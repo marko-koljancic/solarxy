@@ -17,14 +17,47 @@ use solarxy_validate::{
 };
 
 fn main() -> anyhow::Result<ExitCode> {
+    // Standard error, explicitly. The default writer is standard output, which
+    // put every log line in the same stream as the report and would put them in
+    // the same stream as an image. The rule this release establishes is that
+    // standard output is data and standard error is everything else.
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "solarxy=info,wgpu_hal=error,wgpu_core=error".into()),
         )
         .init();
 
-    let args = Args::parse();
+    // Parsed rather than `parse()`, because clap exits 2 on a usage error and
+    // this command's taxonomy spends 2 on an input that could not be loaded.
+    // One is a mistake in the command line and the other is a mistake in the
+    // scene, and a build system branches on the difference.
+    let args = match Args::try_parse() {
+        Ok(args) => args,
+        Err(e) => {
+            // Help and version are not failures: they print to standard output
+            // and succeed, which is what every tool does.
+            let ok = matches!(
+                e.kind(),
+                clap::error::ErrorKind::DisplayHelp
+                    | clap::error::ErrorKind::DisplayVersion
+                    | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            );
+            let _ = e.print();
+            return Ok(if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            });
+        }
+    };
+
+    // A subcommand owns the run when one is given. The flat modes below are the
+    // shipped surface and keep working untouched.
+    if let Some(solarxy_cli::parser::Command::Render(render)) = args.command {
+        return Ok(run_render(&render));
+    }
 
     if args.about {
         let version = env!("CARGO_PKG_VERSION");
@@ -310,4 +343,147 @@ fn run_update() -> anyhow::Result<()> {
 #[cfg(not(feature = "updater"))]
 fn run_update() -> anyhow::Result<()> {
     anyhow::bail!("Updater not available: rebuild solarxy-cli with the 'updater' feature")
+}
+
+/// Renders, and turns the outcome into an exit code a build system can branch
+/// on.
+///
+/// The taxonomy is the point. A pipeline retries a device that was lost and
+/// gives up on a scene that will not parse, and it can only tell them apart if
+/// the difference survives all the way out here.
+#[cfg(feature = "render")]
+fn run_render(args: &solarxy_cli::parser::RenderArgs) -> ExitCode {
+    use solarxy_render::{Output, RenderOptions};
+
+    let output = Output::from_path(&args.out);
+    // One stream, one datum. Both of these want standard output, and a caller
+    // who wants both can redirect one of them.
+    if args.json && output == Output::Stdout {
+        eprintln!(
+            "error: --json and --out - both write to standard output; \
+             send one of them elsewhere"
+        );
+        return ExitCode::from(1);
+    }
+
+    let (width, height) = match args.res.as_deref().map(parse_resolution) {
+        Some(Ok(wh)) => (Some(wh.0), Some(wh.1)),
+        Some(Err(message)) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+        None => (None, None),
+    };
+
+    // The flag reaches the engine's own cancellation closure, so an interrupt
+    // stops between cook passes and between tiles rather than at the end.
+    // Nothing partial is left behind: the image is written in one call after
+    // the last tile, so a run that stops early never creates the file.
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let flag = std::sync::Arc::clone(&cancel);
+        if let Err(e) = ctrlc::set_handler(move || {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }) {
+            tracing::warn!("interrupt handling unavailable: {e}");
+        }
+    }
+
+    let opts = RenderOptions {
+        output: Some(output),
+        render_node: args.render_node.clone(),
+        width,
+        height,
+        samples: args.spp,
+        bounces: args.bounces,
+        denoise: if args.denoise {
+            Some(true)
+        } else if args.no_denoise {
+            Some(false)
+        } else {
+            None
+        },
+        engine: args.engine.map(|e| match e {
+            solarxy_cli::parser::RenderEngineArg::PathTraced => {
+                solarxy_render::RenderEngine::PathTraced
+            }
+            solarxy_cli::parser::RenderEngineArg::Raster => solarxy_render::RenderEngine::Raster,
+        }),
+        seed: args.seed,
+        cancel: Some(cancel),
+    };
+
+    match solarxy_render::run_render(&args.input, &opts) {
+        Ok(outcome) => {
+            for warning in &outcome.report.warnings {
+                tracing::warn!("{warning}");
+            }
+            if args.json {
+                match outcome.report.to_json() {
+                    Ok(line) => println!("{line}"),
+                    Err(e) => {
+                        eprintln!("error: the result could not be serialized: {e}");
+                        return ExitCode::from(7);
+                    }
+                }
+            } else {
+                tracing::info!("rendered {}", outcome.report.output);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(exit_code_for(&e))
+        }
+    }
+}
+
+/// The exit taxonomy.
+///
+/// Eight codes, each naming a failure class rather than a place in the code.
+/// Zero and one are what every tool means by them; the rest exist because a
+/// render farm treats them differently.
+#[cfg(feature = "render")]
+fn exit_code_for(error: &solarxy_render::RenderError) -> u8 {
+    use solarxy_render::RenderError as E;
+    match error {
+        E::InputMissing(_)
+        | E::InputUnreadable { .. }
+        | E::InputInvalid { .. }
+        | E::InputUnsupported { .. } => 2,
+        E::Cook(_) | E::NoRenderNode | E::AmbiguousRenderNode(_) | E::RenderNode(_) => 3,
+        E::NoAdapter => 4,
+        E::Device(_) | E::DeviceLost => 5,
+        E::Cancelled => 6,
+        E::Encode(_) | E::OutputUnwritable { .. } => 7,
+    }
+}
+
+/// `WIDTHxHEIGHT`, as a command line spells a resolution.
+#[cfg(feature = "render")]
+fn parse_resolution(text: &str) -> Result<(u32, u32), String> {
+    let (w, h) = text
+        .split_once(['x', 'X'])
+        .ok_or_else(|| format!("--res wants WIDTHxHEIGHT, got '{text}'"))?;
+    let w = w
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| format!("--res width is not a number: '{w}'"))?;
+    let h = h
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| format!("--res height is not a number: '{h}'"))?;
+    Ok((w, h))
+}
+
+/// The stub arm, following the pattern the other optional surfaces use: a build
+/// without the feature explains itself rather than failing to parse an argument
+/// it does not know.
+#[cfg(not(feature = "render"))]
+fn run_render(_args: &solarxy_cli::parser::RenderArgs) -> ExitCode {
+    eprintln!(
+        "error: rendering is not available: rebuild solarxy-cli with the \
+         'render' feature"
+    );
+    ExitCode::from(1)
 }

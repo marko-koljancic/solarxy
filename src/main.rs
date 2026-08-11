@@ -67,7 +67,11 @@ fn main() -> anyhow::Result<()> {
         );
 
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_filter(stderr_filter))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(stderr_filter),
+        )
         .with(console_layer)
         .init();
 

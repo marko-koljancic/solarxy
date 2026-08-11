@@ -14,12 +14,20 @@ path = "src/bin/solarxy-cli.rs"
 required-features = ["tui"]
 
 [features]
-default = ["tui", "analyzer", "updater"]
+default = ["tui", "analyzer", "updater", "render"]
 tui = ["dep:ratatui", "dep:crossterm", "dep:toml"]
 analyzer = ["dep:solarxy-formats", "dep:solarxy-validate"]
 updater = ["dep:axoupdater"]
+# Headless rendering. On by default so `solarxy-cli render` works from every
+# install channel; it is what brings the GPU stack into an otherwise pure-CPU
+# binary, which is why it is a feature at all rather than a plain dependency.
+render = ["dep:solarxy-render", "dep:ctrlc"]
 
 [dependencies]
+solarxy-render = { path = "../solarxy-render", features = ["clap"], optional = true }
+# Cross-platform interrupt handling. Its own tree is already vendored by other
+# members, so this adds one crate rather than a dependency graph.
+ctrlc = { version = "3", optional = true }
 solarxy-core = { path = "../solarxy-core" }
 solarxy-formats = { path = "../solarxy-formats", optional = true }
 solarxy-validate = { path = "../solarxy-validate", features = ["clap"], optional = true }

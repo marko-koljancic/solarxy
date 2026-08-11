@@ -49,7 +49,10 @@ pub struct Loaded {
 /// # Errors
 /// The file being absent, unreadable, of an unknown kind, failing to parse, or
 /// a node failing to cook.
-pub fn load(path: &Path) -> Result<Loaded, RenderError> {
+pub fn load(
+    path: &Path,
+    cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<Loaded, RenderError> {
     if !path.exists() {
         return Err(RenderError::InputMissing(path.to_path_buf()));
     }
@@ -89,7 +92,7 @@ pub fn load(path: &Path) -> Result<Loaded, RenderError> {
         });
     }
 
-    cook_to_quiescence(&mut engine)?;
+    cook_to_quiescence(&mut engine, cancel)?;
     Ok(Loaded { engine, warnings })
 }
 
@@ -187,10 +190,20 @@ fn added_node(batch: &solarxy_graph::engine::EventBatch) -> Option<NodeId> {
 ///
 /// # Errors
 /// A node reporting a cook error, or the loop failing to settle.
-pub fn cook_to_quiescence(engine: &mut Engine) -> Result<(), RenderError> {
+pub fn cook_to_quiescence(
+    engine: &mut Engine,
+    cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<(), RenderError> {
+    let stopped = || cancel.is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed));
     let mut failures: Vec<String> = Vec::new();
     for _ in 0..MAX_COOK_PASSES {
-        let events = engine.cook(&mut || true);
+        if stopped() {
+            return Err(RenderError::Cancelled);
+        }
+        // The engine's own cancellation hook, which its documentation offers a
+        // native caller for exactly this. A long cook stops between nodes
+        // rather than at the end of it.
+        let events = engine.cook(&mut || !stopped());
         collect_failures(&events, &mut failures);
 
         // Natively there is no worker: a job is resolved on this thread and

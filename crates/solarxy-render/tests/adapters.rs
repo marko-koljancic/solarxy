@@ -37,7 +37,7 @@ fn a_model_file_cooks_into_geometry_through_the_synthesized_document() {
     let model = repo_root().join("res/models/armadillo.obj");
     assert!(model.exists(), "the fixture model is missing: {model:?}");
 
-    let loaded = input::load(&model).expect("a model file loads");
+    let loaded = input::load(&model, None).expect("a model file loads");
     let displayed = loaded.engine.display_geometries();
 
     assert!(
@@ -69,7 +69,7 @@ fn a_model_file_cooks_into_geometry_through_the_synthesized_document() {
 #[test]
 fn both_inputs_produce_a_cooked_engine_of_the_same_kind() {
     let model = repo_root().join("res/models/armadillo.obj");
-    let loaded = input::load(&model).expect("a model file loads");
+    let loaded = input::load(&model, None).expect("a model file loads");
 
     // The scene adapter is exercised by round-tripping what the model adapter
     // built, which is also the strongest available statement that the two are
@@ -84,7 +84,7 @@ fn both_inputs_produce_a_cooked_engine_of_the_same_kind() {
     let scene = dir.join("round-trip.slxy");
     std::fs::write(&scene, bytes).expect("the scene writes");
 
-    let reopened = input::load(&scene).expect("the scene file loads");
+    let reopened = input::load(&scene, None).expect("the scene file loads");
     assert!(
         !reopened.engine.display_geometries().is_empty(),
         "the scene adapter produced no geometry from a document the model \
@@ -101,7 +101,7 @@ fn an_unsupported_file_is_refused_before_anything_is_read_into_the_engine() {
     let odd = dir.join("notes.txt");
     std::fs::write(&odd, b"not a model").expect("the file writes");
 
-    let Err(err) = input::load(&odd) else {
+    let Err(err) = input::load(&odd, None) else {
         panic!("a text file is not renderable");
     };
     assert!(
@@ -114,7 +114,7 @@ fn an_unsupported_file_is_refused_before_anything_is_read_into_the_engine() {
 /// A path that is not there says so, rather than failing later and vaguely.
 #[test]
 fn a_missing_input_is_its_own_failure() {
-    let Err(err) = input::load(Path::new("does-not-exist.slxy")) else {
+    let Err(err) = input::load(Path::new("does-not-exist.slxy"), None) else {
         panic!("nothing to load");
     };
     assert!(matches!(err, solarxy_render::RenderError::InputMissing(_)));

@@ -41,7 +41,10 @@ use solarxy_core::preferences::BackgroundMode;
 use solarxy_core::scene::CameraDef;
 use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings, PaneLook, ViewLayout};
 use solarxy_graph::document::GraphContext;
-use solarxy_graph::nodes::{RenderEngine, RenderSettings};
+use solarxy_graph::nodes::RenderSettings;
+/// Re-exported so a caller can name the engine without taking a dependency on
+/// the graph crate for one enum.
+pub use solarxy_graph::nodes::RenderEngine;
 use solarxy_host::headless::HeadlessHost;
 use solarxy_host::raster::RasterBackend;
 use solarxy_host::still::{StillCtx, StillEngine, StillRenderJob, StillSpec, StillStep};
@@ -128,6 +131,27 @@ pub struct RenderOptions {
     pub denoise: Option<bool>,
     pub engine: Option<RenderEngine>,
     pub seed: Option<u32>,
+    /// Set from outside to stop the render.
+    ///
+    /// A flag rather than a callback because the thing that sets it is a signal
+    /// handler, which cannot call into a borrow of anything. The render reads it
+    /// between cook passes and between tiles, which is often enough that an
+    /// interrupt feels immediate and rare enough that it costs nothing.
+    ///
+    /// Nothing partial is left behind when it fires: the image is encoded and
+    /// written in one call after the last tile, so a run that stops early never
+    /// creates the file at all.
+    pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+}
+
+impl RenderOptions {
+    /// Whether the caller has asked for the render to stop.
+    #[must_use]
+    pub fn cancelled(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+    }
 }
 
 impl RenderOptions {
@@ -166,7 +190,7 @@ pub struct RenderOutcome {
 /// own exit taxonomy.
 pub fn run_render(input: &Path, opts: &RenderOptions) -> Result<RenderOutcome, RenderError> {
     let started = Instant::now();
-    let loaded = input::load(input)?;
+    let loaded = input::load(input, opts.cancel.as_ref())?;
     let mut warnings = loaded.warnings;
     let engine = loaded.engine;
 
@@ -235,6 +259,7 @@ pub fn run_render(input: &Path, opts: &RenderOptions) -> Result<RenderOutcome, R
         &mut job,
         backend.as_mut(),
         &StillView {
+            cancel: opts,
             pds,
             display,
             background,
@@ -413,7 +438,9 @@ fn request_device() -> Result<(wgpu::Device, wgpu::Queue), RenderError> {
 ///
 /// Bundled because the driver takes eight references already and a ninth
 /// argument list is not clearer than a name.
-struct StillView {
+struct StillView<'a> {
+    /// Read between tiles, which is where an interrupt takes effect.
+    cancel: &'a RenderOptions,
     pds: PaneDisplaySettings,
     display: DisplaySettings,
     background: solarxy_core::preferences::ResolvedBackground,
@@ -435,11 +462,14 @@ fn drive(
     camera: &mut CameraState,
     job: &mut StillRenderJob,
     backend: &mut dyn RenderBackend,
-    view: &StillView,
+    view: &StillView<'_>,
 ) -> Result<Vec<u8>, RenderError> {
     let spec = job.spec();
     let mut image = vec![0u8; (spec.width as usize) * (spec.height as usize) * 4];
     while let Some(tile) = job.current() {
+        if view.cancel.cancelled() {
+            return Err(RenderError::Cancelled);
+        }
         host.renderer
             .resize_targets(device, tile.render.width, tile.render.height);
         let step = {
