@@ -1,0 +1,60 @@
+# Verify the Flatpak manifest actually builds, on demand.
+#
+# flatpak-builder does not run on macOS, so this is the Linux verification the
+# Flathub submission needs without a VM: dispatch it, and if it goes green the
+# manifest, the vendored cargo sources and the metainfo are known to produce
+# an installable build on a clean machine. It is deliberately NOT wired to any
+# tag: the per-release bump is flathub-bump.yml's job once the channel is
+# live, and this check exists for the submission and for manifest edits.
+#
+# Hand-rolled with apt rather than the flatpak builder action, matching the
+# native-bundle convention: no third-party action joins the supply chain for
+# what four commands do.
+name: "Packaging: flatpak build check"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # The freedesktop SDK, the rust extension and a release build of the
+      # GUI need more room than the stock runner leaves free.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h /
+
+      - name: Install flatpak-builder and the runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub \
+            org.freedesktop.Platform//24.08 \
+            org.freedesktop.Sdk//24.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//24.08
+
+      - name: Build the flatpak
+        run: |
+          set -euo pipefail
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            build-dir packaging/flatpak/dev.koljam.solarxy.yaml
+          echo "Build complete; the manifest produces an installable tree."
+
+      - name: Validate the AppStream metainfo
+        run: |
+          set -euo pipefail
+          flatpak run --command=appstreamcli org.freedesktop.Sdk//24.08 \
+            validate --no-net packaging/flatpak/dev.koljam.solarxy.metainfo.xml \
+            || flatpak run --command=appstream-util org.freedesktop.Sdk//24.08 \
+                 validate-relax packaging/flatpak/dev.koljam.solarxy.metainfo.xml

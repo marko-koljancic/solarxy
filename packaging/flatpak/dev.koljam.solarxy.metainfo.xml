@@ -64,6 +64,49 @@
   </provides>
 
   <releases>
+    <release version="0.8.2" date="2026-08-06">
+      <description>
+        <p>
+          Rendering foundations: five things the renderer got wrong, closed
+          together. Imported materials keep their glass and their coatings
+          through a widened principled surface. The HDRI a scene is lit with
+          now saves inside it. Instanced scatters render without allocating a
+          real copy per instance. Colour grading arrives, owned by the camera,
+          with exposure, tone mapping, lift, gamma and gain, and grading
+          tables in Adobe cube format. Light intensity becomes physical.
+        </p>
+      </description>
+    </release>
+    <release version="0.8.1" date="2026-07-28">
+      <description>
+        <p>
+          A scene stops being a static arrangement of settings and starts
+          being something that computes, moves, and can leave the editor. Any
+          numeric parameter can hold a formula that reads other nodes and
+          measures its own geometry; the attribute wrangle takes the same
+          language to a single point; a timeline drives time-varying scenes;
+          and rect-area lights land alongside publishing improvements.
+        </p>
+      </description>
+    </release>
+    <release version="0.8.0" date="2026-07-25">
+      <description>
+        <p>
+          The first modeling wave. Geometry carries named attributes on points
+          and primitives, the registry grows from 58 to 74 node types, and the
+          viewport draws point clouds and polylines. Scatter points over any
+          surface, stamp copies onto them, randomize a colour per point, and
+          inspect every value in the new attributes pane.
+        </p>
+      </description>
+    </release>
+    <release version="0.7.2" date="2026-07-21">
+      <description>
+        <p>
+          A polish and bug-fix pass across the web app and the desktop viewer.
+        </p>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-07-17">
       <description>
         <p>
