@@ -296,7 +296,17 @@ fn sample_light(index: u32, origin: vec3f, uv: vec2f) -> LightSample {
 // `count` is passed rather than read from the per-dispatch uniform, so this is
 // pure geometry over the light array and the probe that tests it needs no
 // camera and no environment bound to ask a question about a rectangle.
-fn intersect_lights(origin: vec3f, direction: vec3f, t_max: f32, count: u32) -> LightHit {
+// `travelled` is how far the ray had already flown since the direction was
+// sampled, for a ray that re-origined past a masked or blended surface.
+// Occlusion and radiance are properties of the remaining segment; the density
+// is not, and it is the one output measured from the sample point.
+fn intersect_lights(
+    origin: vec3f,
+    direction: vec3f,
+    t_max: f32,
+    count: u32,
+    travelled: f32,
+) -> LightHit {
     var out: LightHit;
     out.hit = false;
     out.t = t_max;
@@ -333,7 +343,14 @@ fn intersect_lights(origin: vec3f, direction: vec3f, t_max: f32, count: u32) -> 
         out.hit = true;
         out.t = t;
         out.radiance = light.color * light.intensity;
-        out.pdf = (t * t) / (light.area * facing);
+        // The density next-event estimation would have used for this same
+        // transport, which is what the MIS weight divides by. Measured from
+        // where the direction was sampled rather than from where the ray
+        // currently is: charging only the remaining segment understates the
+        // distance-squared conversion and over-weights the scatter side of
+        // the partition, which the blended-pane estimator comparison caught.
+        let r = travelled + t;
+        out.pdf = (r * r) / (light.area * facing);
     }
     return out;
 }
@@ -373,7 +390,7 @@ fn shadow_attenuation(
     // A connection aimed at a light is unaffected: it stops short of its target
     // by `SHADOW_REACH`, so the light it is aimed at sits past the end of the
     // ray and is not found here. Another panel in the way is.
-    if intersect_lights(origin_in, direction, distance, light_count).hit {
+    if intersect_lights(origin_in, direction, distance, light_count, 0.0).hit {
         return vec3f(0.0);
     }
 

@@ -92,6 +92,12 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
     // taken at full strength; see `scatter_mis_weight`.
     var scatter_pdf = -1.0;
 
+    // How far this ray has flown since its direction was sampled. Zero except
+    // past a masked or blended pass-through, which re-origins the ray
+    // mid-flight; the light density the MIS weight divides by is measured from
+    // the sample point, so the distance already crossed has to ride along.
+    var flight = 0.0;
+
     // Beer-Lambert needs the distance travelled inside a medium, which is only
     // known at the *next* hit, so the medium the last transmissive scatter
     // entered is carried across one bounce.
@@ -106,7 +112,7 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
         // Lights are not geometry and are not in the hierarchy, so a ray finds
         // one only because this asks. Tested against the surface distance so a
         // panel behind a wall stays behind it.
-        let light_hit = intersect_lights(origin, direction, scene_t, params.light_count);
+        let light_hit = intersect_lights(origin, direction, scene_t, params.light_count, flight);
         if light_hit.hit {
             var carried = throughput;
             if in_medium {
@@ -148,6 +154,29 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
         // treatment would not; that treatment belongs with the integrator and
         // has a reserved sampling dimension waiting for it.
         if !material_alpha_passes(m, sample) {
+            flight += hit.t;
+            origin = step_ray_origin(origin, direction, -geo_ws * side, hit.t);
+            continue;
+        }
+
+        // A blended surface resolves its coverage by probability rather than
+        // by blending: with `1 - alpha` the ray is simply not stopped here.
+        // The expectation matches the `1 - opacity` the shadow walk charges
+        // for the same surface, which is what keeps the two techniques
+        // telling one story about whether a pane blocks light; before this
+        // arm existed they disagreed, and glass authored as blended alpha
+        // traced opaque. The draw adds the primitive index, which is the open
+        // range the alpha-test dimension owns: coverage tests do not advance
+        // the bounce, so the index is what decorrelates successive panes
+        // along one path. The crossing is charged to the transmissive budget
+        // exactly as the shadow walk charges it; a ray out of budget shades
+        // the pane opaque where a shadow ray out of budget reports it
+        // blocked.
+        if material_alpha_mode(m) == MAT_ALPHA_BLEND
+            && transmissive_left > 0u
+            && rand1_strat(&rng, RNG_DIM_ALPHA_TEST + hit.prim) >= sample.base_color.a {
+            transmissive_left -= 1u;
+            flight += hit.t;
             origin = step_ray_origin(origin, direction, -geo_ws * side, hit.t);
             continue;
         }
@@ -238,6 +267,7 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
         let offset_dir = normal_ws * select(-1.0, 1.0, dot(rec.direction, normal_ws) > 0.0);
         origin = step_ray_origin(origin, direction, offset_dir, hit.t);
         direction = rec.direction;
+        flight = 0.0;
         rng_next_bounce(&rng);
     }
 

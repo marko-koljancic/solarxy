@@ -78,7 +78,7 @@ fn light_probe(@builtin(global_invocation_id) gid: vec3<u32>) {
         light_results[out + 1u] = vec4f(s.radiance, s.distance);
     } else {
         let direction = normalize(tap.direction.xyz);
-        let hit = intersect_lights(tap.origin.xyz, direction, 1e30, arrayLength(&lights));
+        let hit = intersect_lights(tap.origin.xyz, direction, 1e30, arrayLength(&lights), 0.0);
         // A miss reports a zero density, which the host reads as "the
         // light-sampling technique could not have produced this direction"
         // rather than as an error.

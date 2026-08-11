@@ -128,10 +128,12 @@ fn material_sample(m: TracedMaterial, uv_set: vec4f) -> MaterialSample {
 
 // Whether the surface exists at this point at all.
 //
-// Blend is treated as the mask it is not: a tracer resolves partial coverage by
+// Blend passes here unconditionally: a tracer resolves partial coverage by
 // letting a ray through with a probability rather than by blending, and that
-// decision belongs to the integrator. What is here is the test a shadow ray and
-// a camera ray can both apply without one.
+// decision lives with each walk -- the integrator draws it from the alpha-test
+// dimension, and the shadow walk charges the authored opacity
+// deterministically. What is here is the test both can apply without a random
+// number.
 fn material_alpha_passes(m: TracedMaterial, s: MaterialSample) -> bool {
     if material_alpha_mode(m) == MAT_ALPHA_MASK {
         return s.base_color.a >= m.alpha_cutoff;

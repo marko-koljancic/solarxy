@@ -722,6 +722,234 @@ fn the_three_estimators_agree_on_the_same_scene() {
     }
 }
 
+/// The three estimators agree through a pane of blended alpha.
+///
+/// The pane between the light and the sphere is the surface the two techniques
+/// used to disagree about: the shadow walk attenuated connections through it by
+/// its authored opacity while the scatter walk shaded it opaque, so next-event
+/// estimation lit the sphere through a pane that scattering said was a
+/// ceiling. The integrator now resolves blended coverage stochastically from
+/// the alpha-test dimension, with the same `1 - alpha` expectation the shadow
+/// walk charges, and the three estimators must converge on one image again.
+/// Alpha sits mid-range so neither limit -- always there, never there -- could
+/// pass by accident.
+#[test]
+fn the_estimators_agree_through_a_blended_pane() {
+    use solarxy_core::geometry::{AlphaMode, RawMaterialData};
+    use solarxy_core::preferences::ProjectionMode;
+    use solarxy_renderer::camera::{Camera, CameraUniform};
+    use solarxy_renderer::pathtrace::arena::INSTANCE_CAST_SHADOW;
+    use solarxy_renderer::pathtrace::{
+        EnvParams, PathEstimator, PathKernel, PathUniforms, ReadbackPoll, TraceParams, TraceTarget,
+    };
+
+    const WIDTH: u32 = 96;
+    const HEIGHT: u32 = 96;
+    /// More than the unobstructed estimator comparison uses, because the pane
+    /// adds a coin flip to every scattered path that crosses it and the
+    /// scatter-only mode pays for that in variance.
+    const SPP: u32 = 2048;
+
+    let Some(gpu) = common::gpu_or_skip() else {
+        return;
+    };
+
+    // The same rough sphere under the same broad panel as the unobstructed
+    // comparison, with a wide blended pane lying between them so every
+    // connection from the sphere to the light crosses it.
+    let (sphere_pos, sphere_idx) = solarxy_bvh::corpus::sphere(64, 32);
+    let sphere_bvh = Bvh::build_triangles(&sphere_pos, &sphere_idx);
+    let (pane_pos, pane_idx) = solarxy_bvh::corpus::coplanar_grid(4, 1.0);
+    let pane_bvh = Bvh::build_triangles(&pane_pos, &pane_idx);
+
+    let surface = TracedMaterial::from_raw(
+        &RawMaterialData {
+            base_color_factor: [0.8, 0.8, 0.8, 1.0],
+            roughness_factor: 0.6,
+            metallic_factor: 0.0,
+            ..Default::default()
+        },
+        &MaterialTextures::default(),
+    );
+    // Mid-range coverage, no transmission: everything that reaches the sphere
+    // through this pane does so because blended alpha let it through.
+    let pane = TracedMaterial::from_raw(
+        &RawMaterialData {
+            base_color_factor: [0.9, 0.9, 0.9, 0.45],
+            roughness_factor: 0.6,
+            metallic_factor: 0.0,
+            alpha_mode: AlphaMode::Blend,
+            ..Default::default()
+        },
+        &MaterialTextures::default(),
+    );
+
+    let identity: [[f32; 4]; 4] = cgmath::Matrix4::from_scale(1.0).into();
+    // The grid is built in the XY plane; lie it flat, widen it, and lift it
+    // between the sphere and the panel.
+    let pane_world = cgmath::Matrix4::from_translation(cgmath::Vector3::new(0.0, 1.8, 0.0))
+        * cgmath::Matrix4::from_angle_x(cgmath::Deg(-90.0))
+        * cgmath::Matrix4::from_scale(2.5);
+    let placements = [
+        ArenaPlacement {
+            mesh: 0,
+            world: identity,
+            inv_world: identity,
+            material_base: 0,
+            flags: INSTANCE_VISIBLE | INSTANCE_CAST_SHADOW,
+        },
+        ArenaPlacement {
+            mesh: 1,
+            world: pane_world.into(),
+            inv_world: pane_world
+                .invert()
+                .expect("the pane placement inverts")
+                .into(),
+            material_base: 1,
+            flags: INSTANCE_VISIBLE | INSTANCE_CAST_SHADOW,
+        },
+    ];
+    let boxes = [
+        solarxy_core::aabb::AABB {
+            min: cgmath::Point3::new(-1.0, -1.0, -1.0),
+            max: cgmath::Point3::new(1.0, 1.0, 1.0),
+        },
+        solarxy_core::aabb::AABB {
+            min: cgmath::Point3::new(-5.0, 1.79, -5.0),
+            max: cgmath::Point3::new(5.0, 1.81, 5.0),
+        },
+    ];
+    let tlas = Bvh::build_tlas(&boxes);
+    let meshes = [
+        ArenaMesh {
+            bvh: &sphere_bvh,
+            positions: &sphere_pos,
+            indices: &sphere_idx,
+            normals: None,
+            uv0: None,
+        },
+        ArenaMesh {
+            bvh: &pane_bvh,
+            positions: &pane_pos,
+            indices: &pane_idx,
+            normals: None,
+            uv0: None,
+        },
+    ];
+
+    let mut panel = base_light(LightKind::RectArea);
+    panel.position = [0.0, 3.0, 0.0];
+    panel.area_extent = [6.0, 6.0];
+    panel.intensity = 4.0;
+
+    let arena = TraceArena::build(&tlas, &meshes, &placements)
+        .with_materials(vec![surface, pane])
+        .with_lights(TracedLight::pool(&[panel]));
+    let scene = TraceScene::upload(&gpu.device, &gpu.queue, &gpu.pathtrace, &arena);
+    let atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
+
+    let camera = Camera {
+        eye: cgmath::Point3::new(0.0, 0.5, 4.0),
+        target: cgmath::Point3::new(0.0, 0.0, 0.0),
+        up: cgmath::Vector3::unit_y(),
+        #[allow(clippy::cast_precision_loss)]
+        aspect: WIDTH as f32 / HEIGHT as f32,
+        fovy: 45.0,
+        znear: 0.1,
+        zfar: 100.0,
+        projection: ProjectionMode::Perspective,
+        ortho_scale: 1.0,
+    };
+    let mut camera_uniform = CameraUniform::new();
+    camera_uniform.update_view_proj(&camera);
+    let camera_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Blend Estimator Camera"),
+        size: std::mem::size_of::<CameraUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    gpu.queue
+        .write_buffer(&camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
+
+    let target = TraceTarget::new(&gpu.device, &gpu.pathtrace, WIDTH, HEIGHT);
+    let uniforms = PathUniforms::new(&gpu.device, &camera_buffer);
+    let kernel = PathKernel::new(&gpu.device, &gpu.pathtrace, &uniforms);
+
+    let environment = EnvParams::constant([0.12, 0.14, 0.18], [0.04, 0.04, 0.05]);
+    let params = TraceParams {
+        tile_offset: [0, 0],
+        tile_size: [WIDTH, HEIGHT],
+        resolution: [WIDTH, HEIGHT],
+        bounces: 6,
+        // Plenty: each blended crossing charges this budget in both walks, so
+        // a starved budget would measure the clamp rather than the estimator.
+        transmissive_bounces: 6,
+        samples: SPP,
+        seed: 0x9E37_79B9,
+        light_count: scene.light_count(),
+        aperture_radius: 0.0,
+        focus_distance: 0.0,
+        aperture_blades: 0,
+        ..TraceParams::default()
+    };
+
+    let mut means = Vec::new();
+    for estimator in PathEstimator::ALL {
+        uniforms.write(&gpu.queue, &params, &environment);
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Blend Estimator Encoder"),
+            });
+        kernel.encode(
+            &mut encoder,
+            estimator,
+            &scene,
+            &atlas,
+            &target,
+            &uniforms,
+            [WIDTH, HEIGHT],
+        );
+        let mut readback = target.encode_readback(&gpu.device, &mut encoder);
+        gpu.queue.submit(Some(encoder.finish()));
+
+        let pixels = loop {
+            match readback.poll(&gpu.device) {
+                ReadbackPoll::Ready(values) => break values,
+                ReadbackPoll::Pending => {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                ReadbackPoll::Failed => panic!("blend estimator readback failed"),
+            }
+        };
+        let mut total = 0.0f64;
+        for px in pixels.chunks_exact(4) {
+            total += f64::from(px[0]) + f64::from(px[1]) + f64::from(px[2]);
+            assert!(
+                px[0].is_finite() && px[1].is_finite() && px[2].is_finite(),
+                "{estimator:?} produced a pixel that is not a number"
+            );
+        }
+        let mean = total / f64::from(WIDTH * HEIGHT * 3);
+        println!("{estimator:?}: mean radiance through the pane {mean:.6}");
+        means.push(mean);
+    }
+
+    let reference = means[0];
+    for (estimator, mean) in PathEstimator::ALL.iter().zip(&means) {
+        let error = (mean - reference).abs() / reference;
+        assert!(
+            error < 0.005,
+            "{estimator:?} converged to {mean:.6} where the weighted estimator \
+             gives {reference:.6}, a difference of {:.2}%. The two techniques \
+             must tell one story about whether a blended pane blocks light: \
+             the shadow walk charges its authored opacity, and the scatter \
+             walk has to pass through with the same expectation.",
+            error * 100.0
+        );
+    }
+}
+
 /// Tinted glass tints its shadow.
 ///
 /// The criterion this stage owes, and the reason a shadow ray returns a colour
