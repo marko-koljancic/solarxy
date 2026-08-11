@@ -29,7 +29,6 @@ use solarxy_renderer::backend::RenderBackend;
 use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::environment::placeholder_bounds;
 use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
-use solarxy_renderer::scene::BackgroundModeExt;
 
 /// Small enough that a whole run is seconds, large enough that the forced tile
 /// budget below cuts it into a grid rather than a single tile.
@@ -64,8 +63,25 @@ fn spec(engine: StillEngine, samples: u32, budget: u32) -> StillSpec {
 /// non-square image gives an edge shorter than its long side and two tiles.
 const WHOLE: u32 = W * W;
 
+/// How long a whole job may take before the test calls it stuck.
+///
+/// **A wall-clock budget rather than an iteration count, and the difference is
+/// the whole reason this constant exists.** The loop below spent most of its
+/// life bounded by a hundred thousand iterations, which reads like a generous
+/// number and is not one: an iteration that finds the readback still pending
+/// costs about a microsecond in a release build, so the guard was worth a tenth
+/// of a second there while the same suite takes tens of seconds in a debug one.
+/// It passed in debug and failed in release, for a job that completes either
+/// way. Time is what "stuck" means; iterations are what the machine happens to
+/// afford in it.
+const JOB_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Runs a job to completion, resizing the targets per tile the way a shell
 /// does, and returns the assembled image as RGBA8.
+///
+/// A shell drives this from a frame callback and so is paced by the display; a
+/// test has nothing pacing it, so it yields between polls rather than spinning
+/// against the device it is waiting for.
 fn run(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBackend) -> Vec<u8> {
     let pds: PaneDisplaySettings = pane_settings();
     let display: DisplaySettings = display_settings();
@@ -74,10 +90,12 @@ fn run(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBacken
     let format = h.format;
 
     let mut image = vec![0u8; (W * H * 4) as usize];
-    let mut guard = 0;
+    let started = std::time::Instant::now();
     loop {
-        guard += 1;
-        assert!(guard < 100_000, "the job never finished");
+        assert!(
+            started.elapsed() < JOB_BUDGET,
+            "the job did not finish inside {JOB_BUDGET:?}"
+        );
         let Some(tile) = job.current() else {
             break;
         };
@@ -103,7 +121,10 @@ fn run(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBacken
             job.advance(&mut ctx, backend)
         };
         match step {
-            StillStep::Working => {}
+            // Either a chunk was drawn or a readback is still in flight, and
+            // the two are indistinguishable from here. Yielding costs nothing
+            // in the first case and is the whole point in the second.
+            StillStep::Working => std::thread::yield_now(),
             StillStep::Tile => {
                 while let Some(t) = job.take_tile() {
                     blit(&mut image, &t);

@@ -272,7 +272,10 @@ fn run_one(
             job.advance(&mut ctx, backend)
         };
         match step {
-            StillStep::Working => {}
+            // A shell is paced by its display and never spins here. This has
+            // nothing pacing it, so it yields rather than polling a readback as
+            // fast as the processor will let it.
+            StillStep::Working => std::thread::yield_now(),
             StillStep::Tile => {
                 while let Some(t) = job.take_tile() {
                     for y in 0..t.rect.height as usize {

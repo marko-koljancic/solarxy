@@ -70,6 +70,16 @@ jobs:
         run: cargo test -p solarxy-renderer -p solarxy-host -p solarxy-render --all-features
         env:
           SOLARXY_REQUIRE_GPU: "1"
+      # And again optimized, because the two builds are not the same test run.
+      # A tiled traced still passed here in debug and failed in release for a
+      # release, on a harness whose patience was counted in iterations rather
+      # than in seconds: a poll that finds nothing costs a microsecond optimized
+      # and far more unoptimized, so the same bound is a different amount of
+      # waiting in each. Release is also the build every user runs.
+      - name: the same three crates, optimized
+        run: cargo test --release -p solarxy-renderer -p solarxy-host -p solarxy-render --all-features
+        env:
+          SOLARXY_REQUIRE_GPU: "1"
 
   # Desktop rendering regression gate.
   #
