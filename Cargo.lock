@@ -4198,6 +4198,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "solarxy-render"
+version = "0.8.2"
+dependencies = [
+ "cgmath",
+ "clap",
+ "pollster",
+ "serde",
+ "serde_json",
+ "solarxy-core",
+ "solarxy-formats",
+ "solarxy-graph",
+ "solarxy-host",
+ "solarxy-renderer",
+ "solarxy-scenefile",
+ "thiserror 2.0.17",
+ "wgpu",
+]
+
+[[package]]
 name = "solarxy-renderer"
 version = "0.8.2"
 dependencies = [

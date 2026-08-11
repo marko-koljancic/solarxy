@@ -61,8 +61,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92
       - uses: Swatinem/rust-cache@v2
-      - name: renderer tests with a real adapter
-        run: cargo test -p solarxy-renderer --all-features
+      # Three crates, not one. The renderer's tests were the only ones ever run
+      # against a real adapter, which meant the shared host's still and traced
+      # backend tests skipped silently here and were only ever run by hand. One
+      # of them had been failing for a while before anyone noticed, which is the
+      # reason this list grew.
+      - name: renderer, host and render tests with a real adapter
+        run: cargo test -p solarxy-renderer -p solarxy-host -p solarxy-render --all-features
         env:
           SOLARXY_REQUIRE_GPU: "1"
 

@@ -204,6 +204,52 @@ impl PaneLook {
     }
 }
 
+impl PaneDisplaySettings {
+    /// The view a delivered still is drawn with: the scene, and nothing that
+    /// exists to help someone work on it.
+    ///
+    /// No grid, no axis gizmo, no local axes, no bounds, no normals, no
+    /// validation tint, no material override. A still is a photograph of the
+    /// scene rather than a screenshot of the viewport, which is what the render
+    /// node's own help promises, and it is the one view both a browser and a
+    /// terminal can produce without agreeing about anything else first.
+    ///
+    /// Named rather than a `Default` impl, and the distinction is deliberate:
+    /// neither this struct nor [`DisplaySettings`] carries a `Default`, because
+    /// the two shells genuinely disagree about several fields and a default
+    /// would quietly pick one shell's answer for both. This picks nobody's
+    /// answer. It states what a *still* is.
+    ///
+    /// The background rides in rather than being fixed here, because a scene
+    /// that authored a sky should be shot against it.
+    #[must_use]
+    pub fn for_still(background_mode: BackgroundMode) -> Self {
+        Self {
+            view_mode: ViewMode::Shaded,
+            prev_non_ghosted_mode: ViewMode::Shaded,
+            ghosted_wireframe: false,
+            normals_mode: NormalsMode::Off,
+            background_mode,
+            uv_mode: UvMode::Off,
+            bounds_mode: BoundsMode::Off,
+            line_weight: LineWeight::Medium,
+            show_grid: false,
+            show_axis_gizmo: false,
+            show_local_axes: false,
+            inspection_mode: InspectionMode::Shaded,
+            material_override: MaterialOverride::None,
+            texel_density_target: 1.0,
+            pane_mode: PaneMode::Scene3D,
+            uv_bg: UvMapBackground::Dark,
+            uv_offset: [0.0, 0.0],
+            uv_zoom: 1.0,
+            show_uv_overlap: false,
+            show_validation: false,
+            turntable_active: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaneDisplaySettings {

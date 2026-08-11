@@ -79,6 +79,7 @@ pub mod attr_viz;
 pub mod cameras;
 pub mod display_defaults;
 pub mod gizmo;
+pub mod headless;
 pub mod lighting;
 pub mod pane;
 pub mod raster;

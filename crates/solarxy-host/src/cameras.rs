@@ -75,3 +75,32 @@ pub fn ensure_pane_cameras(
         cameras[i] = Some(cam);
     }
 }
+
+/// Writes a cooked camera node's definition onto a live camera.
+///
+/// Shared because two hosts now shoot through an authored camera, and a shot
+/// taken from a slightly different place by each of them is the kind of
+/// difference nobody notices until they are compared.
+///
+/// The guards are not defensive padding. A field-of-view or an orthographic
+/// scale of zero is what a camera definition carries before its node has cooked,
+/// and writing either through would give a camera that renders nothing at all
+/// rather than one that renders the default.
+pub fn apply_camera_def(cam: &mut Camera, def: &solarxy_core::scene::CameraDef) {
+    use solarxy_core::preferences::ProjectionMode;
+    use solarxy_core::scene::CameraKind;
+
+    cam.eye = cgmath::Point3::new(def.position[0], def.position[1], def.position[2]);
+    cam.target = cgmath::Point3::new(def.target[0], def.target[1], def.target[2]);
+    cam.up = cgmath::Vector3::new(def.up[0], def.up[1], def.up[2]);
+    if def.fov_y > 0.0 {
+        cam.fovy = def.fov_y.to_degrees();
+    }
+    cam.projection = match def.kind {
+        CameraKind::Orthographic => ProjectionMode::Orthographic,
+        _ => ProjectionMode::Perspective,
+    };
+    if def.ortho_scale > 0.0 {
+        cam.ortho_scale = def.ortho_scale;
+    }
+}

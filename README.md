@@ -153,7 +153,7 @@ The `getrandom_backend="wasm_js"` rustflag for `wasm32` lives in the workspace `
 
 ## Workspace Structure
 
-Solarxy is a Rust workspace of 14 members: the root GUI binary plus 13 crates spanning the desktop GUI, the CLI, and the web shell, alongside the `web/` React frontend.
+Solarxy is a Rust workspace of 15 members: the root GUI binary plus 14 crates spanning the desktop GUI, the CLI, headless rendering, and the web shell, alongside the `web/` React frontend.
 
 | Crate | Description |
 |---|---|
@@ -170,6 +170,7 @@ Solarxy is a Rust workspace of 14 members: the root GUI binary plus 13 crates sp
 | [`solarxy-app`](crates/solarxy-app/) | winit `ApplicationHandler` + egui: the desktop shell (sidebar, menu, console, dialogs, dock, review UI). |
 | [`solarxy-web`](crates/solarxy-web/) | The `wasm-bindgen` boundary + WebGPU host: hosts the canvas, drives the frame loop, and serializes Commands and Events between the Rust core and the React frontend. |
 | [`solarxy-validate`](crates/solarxy-validate/) | Validation orchestration + pipeline adapters (GitHub Actions / generic-JSON). Library API for integrators; consumed by `solarxy-cli`. |
+| [`solarxy-render`](crates/solarxy-render/) | Headless render orchestration: loads a scene file or a bare model into one document, cooks it, renders it through the same backends the shells drive, and writes the image. Library API for integrators, so rendering needs no subprocess. |
 | [`solarxy-cli`](crates/solarxy-cli/) | clap parser, analyze TUI, terminal companion binary (`solarxy-cli`). |
 
 `web/` is the frontend: a Vite + React 19 display mirror of the Rust-owned document. The palette, typed handles, and parameter panel are pure interpreters of the node registry, so a node added in Rust needs zero frontend changes.

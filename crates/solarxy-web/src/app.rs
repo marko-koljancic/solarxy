@@ -1619,7 +1619,7 @@ impl SolarxyApp {
                 .cameras()
                 .and_then(|cams| cams.iter().find(|c| c.id == id).cloned())
             {
-                apply_camera_def(&mut camera, &def);
+                solarxy_host::cameras::apply_camera_def(&mut camera, &def);
             }
         }
         // The image's aspect, not a pane's: the render's width and height fix
@@ -1709,8 +1709,18 @@ impl SolarxyApp {
         // different policy around the same body.
         self.set_target_dims(tile.render.width, tile.render.height);
 
-        let pane = self.view.active_pane;
-        let pds = self.view.pane_settings[pane];
+        // A delivered still is a photograph of the scene rather than a
+        // screenshot of the pane it was launched from, so it is drawn with the
+        // still view rather than with whatever the pane happens to be showing.
+        // Before this, a rasterized still carried the pane's grid and gizmo
+        // into the saved image, and a terminal render had no pane to inherit
+        // from and so could not have matched it anyway.
+        //
+        // The background is the exception and rides along from the pane: a
+        // scene shot against an authored sky should keep it.
+        let pds = solarxy_core::view_config::PaneDisplaySettings::for_still(
+            self.view.pane_settings[self.view.active_pane].background_mode,
+        );
         let display = self.view.display;
         let background = self.resolve_background(&pds);
         let bounds = self.scene_bounds();
@@ -2107,7 +2117,7 @@ impl SolarxyApp {
                 .and_then(|cams| cams.iter().find(|c| c.id == SceneObjectId(node.0)))
         {
             let mut cam = scratch;
-            apply_camera_def(&mut cam, def);
+            solarxy_host::cameras::apply_camera_def(&mut cam, def);
             return Some(cam);
         }
         Some(scratch)
@@ -2283,7 +2293,7 @@ impl SolarxyApp {
                 .cameras()
                 .and_then(|cams| cams.iter().find(|c| c.id == id).cloned());
             if let (Some(def), Some(cam)) = (def, self.view.cameras[pane].as_mut()) {
-                apply_camera_def(&mut cam.camera, &def);
+                solarxy_host::cameras::apply_camera_def(&mut cam.camera, &def);
             }
         }
         self.view_state()
@@ -3997,7 +4007,7 @@ impl SolarxyApp {
         };
         for (i, def) in updates {
             if let Some(cam) = self.view.cameras[i].as_mut() {
-                apply_camera_def(&mut cam.camera, &def);
+                solarxy_host::cameras::apply_camera_def(&mut cam.camera, &def);
             }
         }
     }
@@ -4795,23 +4805,6 @@ fn camera_to_json(cam: &Camera) -> solarxy_scenefile::CameraJson {
 /// camera, so a pane looking through the node shows exactly what it frames.
 /// The pane's aspect is not touched here (it tracks the pane rect); the
 /// framing gate uses the def's own aspect.
-fn apply_camera_def(cam: &mut Camera, def: &solarxy_core::scene::CameraDef) {
-    use solarxy_core::scene::CameraKind;
-    cam.eye = Point3::new(def.position[0], def.position[1], def.position[2]);
-    cam.target = Point3::new(def.target[0], def.target[1], def.target[2]);
-    cam.up = Vector3::new(def.up[0], def.up[1], def.up[2]);
-    if def.fov_y > 0.0 {
-        cam.fovy = def.fov_y.to_degrees();
-    }
-    cam.projection = match def.kind {
-        CameraKind::Orthographic => ProjectionMode::Orthographic,
-        _ => ProjectionMode::Perspective,
-    };
-    if def.ortho_scale > 0.0 {
-        cam.ortho_scale = def.ortho_scale;
-    }
-}
-
 fn apply_camera_json(cam: &mut Camera, json: &solarxy_scenefile::CameraJson) {
     let target = Point3::new(json.target[0], json.target[1], json.target[2]);
     let cp = json.pitch.cos();
