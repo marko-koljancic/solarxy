@@ -296,10 +296,19 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
+  # The six distribution channels need the release to exist and its assets to
+  # be downloadable, and `host` is the job that provides both: it runs
+  # `gh release create` with every artifact. They deliberately do NOT need
+  # `announce`, which builds and publishes nothing (it exists to mark the
+  # release announced). During the 0.8.2 release a transient Actions outage
+  # killed `announce` before a single step ran and all six channels silently
+  # skipped behind it; the release looked complete and only a by-artifact
+  # check caught it. Hand-edited like the other custom wiring here
+  # (allow-dirty = ["ci"]); re-apply if you ever regenerate ci.
   custom-native-bundle:
     needs:
       - plan
-      - announce
+      - host
     uses: ./.github/workflows/native-bundle.yml
     with:
       plan: ${{ needs.plan.outputs.val }}
@@ -316,7 +325,7 @@ jobs:
   custom-web-release:
     needs:
       - plan
-      - announce
+      - host
     uses: ./.github/workflows/web-release.yml
     with:
       plan: ${{ needs.plan.outputs.val }}
@@ -325,7 +334,7 @@ jobs:
   custom-ghcr-publish:
     needs:
       - plan
-      - announce
+      - host
     uses: ./.github/workflows/ghcr-publish.yml
     with:
       plan: ${{ needs.plan.outputs.val }}
@@ -334,7 +343,7 @@ jobs:
   custom-flathub-bump:
     needs:
       - plan
-      - announce
+      - host
     uses: ./.github/workflows/flathub-bump.yml
     with:
       plan: ${{ needs.plan.outputs.val }}
@@ -345,13 +354,13 @@ jobs:
   #
   # The cask verifies the DMG against a real sha256, and that checksum is
   # published by native-bundle as a `.sha256` companion. Without this edge the
-  # two jobs run in parallel off `announce` and the bump races the bundle it
+  # two jobs run in parallel off `host` and the bump races the bundle it
   # reads from. Failing closed is the point: if native-bundle fails there is no
   # DMG to hash, and a cask must never be bumped to a version it cannot verify.
   custom-homebrew-bump:
     needs:
       - plan
-      - announce
+      - host
       - custom-native-bundle
     uses: ./.github/workflows/homebrew-bump.yml
     with:
@@ -361,7 +370,7 @@ jobs:
   custom-winget-release:
     needs:
       - plan
-      - announce
+      - host
     uses: ./.github/workflows/winget-release.yml
     with:
       plan: ${{ needs.plan.outputs.val }}
