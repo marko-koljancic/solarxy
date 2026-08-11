@@ -1,0 +1,209 @@
+# Verify a release's fan-out by artifact, never by job colour.
+#
+# Job colour is genuinely unreliable here: three channels fail soft on a
+# missing credential (a warning, a skip, and a green run that published
+# nothing), and before the needs rewire a fourth could skip silently behind a
+# failed dependency. 0.8.2 exercised both failure modes in one release, and
+# neither was visible without querying the tap, the registry, the release
+# assets and an external repository one at a time. This workflow is that
+# manual sweep, automated: it asserts each expected artifact exists where the
+# channel was supposed to put it, names what it found per channel, and fails
+# when a non-declared channel is missing.
+#
+# A channel that is deliberately not configured is declared in
+# DECLARED_ABSENT below, the one place, so it is reported as intentionally
+# absent rather than either failing the gate forever or teaching everyone to
+# ignore a red run. Both alternatives are worse than saying so explicitly.
+#
+# Invocation:
+#   - `workflow_run` -- fires automatically when the release workflow
+#     completes on a stable tag. Prerelease tags exit early with a notice,
+#     because their channels gate themselves off and absence is expected.
+#   - `workflow_dispatch` -- the release train's documented verification
+#     step, against any existing tag, and the way to re-check after
+#     re-running a failed channel.
+name: "Release: verify fan-out"
+
+on:
+  workflow_run:
+    workflows: ["Release: installers and GitHub release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to verify (e.g. v0.9.0)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  # The single declaration of channels that are intentionally not live yet.
+  # Space-separated. Remove a name here when its channel ships for real.
+  #   flathub -- documented packaging exists, but the one-time Flathub
+  #              submission has not been made and FLATHUB_PAT is unset.
+  DECLARED_ABSENT: "flathub"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Resolve the tag under verification
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.tag }}" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            # A tag push runs the release workflow on the tag ref, and
+            # workflow_run reports that ref as head_branch.
+            tag="${{ github.event.workflow_run.head_branch }}"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9] ]]; then
+            echo "::notice::'$tag' is not a release tag; nothing to verify."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! gh release view "$tag" --repo "$REPO" --json isPrerelease -q .isPrerelease > /tmp/prerelease; then
+            echo "::error::No release exists for $tag, so there is no fan-out to verify."
+            exit 1
+          fi
+          if [ "$(cat /tmp/prerelease)" = "true" ]; then
+            echo "::notice::$tag is a prerelease; the package channels gate themselves off, so absence is expected and not verified."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify each channel by artifact
+        if: steps.tag.outputs.proceed == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -uo pipefail
+          fail=0
+          summary() { echo "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          declared_absent() { [[ " $DECLARED_ABSENT " == *" $1 "* ]]; }
+
+          summary "## Fan-out verification for $TAG"
+          summary ""
+
+          # ---- Release assets: the native bundles and the cargo-dist set ----
+          gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' > /tmp/assets
+          missing=""
+          for name in \
+            "Solarxy-$VERSION-aarch64.dmg" \
+            "Solarxy-$VERSION-aarch64.dmg.sha256" \
+            "Solarxy-$VERSION-x86_64.dmg" \
+            "Solarxy-$VERSION-x86_64.dmg.sha256" \
+            "Solarxy-$VERSION-x86_64.AppImage" \
+            "Solarxy-$VERSION-x86_64.AppImage.sha256" \
+            "solarxy-x86_64-pc-windows-msvc.msi" \
+            "solarxy-x86_64-pc-windows-msvc.zip" \
+            "solarxy-aarch64-apple-darwin.tar.xz" \
+            "solarxy-x86_64-apple-darwin.tar.xz" \
+            "solarxy-aarch64-unknown-linux-gnu.tar.xz" \
+            "solarxy-x86_64-unknown-linux-gnu.tar.xz" \
+            "solarxy-installer.sh" \
+            "solarxy-installer.ps1" \
+            "solarxy-cli-aarch64-apple-darwin.tar.xz" \
+            "solarxy-cli-x86_64-apple-darwin.tar.xz" \
+            "solarxy-cli-aarch64-unknown-linux-gnu.tar.xz" \
+            "solarxy-cli-x86_64-unknown-linux-gnu.tar.xz" \
+            "solarxy-cli-x86_64-pc-windows-msvc.zip" \
+            "solarxy-cli-installer.sh" \
+            "solarxy-cli-installer.ps1" \
+            ; do
+            grep -qxF "$name" /tmp/assets || missing="$missing $name"
+          done
+          if [ -z "$missing" ]; then
+            summary "- **release assets**: all $(grep -c . /tmp/assets) present, including every expected bundle and installer"
+          else
+            summary "- **release assets**: MISSING:$missing"
+            fail=1
+          fi
+
+          # ---- Web bundle ----
+          if grep -qxF "solarxy-web-$TAG.tar.gz" /tmp/assets; then
+            summary "- **web bundle**: solarxy-web-$TAG.tar.gz present"
+          else
+            summary "- **web bundle**: MISSING solarxy-web-$TAG.tar.gz"
+            fail=1
+          fi
+
+          # ---- Containers: the versioned tag, and the moving tags by digest ----
+          # A stale `latest` passes a shallow existence check, which is why the
+          # moving tags are resolved and compared against the versioned one.
+          # Straight registry API rather than docker: the image is public, an
+          # anonymous pull token suffices, and nothing here depends on the
+          # runner's docker configuration.
+          image_path="$OWNER/solarxy-cli"
+          image="ghcr.io/$image_path"
+          minor="${VERSION%.*}"
+          registry_token=$(curl -fsSL "https://ghcr.io/token?scope=repository:$image_path:pull" \
+            | jq -r .token) || registry_token=""
+          digest_of() {
+            curl -fsSL -D - -o /dev/null \
+              -H "Authorization: Bearer $registry_token" \
+              -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+              "https://ghcr.io/v2/$image_path/manifests/$1" 2>/dev/null \
+              | tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }'
+          }
+          d_version=$(digest_of "$VERSION") || true
+          d_minor=$(digest_of "$minor") || true
+          d_latest=$(digest_of "latest") || true
+          if [ -z "$d_version" ]; then
+            summary "- **containers**: MISSING $image:$VERSION"
+            fail=1
+          elif [ "$d_version" != "$d_minor" ] || [ "$d_version" != "$d_latest" ]; then
+            summary "- **containers**: $image:$VERSION exists but a moving tag is stale ($VERSION=$d_version, $minor=${d_minor:-absent}, latest=${d_latest:-absent})"
+            fail=1
+          else
+            summary "- **containers**: $image at $VERSION, $minor and latest all resolve to $d_version"
+          fi
+
+          # ---- Homebrew tap: verified by content, not by commit colour ----
+          tap="$OWNER/homebrew-solarxy"
+          cask=$(gh api -H "Accept: application/vnd.github.raw" "repos/$tap/contents/Casks/solarxy.rb" 2>/dev/null) || cask=""
+          formula=$(gh api -H "Accept: application/vnd.github.raw" "repos/$tap/contents/Formula/solarxy-cli.rb" 2>/dev/null) || formula=""
+          tap_ok=1
+          echo "$cask" | grep -qF "version \"$VERSION\"" || tap_ok=0
+          echo "$formula" | grep -qF "$VERSION" || tap_ok=0
+          if [ "$tap_ok" = "1" ]; then
+            summary "- **homebrew tap**: cask and formula both carry $VERSION"
+          else
+            summary "- **homebrew tap**: cask or formula does not carry $VERSION (the bump job fails soft on a missing PAT and reports green)"
+            fail=1
+          fi
+
+          # ---- winget: the submission PR on the upstream manifest repo ----
+          pr=$(gh pr list --repo microsoft/winget-pkgs --state all \
+            --search "Koljam.Solarxy version $VERSION in:title" \
+            --json url -q '.[0].url' 2>/dev/null) || pr=""
+          if [ -n "$pr" ]; then
+            summary "- **winget**: submission PR exists: $pr"
+          else
+            summary "- **winget**: no submission PR titled 'Koljam.Solarxy version $VERSION' found"
+            fail=1
+          fi
+
+          # ---- Declared-absent channels ----
+          for ch in $DECLARED_ABSENT; do
+            summary "- **$ch**: intentionally absent (declared in DECLARED_ABSENT; not a failure)"
+          done
+
+          summary ""
+          if [ "$fail" = "1" ]; then
+            summary "**Verdict: INCOMPLETE.** A channel above published nothing; re-run that channel's job and re-verify."
+            exit 1
+          fi
+          summary "**Verdict: complete.** Every non-declared channel published its artifact."
