@@ -336,6 +336,7 @@ fn endurance(args: &[String]) -> anyhow::Result<()> {
         samples,
         screen_space_post: false,
         tile_budget: TILE_BUDGET_PIXELS,
+        readback: solarxy_host::still::StillReadback::Display8,
     };
     let tiles = StillRenderJob::new(spec).plan().len();
     println!(
@@ -380,6 +381,7 @@ fn once(args: &[String]) -> anyhow::Result<()> {
         samples,
         screen_space_post: false,
         tile_budget: TILE_BUDGET_PIXELS,
+        readback: solarxy_host::still::StillReadback::Display8,
     };
     let tiles = StillRenderJob::new(spec).plan().len();
     println!("STILL {width}x{height} at {samples} spp in {tiles} tiles");

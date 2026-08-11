@@ -190,15 +190,7 @@ impl PendingCapture {
             }
         }
 
-        let data = self.buffer.slice(..).get_mapped_range();
-        let unpadded_row = (self.width * 4) as usize;
-        let mut pixels = Vec::with_capacity(unpadded_row * self.height as usize);
-        for row in 0..self.height {
-            let start = (row * self.padded_row_bytes) as usize;
-            pixels.extend_from_slice(&data[start..start + unpadded_row]);
-        }
-        drop(data);
-        self.buffer.unmap();
+        let mut pixels = self.unpad(4);
 
         if matches!(
             source_format,
@@ -210,6 +202,84 @@ impl PendingCapture {
         }
         CapturePoll::Ready(pixels)
     }
+
+    /// The same readback, decoded to four floats per pixel.
+    ///
+    /// For an image that is going to a float file rather than to a screen. The
+    /// eight-bit path above is not a step on the way here: it has already
+    /// quantized, and no amount of widening afterwards puts back what the
+    /// rounding removed.
+    ///
+    /// Half-float and full-float sources both arrive as `f32`, because the
+    /// difference is a storage decision the caller made and not something a
+    /// consumer of the pixels should have to know.
+    ///
+    /// A source that is neither is a caller error rather than a runtime one, so
+    /// it returns `Failed` rather than guessing at a conversion.
+    pub fn poll_floats(
+        &self,
+        device: &wgpu::Device,
+        source_format: wgpu::TextureFormat,
+    ) -> CaptureFloatPoll {
+        let bytes_per_pixel = match source_format {
+            wgpu::TextureFormat::Rgba16Float => 8,
+            wgpu::TextureFormat::Rgba32Float => 16,
+            _ => {
+                tracing::error!("a float readback was asked for a {source_format:?} source");
+                return CaptureFloatPoll::Failed;
+            }
+        };
+
+        let _ = device.poll(wgpu::PollType::Poll);
+        match self.receiver.try_recv() {
+            Ok(Ok(())) => {}
+            Err(TryRecvError::Empty) => return CaptureFloatPoll::Pending,
+            Ok(Err(_)) | Err(TryRecvError::Disconnected) => {
+                tracing::error!("capture readback map failed");
+                return CaptureFloatPoll::Failed;
+            }
+        }
+
+        let bytes = self.unpad(bytes_per_pixel);
+        let floats = match source_format {
+            wgpu::TextureFormat::Rgba16Float => bytes
+                .chunks_exact(2)
+                .map(|b| f32::from(half::f16::from_le_bytes([b[0], b[1]])))
+                .collect(),
+            _ => bytes
+                .chunks_exact(4)
+                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                .collect(),
+        };
+        CaptureFloatPoll::Ready(floats)
+    }
+
+    /// Copies the mapped rows out without their alignment padding.
+    ///
+    /// The padding is the copy's, not the image's: a texture-to-buffer copy
+    /// aligns every row to 256 bytes, so the buffer is wider than the picture
+    /// by an amount that depends on the width and the pixel size. Reading it as
+    /// though it were tight gives an image that shears progressively, which
+    /// looks like a wrong stride rather than like padding.
+    fn unpad(&self, bytes_per_pixel: u32) -> Vec<u8> {
+        let data = self.buffer.slice(..).get_mapped_range();
+        let unpadded_row = (self.width * bytes_per_pixel) as usize;
+        let mut out = Vec::with_capacity(unpadded_row * self.height as usize);
+        for row in 0..self.height {
+            let start = (row * self.padded_row_bytes) as usize;
+            out.extend_from_slice(&data[start..start + unpadded_row]);
+        }
+        drop(data);
+        self.buffer.unmap();
+        out
+    }
+}
+
+/// The float readback's state, mirroring [`CapturePoll`].
+pub enum CaptureFloatPoll {
+    Pending,
+    Ready(Vec<f32>),
+    Failed,
 }
 
 #[cfg(test)]

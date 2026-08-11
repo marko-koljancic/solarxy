@@ -185,6 +185,13 @@ impl CompositeState {
         ssao: &SsaoState,
         viewport: Option<[f32; 4]>,
         clear: bool,
+        // A pipeline to use instead of the one built against the surface's
+        // format. The finishing chain is one shader, and this is the only thing
+        // that varies between writing it to a screen and writing it to a float
+        // file: a pipeline's colour target format is fixed when it is built.
+        // `None` is the ordinary case and takes the pipeline every pane already
+        // renders through, untouched.
+        pipeline: Option<&wgpu::RenderPipeline>,
     ) {
         let load = if clear {
             wgpu::LoadOp::Clear(wgpu::Color::BLACK)
@@ -210,7 +217,7 @@ impl CompositeState {
             pass.set_viewport(x, y, w, h, 0.0, 1.0);
             pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
         }
-        pass.set_pipeline(&pipelines.post.composite);
+        pass.set_pipeline(pipeline.unwrap_or(&pipelines.post.composite));
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_bind_group(1, &self.params_bind_group, &[]);
         if ssao_enabled {

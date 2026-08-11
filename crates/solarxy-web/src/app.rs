@@ -1592,6 +1592,9 @@ impl SolarxyApp {
             // whatever the viewport had.
             screen_space_post: self.renderer.post.bloom_enabled,
             tile_budget: TILE_BUDGET_PIXELS,
+            // The browser saves an eight-bit image; float output is the
+            // headless command's, which has a file format that can hold it.
+            readback: solarxy_host::still::StillReadback::Display8,
         };
         // The job's own camera. Built from the named `camera` node when there
         // is one, and otherwise from the active pane's current view copied by
@@ -2076,6 +2079,7 @@ impl SolarxyApp {
             &self.renderer.post.ssao,
             Some([rect.x, rect.y, rect.width, rect.height]),
             true,
+            None,
         );
         self.queue.submit(std::iter::once(encoder.finish()));
 
@@ -4751,6 +4755,7 @@ impl SolarxyApp {
             &self.renderer.post.ssao,
             Some([0.0, 0.0, w as f32, h as f32]),
             true,
+            None,
         );
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();

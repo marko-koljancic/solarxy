@@ -445,6 +445,7 @@ fn the_two_grading_slots_behave_as_specified() {
             &renderer.post.ssao,
             Some([0.0, 0.0, W as f32, H as f32]),
             true,
+            None,
         );
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {

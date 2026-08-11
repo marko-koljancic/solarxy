@@ -362,6 +362,7 @@ pub fn composite_and_submit(
         &renderer.post.ssao,
         viewport,
         c.index == 0,
+        None,
     );
 
     // The selection rim lands after tone mapping, so it never blooms and AO

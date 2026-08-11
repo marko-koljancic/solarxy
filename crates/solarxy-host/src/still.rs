@@ -67,6 +67,59 @@ pub const TILE_APRON_PIXELS: u32 = 128;
 /// The largest image the job will render, per edge.
 pub const MAX_STILL_EDGE: u32 = 8192;
 
+/// What a finished tile is read back as.
+///
+/// Three answers to one question, because a still goes to two very different
+/// places. A screen wants eight bits in the display's own space; a compositing
+/// package wants floating point, and then wants to know whether the look has
+/// already been applied to it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum StillReadback {
+    /// Eight bits per channel, through the finishing chain. The ordinary case,
+    /// and what every caller that does not ask for something else gets.
+    #[default]
+    Display8,
+    /// Floating point, through the finishing chain: the same image the display
+    /// path produces, without the quantization.
+    DisplayFloat,
+    /// Floating point, before the finishing chain. Scene-referred light with no
+    /// exposure, tone map or grade applied, which is what a compositing package
+    /// expects to be handed and what lets it apply a look of its own.
+    SceneLinear,
+}
+
+impl StillReadback {
+    /// The texture format a tile is read out of.
+    #[must_use]
+    pub fn source_format(self, surface: wgpu::TextureFormat) -> wgpu::TextureFormat {
+        match self {
+            Self::Display8 => surface,
+            Self::DisplayFloat => solarxy_renderer::pipelines::FLOAT_COMPOSITE_FORMAT,
+            Self::SceneLinear => solarxy_renderer::texture::Texture::HDR_FORMAT,
+        }
+    }
+
+    /// Bytes per pixel in a finished tile.
+    ///
+    /// Sixteen for both float modes rather than eight for one of them: a
+    /// half-float source is widened on the way out, because the width it was
+    /// stored at is a decision the renderer made and not one a consumer should
+    /// have to undo.
+    #[must_use]
+    pub fn bytes_per_pixel(self) -> usize {
+        match self {
+            Self::Display8 => 4,
+            Self::DisplayFloat | Self::SceneLinear => 16,
+        }
+    }
+
+    /// Whether the finishing chain runs at all.
+    #[must_use]
+    pub fn composites(self) -> bool {
+        !matches!(self, Self::SceneLinear)
+    }
+}
+
 /// Which renderer draws the still.
 ///
 /// Authored, not detected. See the module documentation.
@@ -99,6 +152,8 @@ pub struct StillSpec {
     /// picture: a weaker one wants smaller passes, and a test wants a grid out
     /// of an image small enough to render in a second.
     pub tile_budget: u32,
+    /// What the finished tiles are read back as.
+    pub readback: StillReadback,
 }
 
 impl Default for StillSpec {
@@ -110,6 +165,7 @@ impl Default for StillSpec {
             samples: 64,
             screen_space_post: false,
             tile_budget: TILE_BUDGET_PIXELS,
+            readback: StillReadback::Display8,
         }
     }
 }
@@ -445,7 +501,7 @@ impl StillRenderJob {
         if !fits {
             self.target = Some(CaptureTarget::new(
                 ctx.device,
-                ctx.format,
+                self.spec.readback.source_format(ctx.format),
                 tile.render.width,
                 tile.render.height,
             ));
@@ -523,6 +579,24 @@ impl StillRenderJob {
         // always clears, uses a full-rect viewport rather than a pane rect, and
         // carries no selection rim. Those three are the whole difference, and
         // they are the same three the web shell's screenshot path names.
+        // Scene-referred output skips the chain entirely rather than running it
+        // with a neutral look: "neutral" would still be the tone map's idea of
+        // neutral, and the point of this mode is that nothing has been decided
+        // yet.
+        if !self.spec.readback.composites() {
+            ctx.queue.submit(std::iter::once(encoder.finish()));
+            return outcome;
+        }
+        // Cloned rather than borrowed: building it needs the pipeline set
+        // mutably, and compositing needs it immutably a line later. The handle
+        // is refcounted, so this is a pointer.
+        let float_pipeline = (self.spec.readback == StillReadback::DisplayFloat).then(|| {
+            ctx.renderer
+                .pipelines
+                .post
+                .float_composite(ctx.device)
+                .clone()
+        });
         let bloom = ctx.renderer.post.bloom_enabled && ctx.scene_present;
         let ssao = ctx.renderer.post.ssao_enabled && ctx.scene_present;
         ctx.renderer.post.composite.write_params(
@@ -542,6 +616,7 @@ impl StillRenderJob {
             &ctx.renderer.post.ssao,
             Some([r.x, r.y, r.width, r.height]),
             true,
+            float_pipeline.as_ref(),
         );
         ctx.queue.submit(std::iter::once(encoder.finish()));
         outcome
@@ -553,10 +628,19 @@ impl StillRenderJob {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Still Tile Readback"),
             });
+        // Scene-referred output is read out of the high-dynamic-range target
+        // the passes wrote into, which is what "before the finishing chain"
+        // literally means. Every other mode reads the capture target the chain
+        // composited into.
+        let source = if self.spec.readback.composites() {
+            &target.texture
+        } else {
+            &ctx.renderer.targets.hdr_resolve_texture
+        };
         let (buffer, padded) = solarxy_renderer::capture::encode_capture(
             ctx.device,
             &mut encoder,
-            &target.texture,
+            source,
             (0, 0, target.width, target.height),
         );
         ctx.queue.submit(std::iter::once(encoder.finish()));
@@ -572,7 +656,22 @@ impl StillRenderJob {
         let Some(pending) = self.pending.as_ref() else {
             return StillStep::Working;
         };
-        match pending.poll(ctx.device, ctx.format) {
+        let source = self.spec.readback.source_format(ctx.format);
+        let polled = if self.spec.readback == StillReadback::Display8 {
+            pending.poll(ctx.device, source)
+        } else {
+            // Widened to full float on the way out and handed on as its bytes,
+            // so a tile stays one shape whatever it holds and the caller reads
+            // it back with the width the spec states.
+            match pending.poll_floats(ctx.device, source) {
+                solarxy_renderer::capture::CaptureFloatPoll::Pending => CapturePoll::Pending,
+                solarxy_renderer::capture::CaptureFloatPoll::Failed => CapturePoll::Failed,
+                solarxy_renderer::capture::CaptureFloatPoll::Ready(floats) => {
+                    CapturePoll::Ready(bytemuck::cast_slice(&floats).to_vec())
+                }
+            }
+        };
+        match polled {
             CapturePoll::Pending => StillStep::Working,
             CapturePoll::Failed => {
                 self.pending = None;
@@ -584,7 +683,7 @@ impl StillRenderJob {
                 let tile = self.plan.tiles[self.tile];
                 self.ready.push_back(StillTile {
                     rect: tile.image,
-                    pixels: crop(&pixels, tile),
+                    pixels: crop(&pixels, tile, self.spec.readback.bytes_per_pixel()),
                 });
                 self.tile += 1;
                 self.samples_done = 0;
@@ -601,16 +700,16 @@ impl StillRenderJob {
 ///
 /// A copy rather than a view, because the result crosses a boundary that does
 /// not carry strides.
-fn crop(pixels: &[u8], tile: Tile) -> Vec<u8> {
+fn crop(pixels: &[u8], tile: Tile, bytes_per_pixel: usize) -> Vec<u8> {
     if tile.render == tile.image {
         return pixels.to_vec();
     }
     let [ox, oy] = tile.crop();
-    let stride = tile.render.width as usize * 4;
-    let row = tile.image.width as usize * 4;
+    let stride = tile.render.width as usize * bytes_per_pixel;
+    let row = tile.image.width as usize * bytes_per_pixel;
     let mut out = Vec::with_capacity(row * tile.image.height as usize);
     for y in 0..tile.image.height as usize {
-        let start = (oy as usize + y) * stride + ox as usize * 4;
+        let start = (oy as usize + y) * stride + ox as usize * bytes_per_pixel;
         out.extend_from_slice(&pixels[start..start + row]);
     }
     out
@@ -715,7 +814,7 @@ mod tests {
                 pixels.extend_from_slice(&[x, y, 0, 255]);
             }
         }
-        let out = crop(&pixels, tile);
+        let out = crop(&pixels, tile, 4);
         assert_eq!(out.len(), 2 * 2 * 4);
         // The owned rect starts two in and two down.
         assert_eq!(&out[0..4], &[2, 2, 0, 255]);

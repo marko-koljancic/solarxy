@@ -245,6 +245,9 @@ pub fn run_render(input: &Path, opts: &RenderOptions) -> Result<RenderOutcome, R
         // apron would be a margin around nothing.
         screen_space_post: false,
         tile_budget: solarxy_host::still::TILE_BUDGET_PIXELS,
+        // Eight bits for now; the float modes arrive with the file format that
+        // can hold them.
+        readback: solarxy_host::still::StillReadback::Display8,
     };
     let mut job = StillRenderJob::new(spec);
     let spec = job.spec();

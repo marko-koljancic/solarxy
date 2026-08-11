@@ -52,6 +52,7 @@ fn spec(engine: StillEngine, samples: u32, budget: u32) -> StillSpec {
         samples,
         screen_space_post: false,
         tile_budget: budget,
+        readback: solarxy_host::still::StillReadback::Display8,
     }
 }
 

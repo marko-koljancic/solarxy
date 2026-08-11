@@ -133,6 +133,13 @@ pub struct PostProcessingPipelines {
     pub bloom_blur_h: wgpu::RenderPipeline,
     pub bloom_blur_v: wgpu::RenderPipeline,
     pub composite: wgpu::RenderPipeline,
+    /// Kept so the float variant can be built later without rebuilding the
+    /// world. Both are refcounted handles, so holding them costs nothing.
+    composite_layout: wgpu::PipelineLayout,
+    composite_shader: wgpu::ShaderModule,
+    /// The finishing chain against a float target, built the first time a float
+    /// still asks for it. A session that never renders one never pays for it.
+    composite_float: Option<wgpu::RenderPipeline>,
     pub ssao: wgpu::RenderPipeline,
     pub ssao_blur_h: wgpu::RenderPipeline,
     pub ssao_blur_v: wgpu::RenderPipeline,
@@ -1011,18 +1018,8 @@ impl Pipelines {
             ],
             push_constant_ranges: &[],
         });
-        let composite = PipelineBuilder::new(
-            device,
-            "Composite Pipeline",
-            &composite_layout,
-            &composite_shader,
-        )
-        .vertex_entry("vs_fullscreen")
-        .fragment_entry("fs_composite")
-        .color_format(config.format)
-        .no_blend()
-        .no_depth()
-        .build();
+        let composite =
+            build_composite(device, &composite_layout, &composite_shader, config.format);
 
         let gbuffer_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("G-Buffer Pipeline Layout"),
@@ -1174,6 +1171,9 @@ impl Pipelines {
                 bloom_blur_h,
                 bloom_blur_v,
                 composite,
+                composite_layout,
+                composite_shader,
+                composite_float: None,
                 ssao,
                 ssao_blur_h,
                 ssao_blur_v,
@@ -1213,4 +1213,53 @@ impl Pipelines {
             },
         }
     }
+}
+
+impl PostProcessingPipelines {
+    /// The finishing chain against a float target, built on first use.
+    ///
+    /// Separate from the surface pipeline rather than replacing it: a pipeline's
+    /// colour format is fixed when it is built, and every pane on screen renders
+    /// through the surface one. Building this lazily is what keeps a session
+    /// that only ever looks at a viewport from paying for a pipeline it will
+    /// never bind.
+    pub fn float_composite(&mut self, device: &wgpu::Device) -> &wgpu::RenderPipeline {
+        self.composite_float.get_or_insert_with(|| {
+            build_composite(
+                device,
+                &self.composite_layout,
+                &self.composite_shader,
+                FLOAT_COMPOSITE_FORMAT,
+            )
+        })
+    }
+}
+
+/// The colour format a float still is composited into.
+///
+/// Full float rather than half. This is the last stop before a file, and the
+/// whole reason to write one is to keep what the eight-bit path rounds away;
+/// halving the mantissa here to save memory that is freed a moment later is the
+/// wrong trade. Renderable without blending under core limits, which is all the
+/// finishing chain needs since it does not blend.
+pub const FLOAT_COMPOSITE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+
+/// Builds the finishing chain against a colour format.
+///
+/// Shared by the surface pipeline and the float one so the two cannot drift:
+/// the entry points, the blend state and the depth state are the shader's
+/// contract, not the target's, and the format is the only thing that varies.
+pub fn build_composite(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    PipelineBuilder::new(device, "Composite Pipeline", layout, shader)
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_composite")
+        .color_format(format)
+        .no_blend()
+        .no_depth()
+        .build()
 }

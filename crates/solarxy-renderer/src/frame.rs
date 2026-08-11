@@ -98,7 +98,9 @@ const _: () = assert!(std::mem::size_of::<WireframeParams>() == 32);
 pub struct RenderTargets {
     pub depth_texture: texture::Texture,
     pub msaa_hdr_view: wgpu::TextureView,
-    pub _hdr_resolve_texture: wgpu::Texture,
+    /// The target every pass draws into, before the finishing chain reads it.
+    /// Named plainly since a scene-referred still now copies out of it.
+    pub hdr_resolve_texture: wgpu::Texture,
     pub hdr_resolve_view: wgpu::TextureView,
 }
 
@@ -486,7 +488,7 @@ impl Renderer {
         self.targets.msaa_hdr_view =
             crate::texture::create_msaa_hdr_texture(device, width, height, self.msaa_sample_count);
         let (hdr_tex, hdr_view) = crate::texture::create_hdr_resolve_texture(device, width, height);
-        self.targets._hdr_resolve_texture = hdr_tex;
+        self.targets.hdr_resolve_texture = hdr_tex;
         self.targets.hdr_resolve_view = hdr_view;
         self.post.bloom.resize(
             device,
@@ -779,7 +781,7 @@ impl Renderer {
             targets: RenderTargets {
                 depth_texture,
                 msaa_hdr_view,
-                _hdr_resolve_texture: hdr_resolve_texture,
+                hdr_resolve_texture,
                 hdr_resolve_view,
             },
             post: PostProcessing {
