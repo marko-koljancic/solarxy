@@ -179,9 +179,39 @@ pub struct RenderArgs {
     #[arg(long)]
     pub seed: Option<u32>,
 
+    /// Auxiliary passes to write beside the image, as 32-bit float EXR.
+    ///
+    /// Path-traced renders only, and refused rather than ignored when the
+    /// engine cannot produce them.
+    #[arg(long, value_enum, value_delimiter = ',', value_name = "LIST")]
+    pub aov: Vec<AovArg>,
+
+    /// Which space a floating-point image is written in. `.exr` output only.
+    #[arg(long, value_enum)]
+    pub exr_space: Option<ExrSpaceArg>,
+
     /// Write a machine-readable result to standard output.
     #[arg(long)]
     pub json: bool,
+}
+
+/// An auxiliary pass, as a flag value.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[clap(rename_all = "kebab-case")]
+pub enum AovArg {
+    Albedo,
+    Normal,
+    Depth,
+}
+
+/// Which floats a float image carries.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[clap(rename_all = "kebab-case")]
+pub enum ExrSpaceArg {
+    /// Light as the scene has it, with no exposure, tone map or grade applied.
+    SceneLinear,
+    /// The finished look, without the quantization a screen would impose.
+    Display,
 }
 
 /// The engine choice as a flag. Mirrors what the render node declares, spelled

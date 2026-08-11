@@ -410,6 +410,19 @@ fn run_render(args: &solarxy_cli::parser::RenderArgs) -> ExitCode {
             solarxy_cli::parser::RenderEngineArg::Raster => solarxy_render::RenderEngine::Raster,
         }),
         seed: args.seed,
+        aovs: args
+            .aov
+            .iter()
+            .map(|a| match a {
+                solarxy_cli::parser::AovArg::Albedo => solarxy_render::AovKind::Albedo,
+                solarxy_cli::parser::AovArg::Normal => solarxy_render::AovKind::Normal,
+                solarxy_cli::parser::AovArg::Depth => solarxy_render::AovKind::Depth,
+            })
+            .collect(),
+        exr_space: args.exr_space.map(|s| match s {
+            solarxy_cli::parser::ExrSpaceArg::SceneLinear => solarxy_render::ExrSpace::SceneLinear,
+            solarxy_cli::parser::ExrSpaceArg::Display => solarxy_render::ExrSpace::Display,
+        }),
         cancel: Some(cancel),
     };
 
@@ -460,6 +473,9 @@ fn exit_code_for(error: &solarxy_render::RenderError) -> u8 {
         | E::InputUnreadable { .. }
         | E::InputInvalid { .. }
         | E::InputUnsupported { .. } => 2,
+        // A flag that cannot take effect is a mistake in the invocation, which
+        // is what code one means, and it is decided before anything is read.
+        E::OptionIneffective(_) => 1,
         E::Cook(_) | E::NoRenderNode | E::AmbiguousRenderNode(_) | E::RenderNode(_) => 3,
         E::NoAdapter => 4,
         E::Device(_) | E::DeviceLost => 5,

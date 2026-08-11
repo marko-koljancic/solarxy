@@ -155,6 +155,63 @@ fn an_output_path_is_required() {
     assert!(out.stdout.is_empty());
 }
 
+/// A pass the chosen renderer cannot produce is refused, not skipped.
+///
+/// **Exit one on a machine with no GPU too**, which is the whole reason the
+/// capability is read off a constant: a refusal that had to build a backend
+/// first would report a missing adapter here, and this test would have to
+/// accept that and prove nothing.
+#[test]
+fn auxiliary_passes_are_refused_by_a_renderer_that_writes_none() {
+    let model = repo_root().join("res/models/armadillo.obj");
+    let Some(out) = render(&[
+        model.to_str().expect("utf8 path"),
+        "--out",
+        "/dev/null.exr",
+        "--engine",
+        "raster",
+        "--aov",
+        "albedo",
+    ]) else {
+        return;
+    };
+    assert_eq!(
+        code(&out),
+        1,
+        "expected a usage error; stderr said: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "the refusal wrote to standard output"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--aov"),
+        "the message did not name the flag that could not take effect"
+    );
+}
+
+/// A space for a file format that cannot carry one is the same kind of mistake.
+#[test]
+fn a_float_space_is_refused_where_the_output_is_not_a_float_file() {
+    let model = repo_root().join("res/models/armadillo.obj");
+    let Some(out) = render(&[
+        model.to_str().expect("utf8 path"),
+        "--out",
+        "/dev/null.png",
+        "--exr-space",
+        "display",
+    ]) else {
+        return;
+    };
+    assert_eq!(code(&out), 1);
+    assert!(out.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--exr-space"),
+        "the message did not name the flag"
+    );
+}
+
 /// Progress goes to standard error, and standard output stays empty.
 ///
 /// The assertion holds whether or not this machine has a GPU, which is what

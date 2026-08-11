@@ -30,6 +30,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod error;
+pub mod files;
 pub mod input;
 pub mod report;
 
@@ -54,6 +55,7 @@ use solarxy_renderer::pathtrace::backend::PathBackend;
 use solarxy_renderer::scene::BackgroundModeExt;
 
 pub use error::RenderError;
+pub use files::{AovKind, ExrSpace};
 pub use report::{RENDER_REPORT_SCHEMA_VERSION, RenderReport};
 
 /// How far along a render is.
@@ -184,6 +186,11 @@ pub struct RenderOptions {
     pub denoise: Option<bool>,
     pub engine: Option<RenderEngine>,
     pub seed: Option<u32>,
+    /// Auxiliary passes to write beside the image. Empty is the ordinary case.
+    pub aovs: Vec<AovKind>,
+    /// Which space a float beauty is written in. Meaningless, and refused, for
+    /// an output that is not floating point.
+    pub exr_space: Option<ExrSpace>,
     /// Set from outside to stop the render.
     ///
     /// A flag rather than a callback because the thing that sets it is a signal
@@ -195,6 +202,64 @@ pub struct RenderOptions {
     /// written in one call after the last tile, so a run that stops early never
     /// creates the file at all.
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+}
+
+/// What a backend of a given kind can do, without building one.
+///
+/// The capability is read off the backend's own declaration, so a third
+/// backend that writes auxiliary passes becomes usable here by saying so
+/// rather than by being added to a list of engines that may.
+///
+/// A constant rather than [`RenderBackend::caps`] because both constructors
+/// need a device, and a caller deciding whether an option it was handed can
+/// take effect should not have to start a GPU to find out. That is not a
+/// detail: it is the difference between a mistyped command exiting one
+/// immediately and exiting four on a machine with no adapter.
+fn caps_of(engine: RenderEngine) -> solarxy_renderer::backend::BackendCaps {
+    match engine {
+        RenderEngine::Raster => RasterBackend::CAPS,
+        RenderEngine::PathTraced => PathBackend::CAPS,
+    }
+}
+
+/// Refuses an option that cannot take effect, before anything is read.
+///
+/// A flag that silently does nothing is worse than a refusal: the run
+/// succeeds, the file is there, and the pass the pipeline was waiting for is
+/// not. `engine` is `None` before the document has been read, which is when
+/// only the flag-against-flag cases can be judged.
+fn check_options(opts: &RenderOptions, engine: Option<RenderEngine>) -> Result<(), RenderError> {
+    let output = opts.output.as_ref();
+    if let Some(engine) = engine {
+        if !opts.aovs.is_empty() && !caps_of(engine).writes_aovs {
+            return Err(RenderError::OptionIneffective(format!(
+                "the {} engine writes no auxiliary passes, so --aov cannot take effect",
+                match engine {
+                    RenderEngine::Raster => "raster",
+                    RenderEngine::PathTraced => "path-traced",
+                }
+            )));
+        }
+        return Ok(());
+    }
+    if !opts.aovs.is_empty() && matches!(output, Some(Output::Stdout)) {
+        return Err(RenderError::OptionIneffective(
+            "--aov writes files beside the image, and standard output has no beside".into(),
+        ));
+    }
+    if opts.exr_space.is_some() {
+        let is_exr = match output {
+            Some(Output::File(p)) => files::is_exr(p),
+            // Nothing is written to a path, so nothing carries a space.
+            Some(Output::Stdout) | None => false,
+        };
+        if !is_exr {
+            return Err(RenderError::OptionIneffective(
+                "--exr-space applies to an .exr output; this one is not".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl RenderOptions {
@@ -271,11 +336,22 @@ fn run(
     progress: &mut dyn FnMut(RenderProgress),
 ) -> Result<RenderOutcome, RenderError> {
     let started = Instant::now();
+    // Before the file is opened: a request that contradicts itself is a
+    // mistake in the invocation, and a build system should get it back in the
+    // time it takes to parse rather than after a cook.
+    check_options(opts, None)?;
+    if let Some(engine) = opts.engine {
+        check_options(opts, Some(engine))?;
+    }
     let loaded = input::load(input, opts.cancel.as_ref(), progress)?;
     let mut warnings = loaded.warnings;
     let engine = loaded.engine;
 
     let settings = opts.apply_to(resolve_settings(&engine, opts, &mut warnings)?);
+    // Again, now that the document has had its say: the engine can come from
+    // the render node rather than from a flag, and the answer has to be the
+    // same either way. Still before any device exists.
+    check_options(opts, Some(settings.engine))?;
     let delta = {
         let mut e = engine;
         e.take_scene_delta()
@@ -330,12 +406,17 @@ fn run(
     let pds = PaneDisplaySettings::for_still(background_mode);
     let display = still_display_settings();
 
-    let mut job = StillRenderJob::new(still_spec(&settings));
+    let output = opts
+        .output
+        .clone()
+        .unwrap_or_else(|| Output::File(PathBuf::from("render.png")));
+
+    let mut job = StillRenderJob::new(still_spec(&settings, &output, opts));
     let spec = job.spec();
     let tiles = job.plan().len();
 
     let scene_present = probe.scene().draw_objects().next().is_some();
-    let image = drive(
+    let assembled = drive(
         &mut Drive {
             device: &device,
             queue: &queue,
@@ -357,23 +438,97 @@ fn run(
         started,
     )?;
 
-    let output = opts
-        .output
-        .clone()
-        .unwrap_or_else(|| Output::File(PathBuf::from("render.png")));
+    // One event, naming the image. The passes are named in the report instead:
+    // the plain sink collapses repeated steps, so four `Writing` lines would
+    // show as one anyway, and a machine reading the result wants the list.
     progress(RenderProgress::Writing {
         output: output.display(),
     });
-    let encoded = solarxy_formats::export::encode_png_bytes(&solarxy_core::RawImageData::new(
-        image,
-        spec.width,
-        spec.height,
-    ))?;
-    output.write(&encoded)?;
+    let aovs = write_all(&output, opts, assembled, spec, &mut warnings)?;
 
     Ok(RenderOutcome {
-        report: report(&output, spec, &settings, tiles, started, warnings),
+        report: report(&output, spec, &settings, tiles, started, warnings, aovs),
     })
+}
+
+/// Encodes the picture, writes it, and writes every pass beside it.
+///
+/// The image first, because it is what was asked for and a pass without one is
+/// of no use to anybody.
+fn write_all(
+    output: &Output,
+    opts: &RenderOptions,
+    assembled: Assembled,
+    spec: StillSpec,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<String>, RenderError> {
+    // Taken apart rather than borrowed, so the colour moves into the encoder
+    // instead of being copied for it.
+    let Assembled { color, aux, depth } = assembled;
+    let encoded = if spec.readback == solarxy_host::still::StillReadback::Display8 {
+        solarxy_formats::export::encode_png_bytes(&solarxy_core::RawImageData::new(
+            color,
+            spec.width,
+            spec.height,
+        ))?
+    } else {
+        solarxy_formats::export::encode_exr_rgb_bytes(&solarxy_core::RawImageHdr::new(
+            files::rgb_from_rgba(&files::floats_of(&color)),
+            spec.width,
+            spec.height,
+        ))?
+    };
+    output.write(&encoded)?;
+    write_passes(
+        output,
+        opts,
+        aux.as_deref(),
+        depth.as_deref(),
+        spec,
+        warnings,
+    )
+}
+
+/// Writes every requested pass beside the image, and names what it wrote.
+fn write_passes(
+    output: &Output,
+    opts: &RenderOptions,
+    aux: Option<&[u8]>,
+    depth: Option<&[u8]>,
+    spec: StillSpec,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<String>, RenderError> {
+    let Output::File(image_path) = output else {
+        return Ok(Vec::new());
+    };
+    let mut written = Vec::new();
+    for kind in &opts.aovs {
+        let plane = match kind {
+            AovKind::Albedo => aux.map(|a| files::albedo_from_auxiliary(&files::floats_of(a))),
+            AovKind::Normal => aux.map(|a| files::normal_from_auxiliary(&files::floats_of(a))),
+            AovKind::Depth => depth.map(files::floats_of),
+        };
+        let Some(plane) = plane else {
+            // Refused before the render for every case that can be judged
+            // ahead of time, so reaching here means the backend declared the
+            // pass and then had none. Said out loud rather than written as a
+            // black file.
+            warnings.push(format!(
+                "the renderer produced no {} pass; it was not written",
+                kind.as_str()
+            ));
+            continue;
+        };
+        let path = files::sibling(image_path, *kind);
+        files::write_pass(&path, *kind, &plane, spec.width, spec.height)?;
+        written.push(
+            std::fs::canonicalize(&path)
+                .unwrap_or(path)
+                .display()
+                .to_string(),
+        );
+    }
+    Ok(written)
 }
 
 /// What the run produced, as the machine-readable result.
@@ -385,6 +540,7 @@ fn report(
     tiles: usize,
     started: Instant,
     warnings: Vec<String>,
+    aovs: Vec<String>,
 ) -> RenderReport {
     RenderReport {
         schema_version: RENDER_REPORT_SCHEMA_VERSION,
@@ -405,6 +561,7 @@ fn report(
         tiles: tiles as u32,
         elapsed_ms: started.elapsed().as_millis() as u64,
         warnings,
+        aovs,
     }
 }
 
@@ -470,8 +627,23 @@ fn triangle_count(delta: &solarxy_core::scene::SceneDelta) -> u64 {
         .sum()
 }
 
-/// The still the settings describe.
-fn still_spec(settings: &RenderSettings) -> StillSpec {
+/// The still the settings describe, written where the caller asked.
+///
+/// The output's extension chooses the depth, because the file format is the
+/// only place the choice is visible: asking for eight bits in a container that
+/// holds floats would throw the render away, and asking for floats in a PNG
+/// cannot be honoured. `--exr-space` then chooses which floats, and its default
+/// is scene-referred, because a compositing package has not decided the look
+/// yet and a tone-mapped float is a decision already taken.
+fn still_spec(settings: &RenderSettings, output: &Output, opts: &RenderOptions) -> StillSpec {
+    use solarxy_host::still::StillReadback;
+    let readback = match output {
+        Output::File(path) if files::is_exr(path) => match opts.exr_space.unwrap_or_default() {
+            ExrSpace::SceneLinear => StillReadback::SceneLinear,
+            ExrSpace::Display => StillReadback::DisplayFloat,
+        },
+        Output::File(_) | Output::Stdout => StillReadback::Display8,
+    };
     StillSpec {
         width: settings.width,
         height: settings.height,
@@ -484,9 +656,11 @@ fn still_spec(settings: &RenderSettings) -> StillSpec {
         // apron would be a margin around nothing.
         screen_space_post: false,
         tile_budget: solarxy_host::still::TILE_BUDGET_PIXELS,
-        // Eight bits for now; the float modes arrive with the file format that
-        // can hold them.
-        readback: solarxy_host::still::StillReadback::Display8,
+        readback,
+        // Albedo and normal come out of one store, so either of them asks for
+        // the same copy.
+        aux: opts.aovs.iter().any(|k| k.from_auxiliary()),
+        depth: opts.aovs.contains(&AovKind::Depth),
     }
 }
 
@@ -538,17 +712,38 @@ fn still_display_settings() -> DisplaySettings {
     }
 }
 
-/// Copies one finished tile into the assembled image.
-fn blit(image: &mut [u8], image_width: u32, tile: &solarxy_host::still::StillTile) {
-    let stride = image_width as usize * 4;
-    let row = tile.rect.width as usize * 4;
-    for y in 0..tile.rect.height as usize {
+/// Copies one finished plane of one tile into the assembled image.
+///
+/// Takes its pixel width rather than assuming four, because the same body
+/// assembles an eight-bit colour, a four-float colour, a four-float auxiliary
+/// and a one-float depth.
+fn blit(
+    image: &mut [u8],
+    image_width: u32,
+    rect: solarxy_host::still::TileRect,
+    plane: &[u8],
+    bytes_per_pixel: usize,
+) {
+    let stride = image_width as usize * bytes_per_pixel;
+    let row = rect.width as usize * bytes_per_pixel;
+    for y in 0..rect.height as usize {
         let src = y * row;
-        let dst = (tile.rect.y as usize + y) * stride + tile.rect.x as usize * 4;
-        if dst + row <= image.len() && src + row <= tile.pixels.len() {
-            image[dst..dst + row].copy_from_slice(&tile.pixels[src..src + row]);
+        let dst = (rect.y as usize + y) * stride + rect.x as usize * bytes_per_pixel;
+        if dst + row <= image.len() && src + row <= plane.len() {
+            image[dst..dst + row].copy_from_slice(&plane[src..src + row]);
         }
     }
+}
+
+/// The whole picture, and whatever passes were asked for beside it.
+///
+/// Every plane is bytes rather than typed samples for the reason the tiles are:
+/// one assembly body serves all of them, and the reader at the far end knows
+/// what it asked for.
+struct Assembled {
+    color: Vec<u8>,
+    aux: Option<Vec<u8>>,
+    depth: Option<Vec<u8>>,
 }
 
 /// A device with no surface, asking for exactly what both shells ask for.
@@ -613,7 +808,7 @@ fn drive(
     d: &mut Drive<'_>,
     view: &StillView<'_>,
     started: Instant,
-) -> Result<Vec<u8>, RenderError> {
+) -> Result<Assembled, RenderError> {
     let Drive {
         device,
         queue,
@@ -624,7 +819,16 @@ fn drive(
         progress,
     } = d;
     let spec = job.spec();
-    let mut image = vec![0u8; (spec.width as usize) * (spec.height as usize) * 4];
+    let pixels = (spec.width as usize) * (spec.height as usize);
+    let color_bpp = spec.readback.bytes_per_pixel();
+    let mut out = Assembled {
+        color: vec![0u8; pixels * color_bpp],
+        // Allocated on the spec rather than on the first tile that carries one,
+        // so a backend that goes quiet halfway leaves a hole rather than a
+        // shorter picture.
+        aux: spec.aux.then(|| vec![0u8; pixels * AUX_BYTES]),
+        depth: spec.depth.then(|| vec![0u8; pixels * DEPTH_BYTES]),
+    };
     while let Some(tile) = job.current() {
         if view.cancel.cancelled() {
             return Err(RenderError::Cancelled);
@@ -661,15 +865,26 @@ fn drive(
             StillStep::Working => {}
             StillStep::Tile => {
                 while let Some(t) = job.take_tile() {
-                    blit(&mut image, spec.width, &t);
+                    blit(&mut out.color, spec.width, t.rect, &t.pixels, color_bpp);
+                    if let (Some(image), Some(plane)) = (out.aux.as_mut(), t.aux.as_ref()) {
+                        blit(image, spec.width, t.rect, plane, AUX_BYTES);
+                    }
+                    if let (Some(image), Some(plane)) = (out.depth.as_mut(), t.depth.as_ref()) {
+                        blit(image, spec.width, t.rect, plane, DEPTH_BYTES);
+                    }
                 }
             }
             StillStep::Done => break,
             StillStep::Failed => return Err(RenderError::DeviceLost),
         }
     }
-    Ok(image)
+    Ok(out)
 }
+
+/// Four `f32`: albedo and the packed normal, as the still job hands them over.
+const AUX_BYTES: usize = 16;
+/// One `f32`.
+const DEPTH_BYTES: usize = 4;
 
 /// The backend the settings ask for, configured from them.
 ///

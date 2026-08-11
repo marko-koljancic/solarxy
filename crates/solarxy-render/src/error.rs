@@ -45,6 +45,16 @@ pub enum RenderError {
     #[error("{0}")]
     RenderNode(String),
 
+    /// An option that cannot take effect, named rather than ignored.
+    ///
+    /// Its own class, and the one the command line reports as a usage error,
+    /// because the alternative is a run that succeeds and quietly does not do
+    /// what it was asked. Every one of these is decided before anything is
+    /// loaded and before a device is requested, so a farm that gets one has
+    /// spent nothing.
+    #[error("{0}")]
+    OptionIneffective(String),
+
     #[error("no GPU adapter is available")]
     NoAdapter,
 
@@ -86,6 +96,7 @@ impl RenderError {
             Self::NoRenderNode | Self::AmbiguousRenderNode(_) | Self::RenderNode(_) => {
                 "resolving the render"
             }
+            Self::OptionIneffective(_) => "checking the request",
             Self::NoAdapter | Self::Device(_) => "starting the GPU",
             Self::DeviceLost => "drawing",
             Self::Cancelled => "cancelled",

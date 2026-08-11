@@ -203,7 +203,8 @@ impl PendingCapture {
         CapturePoll::Ready(pixels)
     }
 
-    /// The same readback, decoded to four floats per pixel.
+    /// The same readback, decoded to floats: four per pixel from a four-channel
+    /// source, one from a single-channel one.
     ///
     /// For an image that is going to a float file rather than to a screen. The
     /// eight-bit path above is not a step on the way here: it has already
@@ -224,6 +225,10 @@ impl PendingCapture {
         let bytes_per_pixel = match source_format {
             wgpu::TextureFormat::Rgba16Float => 8,
             wgpu::TextureFormat::Rgba32Float => 16,
+            // One float per pixel rather than four, which is what a depth pass
+            // writes: a distance is one number, and the caller reads the result
+            // back at the width the format states rather than at four.
+            wgpu::TextureFormat::R32Float => 4,
             _ => {
                 tracing::error!("a float readback was asked for a {source_format:?} source");
                 return CaptureFloatPoll::Failed;

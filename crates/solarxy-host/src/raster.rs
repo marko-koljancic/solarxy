@@ -59,6 +59,23 @@ pub struct RasterBackend {
 }
 
 impl RasterBackend {
+    /// What this backend can do, as a constant.
+    ///
+    /// A constant rather than only a method because the answer does not depend
+    /// on any GPU state, and a caller deciding whether an option it was handed
+    /// can take effect should not have to create a device to find out. The
+    /// method returns this.
+    pub const CAPS: BackendCaps = BackendCaps {
+        // One pass over the geometry produces the final image.
+        progressive: false,
+        // The lights uniform holds this many. It is the viewport's ceiling,
+        // not the scene's, and stating it here is what lets a host say so.
+        max_lights: Some(MAX_LIGHTS as u32),
+        supports_instancing: true,
+        supports_topology: TopologyMask::ALL,
+        writes_aovs: false,
+    };
+
     #[must_use]
     pub fn new(layouts: Arc<BindGroupLayouts>) -> Self {
         Self {
@@ -127,16 +144,7 @@ impl RenderBackend for RasterBackend {
     }
 
     fn caps(&self) -> BackendCaps {
-        BackendCaps {
-            // One pass over the geometry produces the final image.
-            progressive: false,
-            // The lights uniform holds this many. It is the viewport's ceiling,
-            // not the scene's, and stating it here is what lets a host say so.
-            max_lights: Some(MAX_LIGHTS as u32),
-            supports_instancing: true,
-            supports_topology: TopologyMask::ALL,
-            writes_aovs: false,
-        }
+        Self::CAPS
     }
 
     /// Nothing to drop: this backend accumulates nothing across frames. Not a

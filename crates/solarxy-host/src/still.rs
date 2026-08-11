@@ -154,6 +154,19 @@ pub struct StillSpec {
     pub tile_budget: u32,
     /// What the finished tiles are read back as.
     pub readback: StillReadback,
+    /// Whether to read the auxiliary channels back beside the colour.
+    ///
+    /// Two flags rather than a set of named passes, because albedo and normal
+    /// are written by one store and read by one copy: what the job can fetch is
+    /// two extra planes, and which of them a caller turns into which file is
+    /// the caller's vocabulary rather than the job's.
+    ///
+    /// Costs a tile-sized float copy per tile, which is why it is opt-in. A
+    /// backend that writes no auxiliary output simply returns nothing and the
+    /// tile arrives without it.
+    pub aux: bool,
+    /// Whether to run a depth pass per tile and read it back.
+    pub depth: bool,
 }
 
 impl Default for StillSpec {
@@ -166,6 +179,8 @@ impl Default for StillSpec {
             screen_space_post: false,
             tile_budget: TILE_BUDGET_PIXELS,
             readback: StillReadback::Display8,
+            aux: false,
+            depth: false,
         }
     }
 }
@@ -294,9 +309,126 @@ impl TilePlan {
 pub struct StillTile {
     /// Where this belongs in the final image.
     pub rect: TileRect,
-    /// Tightly packed RGBA8, `rect.width * rect.height * 4` bytes, apron
-    /// already cropped away.
+    /// The colour, tightly packed, apron already cropped away, at the width
+    /// [`StillReadback::bytes_per_pixel`] states: four bytes for the eight-bit
+    /// mode and sixteen for either float one.
     pub pixels: Vec<u8>,
+    /// The auxiliary channels, when [`StillSpec::aux`] asked for them and the
+    /// backend had them: four `f32` per pixel, albedo in the first three and
+    /// the octahedrally packed world normal in the fourth.
+    pub aux: Option<Vec<u8>>,
+    /// The depth, when [`StillSpec::depth`] asked for it: one `f32` per pixel,
+    /// measured along the camera's axis, `1e30` where the ray hit nothing.
+    pub depth: Option<Vec<u8>>,
+}
+
+/// Four `f32`, which is what the auxiliary target is.
+const AUX_BYTES_PER_PIXEL: usize = 16;
+/// One `f32`, which is what a depth is.
+const DEPTH_BYTES_PER_PIXEL: usize = 4;
+
+/// One plane's readback: in flight, then landed.
+///
+/// Two states in one struct because a tile waits on up to three buffers and
+/// they do not land together. A poll that has landed unmaps its buffer, so the
+/// bytes have to be kept somewhere until the slowest plane arrives, and keeping
+/// them here is what lets the collect step be called as many times as it takes.
+struct PendingPlane {
+    capture: Option<PendingCapture>,
+    bytes: Option<Vec<u8>>,
+    format: wgpu::TextureFormat,
+    /// Whether to read it as floats. The colour plane's eight-bit mode is the
+    /// only one that is not.
+    floats: bool,
+}
+
+/// Where one plane's readback has got to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlaneStep {
+    Pending,
+    Ready,
+    Failed,
+}
+
+impl PendingPlane {
+    fn arm(capture: PendingCapture, format: wgpu::TextureFormat, floats: bool) -> Self {
+        Self {
+            capture: Some(capture),
+            bytes: None,
+            format,
+            floats,
+        }
+    }
+
+    fn poll(&mut self, device: &wgpu::Device) -> PlaneStep {
+        if self.bytes.is_some() {
+            return PlaneStep::Ready;
+        }
+        let Some(capture) = self.capture.as_ref() else {
+            return PlaneStep::Failed;
+        };
+        let polled = if self.floats {
+            // Widened to full float on the way out and handed on as its bytes,
+            // so a plane stays one shape whatever it holds and the caller reads
+            // it back with the width its own kind states.
+            match capture.poll_floats(device, self.format) {
+                solarxy_renderer::capture::CaptureFloatPoll::Pending => CapturePoll::Pending,
+                solarxy_renderer::capture::CaptureFloatPoll::Failed => CapturePoll::Failed,
+                solarxy_renderer::capture::CaptureFloatPoll::Ready(floats) => {
+                    CapturePoll::Ready(bytemuck::cast_slice(&floats).to_vec())
+                }
+            }
+        } else {
+            capture.poll(device, self.format)
+        };
+        match polled {
+            CapturePoll::Pending => PlaneStep::Pending,
+            CapturePoll::Failed => PlaneStep::Failed,
+            CapturePoll::Ready(bytes) => {
+                self.capture = None;
+                self.bytes = Some(bytes);
+                PlaneStep::Ready
+            }
+        }
+    }
+}
+
+/// Every readback one tile is waiting on.
+struct PendingTile {
+    color: PendingPlane,
+    aux: Option<PendingPlane>,
+    depth: Option<PendingPlane>,
+}
+
+impl PendingTile {
+    fn planes_mut(&mut self) -> impl Iterator<Item = &mut PendingPlane> {
+        std::iter::once(&mut self.color)
+            .chain(self.aux.iter_mut())
+            .chain(self.depth.iter_mut())
+    }
+
+    /// The planes' bytes, once every one of them has landed. `None` if any is
+    /// still missing, which after a ready poll it cannot be.
+    fn into_planes(self) -> Option<TilePlanes> {
+        Some(TilePlanes {
+            color: self.color.bytes?,
+            aux: match self.aux {
+                Some(p) => Some(p.bytes?),
+                None => None,
+            },
+            depth: match self.depth {
+                Some(p) => Some(p.bytes?),
+                None => None,
+            },
+        })
+    }
+}
+
+/// What one tile's readbacks came back as, before the apron is cut off.
+struct TilePlanes {
+    color: Vec<u8>,
+    aux: Option<Vec<u8>>,
+    depth: Option<Vec<u8>>,
 }
 
 /// How far along a job is.
@@ -351,7 +483,7 @@ pub struct StillRenderJob {
     plan: TilePlan,
     tile: usize,
     samples_done: u32,
-    pending: Option<PendingCapture>,
+    pending: Option<PendingTile>,
     ready: VecDeque<StillTile>,
     target: Option<CaptureTarget>,
     finished: bool,
@@ -486,7 +618,7 @@ impl StillRenderJob {
             }
             FrameOutcome::Complete => {
                 self.samples_done = self.target_samples();
-                self.arm_readback(ctx, &target);
+                self.arm_readback(ctx, backend, tile, &target);
                 StillStep::Working
             }
         }
@@ -622,7 +754,22 @@ impl StillRenderJob {
         outcome
     }
 
-    fn arm_readback(&mut self, ctx: &StillCtx<'_>, target: &CaptureTarget) {
+    /// Copies the finished tile out, and whatever auxiliary planes were asked
+    /// for beside it.
+    ///
+    /// Every copy goes into one encoder and one submission. That matters for
+    /// the depth plane, which is a dispatch rather than a copy: its uniforms
+    /// are written through the queue, and a queue write applies to the whole
+    /// submission it lands in rather than at the point in the command stream
+    /// where it was issued, so two tiles' depth parameters batched before one
+    /// submit would both read the second tile's.
+    fn arm_readback(
+        &mut self,
+        ctx: &StillCtx<'_>,
+        backend: &mut dyn RenderBackend,
+        tile: Tile,
+        target: &CaptureTarget,
+    ) {
         let mut encoder = ctx
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -643,56 +790,105 @@ impl StillRenderJob {
             source,
             (0, 0, target.width, target.height),
         );
-        ctx.queue.submit(std::iter::once(encoder.finish()));
-        self.pending = Some(PendingCapture::arm(
-            buffer,
-            padded,
-            target.width,
-            target.height,
-        ));
-    }
+        let color = (buffer, padded);
 
-    fn collect(&mut self, ctx: &StillCtx<'_>) -> StillStep {
-        let Some(pending) = self.pending.as_ref() else {
-            return StillStep::Working;
-        };
-        let source = self.spec.readback.source_format(ctx.format);
-        let polled = if self.spec.readback == StillReadback::Display8 {
-            pending.poll(ctx.device, source)
-        } else {
-            // Widened to full float on the way out and handed on as its bytes,
-            // so a tile stays one shape whatever it holds and the caller reads
-            // it back with the width the spec states.
-            match pending.poll_floats(ctx.device, source) {
-                solarxy_renderer::capture::CaptureFloatPoll::Pending => CapturePoll::Pending,
-                solarxy_renderer::capture::CaptureFloatPoll::Failed => CapturePoll::Failed,
-                solarxy_renderer::capture::CaptureFloatPoll::Ready(floats) => {
-                    CapturePoll::Ready(bytemuck::cast_slice(&floats).to_vec())
-                }
-            }
-        };
-        match polled {
-            CapturePoll::Pending => StillStep::Working,
-            CapturePoll::Failed => {
-                self.pending = None;
-                self.finished = true;
-                StillStep::Failed
-            }
-            CapturePoll::Ready(pixels) => {
-                self.pending = None;
-                let tile = self.plan.tiles[self.tile];
-                self.ready.push_back(StillTile {
-                    rect: tile.image,
-                    pixels: crop(&pixels, tile, self.spec.readback.bytes_per_pixel()),
-                });
-                self.tile += 1;
-                self.samples_done = 0;
-                if self.tile >= self.plan.len() {
-                    self.finished = true;
-                }
-                StillStep::Tile
+        // The auxiliary first, because it only borrows the backend, and the
+        // depth dispatch below needs it mutably.
+        let mut aux = None;
+        if self.spec.aux {
+            // Pane zero: a still encodes one pane, and `encode_tile` says so.
+            if let Some(sources) = backend.aov_sources(0) {
+                aux = Some(solarxy_renderer::capture::encode_capture(
+                    ctx.device,
+                    &mut encoder,
+                    sources.auxiliary,
+                    (0, 0, target.width, target.height),
+                ));
             }
         }
+
+        let mut depth = None;
+        if self.spec.depth {
+            let window = Some(ImageWindow {
+                origin: [tile.render.x, tile.render.y],
+                full: [self.spec.width, self.spec.height],
+            });
+            if let Some(texture) = backend.encode_depth_aov(
+                ctx.device,
+                ctx.queue,
+                &mut encoder,
+                ctx.camera,
+                [target.width, target.height],
+                window,
+            ) {
+                depth = Some(solarxy_renderer::capture::encode_capture(
+                    ctx.device,
+                    &mut encoder,
+                    texture,
+                    (0, 0, target.width, target.height),
+                ));
+            }
+        }
+
+        // Submitted before anything is armed, and that order is the whole of
+        // it: arming maps the staging buffer, and submitting a copy *into* a
+        // mapped buffer is rejected. With one plane the two steps were adjacent
+        // and the order looked like a formality.
+        ctx.queue.submit(std::iter::once(encoder.finish()));
+        let arm = |(buffer, padded): (wgpu::Buffer, u32)| {
+            PendingCapture::arm(buffer, padded, target.width, target.height)
+        };
+        self.pending = Some(PendingTile {
+            color: PendingPlane::arm(
+                arm(color),
+                self.spec.readback.source_format(ctx.format),
+                self.spec.readback != StillReadback::Display8,
+            ),
+            aux: aux.map(|c| PendingPlane::arm(arm(c), wgpu::TextureFormat::Rgba32Float, true)),
+            depth: depth.map(|c| PendingPlane::arm(arm(c), wgpu::TextureFormat::R32Float, true)),
+        });
+    }
+
+    /// Polls every plane this tile is waiting on, and assembles the tile once
+    /// the slowest of them has landed.
+    fn collect(&mut self, ctx: &StillCtx<'_>) -> StillStep {
+        let (mut waiting, mut failed) = (false, false);
+        let Some(pending) = self.pending.as_mut() else {
+            return StillStep::Working;
+        };
+        for plane in pending.planes_mut() {
+            match plane.poll(ctx.device) {
+                PlaneStep::Pending => waiting = true,
+                PlaneStep::Ready => {}
+                PlaneStep::Failed => failed = true,
+            }
+        }
+        if failed {
+            self.pending = None;
+            self.finished = true;
+            return StillStep::Failed;
+        }
+        if waiting {
+            return StillStep::Working;
+        }
+        let Some(planes) = self.pending.take().and_then(PendingTile::into_planes) else {
+            self.finished = true;
+            return StillStep::Failed;
+        };
+
+        let tile = self.plan.tiles[self.tile];
+        self.ready.push_back(StillTile {
+            rect: tile.image,
+            pixels: crop(&planes.color, tile, self.spec.readback.bytes_per_pixel()),
+            aux: planes.aux.map(|a| crop(&a, tile, AUX_BYTES_PER_PIXEL)),
+            depth: planes.depth.map(|d| crop(&d, tile, DEPTH_BYTES_PER_PIXEL)),
+        });
+        self.tile += 1;
+        self.samples_done = 0;
+        if self.tile >= self.plan.len() {
+            self.finished = true;
+        }
+        StillStep::Tile
     }
 }
 

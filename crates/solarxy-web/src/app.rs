@@ -1532,7 +1532,7 @@ impl SolarxyApp {
 
     #[wasm_bindgen(js_name = startStillRender)]
     pub fn start_still_render(&mut self, ctx: JsValue, node: f64) -> Result<(), JsError> {
-        use solarxy_host::still::{StillEngine, StillRenderJob, StillSpec, TILE_BUDGET_PIXELS};
+        use solarxy_host::still::{StillEngine, StillRenderJob};
 
         if self.still.is_some() {
             return Err(JsError::new("a still render is already running"));
@@ -1582,20 +1582,7 @@ impl SolarxyApp {
             t.set_settings(settings);
             t.invalidate();
         }
-        let spec = StillSpec {
-            width: opts.width,
-            height: opts.height,
-            engine,
-            samples: opts.samples,
-            // Bloom is the only screen-space pass a still keeps; ambient
-            // occlusion is off for traced output and a raster still inherits
-            // whatever the viewport had.
-            screen_space_post: self.renderer.post.bloom_enabled,
-            tile_budget: TILE_BUDGET_PIXELS,
-            // The browser saves an eight-bit image; float output is the
-            // headless command's, which has a file format that can hold it.
-            readback: solarxy_host::still::StillReadback::Display8,
-        };
+        let spec = self.still_spec(&opts, engine);
         // The job's own camera. Built from the named `camera` node when there
         // is one, and otherwise from the active pane's current view copied by
         // value: either way the panes are untouched, which is what makes
@@ -3351,6 +3338,32 @@ impl SolarxyApp {
 
 // Internal orchestration: the web port of the desktop per-pane render loop.
 impl SolarxyApp {
+    /// The still the render node's settings describe, as this shell renders it.
+    fn still_spec(
+        &self,
+        opts: &solarxy_graph::nodes::RenderSettings,
+        engine: solarxy_host::still::StillEngine,
+    ) -> solarxy_host::still::StillSpec {
+        solarxy_host::still::StillSpec {
+            width: opts.width,
+            height: opts.height,
+            engine,
+            samples: opts.samples,
+            // Bloom is the only screen-space pass a still keeps; ambient
+            // occlusion is off for traced output and a raster still inherits
+            // whatever the viewport had.
+            screen_space_post: self.renderer.post.bloom_enabled,
+            tile_budget: solarxy_host::still::TILE_BUDGET_PIXELS,
+            // The browser saves an eight-bit image; float output is the
+            // headless command's, which has a file format that can hold it.
+            readback: solarxy_host::still::StillReadback::Display8,
+            // And no auxiliary passes, for the same reason: an eight-bit normal
+            // map is not worth writing.
+            aux: false,
+            depth: false,
+        }
+    }
+
     fn compute_panes(&self) -> Vec<PaneRect> {
         panes::compute_panes(
             self.view.display.layout,

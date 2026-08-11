@@ -85,6 +85,51 @@ pub trait RenderBackend {
     /// edited. A backend that accumulates nothing implements this as a no-op,
     /// which is not a special case but the honest answer.
     fn invalidate(&mut self);
+
+    /// The auxiliary channels this pane described while it drew, if any.
+    ///
+    /// Defaulted to `None`, so a backend that writes no auxiliary output says
+    /// nothing rather than implementing a refusal. What a caller does with the
+    /// answer is gated on [`BackendCaps::writes_aovs`] before it ever gets
+    /// here; this is where the data is, not whether it exists.
+    fn aov_sources(&self, _pane: usize) -> Option<AovSources<'_>> {
+        None
+    }
+
+    /// Encode a depth pass for `pane` and hand back the texture it wrote.
+    ///
+    /// Its own call rather than a lane of [`RenderBackend::aov_sources`]
+    /// because a depth is not accumulated: it is one primary ray at the pixel
+    /// centre, so it is encoded once when the pane is finished rather than
+    /// merged over samples. `window` tiles it exactly the way
+    /// [`FrameCtx::window`] tiles the colour.
+    ///
+    /// Defaulted to `None`, for the same reason as above.
+    fn encode_depth_aov(
+        &mut self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _encoder: &mut wgpu::CommandEncoder,
+        _camera: &CameraState,
+        _size: [u32; 2],
+        _window: Option<ImageWindow>,
+    ) -> Option<&wgpu::Texture> {
+        None
+    }
+}
+
+/// The auxiliary channels a backend described alongside the colour.
+///
+/// One texture rather than two, because albedo and normal are written by the
+/// same store: albedo in `rgb`, the world normal octahedrally packed into `a`,
+/// unpacked through [`crate::pathtrace::unpack_aov_normal`]. A caller that
+/// wants only one of them still reads both, which costs a copy it was making
+/// anyway.
+///
+/// The values are means already, weighted by the count of samples that found a
+/// surface. Nothing downstream divides them.
+pub struct AovSources<'a> {
+    pub auxiliary: &'a wgpu::Texture,
 }
 
 /// Whether a backend finished the pane this call, or is still converging.

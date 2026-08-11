@@ -36,6 +36,13 @@ pub struct RenderReport {
     /// a topology the tracer skipped. Empty is the ordinary case.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// The auxiliary passes written beside the image, absolute, in the order
+    /// they were asked for. Absent when none were.
+    ///
+    /// An added field, so the schema version does not move: a reader that does
+    /// not know about it is not wrong about anything it does read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aovs: Vec<String>,
 }
 
 impl RenderReport {

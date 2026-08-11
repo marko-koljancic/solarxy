@@ -43,6 +43,15 @@ const H: u32 = 72;
 /// shipped code.
 const TEST_BUDGET: u32 = 32 * 32;
 
+/// A budget that forces a grid **and** leaves room for the apron.
+///
+/// The apron is a fixed 128 pixels on every side, so the owned edge is the
+/// budget's square root less 256. Below 256 that saturates to one-pixel tiles
+/// and the plan explodes; this is chosen to land the owned edge at 44, which
+/// gives a three-by-two grid of an image this size with every tile rendering
+/// more than it keeps.
+const APRONED_BUDGET: u32 = 300 * 300;
+
 fn spec(engine: StillEngine, samples: u32, budget: u32) -> StillSpec {
     StillSpec {
         width: W,
@@ -52,6 +61,8 @@ fn spec(engine: StillEngine, samples: u32, budget: u32) -> StillSpec {
         screen_space_post: false,
         tile_budget: budget,
         readback: solarxy_host::still::StillReadback::Display8,
+        aux: false,
+        depth: false,
     }
 }
 
@@ -83,13 +94,27 @@ const JOB_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
 /// test has nothing pacing it, so it yields between polls rather than spinning
 /// against the device it is waiting for.
 fn run(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBackend) -> Vec<u8> {
+    let mut image = vec![0u8; (W * H * 4) as usize];
+    for tile in run_tiles(h, job, backend) {
+        blit(&mut image, &tile);
+    }
+    image
+}
+
+/// The same drive, handing back the tiles themselves rather than the picture,
+/// for a test that is about what a tile carries.
+fn run_tiles(
+    h: &mut Harness,
+    job: &mut StillRenderJob,
+    backend: &mut dyn RenderBackend,
+) -> Vec<StillTile> {
     let pds: PaneDisplaySettings = pane_settings();
     let display: DisplaySettings = display_settings();
     let background: ResolvedBackground = BackgroundMode::GRADIENT.resolve(&[]);
     let bounds: AABB = placeholder_bounds();
     let format = h.format;
 
-    let mut image = vec![0u8; (W * H * 4) as usize];
+    let mut tiles = Vec::new();
     let started = std::time::Instant::now();
     loop {
         assert!(
@@ -125,19 +150,13 @@ fn run(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBacken
             // the two are indistinguishable from here. Yielding costs nothing
             // in the first case and is the whole point in the second.
             StillStep::Working => std::thread::yield_now(),
-            StillStep::Tile => {
-                while let Some(t) = job.take_tile() {
-                    blit(&mut image, &t);
-                }
-            }
+            StillStep::Tile => tiles.extend(std::iter::from_fn(|| job.take_tile())),
             StillStep::Done => break,
             StillStep::Failed => panic!("a tile readback failed"),
         }
     }
-    while let Some(t) = job.take_tile() {
-        blit(&mut image, &t);
-    }
-    image
+    tiles.extend(std::iter::from_fn(|| job.take_tile()));
+    tiles
 }
 
 fn blit(image: &mut [u8], tile: &StillTile) {
@@ -250,6 +269,86 @@ fn a_tiled_traced_still_matches_the_same_image_rendered_in_one_pass() {
         "a tiled traced still differs from a single-pass one by {diff:.4} of 255; \
          the tiles are not drawing the samples their pixels would have drawn"
     );
+}
+
+/// Every tile carries its auxiliary planes, cropped to the part it owns.
+///
+/// The sizes are the assertion, and they are not a formality: the planes are
+/// read out of tile-sized targets and cropped by a width the plane's own kind
+/// states, so a plane cropped at the colour's width would come back plausible
+/// and wrong, and the picture assembled from it would shear.
+#[test]
+fn a_traced_tile_carries_the_passes_that_were_asked_for() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    const SPP: u32 = 4;
+    let mut backend = traced(&h, SPP);
+
+    // With an apron, deliberately. Without one a tile's rendered rect equals
+    // the part it owns, the crop returns the plane untouched, and the size
+    // assertion below would hold whatever width the crop used. An apron is what
+    // makes the width load-bearing: get it wrong and the plane shears.
+    let mut asked = spec(StillEngine::PathTraced, SPP, APRONED_BUDGET);
+    asked.screen_space_post = true;
+    asked.aux = true;
+    asked.depth = true;
+    let mut job = StillRenderJob::new(asked);
+    assert!(job.plan().len() >= 4, "this wants a grid to crop");
+    assert!(
+        job.plan()
+            .tiles
+            .iter()
+            .any(|t| t.render.width > t.image.width),
+        "the plan has no apron, so nothing here is cropped"
+    );
+    let tiles = run_tiles(&mut h, &mut job, &mut backend);
+
+    for tile in &tiles {
+        let pixels = (tile.rect.width * tile.rect.height) as usize;
+        let aux = tile.aux.as_ref().expect("the auxiliary plane");
+        let depth = tile.depth.as_ref().expect("the depth plane");
+        assert_eq!(aux.len(), pixels * 16, "four floats per pixel");
+        assert_eq!(depth.len(), pixels * 4, "one float per pixel");
+    }
+
+    // And a depth that describes something. The sphere is in front of the
+    // camera and the sky is not, so a pass that came back as one constant, or
+    // as the miss value everywhere, would mean the dispatch never ran.
+    let depths: Vec<f32> = tiles
+        .iter()
+        .filter_map(|t| t.depth.as_ref())
+        .flat_map(|d| {
+            d.chunks_exact(4)
+                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        })
+        .collect();
+    let hits = depths
+        .iter()
+        .filter(|d| d.is_finite() && **d < 1e29)
+        .count();
+    assert!(
+        hits > 0 && hits < depths.len(),
+        "the depth pass found {hits} surfaces out of {}, which describes no scene",
+        depths.len()
+    );
+}
+
+/// And a job that asked for neither carries neither, rather than paying for a
+/// copy nobody wanted.
+#[test]
+fn a_still_that_asked_for_no_passes_gets_none() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = traced(&h, 2);
+    let mut job = StillRenderJob::new(spec(StillEngine::PathTraced, 2, WHOLE));
+    let tiles = run_tiles(&mut h, &mut job, &mut backend);
+    assert!(!tiles.is_empty());
+    for tile in &tiles {
+        assert!(tile.aux.is_none(), "an auxiliary plane nobody asked for");
+        assert!(tile.depth.is_none(), "a depth plane nobody asked for");
+    }
 }
 
 /// The seam test, on a field with nothing in it to hide one.

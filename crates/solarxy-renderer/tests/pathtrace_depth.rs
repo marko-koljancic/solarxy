@@ -22,6 +22,7 @@ use solarxy_core::preferences::ProjectionMode;
 use solarxy_core::raycast::{Ray, intersect_triangle, screen_to_world_ray};
 use solarxy_renderer::camera::Camera;
 use solarxy_renderer::camera_state::CameraState;
+use solarxy_renderer::capture::{CaptureFloatPoll, PendingCapture};
 use solarxy_renderer::pathtrace::arena::{ArenaMesh, ArenaPlacement, INSTANCE_VISIBLE, TraceArena};
 use solarxy_renderer::pathtrace::depth::{DEPTH_MISS, DepthPass, DepthTarget};
 use solarxy_renderer::pathtrace::{TraceScene, TraceUniforms};
@@ -205,38 +206,29 @@ fn measured(gpu: &common::Gpu, cam: Camera, positions: &[[f32; 3]], indices: &[u
     );
     gpu.queue.submit(std::iter::once(encoder.finish()));
 
-    let (tx, rx) = std::sync::mpsc::channel();
-    buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-        let _ = tx.send(r);
-    });
+    // Read through the shared float readback rather than by hand, because
+    // that is the path a still render takes and a single-channel source is
+    // the one width it had never been asked for.
+    let pending = PendingCapture::arm(buffer, padded, WIDTH, HEIGHT);
     let started = std::time::Instant::now();
     loop {
         assert!(
             started.elapsed() < std::time::Duration::from_secs(30),
             "the depth readback never landed"
         );
-        let _ = gpu.device.poll(wgpu::PollType::Poll);
-        match rx.try_recv() {
-            Ok(Ok(())) => break,
-            Ok(Err(e)) => panic!("depth readback failed: {e}"),
-            Err(std::sync::mpsc::TryRecvError::Empty) => std::thread::yield_now(),
-            Err(e) => panic!("depth readback channel: {e}"),
+        match pending.poll_floats(&gpu.device, wgpu::TextureFormat::R32Float) {
+            CaptureFloatPoll::Ready(floats) => {
+                assert_eq!(
+                    floats.len(),
+                    (WIDTH * HEIGHT) as usize,
+                    "a single-channel readback came back at the wrong width"
+                );
+                return floats;
+            }
+            CaptureFloatPoll::Failed => panic!("depth readback failed"),
+            CaptureFloatPoll::Pending => std::thread::yield_now(),
         }
     }
-    let data = buffer.slice(..).get_mapped_range();
-    let mut out = Vec::with_capacity((WIDTH * HEIGHT) as usize);
-    for row in 0..HEIGHT {
-        let start = (row * padded) as usize;
-        let bytes = &data[start..start + (WIDTH * 4) as usize];
-        out.extend(
-            bytes
-                .chunks_exact(4)
-                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
-        );
-    }
-    drop(data);
-    buffer.unmap();
-    out
 }
 
 fn compare(projection: ProjectionMode) {

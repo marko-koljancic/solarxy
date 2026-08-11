@@ -166,6 +166,14 @@ pub struct PathBackend {
     /// and writing them into a pane's buffer would leave that pane's next
     /// dispatch reading them.
     depth: Option<(DepthPass, TraceUniforms, wgpu::Buffer)>,
+    /// The target [`RenderBackend::encode_depth_aov`] writes into, reallocated
+    /// when the size changes.
+    ///
+    /// One, not one per pane, because the only caller renders a single pane at
+    /// a time and a depth is not accumulated: there is nothing in it to keep
+    /// between calls. What is genuinely per pane is the mean, and that lives in
+    /// [`Self::panes`].
+    depth_target: Option<DepthTarget>,
     settings: TraceSettings,
     /// The sky the kernel integrates against when no environment image is
     /// installed. Looking up, then looking down.
@@ -175,6 +183,28 @@ pub struct PathBackend {
 }
 
 impl PathBackend {
+    /// What this backend can do, as a constant.
+    ///
+    /// A constant rather than only a method for the reason the rasterizer's is:
+    /// the answer reads no GPU state, and a caller checking whether an option it
+    /// was handed can take effect should not have to create a device to find
+    /// out. The method returns this.
+    pub const CAPS: BackendCaps = BackendCaps {
+        // Repeated frames of an unchanged pane keep improving it, which is
+        // the whole difference between this backend and the other one.
+        progressive: true,
+        // A count rather than a uniform's capacity. The rasterizer's eight
+        // is the size of a struct; this reads a storage array and is bound
+        // by nothing a user will reach.
+        max_lights: None,
+        supports_instancing: true,
+        // Points and lines are not surfaces and the traversal has no
+        // primitive for them. A host states that rather than letting a
+        // point cloud silently vanish.
+        supports_topology: TopologyMask::TRIANGLES,
+        writes_aovs: true,
+    };
+
     /// Builds every pipeline and an empty scene.
     ///
     /// Fails only if the device rejects a module, which on the web is the
@@ -207,6 +237,7 @@ impl PathBackend {
             atlas,
             panes: [None, None, None, None],
             depth: None,
+            depth_target: None,
             settings: TraceSettings::default(),
             sky: ([0.05, 0.06, 0.08], [0.02, 0.02, 0.02]),
             env_intensity: 1.0,
@@ -610,21 +641,50 @@ impl RenderBackend for PathBackend {
     }
 
     fn caps(&self) -> BackendCaps {
-        BackendCaps {
-            // Repeated frames of an unchanged pane keep improving it, which is
-            // the whole difference between this backend and the other one.
-            progressive: true,
-            // A count rather than a uniform's capacity. The rasterizer's eight
-            // is the size of a struct; this reads a storage array and is bound
-            // by nothing a user will reach.
-            max_lights: None,
-            supports_instancing: true,
-            // Points and lines are not surfaces and the traversal has no
-            // primitive for them. A host states that rather than letting a
-            // point cloud silently vanish.
-            supports_topology: TopologyMask::TRIANGLES,
-            writes_aovs: true,
+        Self::CAPS
+    }
+
+    /// The pane's auxiliary target, which holds finished means rather than
+    /// sums: the kernel merges each chunk in by the count of samples that found
+    /// a surface, so a reader divides by nothing.
+    ///
+    /// The write slot, because the swap runs before a dispatch and never after
+    /// one, so the write slot is what the last dispatch left.
+    fn aov_sources(&self, pane: usize) -> Option<crate::backend::AovSources<'_>> {
+        let slot = self.panes.get(pane)?.as_ref()?;
+        Some(crate::backend::AovSources {
+            auxiliary: slot.target.auxiliary_texture(),
+        })
+    }
+
+    fn encode_depth_aov(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        camera: &crate::camera_state::CameraState,
+        size: [u32; 2],
+        window: Option<crate::backend::ImageWindow>,
+    ) -> Option<&wgpu::Texture> {
+        if self
+            .depth_target
+            .as_ref()
+            .is_none_or(|t| t.size() != [size[0].max(1), size[1].max(1)])
+        {
+            self.depth_target = Some(DepthTarget::new(
+                device,
+                &self.layouts,
+                size[0].max(1),
+                size[1].max(1),
+            ));
         }
+        // Lifted out and put back, because the pass needs this backend mutably
+        // while the target it writes is borrowed from the same backend. The
+        // move is a handful of handles.
+        let target = self.depth_target.take()?;
+        self.encode_depth(device, queue, encoder, camera, &target, window);
+        self.depth_target = Some(target);
+        self.depth_target.as_ref().map(DepthTarget::texture)
     }
 
     /// Drop every pane's accumulation.

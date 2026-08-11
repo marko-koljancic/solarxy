@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use solarxy_core::RawImageData;
-use solarxy_core::geometry::{MeshTopology, RawMaterialData, linear_to_srgb};
+use solarxy_core::geometry::{MeshTopology, RawImageHdr, RawMaterialData, linear_to_srgb};
 
 use crate::FormatsError;
 
@@ -973,6 +973,92 @@ pub fn encode_png_bytes(img: &RawImageData) -> Result<Vec<u8>, FormatsError> {
     Ok(out.into_inner())
 }
 
+/// The encoding every EXR this writes carries: ZIP, lossless, scanline blocks.
+///
+/// Lossless is not negotiable for a pass a compositor does arithmetic on, and
+/// ZIP over the run-length default because a render is not the single-coloured
+/// matte run-length encoding is good at. Blocks are indexed and written in
+/// increasing line order, which is what keeps the bytes identical between two
+/// runs of the same render even though the crate compresses blocks in parallel.
+const EXR_ENCODING: exr::image::Encoding = exr::image::Encoding::SMALL_LOSSLESS;
+
+/// EXR-encodes a linear RGB float image.
+///
+/// Byte-first like every other writer here: the crate can write into anything
+/// that is `Write + Seek`, so a caller who wants a file still owns the file.
+///
+/// Three channels and no alpha, matching [`RawImageHdr`] exactly. A still has
+/// its background already in it, so an alpha lane would be a constant one
+/// pretending to be a matte.
+///
+/// # Errors
+/// The encode failing, which for a well-formed image it does not.
+pub fn encode_exr_rgb_bytes(img: &RawImageHdr) -> Result<Vec<u8>, FormatsError> {
+    let (width, height) = (img.width as usize, img.height as usize);
+    let pixels = exr::image::SpecificChannels::rgb(|position: exr::math::Vec2<usize>| {
+        let i = (position.1 * width + position.0) * 3;
+        // Clamped rather than indexed blind: a short buffer is a caller error,
+        // and returning black for it beats a panic inside a writer thread.
+        match img.pixels.get(i..i + 3) {
+            Some(p) => (p[0], p[1], p[2]),
+            None => (0.0, 0.0, 0.0),
+        }
+    });
+    write_exr(&exr::image::Image::from_encoded_channels(
+        (width, height),
+        EXR_ENCODING,
+        pixels,
+    ))
+}
+
+/// EXR-encodes a single-channel depth pass as the channel named `Z`.
+///
+/// `Z` is what a compositing package looks for, and one channel rather than a
+/// grey triple because a depth is one number per pixel and writing it three
+/// times would say otherwise.
+///
+/// # Errors
+/// The encode failing.
+pub fn encode_exr_depth_bytes(
+    depth: &[f32],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, FormatsError> {
+    let (w, h) = (width as usize, height as usize);
+    let pixels = exr::image::SpecificChannels::build()
+        .with_channel("Z")
+        .with_pixel_fn(|position: exr::math::Vec2<usize>| {
+            (depth
+                .get(position.1 * w + position.0)
+                .copied()
+                .unwrap_or(0.0),)
+        });
+    write_exr(&exr::image::Image::from_encoded_channels(
+        (w, h),
+        EXR_ENCODING,
+        pixels,
+    ))
+}
+
+/// The half both encoders share: write the image into memory.
+fn write_exr<'a, C>(
+    image: &'a exr::image::Image<exr::image::Layer<C>>,
+) -> Result<Vec<u8>, FormatsError>
+where
+    exr::image::Layer<C>: exr::image::write::layers::WritableLayers<'a>,
+{
+    use exr::image::write::WritableImage;
+    let mut out = std::io::Cursor::new(Vec::new());
+    image
+        .write()
+        .to_buffered(&mut out)
+        .map_err(|e| FormatsError::Export {
+            format: "exr",
+            message: e.to_string(),
+        })?;
+    Ok(out.into_inner())
+}
+
 /// JPEG-encodes an RGBA8 image (alpha dropped), quality 1..100.
 pub fn encode_jpeg_bytes(img: &RawImageData, quality: u8) -> Result<Vec<u8>, FormatsError> {
     // JPEG has no alpha: flatten onto opaque.
@@ -1502,5 +1588,79 @@ mod tests {
         assert_eq!(&back.pixels[0..4], &[255, 0, 0, 255]);
         let jpg = encode_jpeg_bytes(&img, 90).expect("jpeg");
         assert!(jpg.starts_with(&[0xFF, 0xD8]), "JPEG SOI marker");
+    }
+
+    /// An image where each pixel encodes its own coordinates, so a transposed
+    /// or sheared write is a failure rather than a picture that looks fine.
+    fn coordinate_hdr(width: u32, height: u32) -> RawImageHdr {
+        let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                pixels.extend_from_slice(&[x as f32, y as f32, 0.5]);
+            }
+        }
+        RawImageHdr::new(pixels, width, height)
+    }
+
+    #[test]
+    fn exr_round_trips_through_our_decoder() {
+        let img = coordinate_hdr(7, 5);
+        let bytes = encode_exr_rgb_bytes(&img).expect("exr");
+        let back = crate::hdr::decode_exr_bytes(&bytes).expect("decode");
+        assert_eq!((back.width, back.height), (7, 5));
+        for y in 0..5 {
+            for x in 0..7 {
+                let i = (y * 7 + x) * 3;
+                assert!((back.pixels[i] - x as f32).abs() < 1e-3, "red at {x},{y}");
+                assert!(
+                    (back.pixels[i + 1] - y as f32).abs() < 1e-3,
+                    "green at {x},{y}"
+                );
+                assert!((back.pixels[i + 2] - 0.5).abs() < 1e-3, "blue at {x},{y}");
+            }
+        }
+    }
+
+    /// The property the seeded-render check downstream is built on.
+    ///
+    /// The crate compresses blocks on several threads, so "the same image
+    /// encodes to the same bytes" is a claim about block indexing and line
+    /// order rather than something a single-threaded reading of the code
+    /// proves. Asserted here, once, at the level that can actually see it.
+    #[test]
+    fn the_same_image_encodes_to_the_same_bytes() {
+        let img = coordinate_hdr(64, 48);
+        let a = encode_exr_rgb_bytes(&img).expect("exr");
+        let b = encode_exr_rgb_bytes(&img).expect("exr");
+        assert_eq!(a, b, "two encodes of one image differed");
+
+        let depth: Vec<f32> = (0..64 * 48).map(|i| i as f32 * 0.25).collect();
+        let c = encode_exr_depth_bytes(&depth, 64, 48).expect("exr");
+        let d = encode_exr_depth_bytes(&depth, 64, 48).expect("exr");
+        assert_eq!(c, d, "two encodes of one depth pass differed");
+    }
+
+    /// A depth pass is one channel, and it is the one a compositor looks for.
+    #[test]
+    fn a_depth_pass_carries_a_single_channel_named_z() {
+        let depth: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let bytes = encode_exr_depth_bytes(&depth, 4, 3).expect("exr");
+        use exr::prelude::{ReadChannels, ReadLayers};
+        let image = exr::prelude::read()
+            .no_deep_data()
+            .largest_resolution_level()
+            .all_channels()
+            .first_valid_layer()
+            .all_attributes()
+            .from_buffered(std::io::Cursor::new(bytes))
+            .expect("read back");
+        let names: Vec<String> = image
+            .layer_data
+            .channel_data
+            .list
+            .iter()
+            .map(|c| c.name.to_string())
+            .collect();
+        assert_eq!(names, vec!["Z".to_string()]);
     }
 }
