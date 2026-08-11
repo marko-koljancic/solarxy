@@ -92,6 +92,21 @@ struct TraceParams {
 @group(3) @binding(0) var<uniform> camera: Camera;
 @group(3) @binding(1) var<uniform> params: TraceParams;
 
+// The camera's own axis in world space: the direction it looks along.
+//
+// A look-at view matrix is a rotation and a translation, so the inverse of its
+// rotation is its transpose and no inversion happens in the shader. The third
+// row of that transpose is the axis, negated because a right-handed view space
+// looks down its own negative Z.
+//
+// Two callers want it and they must not disagree: the lens, which measures the
+// focus distance along it rather than as a radius about the eye, and the depth
+// pass, which reports a distance along it rather than along the pixel's own ray
+// so that a defocus applied downstream has a flat focal plane.
+fn camera_forward() -> vec3f {
+    return -normalize(vec3f(camera.view[0].z, camera.view[1].z, camera.view[2].z));
+}
+
 // A tent-filtered offset within a pixel, from a uniform pair.
 //
 // Maps `[0, 1)` onto `[-1, 1)` weighted toward the centre, so a sample near the
@@ -194,7 +209,7 @@ fn camera_ray(pixel: vec2u, jitter: vec2f, lens: vec2f) -> Ray {
     // plane is square to the view axis rather than a sphere around the eye, so
     // the distance is measured along the axis and the ray is extended by more
     // than that toward the edges of frame, which is what a real lens does.
-    let forward = -normalize(rot * vec3f(0.0, 0.0, 1.0));
+    let forward = camera_forward();
     let axis_cos = dot(direction, forward);
     if axis_cos <= 1e-4 {
         return Ray(origin, direction);

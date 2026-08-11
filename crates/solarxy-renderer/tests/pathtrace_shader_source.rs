@@ -182,6 +182,10 @@ const RECIPES: &[(&str, &[&str])] = &[
     ),
     ("the denoiser", &["aov.wgsl", "denoise.wgsl"]),
     (
+        "the depth pass",
+        &["traverse.wgsl", "rand.wgsl", "camera.wgsl", "depth.wgsl"],
+    ),
+    (
         "the path kernel",
         &[
             "aov.wgsl",

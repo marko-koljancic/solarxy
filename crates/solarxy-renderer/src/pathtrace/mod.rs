@@ -24,6 +24,7 @@ pub mod arena;
 pub mod atlas;
 pub mod backend;
 pub mod denoise;
+pub mod depth;
 pub mod environment;
 pub mod light;
 pub mod material;
@@ -1094,6 +1095,13 @@ impl TraceUniforms {
     /// Writes the tile this dispatch covers.
     pub fn write(&self, queue: &wgpu::Queue, params: &TraceParams) {
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(params));
+    }
+
+    /// The camera-and-parameters group, for a kernel encoded outside this
+    /// module.
+    #[must_use]
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
     }
 }
 

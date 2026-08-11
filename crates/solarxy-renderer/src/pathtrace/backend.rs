@@ -39,12 +39,13 @@ use solarxy_core::scene::SceneDelta;
 use crate::backend::{BackendCaps, FrameCtx, FrameOutcome, PaneContent, RenderBackend, TopologyMask};
 use crate::bind_groups::PathtraceLayouts;
 use crate::pathtrace::denoise::{DenoiseSettings, Denoiser};
+use crate::pathtrace::depth::{DepthPass, DepthTarget};
 use crate::pathtrace::environment::TraceEnvironment;
 use crate::pathtrace::resolve::TraceResolve;
 use crate::pathtrace::scene::TraceSceneCache;
 use crate::pathtrace::{
     EnvParams, PathEstimator, PathKernel, PathUniforms, TraceAtlas, TraceParams, TraceScene,
-    TraceTarget,
+    TraceTarget, TraceUniforms,
 };
 
 /// The most panes a layout can show at once, and so the width of any per-pane
@@ -155,6 +156,16 @@ pub struct PathBackend {
     /// The sampled group: the texture atlas and the environment.
     atlas: TraceAtlas,
     panes: [Option<PaneAccumulator>; PANE_SLOTS],
+    /// The depth pass and the uniforms it dispatches against, built the first
+    /// time one is asked for.
+    ///
+    /// Lazy because a render that wants no depth should pay nothing for it, and
+    /// what it would otherwise pay is a shader module and a pipeline at every
+    /// session's first frame. The uniforms are its own rather than a pane's:
+    /// the parameters differ, since a depth ray has no aperture and no jitter,
+    /// and writing them into a pane's buffer would leave that pane's next
+    /// dispatch reading them.
+    depth: Option<(DepthPass, TraceUniforms, wgpu::Buffer)>,
     settings: TraceSettings,
     /// The sky the kernel integrates against when no environment image is
     /// installed. Looking up, then looking down.
@@ -195,11 +206,81 @@ impl PathBackend {
             scene,
             atlas,
             panes: [None, None, None, None],
+            depth: None,
             settings: TraceSettings::default(),
             sky: ([0.05, 0.06, 0.08], [0.02, 0.02, 0.02]),
             env_intensity: 1.0,
             env_rotation: 0.0,
         }
+    }
+
+    /// A depth target this backend's layouts can bind.
+    ///
+    /// Here rather than on [`DepthTarget`] itself so a caller does not have to
+    /// hold the layouts to allocate one.
+    #[must_use]
+    pub fn depth_target(&self, device: &wgpu::Device, width: u32, height: u32) -> DepthTarget {
+        DepthTarget::new(device, &self.layouts, width, height)
+    }
+
+    /// Traces one primary ray per pixel and writes how far away the surface it
+    /// found is, measured along the camera's axis.
+    ///
+    /// Nothing about it is accumulated: it is a single sample at each pixel's
+    /// centre with no jitter and no aperture, which is what a compositing
+    /// package expects a depth pass to be and the only thing a silhouette pixel
+    /// can honestly report. See [`crate::pathtrace::depth`].
+    ///
+    /// `window` places the tile in a larger image, exactly as it does for a
+    /// colour dispatch; `None` renders the whole of `target`.
+    pub fn encode_depth(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        camera: &crate::camera_state::CameraState,
+        target: &DepthTarget,
+        window: Option<crate::backend::ImageWindow>,
+    ) {
+        let [width, height] = target.size();
+        // Rebuilt when the camera buffer changes, which is the same staleness
+        // test the accumulator applies for the same reason: a bind group holds
+        // the buffer it was built over.
+        let stale = self
+            .depth
+            .as_ref()
+            .is_none_or(|(_, _, bound)| *bound != camera.buffer);
+        if stale {
+            self.depth = Some((
+                DepthPass::new(device, &self.layouts),
+                TraceUniforms::new(device, &self.layouts, &camera.buffer),
+                camera.buffer.clone(),
+            ));
+        }
+        let Some((pass, uniforms, _)) = self.depth.as_ref() else {
+            return;
+        };
+
+        let (tile_offset, resolution) = match window {
+            Some(w) => (w.origin, w.full),
+            None => ([0, 0], [width, height]),
+        };
+        uniforms.write(
+            queue,
+            &TraceParams {
+                tile_offset,
+                tile_size: [width, height],
+                resolution,
+                // A depth ray scatters nowhere and is drawn once, so every
+                // field the bounce loop and the sampler read stays at its zero.
+                // The aperture is the one worth naming: zero is what makes
+                // `camera_ray` return a pinhole ray and ignore the lens pair
+                // this pass hands it.
+                aperture_radius: 0.0,
+                ..TraceParams::default()
+            },
+        );
+        pass.encode(encoder, &self.scene, target, uniforms, [width, height]);
     }
 
     /// What the next render uses. Changing any of it drops every accumulation,

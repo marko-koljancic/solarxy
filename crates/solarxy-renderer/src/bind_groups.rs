@@ -334,6 +334,14 @@ pub struct PathtraceLayouts {
     pub sampled: wgpu::BindGroupLayout,
     /// Group 3: the camera and per-dispatch uniforms.
     pub params: wgpu::BindGroupLayout,
+    /// Group 1 **for the depth pass only**: one single-channel storage
+    /// texture.
+    ///
+    /// The same number the accumulator takes in every other kernel, which is
+    /// free there because that pass binds no accumulator: depth cannot be
+    /// averaged and so is not one of the channels the accumulator holds. See
+    /// `pathtrace::depth`.
+    pub depth: wgpu::BindGroupLayout,
 }
 
 impl PathtraceLayouts {
@@ -453,11 +461,28 @@ impl PathtraceLayouts {
                 bgl_uniform_entry(1, wgpu::ShaderStages::COMPUTE),
             ],
         });
+        // One texture, single channel, and it is `R32Float` rather than the
+        // accumulator's four-channel format because a distance is one number
+        // and a compositing package reads it as one.
+        let depth = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_depth_bind_group_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::R32Float,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+                count: None,
+            }],
+        });
         Self {
             scene,
             target,
             sampled,
             params,
+            depth,
         }
     }
 }
