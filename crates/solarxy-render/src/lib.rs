@@ -56,6 +56,59 @@ use solarxy_renderer::scene::BackgroundModeExt;
 pub use error::RenderError;
 pub use report::{RENDER_REPORT_SCHEMA_VERSION, RenderReport};
 
+/// How far along a render is.
+///
+/// One stream with one definition of progress, emitted through a callback that
+/// [`run_render`] calls between the steps it is made of. A callback rather than
+/// a channel because there are no threads here: the render loop is the only
+/// thing running, and it calls the sink between cook passes and between tiles,
+/// which is where it already reads the cancel flag.
+///
+/// # What is not in it
+///
+/// A denoising stage. The filter is not a phase: it runs inside each tile's
+/// dispatch, before the resolve, so a line saying "denoising" would describe a
+/// span of time that does not exist. What it costs is already inside
+/// [`RenderProgress::Sampling`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RenderProgress {
+    /// Reading the input and turning it into a document.
+    Loading,
+    /// Cooking it. Bounded by passes rather than measured in nodes, because a
+    /// pass is what the engine's own loop counts and inventing a percentage
+    /// from anything else would be a number nobody could act on.
+    Cooking {
+        pass: u32,
+        passes: u32,
+    },
+    /// Building the ray hierarchy, which for a large model is the longest step
+    /// before any pixel is drawn.
+    BuildingHierarchy {
+        triangles: u64,
+    },
+    /// Drawing. `sample` and `samples` describe the tile, not the image: each
+    /// tile converges on its own before the next one starts.
+    Sampling {
+        tile: u32,
+        tiles: u32,
+        sample: u32,
+        samples: u32,
+        elapsed_ms: u64,
+    },
+    /// Encoding and writing the result.
+    Writing {
+        output: String,
+    },
+    Done {
+        elapsed_ms: u64,
+    },
+    /// The step that failed, named so a sink can end its line honestly rather
+    /// than leaving the last one hanging.
+    Failed {
+        stage: &'static str,
+    },
+}
+
 /// Where the encoded image goes.
 ///
 /// Bytes rather than text, which is the one place this differs from the
@@ -185,12 +238,40 @@ pub struct RenderOutcome {
 
 /// Loads, cooks, renders, and writes.
 ///
+/// `progress` is called between steps; pass `&mut |_| {}` to ignore it.
+///
 /// # Errors
 /// Every way that can fail, as [`RenderError`], which the caller maps onto its
 /// own exit taxonomy.
-pub fn run_render(input: &Path, opts: &RenderOptions) -> Result<RenderOutcome, RenderError> {
+pub fn run_render(
+    input: &Path,
+    opts: &RenderOptions,
+    progress: &mut dyn FnMut(RenderProgress),
+) -> Result<RenderOutcome, RenderError> {
+    // Wrapped so the last thing a sink hears is always either a completion or
+    // the name of the step that ended it, whichever way the body left. A sink
+    // that has been drawing over one line needs to know to stop.
+    match run(input, opts, progress) {
+        Ok(outcome) => {
+            progress(RenderProgress::Done {
+                elapsed_ms: outcome.report.elapsed_ms,
+            });
+            Ok(outcome)
+        }
+        Err(e) => {
+            progress(RenderProgress::Failed { stage: e.stage() });
+            Err(e)
+        }
+    }
+}
+
+fn run(
+    input: &Path,
+    opts: &RenderOptions,
+    progress: &mut dyn FnMut(RenderProgress),
+) -> Result<RenderOutcome, RenderError> {
     let started = Instant::now();
-    let loaded = input::load(input, opts.cancel.as_ref())?;
+    let loaded = input::load(input, opts.cancel.as_ref(), progress)?;
     let mut warnings = loaded.warnings;
     let engine = loaded.engine;
 
@@ -215,6 +296,15 @@ pub fn run_render(input: &Path, opts: &RenderOptions) -> Result<RenderOutcome, R
         opts.seed,
         background.sky_colors(),
     );
+    // The ingest is where a traced render builds its ray hierarchy, and for a
+    // large model that is the longest step before any pixel is drawn. Reported
+    // before it rather than after, because a sink saying nothing for a minute is
+    // indistinguishable from a sink that has hung.
+    if settings.engine == RenderEngine::PathTraced {
+        progress(RenderProgress::BuildingHierarchy {
+            triangles: triangle_count(&delta),
+        });
+    }
     backend.apply(&device, &queue, &delta);
 
     // A raster backend knows the scene's extent; a traced one is asked the same
@@ -246,12 +336,15 @@ pub fn run_render(input: &Path, opts: &RenderOptions) -> Result<RenderOutcome, R
 
     let scene_present = probe.scene().draw_objects().next().is_some();
     let image = drive(
-        &device,
-        &queue,
-        &mut host,
-        &mut camera,
-        &mut job,
-        backend.as_mut(),
+        &mut Drive {
+            device: &device,
+            queue: &queue,
+            host: &mut host,
+            camera: &mut camera,
+            job: &mut job,
+            backend: backend.as_mut(),
+            progress,
+        },
         &StillView {
             cancel: opts,
             pds,
@@ -261,12 +354,16 @@ pub fn run_render(input: &Path, opts: &RenderOptions) -> Result<RenderOutcome, R
             format,
             scene_present,
         },
+        started,
     )?;
 
     let output = opts
         .output
         .clone()
         .unwrap_or_else(|| Output::File(PathBuf::from("render.png")));
+    progress(RenderProgress::Writing {
+        output: output.display(),
+    });
     let encoded = solarxy_formats::export::encode_png_bytes(&solarxy_core::RawImageData::new(
         image,
         spec.width,
@@ -274,27 +371,41 @@ pub fn run_render(input: &Path, opts: &RenderOptions) -> Result<RenderOutcome, R
     ))?;
     output.write(&encoded)?;
 
-    #[allow(clippy::cast_possible_truncation)]
     Ok(RenderOutcome {
-        report: RenderReport {
-            schema_version: RENDER_REPORT_SCHEMA_VERSION,
-            solarxy_version: env!("CARGO_PKG_VERSION"),
-            output: output.display(),
-            width: spec.width,
-            height: spec.height,
-            engine: match settings.engine {
-                RenderEngine::PathTraced => "pathTraced",
-                RenderEngine::Raster => "raster",
-            },
-            samples: match settings.engine {
-                RenderEngine::PathTraced => spec.samples,
-                RenderEngine::Raster => 1,
-            },
-            tiles: tiles as u32,
-            elapsed_ms: started.elapsed().as_millis() as u64,
-            warnings,
-        },
+        report: report(&output, spec, &settings, tiles, started, warnings),
     })
+}
+
+/// What the run produced, as the machine-readable result.
+#[allow(clippy::cast_possible_truncation)]
+fn report(
+    output: &Output,
+    spec: StillSpec,
+    settings: &RenderSettings,
+    tiles: usize,
+    started: Instant,
+    warnings: Vec<String>,
+) -> RenderReport {
+    RenderReport {
+        schema_version: RENDER_REPORT_SCHEMA_VERSION,
+        solarxy_version: env!("CARGO_PKG_VERSION"),
+        output: output.display(),
+        width: spec.width,
+        height: spec.height,
+        engine: match settings.engine {
+            RenderEngine::PathTraced => "pathTraced",
+            RenderEngine::Raster => "raster",
+        },
+        // A rasterized pixel does not converge, it is drawn, so the count that
+        // means something for one engine means nothing for the other.
+        samples: match settings.engine {
+            RenderEngine::PathTraced => spec.samples,
+            RenderEngine::Raster => 1,
+        },
+        tiles: tiles as u32,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        warnings,
+    }
 }
 
 /// The render node's settings, or the defaults when there is no render node.
@@ -339,6 +450,24 @@ fn resolve_settings(
     engine
         .render_settings(GraphContext::Root, chosen)
         .map_err(RenderError::RenderNode)
+}
+
+/// How many triangles a delta puts in front of the hierarchy builder.
+///
+/// Read off the upserts rather than off the backend, because the point of
+/// reporting it is to say how much work is about to start, and by the time a
+/// backend could answer the work is done.
+fn triangle_count(delta: &solarxy_core::scene::SceneDelta) -> u64 {
+    delta
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            solarxy_core::scene::SceneOp::UpsertGeometry { geometry, .. } => Some(geometry),
+            _ => None,
+        })
+        .flat_map(|g| g.meshes.iter())
+        .map(|m| (m.indices.len() / 3) as u64)
+        .sum()
 }
 
 /// The still the settings describe.
@@ -450,8 +579,9 @@ fn request_device() -> Result<(wgpu::Device, wgpu::Queue), RenderError> {
 
 /// Everything a tile's encode needs that does not change between tiles.
 ///
-/// Bundled because the driver takes eight references already and a ninth
-/// argument list is not clearer than a name.
+/// Bundled for the reason the still job's own context is bundled: the driver
+/// takes a handful of references already and a longer argument list is not
+/// clearer than a name. [`Drive`] below is the mutable half of the same idea.
 struct StillView<'a> {
     /// Read between tiles, which is where an interrupt takes effect.
     cancel: &'a RenderOptions,
@@ -469,21 +599,45 @@ struct StillView<'a> {
 /// The resize is the caller's job by the still job's own contract: the two
 /// shells resize with different policy around one body, so the job asserts
 /// rather than resizes.
+struct Drive<'a> {
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    host: &'a mut HeadlessHost,
+    camera: &'a mut CameraState,
+    job: &'a mut StillRenderJob,
+    backend: &'a mut dyn RenderBackend,
+    progress: &'a mut dyn FnMut(RenderProgress),
+}
+
 fn drive(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    host: &mut HeadlessHost,
-    camera: &mut CameraState,
-    job: &mut StillRenderJob,
-    backend: &mut dyn RenderBackend,
+    d: &mut Drive<'_>,
     view: &StillView<'_>,
+    started: Instant,
 ) -> Result<Vec<u8>, RenderError> {
+    let Drive {
+        device,
+        queue,
+        host,
+        camera,
+        job,
+        backend,
+        progress,
+    } = d;
     let spec = job.spec();
     let mut image = vec![0u8; (spec.width as usize) * (spec.height as usize) * 4];
     while let Some(tile) = job.current() {
         if view.cancel.cancelled() {
             return Err(RenderError::Cancelled);
         }
+        let p = job.progress();
+        #[allow(clippy::cast_possible_truncation)]
+        progress(RenderProgress::Sampling {
+            tile: p.tile,
+            tiles: p.tiles,
+            sample: p.sample,
+            samples: p.samples,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        });
         host.renderer
             .resize_targets(device, tile.render.width, tile.render.height);
         let step = {
@@ -501,7 +655,7 @@ fn drive(
                 format: view.format,
                 scene_present: view.scene_present,
             };
-            job.advance(&mut ctx, backend)
+            job.advance(&mut ctx, *backend)
         };
         match step {
             StillStep::Working => {}

@@ -20,6 +20,8 @@
 #[cfg(feature = "analyzer")]
 pub mod calc;
 pub mod parser;
+#[cfg(feature = "render")]
+pub mod render_sink;
 #[cfg(feature = "tui")]
 pub mod tui;
 mod validators;

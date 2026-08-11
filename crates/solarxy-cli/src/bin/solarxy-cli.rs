@@ -413,7 +413,16 @@ fn run_render(args: &solarxy_cli::parser::RenderArgs) -> ExitCode {
         cancel: Some(cancel),
     };
 
-    match solarxy_render::run_render(&args.input, &opts) {
+    // Standard error, and one line: the sink a build system reads. It rewrites
+    // in place on a terminal and writes once per step anywhere else, which is
+    // the difference between a live readout and a log worth reading later.
+    let mut sink = solarxy_cli::render_sink::PlainSink::new(
+        std::io::stderr(),
+        std::io::IsTerminal::is_terminal(&std::io::stderr()),
+    );
+    let mut progress = |p: solarxy_render::RenderProgress| sink.report(&p);
+
+    match solarxy_render::run_render(&args.input, &opts, &mut progress) {
         Ok(outcome) => {
             for warning in &outcome.report.warnings {
                 tracing::warn!("{warning}");

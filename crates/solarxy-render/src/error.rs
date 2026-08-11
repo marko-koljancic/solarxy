@@ -67,3 +67,29 @@ pub enum RenderError {
         source: std::io::Error,
     },
 }
+
+impl RenderError {
+    /// Which step of a render this ended.
+    ///
+    /// Coarser than the variant on purpose: a progress sink wants to close its
+    /// line with the name of the thing that was happening, not with a failure
+    /// class. The two group differently, which is why this is a mapping rather
+    /// than a derive.
+    #[must_use]
+    pub fn stage(&self) -> &'static str {
+        match self {
+            Self::InputMissing(_)
+            | Self::InputUnreadable { .. }
+            | Self::InputInvalid { .. }
+            | Self::InputUnsupported { .. } => "loading",
+            Self::Cook(_) => "cooking",
+            Self::NoRenderNode | Self::AmbiguousRenderNode(_) | Self::RenderNode(_) => {
+                "resolving the render"
+            }
+            Self::NoAdapter | Self::Device(_) => "starting the GPU",
+            Self::DeviceLost => "drawing",
+            Self::Cancelled => "cancelled",
+            Self::Encode(_) | Self::OutputUnwritable { .. } => "writing",
+        }
+    }
+}

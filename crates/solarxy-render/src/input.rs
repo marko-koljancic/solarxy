@@ -52,7 +52,9 @@ pub struct Loaded {
 pub fn load(
     path: &Path,
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    progress: &mut dyn FnMut(crate::RenderProgress),
 ) -> Result<Loaded, RenderError> {
+    progress(crate::RenderProgress::Loading);
     if !path.exists() {
         return Err(RenderError::InputMissing(path.to_path_buf()));
     }
@@ -92,7 +94,7 @@ pub fn load(
         });
     }
 
-    cook_to_quiescence(&mut engine, cancel)?;
+    cook_to_quiescence(&mut engine, cancel, progress)?;
     Ok(Loaded { engine, warnings })
 }
 
@@ -193,10 +195,15 @@ fn added_node(batch: &solarxy_graph::engine::EventBatch) -> Option<NodeId> {
 pub fn cook_to_quiescence(
     engine: &mut Engine,
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    progress: &mut dyn FnMut(crate::RenderProgress),
 ) -> Result<(), RenderError> {
     let stopped = || cancel.is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed));
     let mut failures: Vec<String> = Vec::new();
-    for _ in 0..MAX_COOK_PASSES {
+    for pass in 0..MAX_COOK_PASSES {
+        progress(crate::RenderProgress::Cooking {
+            pass: u32::try_from(pass).unwrap_or(u32::MAX).saturating_add(1),
+            passes: u32::try_from(MAX_COOK_PASSES).unwrap_or(u32::MAX),
+        });
         if stopped() {
             return Err(RenderError::Cancelled);
         }
