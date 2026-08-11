@@ -26,13 +26,11 @@
 //!   the other. The computed answer wins; see the scene-present field on the
 //!   frame context.
 //!
-//! One thing deliberately **not** settled here: the UV overlap statistics pass
-//! writes the identity UV camera, encodes, then writes the pane camera back,
-//! all before a single submit. Queue writes are applied ahead of the command
-//! buffer, so the last write wins and the statistic is measured at the pane's
-//! zoom rather than at identity. Both shells had that, identically, before this
-//! merge, and fixing it changes a number a user reads, which is not what a
-//! collapse commit is for.
+//! A sixth was recorded here and left alone, and has since been settled: the UV
+//! overlap statistics pass wrote the identity camera, encoded, and wrote the
+//! pane camera back, all before one submit, so the last write won and the
+//! statistic was measured at the pane's zoom. It now has a camera of its own
+//! that nothing writes.
 
 use solarxy_core::AABB;
 use solarxy_core::preferences::{InspectionMode, ResolvedBackground, UvMapBackground};
@@ -639,19 +637,16 @@ fn render_uv_pane(f: &UvPane<'_>, renderer: &mut Renderer, encoder: &mut wgpu::C
             &renderer.uv_overlap.count_view,
         );
         if stats_needed {
-            // One-shot statistics render at the identity UV camera, then
-            // restore the pane view.
-            renderer.uv_cam.write(queue, [0.0, 0.0], 1.0, 1.0);
+            // The one-shot statistics render, through the camera that is
+            // always the whole unit square. The percentage describes the
+            // layout, not how far into it the reader has zoomed.
             renderer.render_uv_overlap_count_pass(
                 encoder,
                 object,
-                &renderer.uv_cam.bind_group,
+                &renderer.uv_cam_stats.bind_group,
                 &renderer.uv_overlap.stats_view,
             );
             renderer.uv_overlap.request_readback(device, encoder);
-            renderer
-                .uv_cam
-                .write(queue, f.pds.uv_offset, f.pds.uv_zoom, pane_aspect);
         }
     }
     renderer.render_uv_map_pass(encoder, object, &renderer.uv_cam.bind_group, f.pds);

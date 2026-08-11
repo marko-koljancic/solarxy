@@ -34,6 +34,27 @@ impl UvCameraState {
         }
     }
 
+    /// The whole unit square, square on, written once and never again.
+    ///
+    /// The overlap statistic is a property of the layout rather than of how far
+    /// a reader has zoomed into it, so the pass that measures it needs a view
+    /// that no pane gesture can move. A second buffer rather than a write
+    /// before the pass and a write back after it, because those are queue
+    /// writes: a submission applies every queued write and *then* runs the
+    /// command buffers, so the restoring write landed before either pass ran
+    /// and both measured the pane's zoom. Two buffers cannot race; one buffer
+    /// and two writes always will.
+    #[must_use]
+    pub fn identity(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let mut cam = Self::new(device, layout);
+        cam.write(queue, [0.0, 0.0], 1.0, 1.0);
+        cam
+    }
+
     pub fn write(&mut self, queue: &wgpu::Queue, offset: [f32; 2], zoom: f32, aspect: f32) {
         let cx = 0.5 + offset[0];
         let cy = 0.5 + offset[1];

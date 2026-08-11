@@ -376,6 +376,13 @@ pub struct Renderer {
     pub layouts: Arc<BindGroupLayouts>,
     pub pipelines: Pipelines,
     pub uv_cam: UvCameraState,
+    /// The view the overlap *statistic* is measured through: the whole unit
+    /// square, square on, fixed for the life of the renderer.
+    ///
+    /// Separate from `uv_cam` because the statistic must not follow the pane.
+    /// See [`UvCameraState::identity`] for why a second buffer rather than a
+    /// write and a write back.
+    pub uv_cam_stats: UvCameraState,
     pub uv_boundary_buf: wgpu::Buffer,
     /// The transform manipulator this frame, or `None` when no tool is active.
     /// Pull-based: the host sets it, the renderer draws it. `solarxy-app` never
@@ -660,6 +667,7 @@ impl Renderer {
         let ssao = SsaoState::new(device, queue, &layouts, width, height);
 
         let uv_cam = UvCameraState::new(device, &layouts.camera);
+        let uv_cam_stats = UvCameraState::identity(device, queue, &layouts.camera);
 
         let yellow = [1.0, 0.85, 0.0];
         let boundary_verts: [crate::model::GizmoVertex; 8] = [
@@ -816,6 +824,7 @@ impl Renderer {
             layouts,
             pipelines,
             uv_cam,
+            uv_cam_stats,
             uv_boundary_buf,
             manipulator: None,
             manipulator_line_buf: device.create_buffer(&wgpu::BufferDescriptor {
