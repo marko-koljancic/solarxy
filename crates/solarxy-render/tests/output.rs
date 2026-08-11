@@ -32,7 +32,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn render(opts: &RenderOptions) -> Result<solarxy_render::RenderOutcome, RenderError> {
-    solarxy_render::run_render(&model(), opts, &mut |_| {})
+    solarxy_render::run_render(&model(), opts, &mut solarxy_render::Silent)
 }
 
 /// The message a refusal carries, or a panic naming what happened instead.
@@ -71,7 +71,11 @@ fn the_refusal_arrives_before_anything_is_loaded_or_started() {
     };
     // An input that does not exist. Reaching the loader would report that
     // instead, and reaching a device would report the adapter.
-    let outcome = solarxy_render::run_render(Path::new("no-such-scene.slxy"), &opts, &mut |_| {});
+    let outcome = solarxy_render::run_render(
+        Path::new("no-such-scene.slxy"),
+        &opts,
+        &mut solarxy_render::Silent,
+    );
     assert!(
         matches!(outcome, Err(RenderError::OptionIneffective(_))),
         "the request was checked too late"
@@ -160,6 +164,141 @@ fn the_same_seed_writes_the_same_bytes() {
         assert!(
             first[i] == second[i],
             "the {name} differed between two runs of one seed"
+        );
+    }
+}
+
+/// Keeps the picture the render last handed over.
+///
+/// Comparing the written files would compare compressed bytes, where one
+/// changed pixel moves the whole stream and the size of a difference cannot be
+/// read at all. The preview seam hands over the assembled image itself, so this
+/// exercises that seam and gets pixels to compare in the same move.
+#[derive(Default)]
+struct LastPicture {
+    pixels: Vec<u8>,
+    calls: usize,
+}
+
+impl solarxy_render::RenderSink for LastPicture {
+    fn report(&mut self, _progress: &solarxy_render::RenderProgress) {}
+
+    fn preview(&mut self, image: &solarxy_render::Preview<'_>) {
+        assert_eq!(
+            image.format,
+            solarxy_render::PreviewFormat::Rgba8,
+            "an eight-bit output previewed as something else"
+        );
+        assert_eq!(
+            image.pixels.len(),
+            (image.width as usize) * (image.height as usize) * 4,
+            "the preview is not the whole picture"
+        );
+        self.pixels = image.pixels.to_vec();
+        self.calls += 1;
+    }
+}
+
+/// A finer tiling renders the same picture.
+///
+/// A surface that shows a render converging asks for one, because pixels only
+/// reach a sink when a tile finishes and an ordinary image is a single tile.
+/// The milestone measured a tiled render as identical to a single-pass one at
+/// the default budget; this is the same claim at the budget those surfaces
+/// actually use.
+///
+/// **Identical for one engine and not quite for the other, which is worth
+/// knowing.** Measured at 160 by 120 across two tilings: the tracer comes out
+/// at **zero differing pixels**, because it offsets a dispatch and its seed is
+/// the whole-image coordinate. The rasterizer comes out at **two pixels of
+/// 19,200, worst channel 13 of 255**, because it cuts an asymmetric frustum out
+/// of the picture's own and the arithmetic deriving it differs in the last bits
+/// between two tilings, so a pixel lying exactly on a triangle edge can take
+/// coverage one way at one tiling and the other way at the other. The bound
+/// below is loose enough for that and far tighter than a seam, which would put
+/// a whole row or column out.
+#[test]
+fn two_tile_budgets_render_the_same_image() {
+    /// A twentieth of a percent of the pixels. A seam along one boundary of
+    /// this picture would be four times that on its own.
+    const TOLERATED_FRACTION: f64 = 0.0005;
+    /// And none of them by more than this, so "a few pixels" cannot become
+    /// "a few pixels that are completely wrong".
+    const TOLERATED_DELTA: u8 = 32;
+
+    for engine in [RenderEngine::Raster, RenderEngine::PathTraced] {
+        let dir = scratch(&format!("budgets-{engine:?}"));
+        let mut runs = Vec::new();
+        // 160 by 120 is two tiles at an edge of 128 and six at an edge of 64,
+        // which is what makes this test able to fail at all.
+        for (run, budget) in [(0, 128 * 128), (1, 64 * 64)] {
+            let opts = RenderOptions {
+                output: Some(Output::File(dir.join(format!("{run}.png")))),
+                engine: Some(engine),
+                width: Some(160),
+                height: Some(120),
+                samples: Some(4),
+                seed: Some(11),
+                tile_budget: Some(budget),
+                ..RenderOptions::default()
+            };
+            let mut sink = LastPicture::default();
+            match solarxy_render::run_render(&model(), &opts, &mut sink) {
+                Ok(outcome) => {
+                    assert_eq!(
+                        sink.calls, outcome.report.tiles as usize,
+                        "{engine:?}: the picture was offered once per tile and this was not that"
+                    );
+                    runs.push((outcome.report.tiles, sink.pixels));
+                }
+                Err(RenderError::NoAdapter) => {
+                    assert!(
+                        std::env::var("SOLARXY_REQUIRE_GPU").as_deref() != Ok("1"),
+                        "SOLARXY_REQUIRE_GPU=1 but no usable GPU adapter"
+                    );
+                    eprintln!("skipping: no GPU adapter available");
+                    return;
+                }
+                Err(other) => panic!("the render failed: {other}"),
+            }
+        }
+
+        // Without this the comparison would hold for the reason nothing had
+        // changed, which is the way this class of test usually fails.
+        assert!(
+            runs[1].0 > runs[0].0,
+            "{engine:?}: the smaller budget did not cut more tiles ({} then {})",
+            runs[0].0,
+            runs[1].0
+        );
+
+        let (a, b) = (&runs[0].1, &runs[1].1);
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "{engine:?}: two pictures of different size"
+        );
+        let mut differing = 0usize;
+        let mut worst = 0u8;
+        for (x, y) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+            let delta = x
+                .iter()
+                .zip(y)
+                .map(|(p, q)| p.abs_diff(*q))
+                .max()
+                .unwrap_or(0);
+            if delta > 0 {
+                differing += 1;
+                worst = worst.max(delta);
+            }
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let fraction = differing as f64 / (a.len() / 4) as f64;
+        assert!(
+            fraction <= TOLERATED_FRACTION && worst <= TOLERATED_DELTA,
+            "{engine:?}: two tile budgets rendered different pictures: \
+             {differing} pixels ({:.4}%), worst channel {worst}",
+            fraction * 100.0
         );
     }
 }

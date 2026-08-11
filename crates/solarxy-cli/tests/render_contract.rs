@@ -256,6 +256,71 @@ fn progress_goes_to_standard_error_and_the_payload_stream_stays_empty() {
     }
 }
 
+/// The dashboard hands back to the plain line when it cannot have a terminal,
+/// and standard output stays data either way.
+///
+/// A test runs with its streams piped, which is exactly the case the fallback
+/// exists for, so this asserts the fallback rather than the surface. The
+/// dashboard's own drawing is asserted in the crate, against a buffer, because
+/// a test harness has no terminal to give it.
+///
+/// `--json` alongside it on purpose: the two composing is the whole reason the
+/// dashboard paints on standard error, and a dashboard that ever wrote to
+/// standard output would corrupt the payload this parses.
+#[test]
+fn the_dashboard_hands_back_to_the_plain_line_when_it_cannot_have_a_terminal() {
+    let dir = std::env::temp_dir().join("solarxy-render-contract");
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let out = dir.join("dashboard.png");
+    let _ = std::fs::remove_file(&out);
+    let model = repo_root().join("res/models/armadillo.obj");
+
+    let Some(result) = render(&[
+        model.to_str().expect("utf8 path"),
+        "--out",
+        out.to_str().expect("utf8 path"),
+        "--res",
+        "64x48",
+        "--tui",
+        "--json",
+    ]) else {
+        return;
+    };
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("needs a terminal on standard error"),
+        "the dashboard did not say why it stood down: {stderr}"
+    );
+    match code(&result) {
+        0 => {
+            assert!(
+                stderr.contains("done in"),
+                "the plain line did not take over: {stderr}"
+            );
+            // Checked by shape rather than by parsing it: this crate has no
+            // JSON reader and is not worth one for an assertion that a
+            // dashboard did not write here. A single escape sequence anywhere
+            // in the stream breaks every one of these.
+            let payload = String::from_utf8(result.stdout).expect("the report is text");
+            assert!(
+                payload.starts_with('{') && payload.trim_end().ends_with('}'),
+                "standard output is not the report alone: {payload:?}"
+            );
+            assert!(
+                payload.contains("schemaVersion"),
+                "the report carries no schema version: {payload}"
+            );
+            assert!(
+                !payload.contains('\u{1b}'),
+                "an escape sequence reached the payload stream: {payload:?}"
+            );
+            let _ = std::fs::remove_file(&out);
+        }
+        4 => eprintln!("skipping the success arm: no GPU adapter"),
+        other => panic!("unexpected exit {other}; stderr said: {stderr}"),
+    }
+}
+
 /// The subcommand did not displace the shipped surface.
 ///
 /// The analyze and view modes are flags with users, and a pipeline that runs

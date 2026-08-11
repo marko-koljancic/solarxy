@@ -78,7 +78,7 @@ pub struct Args {
     #[clap(
         long = "tui-theme",
         value_name = "NAME",
-        help = "Terminal theme for analyze mode; applies at 256-colour and truecolor terminals"
+        help = "Terminal theme for the analyze surface and the render dashboard; applies at 256-colour and truecolor terminals"
     )]
     pub tui_theme: Option<String>,
     #[clap(
@@ -136,6 +136,11 @@ pub enum Command {
 /// overrides it. The node stays authoritative and the flags are a convenience,
 /// which is what stops a scene and a command line becoming two descriptions of
 /// one render that disagree.
+// A command line is made of flags, and a flag is a bool. Grouping them into
+// sub-structs to satisfy a count would change what `--help` prints and what a
+// caller writes, which is the wrong way round: the lint is about a struct
+// nobody types, and this is one everybody does.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(clap::Args, Debug)]
 pub struct RenderArgs {
     /// A `.slxy` scene, or a model file.
@@ -193,6 +198,21 @@ pub struct RenderArgs {
     /// Write a machine-readable result to standard output.
     #[arg(long)]
     pub json: bool,
+
+    /// Show the render on a terminal dashboard instead of one line.
+    ///
+    /// Paints on standard error, so this and `--json` can be given together.
+    /// Falls back to the plain line when standard error is not a terminal or
+    /// is too small for the surface.
+    #[arg(long)]
+    pub tui: bool,
+
+    /// Show the render in a window as it converges.
+    ///
+    /// A build feature, off by default. A build without it says so rather than
+    /// refusing to parse the flag.
+    #[arg(long)]
+    pub watch: bool,
 }
 
 /// An auxiliary pass, as a flag value.

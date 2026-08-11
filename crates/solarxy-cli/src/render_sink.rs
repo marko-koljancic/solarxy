@@ -18,7 +18,7 @@
 
 use std::io::Write;
 
-use solarxy_render::RenderProgress;
+use solarxy_render::{RenderProgress, RenderSink};
 
 /// What a step is, for deciding whether a non-terminal sink writes again.
 ///
@@ -66,6 +66,10 @@ fn line(progress: &RenderProgress, live: bool) -> String {
             sample,
             samples,
             elapsed_ms,
+            // The plan's shape is for a surface that draws the tiles. A line
+            // says how many there are and which one is being drawn, and a
+            // reader of a log does not want the geometry.
+            ..
         } => {
             let seconds = *elapsed_ms as f64 / 1000.0;
             if live {
@@ -140,6 +144,14 @@ impl<W: Write> PlainSink<W> {
     }
 }
 
+/// The sink automation reads. It wants no pixels, which is what the defaulted
+/// half of the trait is for.
+impl<W: Write> RenderSink for PlainSink<W> {
+    fn report(&mut self, progress: &RenderProgress) {
+        PlainSink::report(self, progress);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +160,8 @@ mod tests {
         RenderProgress::Sampling {
             tile,
             tiles: 4,
+            columns: 2,
+            rows: 2,
             sample,
             samples: 64,
             elapsed_ms: 1500,

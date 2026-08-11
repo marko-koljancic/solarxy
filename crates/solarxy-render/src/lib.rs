@@ -90,9 +90,17 @@ pub enum RenderProgress {
     },
     /// Drawing. `sample` and `samples` describe the tile, not the image: each
     /// tile converges on its own before the next one starts.
+    ///
+    /// `columns` and `rows` are the shape the tiles are laid out in, which a
+    /// surface drawing a grid of them cannot work out from a count: the plan
+    /// is filled row by row and the last row may be short. Carried on this
+    /// event rather than announced by one of its own, so a log that collapses
+    /// repeated steps is unaffected.
     Sampling {
         tile: u32,
         tiles: u32,
+        columns: u32,
+        rows: u32,
         sample: u32,
         samples: u32,
         elapsed_ms: u64,
@@ -202,6 +210,77 @@ pub struct RenderOptions {
     /// written in one call after the last tile, so a run that stops early never
     /// creates the file at all.
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// The largest single pass, in pixels, or the job's own default.
+    ///
+    /// The reason to lower it is that pixels only reach a sink when a tile
+    /// finishes: an image inside the default budget is one tile, so a surface
+    /// showing the picture as it converges would show nothing at all until the
+    /// render ended. A smaller budget cuts the same picture into more pieces
+    /// and it arrives in pieces. The output is unchanged, which
+    /// `two_tile_budgets_render_the_same_image` asserts rather than assumes.
+    pub tile_budget: Option<u32>,
+}
+
+/// The tile budget a surface showing the picture asks for.
+///
+/// An edge of 256 pixels, so an ordinary still comes in tens of tiles rather
+/// than one and a reader watching it sees it arrive. Named here rather than
+/// chosen at each call site, because it is one judgement about how often a
+/// person wants to see something new and it should be made once.
+///
+/// What it costs is one target resize and one readback per extra tile. What it
+/// buys is the whole value of a surface that shows the picture, and the output
+/// is unchanged either way.
+pub const PREVIEW_TILE_BUDGET: u32 = 256 * 256;
+
+/// The picture so far, as tiles land.
+///
+/// Whole rather than the rectangle that just arrived, because every consumer
+/// so far uploads or redraws all of it anyway and a rect would be an
+/// optimisation with no caller.
+pub struct Preview<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: &'a [u8],
+    pub format: PreviewFormat,
+}
+
+/// How to read [`Preview::pixels`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewFormat {
+    /// Four bytes a pixel, display-referred. The ordinary case.
+    Rgba8,
+    /// Sixteen bytes a pixel. Display-referred for a float image, and
+    /// scene-referred for one written in scene-linear, which a consumer that
+    /// wants to show it has to tone map itself.
+    Rgba32F,
+}
+
+/// Where a render says what it is doing.
+///
+/// Two methods, one required. Reporting is what every sink is for; pixels are
+/// wanted only by a surface that shows the picture, and a trait with a
+/// defaulted second method lets the plain line stay four lines long. The same
+/// shape the auxiliary passes took on the backend, for the same reason.
+pub trait RenderSink {
+    /// One event.
+    fn report(&mut self, progress: &RenderProgress);
+
+    /// The picture so far. Called when a tile lands, never between.
+    fn preview(&mut self, _image: &Preview<'_>) {}
+}
+
+/// A sink that says nothing, for a caller that only wants the picture.
+///
+/// A named type rather than a blanket implementation over closures. That was
+/// tried: a closure written `&mut |_| {}` is not higher-ranked over the
+/// borrow, so every no-op call site failed with a lifetime error about
+/// `FnMut` rather than about anything the caller had done. One unit struct
+/// costs a word at the call site and nothing to understand.
+pub struct Silent;
+
+impl RenderSink for Silent {
+    fn report(&mut self, _progress: &RenderProgress) {}
 }
 
 /// What a backend of a given kind can do, without building one.
@@ -311,20 +390,20 @@ pub struct RenderOutcome {
 pub fn run_render(
     input: &Path,
     opts: &RenderOptions,
-    progress: &mut dyn FnMut(RenderProgress),
+    sink: &mut dyn RenderSink,
 ) -> Result<RenderOutcome, RenderError> {
     // Wrapped so the last thing a sink hears is always either a completion or
     // the name of the step that ended it, whichever way the body left. A sink
     // that has been drawing over one line needs to know to stop.
-    match run(input, opts, progress) {
+    match run(input, opts, sink) {
         Ok(outcome) => {
-            progress(RenderProgress::Done {
+            sink.report(&RenderProgress::Done {
                 elapsed_ms: outcome.report.elapsed_ms,
             });
             Ok(outcome)
         }
         Err(e) => {
-            progress(RenderProgress::Failed { stage: e.stage() });
+            sink.report(&RenderProgress::Failed { stage: e.stage() });
             Err(e)
         }
     }
@@ -333,7 +412,7 @@ pub fn run_render(
 fn run(
     input: &Path,
     opts: &RenderOptions,
-    progress: &mut dyn FnMut(RenderProgress),
+    sink: &mut dyn RenderSink,
 ) -> Result<RenderOutcome, RenderError> {
     let started = Instant::now();
     // Before the file is opened: a request that contradicts itself is a
@@ -343,7 +422,7 @@ fn run(
     if let Some(engine) = opts.engine {
         check_options(opts, Some(engine))?;
     }
-    let loaded = input::load(input, opts.cancel.as_ref(), progress)?;
+    let loaded = input::load(input, opts.cancel.as_ref(), sink)?;
     let mut warnings = loaded.warnings;
     let engine = loaded.engine;
 
@@ -377,7 +456,7 @@ fn run(
     // before it rather than after, because a sink saying nothing for a minute is
     // indistinguishable from a sink that has hung.
     if settings.engine == RenderEngine::PathTraced {
-        progress(RenderProgress::BuildingHierarchy {
+        sink.report(&RenderProgress::BuildingHierarchy {
             triangles: triangle_count(&delta),
         });
     }
@@ -424,7 +503,7 @@ fn run(
             camera: &mut camera,
             job: &mut job,
             backend: backend.as_mut(),
-            progress,
+            sink,
         },
         &StillView {
             cancel: opts,
@@ -441,7 +520,7 @@ fn run(
     // One event, naming the image. The passes are named in the report instead:
     // the plain sink collapses repeated steps, so four `Writing` lines would
     // show as one anyway, and a machine reading the result wants the list.
-    progress(RenderProgress::Writing {
+    sink.report(&RenderProgress::Writing {
         output: output.display(),
     });
     let aovs = write_all(&output, opts, assembled, spec, &mut warnings)?;
@@ -655,7 +734,9 @@ fn still_spec(settings: &RenderSettings, output: &Output, opts: &RenderOptions) 
         // Both screen-space post passes are off in a headless bring-up, so the
         // apron would be a margin around nothing.
         screen_space_post: false,
-        tile_budget: solarxy_host::still::TILE_BUDGET_PIXELS,
+        tile_budget: opts
+            .tile_budget
+            .unwrap_or(solarxy_host::still::TILE_BUDGET_PIXELS),
         readback,
         // Albedo and normal come out of one store, so either of them asks for
         // the same copy.
@@ -801,7 +882,7 @@ struct Drive<'a> {
     camera: &'a mut CameraState,
     job: &'a mut StillRenderJob,
     backend: &'a mut dyn RenderBackend,
-    progress: &'a mut dyn FnMut(RenderProgress),
+    sink: &'a mut dyn RenderSink,
 }
 
 fn drive(
@@ -816,7 +897,7 @@ fn drive(
         camera,
         job,
         backend,
-        progress,
+        sink,
     } = d;
     let spec = job.spec();
     let pixels = (spec.width as usize) * (spec.height as usize);
@@ -829,15 +910,23 @@ fn drive(
         aux: spec.aux.then(|| vec![0u8; pixels * AUX_BYTES]),
         depth: spec.depth.then(|| vec![0u8; pixels * DEPTH_BYTES]),
     };
+    // Read once: the shape of the plan is fixed when the job is built, and
+    // asking inside the loop would borrow the job where it has to be advanced.
+    let (columns, rows) = {
+        let plan = job.plan();
+        (plan.columns, plan.rows)
+    };
     while let Some(tile) = job.current() {
         if view.cancel.cancelled() {
             return Err(RenderError::Cancelled);
         }
         let p = job.progress();
         #[allow(clippy::cast_possible_truncation)]
-        progress(RenderProgress::Sampling {
+        sink.report(&RenderProgress::Sampling {
             tile: p.tile,
             tiles: p.tiles,
+            columns,
+            rows,
             sample: p.sample,
             samples: p.samples,
             elapsed_ms: started.elapsed().as_millis() as u64,
@@ -873,6 +962,20 @@ fn drive(
                         blit(image, spec.width, t.rect, plane, DEPTH_BYTES);
                     }
                 }
+                // Here and nowhere else: this is the only moment the picture
+                // has changed. A sink that shows it redraws once a tile, which
+                // is why a surface that wants to see a render converge asks for
+                // a smaller budget than one tile of the whole image.
+                sink.preview(&Preview {
+                    width: spec.width,
+                    height: spec.height,
+                    pixels: &out.color,
+                    format: if spec.readback == solarxy_host::still::StillReadback::Display8 {
+                        PreviewFormat::Rgba8
+                    } else {
+                        PreviewFormat::Rgba32F
+                    },
+                });
             }
             StillStep::Done => break,
             StillStep::Failed => return Err(RenderError::DeviceLost),
