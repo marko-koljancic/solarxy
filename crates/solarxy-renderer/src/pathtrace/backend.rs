@@ -433,6 +433,23 @@ impl PathBackend {
         self.invalidate();
     }
 
+    /// The snapshot twin of [`RenderBackend::apply`], for a tracer that may
+    /// already hold a scene. A snapshot carries no removals, so the cache
+    /// reconciles what it holds against what the snapshot names before the
+    /// ops run; unchanged geometry stays a hierarchy-cache hit. A shell
+    /// starts every still through this rather than snapshotting once at
+    /// construction, which was the defect where every still after the first
+    /// rendered the first scene.
+    pub fn apply_snapshot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        delta: &SceneDelta,
+    ) {
+        self.cache.apply_snapshot(delta);
+        self.sync(device, queue);
+    }
+
     /// The environment uniform this frame: the image when one is installed, the
     /// two-colour sky when not.
     fn environment(&self) -> EnvParams {

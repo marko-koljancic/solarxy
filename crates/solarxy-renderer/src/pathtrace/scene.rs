@@ -546,6 +546,44 @@ impl TraceSceneCache {
         }
     }
 
+    /// Applies a full-scene snapshot to a cache that may already hold a scene.
+    ///
+    /// `Engine::scene_snapshot` carries no removals by design: it exists for a
+    /// consumer seeing the scene for the first time, and a removal names what
+    /// a consumer holds. A tracer kept alive between stills is not that
+    /// consumer, so what the snapshot does not name is reconciled here: any
+    /// held object the snapshot does not upsert is dropped before the ops run.
+    /// Not `SceneOp::Clear` plus the snapshot, deliberately -- a clear empties
+    /// the hierarchy cache and the pending builds, so an unchanged scene would
+    /// rebuild every hierarchy per still, and under a deferred build policy
+    /// the next still would start over an empty scene while builds refill it.
+    /// Dropping only the stale objects keeps every re-upsert with unchanged
+    /// buffers a cache hit, which is what makes re-applying a large scene
+    /// cheap. Lights and cameras need no reconciling: a snapshot always
+    /// carries both sets whole.
+    pub fn apply_snapshot(&mut self, delta: &SceneDelta) {
+        let named: HashSet<SceneObjectId> = delta
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                SceneOp::UpsertGeometry { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let before = self.objects.len();
+        self.objects.retain(|id, _| named.contains(id));
+        if self.objects.len() != before {
+            // The same three flags the remove arm sets. The sweep itself still
+            // runs once, inside `apply` below, after the whole batch: the
+            // dropped objects' cache entries keep their buffers pinned until
+            // every upsert in the snapshot has looked its own buffers up.
+            self.dirty = true;
+            self.atlas_dirty = true;
+            self.needs_sweep = true;
+        }
+        self.apply(delta);
+    }
+
     /// Repacks if anything changed since the last call, and hands back the
     /// arena when it did.
     ///
@@ -1601,6 +1639,36 @@ mod tests {
         assert!(cache.is_empty());
         assert!(cache.lights().is_none());
         assert_eq!(cache.arena().instances().len(), 0);
+    }
+
+    /// The snapshot the engine hands a late-arriving consumer carries no
+    /// removals, so a tracer kept alive between stills reconciles here: what
+    /// the snapshot does not name is dropped, and what it re-upserts with
+    /// unchanged buffers stays the same build. The construction-only wiring
+    /// this guards against rendered every still after the first from the
+    /// first scene.
+    #[test]
+    fn a_reapplied_snapshot_drops_stale_objects_and_keeps_unchanged_builds() {
+        let mut cache = TraceSceneCache::new();
+        let kept = geometry(vec![mesh(MeshTopology::Triangles)]);
+        let deleted = geometry(vec![mesh(MeshTopology::Triangles)]);
+        cache.apply(&upsert(1, &kept));
+        cache.apply(&upsert(2, &deleted));
+        cache.repack();
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.hierarchy_count(), 2);
+        let key = MeshKey::of(&kept.meshes[0]);
+        let built = Arc::as_ptr(&cache.hierarchies[&key].bvh);
+
+        // The snapshot names object 1 alone: object 2 goes, its hierarchy is
+        // swept, and object 1's hierarchy is the same allocation rather than
+        // a rebuild, which is what keeps re-applying a large scene cheap.
+        cache.apply_snapshot(&upsert(1, &kept));
+        cache.repack();
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.hierarchy_count(), 1);
+        assert_eq!(Arc::as_ptr(&cache.hierarchies[&key].bvh), built);
+        assert_eq!(cache.arena().instances().len(), 1);
     }
 
     #[test]

@@ -1550,21 +1550,30 @@ impl SolarxyApp {
             solarxy_graph::nodes::RenderEngine::PathTraced => StillEngine::PathTraced,
             solarxy_graph::nodes::RenderEngine::Raster => StillEngine::Raster,
         };
-        if engine == StillEngine::PathTraced && self.tracer.is_none() {
-            self.tracer = Some(solarxy_renderer::pathtrace::backend::PathBackend::new(
-                &self.device,
-                &self.queue,
-            ));
-            // The tracer has never seen this document. A full snapshot rather
-            // than a delta, because deltas since boot are long gone.
+        if engine == StillEngine::PathTraced {
+            if self.tracer.is_none() {
+                self.tracer = Some(solarxy_renderer::pathtrace::backend::PathBackend::new(
+                    &self.device,
+                    &self.queue,
+                ));
+                // A tracer built after the environment was installed has
+                // missed it, and the snapshot below cannot carry it: the
+                // scene cache drops that op by design.
+                self.traced_env_dirty = true;
+            }
+            // The document as it stands now, on every start rather than only
+            // at construction: the per-frame delta feed goes to the raster
+            // backend alone, so a tracer kept from a previous still has seen
+            // nothing since, and a construction-only snapshot rendered every
+            // later still against the first scene. A full snapshot rather
+            // than a delta because deltas since boot are long gone, and cheap
+            // to re-apply: unchanged geometry stays a hierarchy-cache hit,
+            // and the snapshot-aware apply drops what the document no longer
+            // holds.
             let delta = self.engine.scene_snapshot();
             if let Some(t) = self.tracer.as_mut() {
-                t.apply(&self.device, &self.queue, &delta);
+                t.apply_snapshot(&self.device, &self.queue, &delta);
             }
-            // A tracer built after the environment was installed has missed
-            // it, and the snapshot above cannot carry it: the scene cache
-            // drops that op by design.
-            self.traced_env_dirty = true;
         }
         self.sync_traced_environment();
         if let Some(t) = self.tracer.as_mut() {
