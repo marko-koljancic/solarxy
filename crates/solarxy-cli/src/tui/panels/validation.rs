@@ -27,7 +27,7 @@ use ratatui::widgets::{List, ListState, Paragraph};
 use solarxy_core::validation::{IssueScope, Severity, ValidationIssue};
 
 use super::super::widgets;
-use super::{Action, Ctx, Panel};
+use super::{Action, AnalyzeCtx, Analysis, Panel};
 
 /// What the rows are collected under.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -105,8 +105,9 @@ pub struct Validation {
 }
 
 impl Validation {
-    fn rows<'a>(&self, ctx: &Ctx<'a>) -> Vec<Row<'a>> {
+    fn rows<'a>(&self, ctx: &AnalyzeCtx<'a>) -> Vec<Row<'a>> {
         let issues: Vec<&ValidationIssue> = ctx
+            .subject
             .report
             .validation
             .issues
@@ -154,9 +155,10 @@ impl Validation {
 }
 
 /// What an issue is about, named the way a reader would say it.
-fn subject(issue: &ValidationIssue, ctx: &Ctx<'_>) -> String {
+fn subject(issue: &ValidationIssue, ctx: &AnalyzeCtx<'_>) -> String {
     let mesh = |index: usize| {
-        ctx.report
+        ctx.subject
+            .report
             .meshes
             .iter()
             .find(|m| m.index == index)
@@ -175,6 +177,7 @@ fn subject(issue: &ValidationIssue, ctx: &Ctx<'_>) -> String {
         IssueScope::Mesh(index) | IssueScope::Face(index, _) => mesh(index),
         IssueScope::Edge { mesh_index, .. } => mesh(mesh_index),
         IssueScope::Material(index) => ctx
+            .subject
             .report
             .materials
             .iter()
@@ -187,12 +190,12 @@ fn subject(issue: &ValidationIssue, ctx: &Ctx<'_>) -> String {
     }
 }
 
-impl Panel for Validation {
+impl Panel<Analysis<'_>, Action> for Validation {
     fn menu(&self) -> &'static [&'static str] {
         &["group", "severity", "jump"]
     }
 
-    fn handle(&mut self, key: KeyEvent, ctx: &Ctx<'_>) -> Action {
+    fn handle(&mut self, key: KeyEvent, ctx: &AnalyzeCtx<'_>) -> Action {
         let rows = self.rows(ctx);
         match key.code {
             KeyCode::Char('g') if key.modifiers.is_empty() => {
@@ -228,10 +231,10 @@ impl Panel for Validation {
         Action::None
     }
 
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
         let rows = self.rows(ctx);
         if rows.is_empty() {
-            let what = if ctx.report.validation.is_clean() {
+            let what = if ctx.subject.report.validation.is_clean() {
                 "no issues found"
             } else {
                 "no issue matches this severity"
@@ -301,8 +304,8 @@ impl Panel for Validation {
         frame.render_stateful_widget(list, area, &mut self.state);
     }
 
-    fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
-        let validation = &ctx.report.validation;
+    fn status(&self, ctx: &AnalyzeCtx<'_>) -> Option<String> {
+        let validation = &ctx.subject.report.validation;
         Some(format!(
             "{} errors, {} warnings across {} kinds \u{b7} {}",
             validation.error_count(),

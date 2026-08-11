@@ -12,16 +12,16 @@ use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 
 use super::super::widgets;
-use super::{Ctx, Panel};
+use super::{Action, AnalyzeCtx, Analysis, Panel};
 
 /// The axis-aligned bounds panel: extents, centre, and the axis spans.
 pub struct Bounds;
 
 const LABEL: u16 = 9;
 
-impl Panel for Bounds {
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
-        let Some(bounds) = &ctx.report.bounds else {
+impl Panel<Analysis<'_>, Action> for Bounds {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
+        let Some(bounds) = &ctx.subject.report.bounds else {
             let (line, rect) = widgets::empty_state("no bounding box", area, ctx.theme);
             frame.render_widget(Paragraph::new(line), rect);
             return;
@@ -78,8 +78,8 @@ impl Panel for Bounds {
         frame.render_widget(Paragraph::new(lines), area);
     }
 
-    fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
-        let bounds = ctx.report.bounds.as_ref()?;
+    fn status(&self, ctx: &AnalyzeCtx<'_>) -> Option<String> {
+        let bounds = ctx.subject.report.bounds.as_ref()?;
         // Naming the shape is the panel's judgement, not the reader's
         // arithmetic. A ratio past a hundred is not a proportion anyone
         // designed on purpose.

@@ -20,9 +20,9 @@ use super::caps::{Capabilities, Glyphs};
 use super::geometry::ModelView;
 use super::arrange::{self, Toward};
 use super::keymap::{self, Command, Context};
-use super::layout::{Direction, Layout, LeafId, PanelType, Preset};
+use super::layout::{Direction, Layout, LeafId, PanelKind, PanelType, Preset};
 use super::overlay::{Catalogue, Confirm, Export, Overlay};
-use super::panels::{self, Action, Ctx, Panel};
+use super::panels::{self, Action, Analysis, BoxedAnalyzePanel, Ctx};
 use super::shell::{Flow, Input, Surface};
 use super::theme::Theme;
 
@@ -30,13 +30,13 @@ use super::theme::Theme;
 /// modal state (overlay, filter, arrange mode, maximize) sits over it, all
 /// over one borrowed report.
 pub struct App<'a> {
-    report: &'a AnalysisReport,
-    model: &'a ModelView<'a>,
-    layout: Layout,
+    /// What this surface is about, in the shape its panels read it.
+    subject: Analysis<'a>,
+    layout: Layout<PanelType>,
     maximized: Option<LeafId>,
     /// One panel per leaf, so two of a type are two panels with their own
     /// selection and sort rather than one drawn twice.
-    panels: HashMap<LeafId, Box<dyn Panel>>,
+    panels: HashMap<LeafId, BoxedAnalyzePanel<'a>>,
     preset: Preset,
     theme: Theme,
     glyphs: Glyphs,
@@ -58,13 +58,12 @@ impl<'a> App<'a> {
     pub fn new(
         report: &'a AnalysisReport,
         model: &'a ModelView<'a>,
-        layout: Layout,
+        layout: Layout<PanelType>,
         theme: Theme,
         caps: Capabilities,
     ) -> Self {
         let mut app = Self {
-            report,
-            model,
+            subject: Analysis { report, model },
             layout,
             maximized: None,
             panels: HashMap::new(),
@@ -97,10 +96,16 @@ impl<'a> App<'a> {
             .retain(|id, _| leaves.iter().any(|(l, _)| l == id));
     }
 
-    fn context(&self, focused: bool) -> Ctx<'_> {
+    /// The context for one panel this frame.
+    ///
+    /// Two lifetimes and they are genuinely different: the borrow is this
+    /// frame's, the subject is the surface's. A boxed panel names the subject
+    /// type exactly, and a trait object is invariant in it, so collapsing the
+    /// two would hand a panel a subject with a shorter life than the one it
+    /// was built for.
+    fn context(&self, focused: bool) -> Ctx<'_, Analysis<'a>> {
         Ctx {
-            report: self.report,
-            model: self.model,
+            subject: &self.subject,
             theme: &self.theme.slots,
             glyphs: &self.glyphs,
             caps: self.caps,
@@ -176,7 +181,7 @@ impl<'a> App<'a> {
             Command::Export => {
                 self.overlay = Some(Overlay::Export(Export {
                     json: false,
-                    path: default_export_path(self.report, false),
+                    path: default_export_path(self.subject.report, false),
                 }));
                 true
             }
@@ -274,7 +279,7 @@ impl<'a> App<'a> {
             Overlay::Export(export) => match key.code {
                 KeyCode::Right | KeyCode::Left | KeyCode::Tab => {
                     export.json = !export.json;
-                    export.path = default_export_path(self.report, export.json);
+                    export.path = default_export_path(self.subject.report, export.json);
                 }
                 KeyCode::Char(c) => export.path.push(c),
                 KeyCode::Backspace => {
@@ -303,14 +308,14 @@ impl<'a> App<'a> {
             }
             Overlay::Catalogue(catalogue) => match key.code {
                 KeyCode::Up | KeyCode::Char('k' | 'K') => {
-                    let count = PanelType::CHOOSABLE.len();
+                    let count = PanelType::choosable().len();
                     catalogue.selected = (catalogue.selected + count - 1) % count;
                 }
                 KeyCode::Down | KeyCode::Char('j' | 'J') => {
-                    catalogue.selected = (catalogue.selected + 1) % PanelType::CHOOSABLE.len();
+                    catalogue.selected = (catalogue.selected + 1) % PanelType::choosable().len();
                 }
                 KeyCode::Enter => {
-                    let kind = PanelType::CHOOSABLE[catalogue.selected];
+                    let kind = PanelType::choosable()[catalogue.selected];
                     self.overlay = None;
                     self.layout = self.layout.assign(kind);
                     // The leaf keeps its id across the assignment, so the old
@@ -360,12 +365,12 @@ impl<'a> App<'a> {
             return String::new();
         };
         let rendered = if export.json {
-            match solarxy_core::json::report_to_json(self.report) {
+            match solarxy_core::json::report_to_json(self.subject.report) {
                 Ok(json) => json,
                 Err(error) => return format!("could not build json: {error}"),
             }
         } else {
-            self.report.to_string()
+            self.subject.report.to_string()
         };
         match std::fs::write(&export.path, rendered) {
             Ok(()) => format!("saved to {}", export.path),
@@ -561,8 +566,7 @@ impl Surface for App<'_> {
             frame.render_widget(block, placement.rect);
             if let Some(panel) = self.panels.get_mut(&placement.id) {
                 let ctx = Ctx {
-                    report: self.report,
-                    model: self.model,
+                    subject: &self.subject,
                     theme: &self.theme.slots,
                     glyphs: &self.glyphs,
                     caps: self.caps,
@@ -579,7 +583,7 @@ impl Surface for App<'_> {
         draw_footer(
             frame,
             Rect::new(area.x, area.bottom() - 1, area.width, 1),
-            self.report,
+            self.subject.report,
             &self.theme,
             &self.glyphs,
             menu,
@@ -591,10 +595,13 @@ impl Surface for App<'_> {
                 frame,
                 area,
                 overlay,
-                &self.theme.slots,
-                &self.glyphs,
-                self.caps,
-                menu,
+                &super::overlay::Chrome {
+                    theme: &self.theme.slots,
+                    glyphs: &self.glyphs,
+                    caps: self.caps,
+                    panel_menu: menu,
+                    catalogue: &catalogue_names(),
+                },
             );
         }
     }
@@ -641,8 +648,7 @@ impl Surface for App<'_> {
         // its border words reach it.
         let focus = self.layout.focus();
         let ctx = Ctx {
-            report: self.report,
-            model: self.model,
+            subject: &self.subject,
             theme: &self.theme.slots,
             glyphs: &self.glyphs,
             caps: self.caps,
@@ -657,6 +663,17 @@ impl Surface for App<'_> {
         }
         Flow::Continue
     }
+}
+
+/// The pick list the catalogue overlay shows.
+///
+/// Assembled here rather than read off the enum inside the overlay, so that
+/// module stays free of any one surface's vocabulary. The coupling does not
+/// disappear, it moves: this is now the only place that says the catalogue
+/// offers exactly what a reader can choose, which is what the test below
+/// asserts.
+fn catalogue_names() -> Vec<&'static str> {
+    PanelType::choosable().iter().map(|k| k.name()).collect()
 }
 
 /// Where an export lands unless the reader says otherwise.
@@ -962,6 +979,34 @@ mod tests {
             app.panels.contains_key(&leaf),
             "the leaf has no panel object after the pick"
         );
+    }
+
+    /// Every choosable panel reaches the pick, on screen, through the real
+    /// wiring.
+    ///
+    /// The overlay renders whatever list it is handed and can no longer check
+    /// that the list is the whole catalogue, so the check moves here and is
+    /// made against painted cells rather than against the list: a narrowed
+    /// list, a wrong list, or a call site that stops passing one all fail the
+    /// same way. Without it a panel added to the enum would simply never
+    /// appear in the pick and nothing would say so.
+    #[test]
+    fn every_choosable_panel_reaches_the_pick() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+        app.overlay = Some(Overlay::Catalogue(Catalogue { selected: 0 }));
+        let mut terminal = Terminal::new(TestBackend::new(140, 45)).expect("terminal");
+        terminal.draw(|frame| app.draw(frame)).expect("draw");
+        let text = screen(terminal.backend().buffer(), 140, 45);
+        for kind in PanelType::choosable() {
+            assert!(
+                text.contains(&format!("( ) {}", kind.name()))
+                    || text.contains(&format!("(\u{2022}) {}", kind.name())),
+                "{} is not offered by the pick",
+                kind.name()
+            );
+        }
     }
 
     /// The pick draws through the whole surface path, titled, over the

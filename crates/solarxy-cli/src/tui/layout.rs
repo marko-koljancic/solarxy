@@ -56,8 +56,61 @@ pub const ELISION_ORDER: [PanelType; 5] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LeafId(pub u32);
 
+/// What a surface's panels have to answer before the tree can arrange them.
+///
+/// Everything above this line is geometry and applies to any set of panels;
+/// everything the tree needs to know about a *particular* set is here. A second
+/// surface supplies its own vocabulary and gets the tiling, the addresses, the
+/// minimum size and the serialised form without a second copy of any of them.
+///
+/// [`Default`] is the panel a leaf holds before anyone has chosen one, because
+/// splitting genuinely creates such a leaf rather than guessing.
+pub trait PanelKind: Copy + Eq + Default + std::fmt::Debug + 'static {
+    /// Every kind a reader can choose, in catalogue order.
+    fn choosable() -> &'static [Self];
+
+    /// The order kinds leave in when the terminal is too narrow to hold them
+    /// all, most expendable first.
+    ///
+    /// Required rather than defaulted to empty. A surface that forgot it would
+    /// not fail: it would silently keep every panel at any width and overflow a
+    /// narrow terminal, which is the failure this whole module exists to make
+    /// unreachable.
+    fn elision_order() -> &'static [Self];
+
+    /// The name as it appears in the top border, lowercase.
+    fn name(self) -> &'static str;
+
+    /// The token used in the serialised form.
+    ///
+    /// Distinct from [`Self::name`] because a display name may carry a space
+    /// and the encoding cannot afford one.
+    fn token(self) -> &'static str {
+        self.name()
+    }
+
+    /// The kind a token names, or nothing.
+    ///
+    /// Provided, because the answer is always "search what a reader could have
+    /// chosen, plus the empty leaf", and a surface writing that by hand could
+    /// get it wrong in only one direction: by accepting something it cannot
+    /// draw.
+    fn from_token(token: &str) -> Option<Self> {
+        Self::choosable()
+            .iter()
+            .copied()
+            .chain(std::iter::once(Self::default()))
+            .find(|panel| panel.token() == token)
+    }
+
+    /// What a solve falls back to when it cannot find the focused leaf.
+    fn fallback() -> Self {
+        Self::choosable().first().copied().unwrap_or_default()
+    }
+}
+
 /// The ten panel types, plus the state a freshly split leaf sits in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PanelType {
     Geometry,
     Health,
@@ -71,6 +124,7 @@ pub enum PanelType {
     Bounds,
     /// A leaf that exists but has not been given a panel yet. A split creates
     /// one of these rather than guessing what the reader wanted.
+    #[default]
     Catalogue,
 }
 
@@ -88,9 +142,19 @@ impl PanelType {
         PanelType::Textures,
         PanelType::Bounds,
     ];
+}
+
+impl PanelKind for PanelType {
+    fn choosable() -> &'static [Self] {
+        &Self::CHOOSABLE
+    }
+
+    fn elision_order() -> &'static [Self] {
+        &ELISION_ORDER
+    }
 
     /// The name as it appears in the top border, lowercase.
-    pub fn name(self) -> &'static str {
+    fn name(self) -> &'static str {
         match self {
             Self::Geometry => "geometry",
             Self::Health => "health",
@@ -109,18 +173,18 @@ impl PanelType {
     /// The token used in the serialised form. Distinct from [`Self::name`]
     /// because the catalogue's display name has a space in it and the
     /// encoding cannot afford one.
-    pub fn token(self) -> &'static str {
+    fn token(self) -> &'static str {
         match self {
             Self::Catalogue => "catalogue",
             other => other.name(),
         }
     }
 
-    fn from_token(token: &str) -> Option<Self> {
-        Self::CHOOSABLE
-            .into_iter()
-            .chain(std::iter::once(Self::Catalogue))
-            .find(|panel| panel.token() == token)
+    /// Geometry rather than the catalogue, so a terminal that cannot hold the
+    /// tree shows the reader something about the model rather than a prompt to
+    /// pick a panel it has no room for.
+    fn fallback() -> Self {
+        Self::Geometry
     }
 }
 
@@ -146,16 +210,16 @@ impl Direction {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Node {
+pub enum Node<P> {
     Leaf {
         id: LeafId,
-        panel: PanelType,
+        panel: P,
     },
     Split {
         dir: Direction,
         ratio: f32,
-        first: Box<Node>,
-        second: Box<Node>,
+        first: Box<Node<P>>,
+        second: Box<Node<P>>,
     },
 }
 
@@ -180,9 +244,9 @@ impl std::fmt::Display for Refusal {
 
 /// Where one leaf lands on the screen this frame.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Placement {
+pub struct Placement<P> {
     pub id: LeafId,
-    pub panel: PanelType,
+    pub panel: P,
     pub rect: Rect,
     /// The jump address, one-based, in reading order.
     pub address: u8,
@@ -191,18 +255,18 @@ pub struct Placement {
 
 /// A whole arrangement: the tree, who has focus, and the id counter.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Layout {
-    root: Node,
+pub struct Layout<P> {
+    root: Node<P>,
     focus: LeafId,
     next_id: u32,
 }
 
-impl Layout {
+impl<P: PanelKind> Layout<P> {
     /// A single panel filling the pane.
     ///
     /// The starting point for a reader who closes their way down to one, and
     /// the fixture most layout tests build from.
-    pub fn single(panel: PanelType) -> Self {
+    pub fn single(panel: P) -> Self {
         Self {
             root: Node::Leaf {
                 id: LeafId(0),
@@ -218,13 +282,13 @@ impl Layout {
     }
 
     /// Every leaf in reading order.
-    pub fn leaves(&self) -> Vec<(LeafId, PanelType)> {
+    pub fn leaves(&self) -> Vec<(LeafId, P)> {
         let mut out = Vec::new();
         collect(&self.root, &mut out);
         out
     }
 
-    pub fn panel_of(&self, id: LeafId) -> Option<PanelType> {
+    pub fn panel_of(&self, id: LeafId) -> Option<P> {
         self.leaves()
             .into_iter()
             .find(|(leaf, _)| *leaf == id)
@@ -292,7 +356,7 @@ impl Layout {
     /// Called when a reader picks from the catalogue, which is arrange
     /// mode's `a`.
     #[must_use]
-    pub fn assign(&self, panel: PanelType) -> Self {
+    pub fn assign(&self, panel: P) -> Self {
         let mut next = self.clone();
         set_panel(&mut next.root, self.focus, panel);
         next
@@ -325,7 +389,7 @@ impl Layout {
     ///
     /// `maximized` renders that leaf over the whole pane and every other leaf
     /// not at all, without the tree knowing anything about it.
-    pub fn solve(&self, area: Rect, maximized: Option<LeafId>) -> Vec<Placement> {
+    pub fn solve(&self, area: Rect, maximized: Option<LeafId>) -> Vec<Placement<P>> {
         if let Some(id) = maximized
             && let Some(panel) = self.panel_of(id)
         {
@@ -345,7 +409,7 @@ impl Layout {
         // arrangement is the reader's, so the frame gives way instead: the
         // focused panel takes the pane until there is room again.
         if out.iter().any(|p| !fits(p.rect)) {
-            let panel = self.panel_of(self.focus).unwrap_or(PanelType::Geometry);
+            let panel = self.panel_of(self.focus).unwrap_or_else(P::fallback);
             out = vec![Placement {
                 id: self.focus,
                 panel,
@@ -377,7 +441,7 @@ impl Layout {
             return self.clone();
         }
         let mut next = self.clone();
-        for panel in ELISION_ORDER {
+        for panel in P::elision_order().iter().copied() {
             let victims: Vec<LeafId> = next
                 .leaves()
                 .into_iter()
@@ -428,7 +492,7 @@ impl Layout {
 /// nobody opens it, while this file sits beside a user's other dotfiles and is
 /// expected to be read. Going compact also keeps `serde` and `serde_json` out
 /// of this crate, which has neither.
-impl Layout {
+impl<P: PanelKind> Layout<P> {
     pub fn encode(&self) -> String {
         let mut out = String::new();
         write_node(&self.root, &mut out);
@@ -437,10 +501,11 @@ impl Layout {
 
     /// Read a layout back, or say where it stopped making sense.
     pub fn decode(source: &str) -> Result<Self, String> {
-        let mut cursor = Cursor {
+        let mut cursor = Cursor::<P> {
             text: source.trim(),
             at: 0,
             next_id: 0,
+            kind: std::marker::PhantomData,
         };
         let root = cursor.node()?;
         cursor.skip_space();
@@ -456,7 +521,7 @@ impl Layout {
     }
 }
 
-fn write_node(node: &Node, out: &mut String) {
+fn write_node<P: PanelKind>(node: &Node<P>, out: &mut String) {
     match node {
         Node::Leaf { panel, .. } => out.push_str(panel.token()),
         Node::Split {
@@ -479,20 +544,23 @@ fn write_node(node: &Node, out: &mut String) {
     }
 }
 
-struct Cursor<'a> {
+struct Cursor<'a, P> {
     text: &'a str,
     at: usize,
     next_id: u32,
+    /// The vocabulary being read. Carried as a marker because the cursor
+    /// produces panels without ever holding one.
+    kind: std::marker::PhantomData<P>,
 }
 
-impl Cursor<'_> {
+impl<P: PanelKind> Cursor<'_, P> {
     fn skip_space(&mut self) {
         while self.text[self.at..].starts_with(' ') {
             self.at += 1;
         }
     }
 
-    fn node(&mut self) -> Result<Node, String> {
+    fn node(&mut self) -> Result<Node<P>, String> {
         self.skip_space();
         let rest = &self.text[self.at..];
         let dir = match rest.chars().next() {
@@ -531,7 +599,7 @@ impl Cursor<'_> {
         })
     }
 
-    fn leaf(&mut self) -> Result<Node, String> {
+    fn leaf(&mut self) -> Result<Node<P>, String> {
         let token: String = self.text[self.at..]
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
@@ -540,7 +608,7 @@ impl Cursor<'_> {
             return Err(format!("expected a panel name at byte {}", self.at));
         }
         self.at += token.len();
-        let panel = PanelType::from_token(&token)
+        let panel = P::from_token(&token)
             .ok_or_else(|| format!("{token} is not a panel this version knows"))?;
         let id = LeafId(self.next_id);
         self.next_id += 1;
@@ -605,7 +673,7 @@ impl Preset {
 
     /// The preset as a layout. Panics only if a preset's own encoding is
     /// malformed, which a test rules out.
-    pub fn layout(self) -> Layout {
+    pub fn layout(self) -> Layout<PanelType> {
         Layout::decode(self.encoded())
             .unwrap_or_else(|e| panic!("the {} preset does not parse: {e}", self.name()))
     }
@@ -663,7 +731,7 @@ fn scale(total: u16, ratio: f32) -> u16 {
     cells
 }
 
-fn place(node: &Node, area: Rect, out: &mut Vec<Placement>) {
+fn place<P: PanelKind>(node: &Node<P>, area: Rect, out: &mut Vec<Placement<P>>) {
     match node {
         Node::Leaf { id, panel } => out.push(Placement {
             id: *id,
@@ -685,7 +753,7 @@ fn place(node: &Node, area: Rect, out: &mut Vec<Placement>) {
     }
 }
 
-fn collect(node: &Node, out: &mut Vec<(LeafId, PanelType)>) {
+fn collect<P: PanelKind>(node: &Node<P>, out: &mut Vec<(LeafId, P)>) {
     match node {
         Node::Leaf { id, panel } => out.push((*id, *panel)),
         Node::Split { first, second, .. } => {
@@ -697,14 +765,19 @@ fn collect(node: &Node, out: &mut Vec<(LeafId, PanelType)>) {
 
 /// Turn a leaf into a split with the original on one side and a fresh
 /// catalogue leaf on the other.
-fn split_leaf(node: &mut Node, id: LeafId, dir: Direction, new_id: LeafId) -> bool {
+fn split_leaf<P: PanelKind>(
+    node: &mut Node<P>,
+    id: LeafId,
+    dir: Direction,
+    new_id: LeafId,
+) -> bool {
     match node {
         Node::Leaf { id: leaf, .. } if *leaf == id => {
             let original = std::mem::replace(
                 node,
                 Node::Leaf {
                     id,
-                    panel: PanelType::Catalogue,
+                    panel: P::default(),
                 },
             );
             *node = Node::Split {
@@ -713,7 +786,7 @@ fn split_leaf(node: &mut Node, id: LeafId, dir: Direction, new_id: LeafId) -> bo
                 first: Box::new(original),
                 second: Box::new(Node::Leaf {
                     id: new_id,
-                    panel: PanelType::Catalogue,
+                    panel: P::default(),
                 }),
             };
             true
@@ -725,7 +798,7 @@ fn split_leaf(node: &mut Node, id: LeafId, dir: Direction, new_id: LeafId) -> bo
     }
 }
 
-fn set_panel(node: &mut Node, id: LeafId, panel: PanelType) -> bool {
+fn set_panel<P: PanelKind>(node: &mut Node<P>, id: LeafId, panel: P) -> bool {
     match node {
         Node::Leaf {
             id: leaf,
@@ -744,7 +817,7 @@ fn set_panel(node: &mut Node, id: LeafId, panel: PanelType) -> bool {
 /// Remove a leaf, collapsing its parent into the surviving sibling.
 ///
 /// Returns a leaf from the survivor for focus to land on.
-fn remove_leaf(node: &mut Node, id: LeafId) -> Option<LeafId> {
+fn remove_leaf<P: PanelKind>(node: &mut Node<P>, id: LeafId) -> Option<LeafId> {
     let Node::Split { first, second, .. } = node else {
         return None;
     };
@@ -758,7 +831,7 @@ fn remove_leaf(node: &mut Node, id: LeafId) -> Option<LeafId> {
                 &mut **second,
                 Node::Leaf {
                     id,
-                    panel: PanelType::Catalogue,
+                    panel: P::default(),
                 },
             )
         } else {
@@ -766,7 +839,7 @@ fn remove_leaf(node: &mut Node, id: LeafId) -> Option<LeafId> {
                 &mut **first,
                 Node::Leaf {
                     id,
-                    panel: PanelType::Catalogue,
+                    panel: P::default(),
                 },
             )
         };
@@ -778,7 +851,7 @@ fn remove_leaf(node: &mut Node, id: LeafId) -> Option<LeafId> {
     remove_leaf(first, id).or_else(|| remove_leaf(second, id))
 }
 
-fn first_leaf(node: &Node) -> LeafId {
+fn first_leaf<P: PanelKind>(node: &Node<P>) -> LeafId {
     match node {
         Node::Leaf { id, .. } => *id,
         Node::Split { first, .. } => first_leaf(first),
@@ -786,7 +859,7 @@ fn first_leaf(node: &Node) -> LeafId {
 }
 
 /// Nudge the ratio of the split immediately above a leaf.
-fn adjust_ratio(node: &mut Node, id: LeafId, delta: f32) -> bool {
+fn adjust_ratio<P: PanelKind>(node: &mut Node<P>, id: LeafId, delta: f32) -> bool {
     let Node::Split {
         ratio,
         first,
@@ -815,14 +888,14 @@ fn adjust_ratio(node: &mut Node, id: LeafId, delta: f32) -> bool {
     false
 }
 
-fn contains(node: &Node, id: LeafId) -> bool {
+fn contains<P: PanelKind>(node: &Node<P>, id: LeafId) -> bool {
     match node {
         Node::Leaf { id: leaf, .. } => *leaf == id,
         Node::Split { first, second, .. } => contains(first, id) || contains(second, id),
     }
 }
 
-fn even(node: &mut Node) {
+fn even<P: PanelKind>(node: &mut Node<P>) {
     if let Node::Split {
         ratio,
         first,
@@ -836,7 +909,7 @@ fn even(node: &mut Node) {
     }
 }
 
-impl Node {
+impl<P> Node<P> {
     fn is_leaf(&self) -> bool {
         matches!(self, Node::Leaf { .. })
     }
@@ -853,8 +926,55 @@ mod tests {
         height: 44,
     };
 
-    fn survey() -> Layout {
+    fn survey() -> Layout<PanelType> {
         Preset::Survey.layout()
+    }
+
+    /// A second surface's vocabulary, so the provided parts of [`PanelKind`]
+    /// are exercised by something other than the surface they were lifted from.
+    /// Two members is enough: one choosable and the empty leaf.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    enum Fixture {
+        Only,
+        #[default]
+        Empty,
+    }
+
+    impl PanelKind for Fixture {
+        fn choosable() -> &'static [Self] {
+            &[Fixture::Only]
+        }
+        fn elision_order() -> &'static [Self] {
+            &[]
+        }
+        fn name(self) -> &'static str {
+            match self {
+                Self::Only => "only",
+                Self::Empty => "empty",
+            }
+        }
+    }
+
+    /// The provided reader accepts what a reader could have chosen and the
+    /// empty leaf, and nothing else. Written against a kind that is not the
+    /// analyze one, because the analyze one has its own override and would
+    /// prove only that the override works.
+    #[test]
+    fn a_kinds_tokens_round_trip_and_a_stranger_is_refused() {
+        for kind in [Fixture::Only, Fixture::Empty] {
+            assert_eq!(Fixture::from_token(kind.token()), Some(kind));
+        }
+        assert_eq!(Fixture::from_token("nonesuch"), None);
+        assert_eq!(Fixture::fallback(), Fixture::Only);
+    }
+
+    /// The arrangement a terminal cannot satisfy shows the focused panel, and
+    /// when it cannot even find that one it shows something about the model
+    /// rather than a prompt to pick a panel there is no room for.
+    #[test]
+    fn the_solves_fallback_is_a_panel_and_not_the_catalogue() {
+        assert_eq!(PanelType::fallback(), PanelType::Geometry);
+        assert_ne!(PanelType::fallback(), PanelType::default());
     }
 
     #[test]
@@ -1180,7 +1300,7 @@ mod tests {
                 "{} does not survive a round trip",
                 preset.name()
             );
-            let again = Layout::decode(&layout.encode()).expect("re-parses");
+            let again = Layout::<PanelType>::decode(&layout.encode()).expect("re-parses");
             assert_eq!(again.encode(), layout.encode());
         }
     }
@@ -1197,7 +1317,7 @@ mod tests {
             .expect("room");
 
         let text = built.encode();
-        let read = Layout::decode(&text).expect("parses");
+        let read = Layout::<PanelType>::decode(&text).expect("parses");
         assert_eq!(read.encode(), text);
         assert_eq!(
             read.leaves().iter().map(|(_, p)| *p).collect::<Vec<_>>(),
@@ -1207,7 +1327,8 @@ mod tests {
 
     #[test]
     fn the_encoding_reads_the_way_it_looks() {
-        let layout = Layout::decode("V0.336(silhouette,V0.505(geometry,health))").expect("parses");
+        let layout = Layout::<PanelType>::decode("V0.336(silhouette,V0.505(geometry,health))")
+            .expect("parses");
         let placements = layout.solve(PANE, None);
         assert_eq!(placements.len(), 3);
         assert_eq!(placements[0].rect.width, 47);
@@ -1236,7 +1357,8 @@ mod tests {
             ("meshes extra", "trailing text"),
             ("", "expected a panel"),
         ] {
-            let error = Layout::decode(source).expect_err("{source} should be refused");
+            let error =
+                Layout::<PanelType>::decode(source).expect_err("{source} should be refused");
             assert!(
                 error.contains(expected),
                 "{source:?} reported {error:?}, expected it to mention {expected:?}"
@@ -1248,7 +1370,7 @@ mod tests {
     /// without the new leaf colliding with one that came from the file.
     #[test]
     fn a_decoded_tree_can_still_be_split() {
-        let layout = Layout::decode(Preset::Survey.encoded()).expect("parses");
+        let layout = Layout::<PanelType>::decode(Preset::Survey.encoded()).expect("parses");
         let split = layout.split(PANE, Direction::Horizontal).expect("room");
         let ids: Vec<LeafId> = split.leaves().into_iter().map(|(id, _)| id).collect();
         let mut unique = ids.clone();

@@ -14,7 +14,7 @@ use ratatui::widgets::Paragraph;
 use solarxy_core::format_number;
 
 use super::super::widgets;
-use super::{Action, Ctx, Panel};
+use super::{Action, AnalyzeCtx, Analysis, Panel};
 
 /// Which count the bars are of.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -49,8 +49,9 @@ const NAME_WIDTH: u16 = 14;
 
 impl Distributions {
     /// Every mesh's share, largest first.
-    fn shares(&self, ctx: &Ctx<'_>) -> Vec<(String, u64)> {
+    fn shares(&self, ctx: &AnalyzeCtx<'_>) -> Vec<(String, u64)> {
         let mut rows: Vec<(String, u64)> = ctx
+            .subject
             .report
             .meshes
             .iter()
@@ -72,19 +73,19 @@ impl Distributions {
     }
 }
 
-impl Panel for Distributions {
+impl Panel<Analysis<'_>, Action> for Distributions {
     fn menu(&self) -> &'static [&'static str] {
         &["by"]
     }
 
-    fn handle(&mut self, key: KeyEvent, _ctx: &Ctx<'_>) -> Action {
+    fn handle(&mut self, key: KeyEvent, _ctx: &AnalyzeCtx<'_>) -> Action {
         if matches!(key.code, KeyCode::Char('b') | KeyCode::Char('B')) {
             self.by = self.by.next();
         }
         Action::None
     }
 
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
         let rows = self.shares(ctx);
         if rows.is_empty() {
             let (line, rect) = widgets::empty_state("no meshes to compare", area, ctx.theme);
@@ -156,8 +157,8 @@ impl Panel for Distributions {
         frame.render_widget(Paragraph::new(lines), area);
     }
 
-    fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
-        Some(format!("{} meshes", ctx.report.mesh_count))
+    fn status(&self, ctx: &AnalyzeCtx<'_>) -> Option<String> {
+        Some(format!("{} meshes", ctx.subject.report.mesh_count))
     }
 }
 

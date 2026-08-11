@@ -16,7 +16,7 @@ use solarxy_core::format_number;
 use solarxy_core::report::MeshSummary;
 
 use super::super::widgets;
-use super::{Action, Ctx, Panel, Sort};
+use super::{Action, AnalyzeCtx, Analysis, Panel, Sort};
 
 /// The table's column headers, in sort-cycle order.
 pub const COLUMNS: [&str; 6] = ["name", "tris", "verts", "nrm", "uv", "material"];
@@ -34,9 +34,10 @@ impl Meshes {
     /// Filtering and sorting are resolved together and on every draw rather
     /// than cached, because the alternative is a cache that has to be
     /// invalidated from two places and eventually is not.
-    fn rows<'a>(&self, ctx: &Ctx<'a>) -> Vec<&'a MeshSummary> {
+    fn rows<'a>(&self, ctx: &AnalyzeCtx<'a>) -> Vec<&'a MeshSummary> {
         let needle = self.filter.as_deref().unwrap_or("").to_lowercase();
         let mut rows: Vec<&MeshSummary> = ctx
+            .subject
             .report
             .meshes
             .iter()
@@ -78,12 +79,12 @@ impl Meshes {
     }
 }
 
-impl Panel for Meshes {
+impl Panel<Analysis<'_>, Action> for Meshes {
     fn menu(&self) -> &'static [&'static str] {
         &["sort", "filter"]
     }
 
-    fn handle(&mut self, key: KeyEvent, ctx: &Ctx<'_>) -> Action {
+    fn handle(&mut self, key: KeyEvent, ctx: &AnalyzeCtx<'_>) -> Action {
         let count = self.rows(ctx).len();
         match key.code {
             KeyCode::Char('s') | KeyCode::Char('S') => self.sort = self.sort.cycle(COLUMNS.len()),
@@ -96,10 +97,10 @@ impl Panel for Meshes {
         Action::None
     }
 
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
         let rows = self.rows(ctx);
         if rows.is_empty() {
-            let what = if ctx.report.meshes.is_empty() {
+            let what = if ctx.subject.report.meshes.is_empty() {
                 "no meshes in this model"
             } else {
                 "no mesh matches the filter"
@@ -187,7 +188,7 @@ impl Panel for Meshes {
             .highlight_symbol("");
         frame.render_stateful_widget(table, table_area, &mut self.state);
 
-        let series = Self::triangle_series(ctx.report);
+        let series = Self::triangle_series(ctx.subject.report);
         let spark = widgets::sparkline(&series, ctx.glyphs);
         if area.height >= 2 {
             frame.render_widget(
@@ -210,8 +211,8 @@ impl Panel for Meshes {
         self.filter = query.filter(|q| !q.is_empty());
     }
 
-    fn filter_counts(&self, ctx: &Ctx<'_>) -> Option<(usize, usize)> {
-        Some((self.rows(ctx).len(), ctx.report.meshes.len()))
+    fn filter_counts(&self, ctx: &AnalyzeCtx<'_>) -> Option<(usize, usize)> {
+        Some((self.rows(ctx).len(), ctx.subject.report.meshes.len()))
     }
 
     fn reveal(&mut self, row: usize) -> bool {
@@ -219,11 +220,11 @@ impl Panel for Meshes {
         true
     }
 
-    fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
+    fn status(&self, ctx: &AnalyzeCtx<'_>) -> Option<String> {
         Some(format!(
             "{} meshes \u{b7} {} tris",
-            format_number(ctx.report.mesh_count),
-            format_number(ctx.report.total_triangles)
+            format_number(ctx.subject.report.mesh_count),
+            format_number(ctx.subject.report.total_triangles)
         ))
     }
 }

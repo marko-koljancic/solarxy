@@ -211,7 +211,12 @@ fn run_analyze(
 #[cfg(feature = "analyzer")]
 fn terminal_too_small() -> Option<String> {
     let (width, height) = crossterm::terminal::size().ok()?;
-    solarxy_cli::tui::shell::below_floor(width, height)
+    solarxy_cli::tui::shell::below_floor(
+        width,
+        height,
+        "analyze",
+        "Printing the report instead; use --format text to ask for it directly.",
+    )
 }
 
 /// Assemble the analyze surface and hand it the terminal.

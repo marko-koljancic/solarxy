@@ -26,7 +26,6 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 
 use super::caps::{Capabilities, Glyphs};
 use super::keymap::{self, Context};
-use super::layout::PanelType;
 use super::theme::Slots;
 
 /// What is open over the grid, if anything.
@@ -67,7 +66,9 @@ pub struct Confirm {
 /// tree does not have.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Catalogue {
-    /// Index into [`PanelType::CHOOSABLE`].
+    /// Index into the name list the surface supplies through
+    /// [`Chrome::catalogue`], which is in the same order as the panels a
+    /// reader can choose.
     pub selected: usize,
 }
 
@@ -108,24 +109,40 @@ fn window(area: Rect, want_width: u16, want_height: u16) -> Rect {
     )
 }
 
+/// Everything an overlay draws with that is not the overlay itself.
+///
+/// A bundle rather than five arguments, and the two name lists are why: this
+/// module used to read the analyze panel enum directly, which is the one thing
+/// that made it analyze's. Handed the words instead, it belongs to no surface,
+/// and a second surface's overlays cost nothing here.
+#[derive(Clone, Copy)]
+pub struct Chrome<'a> {
+    pub theme: &'a Slots,
+    pub glyphs: &'a Glyphs,
+    pub caps: Capabilities,
+    /// The focused panel's own border words, which the help overlay repeats.
+    pub panel_menu: &'a [&'static str],
+    /// The panels the pick offers, in the order a selection indexes them.
+    pub catalogue: &'a [&'static str],
+}
+
 /// Draw an overlay centred over the dimmed grid: the window, its double
 /// border, and the body the variant supplies.
-pub fn draw(
-    frame: &mut Frame,
-    area: Rect,
-    overlay: &Overlay,
-    theme: &Slots,
-    glyphs: &Glyphs,
-    caps: Capabilities,
-    panel_menu: &[&'static str],
-) {
+pub fn draw(frame: &mut Frame, area: Rect, overlay: &Overlay, chrome: &Chrome<'_>) {
+    let Chrome {
+        theme,
+        glyphs,
+        caps,
+        panel_menu,
+        catalogue: catalogue_names,
+    } = *chrome;
     dim(frame, area, theme);
 
     let body = match overlay {
         Overlay::Help => help_lines(theme, glyphs, panel_menu),
         Overlay::Export(export) => export_lines(export, theme, glyphs),
         Overlay::Confirm(confirm) => confirm_lines(confirm, theme),
-        Overlay::Catalogue(catalogue) => catalogue_lines(catalogue, theme),
+        Overlay::Catalogue(catalogue) => catalogue_lines(catalogue, theme, catalogue_names),
     };
     let want_width = body
         .iter()
@@ -302,10 +319,19 @@ fn confirm_lines(confirm: &Confirm, theme: &Slots) -> Vec<Line<'static>> {
 /// The pick list: every choosable type, the selected one marked the way the
 /// export overlay marks its chosen format, so the language is already
 /// learned and survives monochrome.
-fn catalogue_lines(catalogue: &Catalogue, theme: &Slots) -> Vec<Line<'static>> {
+///
+/// The names arrive rather than being read off a panel enum, because this
+/// module has no business knowing which surface is asking. What it costs is
+/// that nothing here can check the list is the whole catalogue; the surface
+/// that assembles it asserts that instead.
+fn catalogue_lines(
+    catalogue: &Catalogue,
+    theme: &Slots,
+    names: &[&'static str],
+) -> Vec<Line<'static>> {
     let radio = |on: bool| if on { "(\u{2022})" } else { "( )" };
     let mut lines = vec![Line::raw("")];
-    for (i, kind) in PanelType::CHOOSABLE.iter().enumerate() {
+    for (i, name) in names.iter().enumerate() {
         let chosen = i == catalogue.selected;
         let style = if chosen {
             Style::default()
@@ -315,7 +341,7 @@ fn catalogue_lines(catalogue: &Catalogue, theme: &Slots) -> Vec<Line<'static>> {
             Style::default().fg(theme.ink)
         };
         lines.push(Line::from(Span::styled(
-            format!("  {} {}", radio(chosen), kind.name()),
+            format!("  {} {}", radio(chosen), name),
             style,
         )));
     }
@@ -436,23 +462,28 @@ mod tests {
         assert!(text(false).contains("(\u{2022}) text"), "{}", text(false));
     }
 
-    /// The pick lists every choosable type, or the overlay silently narrows
-    /// the catalogue it is named for.
+    /// The pick lists everything it was handed and marks the selection.
+    ///
+    /// That the list *is* the whole catalogue is asserted where the list is
+    /// now assembled, in the surface, since this module no longer knows which
+    /// surface is asking. Driven with the analyze names anyway, so the shape a
+    /// reader actually sees is the shape under test.
     #[test]
-    fn the_catalogue_lists_every_choosable_type_and_marks_the_pick() {
+    fn the_catalogue_lists_everything_it_is_given_and_marks_the_pick() {
         let theme = slots();
-        let text: String = catalogue_lines(&Catalogue { selected: 2 }, &theme)
+        // Invented rather than borrowed from a surface: this module no longer
+        // knows any, and a test that reached for one would put the coupling
+        // back.
+        let names = ["first", "second", "third", "fourth"];
+        let text: String = catalogue_lines(&Catalogue { selected: 2 }, &theme, &names)
             .iter()
             .flat_map(|line| line.spans.iter())
             .map(|span| span.content.to_string())
             .collect();
-        for kind in PanelType::CHOOSABLE {
-            assert!(text.contains(kind.name()), "missing {}", kind.name());
+        for name in &names {
+            assert!(text.contains(name), "missing {name}");
         }
-        assert!(
-            text.contains(&format!("(\u{2022}) {}", PanelType::CHOOSABLE[2].name())),
-            "{text}"
-        );
+        assert!(text.contains(&format!("(\u{2022}) {}", names[2])), "{text}");
     }
 
     /// Confirm names what it is about to close and why it is asking, because

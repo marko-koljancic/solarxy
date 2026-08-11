@@ -17,7 +17,7 @@
 
 use ratatui::layout::Rect;
 
-use super::layout::{Direction, Layout, Refusal};
+use super::layout::{Direction, Layout, PanelKind, Refusal};
 
 /// One thing a reader can do to an arrangement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,9 +56,9 @@ pub const RESIZE_STEP: f32 = 0.05;
 /// key ends arranging and the caller acts on it directly, so this enum stays
 /// about what happened to the arrangement rather than to the reader's mode.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Outcome {
+pub enum Outcome<P> {
     /// The arrangement changed.
-    Changed(Layout),
+    Changed(Layout<P>),
     /// The command was refused; the arrangement is untouched and the reason
     /// belongs in the focused panel's border.
     Refused(Refusal),
@@ -69,7 +69,7 @@ pub enum Outcome {
 /// Takes the pane because every refusal is a question about cells: whether a
 /// split leaves both children readable can only be answered against the size
 /// the arrangement is actually being drawn at.
-pub fn apply(layout: &Layout, area: Rect, command: Command) -> Outcome {
+pub fn apply<P: PanelKind>(layout: &Layout<P>, area: Rect, command: Command) -> Outcome<P> {
     match command {
         Command::Focus(toward) => Outcome::Changed(focus_toward(layout, area, toward)),
         Command::Split(dir) => result(layout.split(area, dir)),
@@ -80,7 +80,7 @@ pub fn apply(layout: &Layout, area: Rect, command: Command) -> Outcome {
     }
 }
 
-fn result(outcome: Result<Layout, Refusal>) -> Outcome {
+fn result<P: PanelKind>(outcome: Result<Layout<P>, Refusal>) -> Outcome<P> {
     match outcome {
         Ok(layout) => Outcome::Changed(layout),
         Err(refusal) => Outcome::Refused(refusal),
@@ -97,7 +97,7 @@ fn result(outcome: Result<Layout, Refusal>) -> Outcome {
 /// answer at an edge: silently wrapping to the far side would move the eye
 /// somewhere it did not ask to go.
 #[must_use]
-pub fn focus_toward(layout: &Layout, area: Rect, toward: Toward) -> Layout {
+pub fn focus_toward<P: PanelKind>(layout: &Layout<P>, area: Rect, toward: Toward) -> Layout<P> {
     let placements = layout.solve(area, None);
     let Some(current) = placements.iter().find(|p| p.focused) else {
         return layout.clone();
@@ -197,7 +197,7 @@ mod tests {
         height: 44,
     };
 
-    fn focused_name(layout: &Layout) -> &'static str {
+    fn focused_name(layout: &Layout<PanelType>) -> &'static str {
         layout
             .panel_of(layout.focus())
             .expect("focus points at a leaf")
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn growing_and_shrinking_move_the_divider_opposite_ways() {
         let layout = Preset::Survey.layout();
-        let width_of = |l: &Layout| l.solve(PANE, None)[0].rect.width;
+        let width_of = |l: &Layout<PanelType>| l.solve(PANE, None)[0].rect.width;
         let start = width_of(&layout);
 
         let Outcome::Changed(grown) = apply(&layout, PANE, Command::Grow) else {

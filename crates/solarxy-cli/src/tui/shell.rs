@@ -10,24 +10,44 @@
 //!
 //! # Giving the terminal back
 //!
-//! Setup and restore are paired here so no caller can take the screen without
-//! also arranging to hand it back, and a panic hook restores before it
-//! delegates. Without that hook a panic anywhere in a draw leaves the reader
-//! at a shell that is still in raw mode with the alternate screen showing:
-//! no echo, no line editing, and no obvious way out.
+//! Setup and restore are paired in [`Session`], so no caller can take the
+//! screen without also arranging to hand it back, and a panic hook restores
+//! before it delegates. Without that hook a panic anywhere in a draw leaves the
+//! reader at a shell that is still in raw mode with the alternate screen
+//! showing: no echo, no line editing, and no obvious way out.
 //!
-//! `ratatui::restore` covers raw mode and the alternate screen and nothing
-//! else, so anything this module turns on it must turn off itself. Today that
-//! is mouse capture.
+//! A session rather than only a loop, because not every surface can be driven
+//! by one. A surface that reports on work happening elsewhere is called by that
+//! work and cannot also own the loop, so it takes the screen, draws when it is
+//! told something, and gives the screen back. [`run`] is the same session for a
+//! surface that has nothing else to do.
+//!
+//! # Why the screen is taken by hand rather than through `ratatui::init`
+//!
+//! That helper is hard-wired to standard output in three places: it enters the
+//! alternate screen there, its restore leaves it there, and the panic hook it
+//! installs writes the leave sequence there **for the rest of the process**. A
+//! surface painting on standard error cannot use any of it without putting
+//! escape sequences into the stream that carries data. Doing the four steps
+//! here costs a dozen lines and makes the stream a parameter.
+//!
+//! It also removes a hook the old code could not have been right about: this
+//! module used to take `ratatui`'s wrapper as the previous hook and put *that*
+//! back on the way out, so every later panic in the process stayed wrapped in a
+//! restore for a terminal nobody held. The hook captured below is the real one.
 
-use std::io;
+use std::io::{self, Write};
 use std::sync::Arc;
 
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyEvent, KeyEventKind, MouseEvent,
 };
 use crossterm::execute;
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::Frame;
+use ratatui::backend::CrosstermBackend;
 
 /// How long a quiet loop waits before looking up.
 ///
@@ -111,83 +131,189 @@ pub fn mouse_requested(lookup: impl Fn(&str) -> Option<String>) -> bool {
 /// The message for a terminal too small to take over, or `None` if it fits.
 ///
 /// Names both the actual and the required size, because "too small" without
-/// numbers leaves the reader guessing how much to drag.
-pub fn below_floor(width: u16, height: u16) -> Option<String> {
+/// numbers leaves the reader guessing how much to drag. `surface` names which
+/// one is refusing and `instead` says what happens now, because a reader who is
+/// told only that something did not fit has been told the least useful half.
+pub fn below_floor(width: u16, height: u16, surface: &str, instead: &str) -> Option<String> {
     (width < FLOOR_WIDTH || height < FLOOR_HEIGHT).then(|| {
         format!(
-            "This terminal is {width}x{height} and the analyze surface needs \
-             {FLOOR_WIDTH}x{FLOOR_HEIGHT}. Printing the report instead; \
-             use --format text to ask for it directly."
+            "This terminal is {width}x{height} and the {surface} surface needs \
+             {FLOOR_WIDTH}x{FLOOR_HEIGHT}. {instead}"
         )
     })
 }
 
-/// Take the terminal, run the surface, and give it back.
+/// Which stream a surface paints on.
 ///
-/// The restore path runs whatever the loop did, including panicking, which is
-/// the whole reason setup and teardown live together in one function rather
-/// than at two call sites that could drift.
-pub fn run(surface: &mut impl Surface) -> io::Result<()> {
-    let mouse = mouse_requested(|key| std::env::var(key).ok());
-    let mut terminal = ratatui::init();
-    if mouse {
-        execute!(io::stdout(), EnableMouseCapture)?;
-    }
-    let previous = install_panic_hook(mouse);
-
-    let result = pump(surface, &mut terminal, mouse);
-
-    if mouse {
-        let _ = execute!(io::stdout(), DisableMouseCapture);
-    }
-    ratatui::restore();
-    // Put the reader's own hook back rather than leaving every later panic in
-    // this process wrapped in a restore for a terminal nobody holds any more.
-    std::panic::set_hook(Box::new(move |info| previous(info)));
-    result
+/// Standard output is where a terminal application conventionally draws, and
+/// where the analyze surface draws. A progress surface draws on standard error
+/// instead, because this release's rule is that standard output carries data: a
+/// dashboard painted on it would put escape sequences into the stream a build
+/// system parses, and the alternate screen's exit sequence would land there
+/// after the surface had finished with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stream {
+    Stdout,
+    Stderr,
 }
 
-/// Restore before delegating, so a panic message lands on a usable terminal.
-///
-/// The previous hook is what prints the message and the backtrace, so it still
-/// has to run; it just must not run first, into a screen that is still in raw
-/// mode. It is shared rather than moved because it is needed twice: once from
-/// inside the wrapper and once to put back afterwards.
-fn install_panic_hook(mouse: bool) -> PanicHook {
-    let previous: PanicHook = Arc::from(std::panic::take_hook());
-    let inner = Arc::clone(&previous);
-    std::panic::set_hook(Box::new(move |info| {
-        if mouse {
-            let _ = execute!(io::stdout(), DisableMouseCapture);
+impl Stream {
+    /// A fresh handle to the stream.
+    ///
+    /// Boxed rather than made a type parameter of the session, because the only
+    /// thing that varies is which descriptor the escape sequences reach, and a
+    /// type parameter for that would spread through every signature touching a
+    /// session for no gain a reader could name.
+    fn writer(self) -> Box<dyn Write> {
+        match self {
+            Self::Stdout => Box::new(io::stdout()),
+            Self::Stderr => Box::new(io::stderr()),
         }
-        ratatui::restore();
-        inner(info);
-    }));
-    previous
+    }
+
+    /// How the stream is named to a person, for a message that has to say.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Stdout => "standard output",
+            Self::Stderr => "standard error",
+        }
+    }
+}
+
+/// Give the screen back. Safe on a session that never finished taking it.
+///
+/// Free rather than a method, because the panic hook has to run it and cannot
+/// hold the session: the session is what is unwinding.
+fn restore(stream: Stream, mouse: bool) {
+    let mut out = stream.writer();
+    // Before leaving the screen, so the sequence lands where it was turned on.
+    if mouse {
+        let _ = execute!(out, DisableMouseCapture);
+    }
+    let _ = disable_raw_mode();
+    let _ = execute!(out, LeaveAlternateScreen);
 }
 
 type PanicHook = Arc<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send>;
 
-fn pump(
-    surface: &mut impl Surface,
-    terminal: &mut ratatui::DefaultTerminal,
+/// The terminal, held for as long as a surface needs it.
+///
+/// Taking it and giving it back are one value rather than two calls, so a
+/// caller cannot do the first without the second: the restore runs from `Drop`,
+/// which covers the early return and the panic alike.
+pub struct Session {
+    terminal: ratatui::Terminal<CrosstermBackend<Box<dyn Write>>>,
+    stream: Stream,
     mouse: bool,
-) -> io::Result<()> {
-    let mut dirty = true;
-    loop {
-        if dirty {
-            terminal.draw(|frame| surface.draw(frame))?;
-            dirty = false;
-        }
+    /// Put back when the session ends. `Option` only so `Drop` can take it.
+    previous: Option<PanicHook>,
+}
 
-        let input = if event::poll(TICK)? {
+impl Session {
+    /// Take the screen, on a stream.
+    ///
+    /// # Errors
+    /// If the terminal will not go into raw mode or will not switch screens.
+    pub fn enter(stream: Stream) -> io::Result<Self> {
+        let mouse = mouse_requested(|key| std::env::var(key).ok());
+
+        // The real hook, taken before anything else installs one. Shared rather
+        // than moved because it is needed twice: from inside the wrapper, and
+        // to put back afterwards.
+        let previous: PanicHook = Arc::from(std::panic::take_hook());
+        let inner = Arc::clone(&previous);
+        // Restore before delegating, so a panic message lands on a usable
+        // terminal. The previous hook still prints the message and the
+        // backtrace; it just must not do it first, into a screen that is still
+        // in raw mode.
+        std::panic::set_hook(Box::new(move |info| {
+            restore(stream, mouse);
+            inner(info);
+        }));
+
+        // From here every way out unwinds through `Drop`, including the three
+        // fallible steps below, so a screen half taken is still given back.
+        let session = Self {
+            terminal: ratatui::Terminal::new(CrosstermBackend::new(stream.writer()))?,
+            stream,
+            mouse,
+            previous: Some(previous),
+        };
+        enable_raw_mode()?;
+        let mut out = stream.writer();
+        execute!(out, EnterAlternateScreen)?;
+        if mouse {
+            execute!(out, EnableMouseCapture)?;
+        }
+        Ok(session)
+    }
+
+    /// Which stream this session paints on.
+    #[must_use]
+    pub fn stream(&self) -> Stream {
+        self.stream
+    }
+
+    /// Paint the surface once.
+    ///
+    /// # Errors
+    /// If the terminal cannot be written to.
+    pub fn draw(&mut self, surface: &mut impl Surface) -> io::Result<()> {
+        self.terminal.draw(|frame| surface.draw(frame))?;
+        Ok(())
+    }
+
+    /// Wait up to `timeout` for something the surface cares about.
+    ///
+    /// `Some(Input::Tick)` means the wait expired and `None` means an event
+    /// arrived that this surface has no use for. The two are distinct because
+    /// only the first is a reason to consider repainting. A caller driving its
+    /// own work passes a zero timeout and gets one or the other at once.
+    ///
+    /// # Errors
+    /// If the event stream cannot be read.
+    pub fn poll(&mut self, timeout: std::time::Duration) -> io::Result<Option<Input>> {
+        if event::poll(timeout)? {
             // A resize arrives here as an event rather than as a surprise,
             // because crossterm registers for the signal. What was missing
             // before was anything to wake up and notice.
-            classify(&event::read()?, mouse)
+            Ok(classify(&event::read()?, self.mouse))
         } else {
-            Some(Input::Tick)
-        };
+            Ok(Some(Input::Tick))
+        }
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        restore(self.stream, self.mouse);
+        // Put the reader's own hook back rather than leaving every later panic
+        // in this process wrapped in a restore for a terminal nobody holds any
+        // more.
+        if let Some(previous) = self.previous.take() {
+            std::panic::set_hook(Box::new(move |info| previous(info)));
+        }
+    }
+}
+
+/// Take the terminal, run the surface until it quits, and give it back.
+///
+/// The loop for a surface that has nothing else to do. One driven by work
+/// happening elsewhere holds a [`Session`] and calls it itself.
+///
+/// # Errors
+/// If the terminal cannot be taken, drawn to, or read from.
+pub fn run(surface: &mut impl Surface) -> io::Result<()> {
+    let mut session = Session::enter(Stream::Stdout)?;
+    let mut dirty = true;
+    loop {
+        if dirty {
+            session.draw(surface)?;
+            dirty = false;
+        }
+
+        let input = session.poll(TICK)?;
 
         let Some(input) = input else { continue };
         // A tick repaints only if the surface says so; anything else is a real
@@ -279,21 +405,42 @@ mod tests {
         assert_eq!(classify(&Event::Paste("x".to_owned()), true), None);
     }
 
+    const ANALYZE_INSTEAD: &str =
+        "Printing the report instead; use --format text to ask for it directly.";
+
+    fn analyze_floor(width: u16, height: u16) -> Option<String> {
+        below_floor(width, height, "analyze", ANALYZE_INSTEAD)
+    }
+
     /// "Too small" without numbers leaves the reader guessing how far to drag.
     #[test]
     fn the_floor_message_names_both_sizes() {
-        assert_eq!(below_floor(FLOOR_WIDTH, FLOOR_HEIGHT), None);
-        assert_eq!(below_floor(200, 60), None);
+        assert_eq!(analyze_floor(FLOOR_WIDTH, FLOOR_HEIGHT), None);
+        assert_eq!(analyze_floor(200, 60), None);
 
-        let message = below_floor(80, 25).expect("below the floor");
+        let message = analyze_floor(80, 25).expect("below the floor");
         assert!(message.contains("80x25"), "{message}");
         assert!(message.contains("100x30"), "{message}");
         assert!(message.contains("--format text"), "{message}");
     }
 
+    /// The surface refusing and what happens now are both the caller's words,
+    /// so a second surface says its own thing rather than the analyzer's.
+    #[test]
+    fn the_floor_message_is_the_callers_own() {
+        let message = below_floor(80, 25, "render", "Reporting a plain line instead.")
+            .expect("below the floor");
+        assert!(message.contains("the render surface needs"), "{message}");
+        assert!(
+            message.ends_with("Reporting a plain line instead."),
+            "{message}"
+        );
+        assert!(!message.contains("--format text"), "{message}");
+    }
+
     #[test]
     fn either_dimension_alone_is_enough_to_be_below_the_floor() {
-        assert!(below_floor(FLOOR_WIDTH - 1, FLOOR_HEIGHT).is_some());
-        assert!(below_floor(FLOOR_WIDTH, FLOOR_HEIGHT - 1).is_some());
+        assert!(analyze_floor(FLOOR_WIDTH - 1, FLOOR_HEIGHT).is_some());
+        assert!(analyze_floor(FLOOR_WIDTH, FLOOR_HEIGHT - 1).is_some());
     }
 }
