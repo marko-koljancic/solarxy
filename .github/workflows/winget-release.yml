@@ -81,6 +81,35 @@ jobs:
         shell: pwsh
         run: Invoke-WebRequest -Uri https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
 
+      # The submission opens its PR from a fork of microsoft/winget-pkgs, and
+      # wingetcreate refuses to submit when it cannot fast-forward that fork
+      # itself (4,185 commits behind at 0.8.2, failing with a generic "sync
+      # your fork manually and try again"). Sync it here, server-side: the
+      # merge-upstream API performs the same merge as the web UI's "Sync
+      # fork" button, on GitHub's side, which is what sidesteps the
+      # `workflow` scope a git push of upstream workflow files would need.
+      # The fork is never ahead, because nothing but wingetcreate writes to
+      # it, so a fast-forward always suffices and there is no conflict case.
+      # The fork owner is resolved from the PAT rather than hard-coded, since
+      # the fork is whichever account the credential belongs to.
+      - name: Sync the winget-pkgs fork with upstream
+        if: steps.gate.outputs.proceed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          fork_owner=$(gh api user -q .login)
+          if ! gh api "repos/$fork_owner/winget-pkgs" > /dev/null 2>&1; then
+            echo "::notice::$fork_owner has no winget-pkgs fork yet; wingetcreate will create one, which is born current."
+            exit 0
+          fi
+          echo "Syncing $fork_owner/winget-pkgs from upstream"
+          if ! gh api -X POST "repos/$fork_owner/winget-pkgs/merge-upstream" -f branch=master; then
+            echo "::error::The winget-pkgs fork is stale and could not be synced server-side. The submission would fail with wingetcreate's generic wording, but the cause is the fork, not the manifest: sync $fork_owner/winget-pkgs by hand (the web UI's Sync fork button performs the same merge) and re-run this workflow."
+            exit 1
+          fi
+
       - name: Fill manifest and submit to winget-pkgs
         if: steps.gate.outputs.proceed == 'true'
         shell: pwsh
