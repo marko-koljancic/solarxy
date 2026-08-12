@@ -9,10 +9,17 @@
 //!
 //! # What is not here
 //!
-//! The codes for a lost device and for an unavailable adapter. Both need a
-//! machine whose GPU behaves in a particular way, and a test that provokes one
-//! by breaking the machine is worse than the gap. They are exercised by hand and
-//! recorded.
+//! Six of the eight exit codes are provoked deliberately: zero and one, two for
+//! an input that cannot be read, three for a scene the document itself makes
+//! unrenderable, six for an interrupt, and seven for an output that cannot be
+//! written.
+//!
+//! Four, no adapter, and five, a lost device, are not. Both need a machine
+//! whose GPU behaves in a particular way, and a test that provokes one by
+//! breaking the machine is worse than the gap. Four is nonetheless exercised
+//! every time this suite runs somewhere without a GPU, which is why several
+//! tests below carry an arm for it rather than failing there; five is exercised
+//! by hand and recorded.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -365,6 +372,184 @@ fn a_build_without_the_window_says_so_rather_than_refusing_the_flag() {
         4 => eprintln!("skipping the success arm: no GPU adapter"),
         other => panic!("unexpected exit {other}; stderr said: {stderr}"),
     }
+}
+
+/// Naming a render node the scene does not have exits three.
+///
+/// Three is the scene's code: the invocation was well formed and the file
+/// loaded, and what failed was the document's own content. It is decided
+/// before any device exists, which is what lets this run on a machine with no
+/// GPU and still mean something.
+///
+/// The other two ways into three, a cook that fails and a scene carrying more
+/// than one render node, need a scene authored to be broken and a scene
+/// authored to be ambiguous. Neither exists as a fixture, and the code they
+/// return is this one, so this is what stands for the class.
+#[test]
+fn naming_a_render_node_the_scene_lacks_exits_three() {
+    let scene = repo_root().join("web/public/samples/lights-camera-review.slxy");
+    if !scene.exists() {
+        eprintln!("skipping: the sample scenes have not been generated");
+        return;
+    }
+    let Some(out) = render(&[
+        scene.to_str().expect("utf8 path"),
+        "--out",
+        "/dev/null.png",
+        "--render-node",
+        "no-node-is-called-this",
+    ]) else {
+        return;
+    };
+    assert_eq!(
+        code(&out),
+        3,
+        "stderr said: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty(), "a failure wrote to standard output");
+}
+
+/// An output that cannot be written exits seven, after the render.
+///
+/// Seven is the writing code, and it necessarily arrives late: the path is not
+/// opened until there are bytes for it, so the render has to succeed first.
+/// That is also why this skips on a machine with no adapter, which fails
+/// earlier with four and never reaches the write.
+#[test]
+fn an_output_that_cannot_be_written_exits_seven() {
+    let model = repo_root().join("res/models/armadillo.obj");
+    // A directory that is not there. `write` does not create parents, so this
+    // is a plain not-found at the moment of writing rather than a permission
+    // trick that behaves differently as root.
+    let missing = std::env::temp_dir()
+        .join("solarxy-render-contract")
+        .join("no-such-directory")
+        .join("out.png");
+    let Some(out) = render(&[
+        model.to_str().expect("utf8 path"),
+        "--out",
+        missing.to_str().expect("utf8 path"),
+        "--res",
+        "64x48",
+    ]) else {
+        return;
+    };
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    match code(&out) {
+        7 => assert!(out.stdout.is_empty(), "a failure wrote to standard output"),
+        4 => eprintln!("skipping: no GPU adapter, so the write is never reached"),
+        other => panic!("unexpected exit {other}; stderr said: {stderr}"),
+    }
+}
+
+/// An interrupt exits six and leaves no half-written file behind.
+///
+/// Unix only, because the signal is. Rather than sleeping a guessed interval,
+/// this reads the child's progress until sampling is announced, which is the
+/// only window in which the interrupt tests anything: before it the cancel
+/// flag has nothing to stop, and after it the file is already written.
+///
+/// Traced deliberately. A piped run writes one line per step and the step is
+/// the tile, so the rasterizer's single non-progressive pass announces itself
+/// and is over, leaving no window at all. The tracer announces the tile and
+/// then keeps sampling it, which is the window.
+///
+/// `kill` rather than a signalling crate: one process spawn against a utility
+/// every Unix has, versus a dependency in the tree of a public repository.
+#[cfg(unix)]
+#[test]
+fn an_interrupt_exits_six_and_leaves_no_partial_file() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    let bin = binary();
+    if !bin.exists() {
+        eprintln!("skipping: {} has not been built", bin.display());
+        return;
+    }
+    let dir = std::env::temp_dir().join("solarxy-render-contract");
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let out = dir.join("interrupted.png");
+    let _ = std::fs::remove_file(&out);
+    let model = repo_root().join("res/models/armadillo.obj");
+
+    // Small and deep rather than large and shallow: the samples are what the
+    // signal has to land inside, and the pixels are only cost.
+    let mut child = Command::new(bin)
+        .current_dir(repo_root())
+        .args([
+            "render",
+            model.to_str().expect("utf8 path"),
+            "--out",
+            out.to_str().expect("utf8 path"),
+            "--engine",
+            "path-traced",
+            "--res",
+            "128x128",
+            "--spp",
+            "4096",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+
+    let stderr = child.stderr.take().expect("stderr was piped");
+    let mut reader = BufReader::new(stderr);
+    let mut seen = String::new();
+    let mut sampling = false;
+    // The plain sink rewrites one line with carriage returns on a terminal and
+    // writes a line per step otherwise, which is what a piped run gets.
+    let mut line = Vec::new();
+    while reader
+        .read_until(b'\n', &mut line)
+        .expect("the child's progress reads")
+        > 0
+    {
+        seen.push_str(&String::from_utf8_lossy(&line));
+        line.clear();
+        if seen.contains("tile 1 of") {
+            sampling = true;
+            break;
+        }
+        if seen.contains("failed while") {
+            break;
+        }
+    }
+
+    if !sampling {
+        let _ = child.kill();
+        let _ = child.wait();
+        // A machine with no adapter is the one reason to let this go. Anything
+        // else, a flag this no longer accepts above all, would otherwise make
+        // the test pass by never running, which is how it first went green
+        // against an argument the command does not have.
+        assert!(
+            seen.contains("failed while loading"),
+            "the render never reached drawing, and not for want of an adapter: {seen}"
+        );
+        eprintln!("skipping: no GPU adapter");
+        return;
+    }
+
+    let killed = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .expect("kill runs");
+    assert!(killed.success(), "the signal was not delivered");
+
+    let status = child.wait().expect("the child exits");
+    assert_eq!(
+        status.code().unwrap_or(-1),
+        6,
+        "an interrupted render did not exit six"
+    );
+    assert!(
+        !out.exists(),
+        "an interrupted render left a file at {}",
+        out.display()
+    );
 }
 
 /// The subcommand did not displace the shipped surface.
