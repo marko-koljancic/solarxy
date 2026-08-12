@@ -4199,6 +4199,7 @@ dependencies = [
  "pollster",
  "serde",
  "serde_json",
+ "solarxy-bvh",
  "solarxy-core",
  "solarxy-formats",
  "solarxy-kernel",
