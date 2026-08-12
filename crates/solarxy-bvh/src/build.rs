@@ -502,7 +502,7 @@ fn partition_by_median(prims: &[PrimRef], order: &mut [u32], axis: usize) -> u32
 #[cfg(test)]
 mod tests {
     use super::{Bvh, MAX_DEPTH, MAX_LEAF_SIZE, TARGET_LEAF_SIZE};
-    use crate::corpus::grid;
+    use crate::corpus::{grid, sphere};
 
     #[test]
     fn an_empty_input_still_has_a_root() {
@@ -596,6 +596,32 @@ mod tests {
         assert_eq!(bvh.stats().prim_count, 500);
         assert!(bvh.stats().max_leaf_size <= MAX_LEAF_SIZE);
         assert!(bvh.stats().max_depth < MAX_DEPTH);
+    }
+
+    #[test]
+    fn the_same_geometry_builds_the_same_tree_twice() {
+        // Two things rest on this. A built hierarchy is cached across repacks
+        // and reused rather than rebuilt, so a second build that disagreed
+        // with the first would make a scene's rays depend on when the cache
+        // happened to miss. And a seeded render promises the same image
+        // twice, which it cannot keep if the tree underneath it moved.
+        //
+        // The coincident case is the one at risk: no split reduces area, so
+        // the median fallback runs, and it selects by an unstable order.
+        // Curved geometry with degenerate pole quads is the ordinary case
+        // beside it.
+        for (positions, indices) in [
+            sphere(24, 16),
+            (
+                vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                std::iter::repeat_n([0u32, 1, 2], 500).flatten().collect(),
+            ),
+        ] {
+            let first = Bvh::build_triangles(&positions, &indices);
+            let second = Bvh::build_triangles(&positions, &indices);
+            assert_eq!(first.nodes(), second.nodes());
+            assert_eq!(first.prim_indices(), second.prim_indices());
+        }
     }
 
     #[test]
