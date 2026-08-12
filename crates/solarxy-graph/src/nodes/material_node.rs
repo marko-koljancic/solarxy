@@ -358,7 +358,9 @@ fn surface_params() -> Vec<ParamSpec> {
              own reflection and dims what is under it by whatever it \
              reflects away, so a coated surface reads slightly darker as \
              well as shinier. It is an analytic approximation in the \
-             interactive viewport rather than a simulated layer.",
+             interactive viewport rather than a simulated layer, and a \
+             traced render evaluates it by a different method, so the two \
+             will not match pixel for pixel. Judge the coat in the render.",
         ),
         ParamSpec::new(
             "clearcoat_roughness",
@@ -392,7 +394,9 @@ fn surface_params() -> Vec<ParamSpec> {
              default, is no sheen, which is why this one starts at black \
              rather than white. Velvet, satin and brushed cloth are what \
              it is for. It is an analytic approximation in the interactive \
-             viewport.",
+             viewport, and a traced render evaluates it by a different \
+             method, so the two will not match pixel for pixel. Judge the \
+             sheen in the render.",
         ),
         ParamSpec::new(
             "sheen_roughness",
@@ -426,7 +430,9 @@ fn surface_params() -> Vec<ParamSpec> {
              bubble, an oil slick or anodized metal. 0 is none. The hue \
              depends on viewing angle and on the film's thickness, so it \
              moves as the camera moves, which is the whole effect. It is \
-             an analytic approximation in the interactive viewport.",
+             an analytic approximation in the interactive viewport, and a \
+             traced render evaluates it by a different method, so the two \
+             will not match pixel for pixel. Judge the film in the render.",
         ),
         ParamSpec::new(
             "iridescence_ior",
@@ -528,7 +534,10 @@ fn surface_params() -> Vec<ParamSpec> {
             "Stretches the specular highlight along one direction instead \
              of leaving it round: brushed metal, hair, the bottom of a \
              saucepan. 0 is isotropic. It follows the surface's tangents, \
-             so it needs UVs to point anywhere meaningful.",
+             so it needs UVs to point anywhere meaningful. The interactive \
+             viewport and a traced render evaluate the stretched highlight \
+             by different methods, so the two will not match pixel for \
+             pixel. Judge the highlight in the render.",
         ),
         ParamSpec::new(
             "anisotropy_rotation",
@@ -571,7 +580,11 @@ fn volume_params() -> Vec<ParamSpec> {
              reflections and lets light through it.\n\n\
              In the interactive viewport it refracts the environment, not \
              the objects behind the surface. Glass reads correctly against \
-             an environment and shows nothing of what is behind it.",
+             an environment and shows nothing of what is behind it. A \
+             traced render does carry light through to what is behind, so \
+             the two differ by more than pixels here: judge glass in the \
+             render. The traced result is itself an approximation, close \
+             enough to light a shot by and not a physical prediction.",
         ),
         ParamSpec::new(
             "ior",

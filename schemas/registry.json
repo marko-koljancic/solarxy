@@ -7796,7 +7796,7 @@
               }
             }
           ],
-          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer."
+          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the coat in the render."
         },
         {
           "key": "clearcoat_roughness",
@@ -7863,7 +7863,7 @@
               }
             }
           ],
-          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport."
+          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the sheen in the render."
         },
         {
           "key": "sheen_roughness",
@@ -7925,7 +7925,7 @@
               }
             }
           ],
-          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport."
+          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the film in the render."
         },
         {
           "key": "iridescence_ior",
@@ -8128,7 +8128,7 @@
               }
             }
           ],
-          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful."
+          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful. The interactive viewport and a traced render evaluate the stretched highlight by different methods, so the two will not match pixel for pixel. Judge the highlight in the render."
         },
         {
           "key": "anisotropy_rotation",
@@ -8195,7 +8195,7 @@
               }
             }
           ],
-          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it."
+          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it. A traced render does carry light through to what is behind, so the two differ by more than pixels here: judge glass in the render. The traced result is itself an approximation, close enough to light a shot by and not a physical prediction."
         },
         {
           "key": "ior",
@@ -10238,7 +10238,7 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer."
+          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the coat in the render."
         },
         {
           "key": "clearcoat_roughness",
@@ -10289,7 +10289,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport."
+          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the sheen in the render."
         },
         {
           "key": "sheen_roughness",
@@ -10333,7 +10333,7 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport."
+          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the film in the render."
         },
         {
           "key": "iridescence_ior",
@@ -10488,7 +10488,7 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful."
+          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful. The interactive viewport and a traced render evaluate the stretched highlight by different methods, so the two will not match pixel for pixel. Judge the highlight in the render."
         },
         {
           "key": "anisotropy_rotation",
@@ -10539,7 +10539,7 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it."
+          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it. A traced render does carry light through to what is behind, so the two differ by more than pixels here: judge glass in the render. The traced result is itself an approximation, close enough to light a shot by and not a physical prediction."
         },
         {
           "key": "ior",
