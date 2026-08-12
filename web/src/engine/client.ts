@@ -12,6 +12,7 @@ import type {
   AttrVizState,
   AttributePage,
   AttributeSummary,
+  BackendCapsSet,
   CameraCommand,
   CameraPose,
   Command,
@@ -181,6 +182,12 @@ export class SolarxyClient {
   /** Cancels the running still render. Safe when nothing is running. */
   cancelStillRender(): void {
     this.app.cancelStillRender();
+  }
+
+  /** What each render backend can do. Constants on the Rust side, so one
+   * read at boot is the whole cost. */
+  backendCaps(): BackendCapsSet {
+    return this.app.backendCaps() as BackendCapsSet;
   }
 
   /** A finished tile, or undefined when none is waiting. Drain in a loop:

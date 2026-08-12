@@ -8,6 +8,7 @@ pub(crate) struct MenuActions {
     pub close_model: bool,
     pub quit: bool,
     pub save_screenshot: bool,
+    pub render_still: bool,
     pub save_preferences: bool,
     pub save_view_defaults: bool,
     pub open_recent: Option<String>,

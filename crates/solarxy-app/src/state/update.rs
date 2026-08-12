@@ -196,6 +196,7 @@ impl State {
                 // have moved even when the HDRI did not.
                 EnvironmentOutcome::Unchanged => {}
                 EnvironmentOutcome::HdriInstalled => {
+                    self.traced_env_dirty = true;
                     if *background == solarxy_core::scene::BackgroundKind::HdriSky {
                         self.view.pane_settings[0].background_mode =
                             solarxy_core::preferences::BackgroundMode::HDRI_SKY;
@@ -205,6 +206,7 @@ impl State {
                 // to the procedural sky the pane's own background derives,
                 // which is exactly what the Clear HDRI button does.
                 EnvironmentOutcome::Cleared => {
+                    self.traced_env_dirty = true;
                     let (top, bottom) = self
                         .resolve_background(&self.view.pane_settings[0])
                         .sky_colors();
@@ -773,7 +775,7 @@ pub(super) fn build_bounds_env(
 /// A node's display name looked up across every context, root first,
 /// because a cook status event carries no context. Falls back to the
 /// bare id for a node that vanished between the event and this frame.
-fn find_node_name(engine: &solarxy_graph::Engine, id: NodeId) -> String {
+pub(super) fn find_node_name(engine: &solarxy_graph::Engine, id: NodeId) -> String {
     let doc = engine.document();
     let registry = engine.registry();
     std::iter::once(GraphContext::Root)

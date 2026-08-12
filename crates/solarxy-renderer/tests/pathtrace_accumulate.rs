@@ -497,7 +497,13 @@ fn the_resolve_hands_the_accumulator_to_the_post_chain_unchanged() {
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Resolve Encoder"),
         });
-    resolve.encode(&gpu.device, &mut encoder, r.target.color_view(), &view);
+    resolve.encode(
+        &gpu.device,
+        &mut encoder,
+        r.target.color_view(),
+        &view,
+        (WIDTH, HEIGHT),
+    );
     let (buffer, padded) = solarxy_renderer::capture::encode_capture(
         &gpu.device,
         &mut encoder,

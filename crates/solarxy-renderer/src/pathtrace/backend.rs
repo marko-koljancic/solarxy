@@ -86,12 +86,19 @@ pub struct TraceSettings {
     pub aperture_blades: u32,
     /// Whether the edge-aware filter runs before the resolve.
     ///
-    /// **Off by default, which is the still's default and the only one this
-    /// release has a consumer for.** A converged still does not need it and a
-    /// filter can only take detail out of one. The interactive preview turns it
-    /// on, because a one-sample frame is unusable without it; that preview is
-    /// the per-pane traced display mode, which is not in this release.
+    /// **Off by default, which is the still's default.** A converged still
+    /// does not need it and a filter can only take detail out of one. The
+    /// interactive preview (the per-pane traced display mode) turns it on,
+    /// because a one-sample frame is unusable without it.
     pub denoise: bool,
+    /// The accumulator's size as a fraction of the pane's, `(0, 1]`.
+    ///
+    /// One for a still, which must land every pixel it was asked for. The
+    /// interactive preview trades resolution for convergence: at one half,
+    /// a sample costs a quarter of the rays and the resolve upscales the
+    /// mean into the pane-sized target. Never applied to a windowed
+    /// render, whose tile is a window on a picture whose size is authored.
+    pub resolution_scale: f32,
 }
 
 impl Default for TraceSettings {
@@ -107,6 +114,7 @@ impl Default for TraceSettings {
             focus_distance: 0.0,
             aperture_blades: 0,
             denoise: false,
+            resolution_scale: 1.0,
         }
     }
 }
@@ -518,10 +526,26 @@ impl RenderBackend for PathBackend {
         // The pane's own pixels, not the pane's rect in CSS units: the
         // accumulator is sized in the same texels the shared target is.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let (width, height) = (
+        let (full_width, full_height) = (
             (ctx.rect.width.max(1.0)) as u32,
             (ctx.rect.height.max(1.0)) as u32,
         );
+        // The preview's resolution scale shrinks the accumulator, the
+        // kernel's grid and the filter with it; the resolve upscales into
+        // the pane-sized viewport of the target. Only the whole-pane path
+        // scales: a tile is a window on a still whose size is authored,
+        // and the still job reads the target back at exactly the size it
+        // asked for.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let (width, height) = if ctx.window.is_none() {
+            let scale = settings.resolution_scale.clamp(0.1, 1.0);
+            (
+                ((full_width as f32 * scale) as u32).max(1),
+                ((full_height as f32 * scale) as u32).max(1),
+            )
+        } else {
+            (full_width, full_height)
+        };
 
         // Where this pane sits in the picture. An ordinary frame is the whole
         // of a one-pane image; a still render's tile is a window on a larger
@@ -582,7 +606,13 @@ impl RenderBackend for PathBackend {
             } else {
                 pane.target.color_view()
             };
-            resolve.encode(ctx.device, ctx.encoder, source, target);
+            resolve.encode(
+                ctx.device,
+                ctx.encoder,
+                source,
+                target,
+                (full_width, full_height),
+            );
             return FrameOutcome::Complete;
         }
 
@@ -645,7 +675,13 @@ impl RenderBackend for PathBackend {
         } else {
             pane.target.color_view()
         };
-        resolve.encode(ctx.device, ctx.encoder, source, target);
+        resolve.encode(
+            ctx.device,
+            ctx.encoder,
+            source,
+            target,
+            (full_width, full_height),
+        );
 
         if pane.samples >= total {
             FrameOutcome::Complete
@@ -711,6 +747,21 @@ impl RenderBackend for PathBackend {
     /// allocation survives to be written over.
     fn invalidate(&mut self) {
         for pane in self.panes.iter_mut().flatten() {
+            pane.samples = 0;
+        }
+    }
+}
+
+impl PathBackend {
+    /// Drop one pane's accumulation, leaving the others converging.
+    ///
+    /// The trait's [`RenderBackend::invalidate`] is the whole-scene reset a
+    /// delta wants; this is the narrower one a single pane's camera move
+    /// wants. Inherent rather than on the contract, because the contract
+    /// has no pane vocabulary beyond `FrameCtx::index` and the rasterizer
+    /// accumulates nothing there is to drop.
+    pub fn invalidate_pane(&mut self, index: usize) {
+        if let Some(pane) = self.panes.get_mut(index).and_then(Option::as_mut) {
             pane.samples = 0;
         }
     }

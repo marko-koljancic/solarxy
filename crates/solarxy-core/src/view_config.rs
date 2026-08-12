@@ -246,6 +246,9 @@ impl PaneDisplaySettings {
             show_uv_overlap: false,
             show_validation: false,
             turntable_active: false,
+            // A still's engine is authored on the render node and carried
+            // by the job's spec, never by these settings.
+            pane_engine: PaneEngine::Raster,
         }
     }
 }
@@ -278,4 +281,24 @@ pub struct PaneDisplaySettings {
     /// default so older pane blobs deserialize.
     #[serde(default)]
     pub turntable_active: bool,
+    /// Which backend draws this pane's 3D content.
+    ///
+    /// A field on the display settings rather than a [`PaneMode`] variant,
+    /// deliberately: a traced pane is still a 3D pane, with the same
+    /// navigation, picking, review and toolbar semantics, and only the
+    /// encode differs. A mode variant would change the meaning of every
+    /// `pane_mode == Scene3D` comparison in both shells. Serde default so
+    /// older pane blobs deserialize.
+    #[serde(default)]
+    pub pane_engine: PaneEngine,
+}
+
+/// Which renderer draws a 3D pane: the viewport rasterizer, or the path
+/// tracer converging a preview while the pane is quiescent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PaneEngine {
+    #[default]
+    Raster,
+    Traced,
 }

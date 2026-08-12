@@ -48,7 +48,11 @@ impl State {
 
         let frame_ms = self.dt * 1000.0;
         self.gui.clear_expired_toasts();
-        self.sync_render_target_dims();
+        // A running still owns the shared render targets; resizing them
+        // back to the panes every frame would fight its per-tile sizing.
+        if self.still.is_none() {
+            self.sync_render_target_dims();
+        }
 
         let output = self.surface.get_current_texture()?;
         let surface_view = output
@@ -75,6 +79,18 @@ impl State {
             // rebuilt here rather than per frame: a delta is the only thing
             // that can change either.
             self.refresh_engine_scene_info();
+        }
+
+        // A running still renders instead of the panes: the job and the
+        // viewport would otherwise fight over the shared render targets
+        // at different sizes every frame. The GUI still draws, which is
+        // where the modal's progress and cancel live.
+        if self.still.is_some() {
+            self.pump_still_render();
+            self.clear_surface(&surface_view);
+            self.render_gui_overlay(&output, &[], false, frame_ms);
+            output.present();
+            return Ok(());
         }
 
         let viewport_present = self.gui.viewport_tab_present();
@@ -661,6 +677,7 @@ impl State {
         }
 
         self.handle_screenshot_modal();
+        self.handle_still_modal();
     }
 
     /// Build the per-pane data the egui review overlay needs: one

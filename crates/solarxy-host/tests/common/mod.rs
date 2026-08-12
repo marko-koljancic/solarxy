@@ -189,6 +189,7 @@ pub fn pane_settings() -> PaneDisplaySettings {
         show_uv_overlap: false,
         show_validation: false,
         turntable_active: false,
+        pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     }
 }
 

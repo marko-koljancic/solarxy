@@ -223,6 +223,7 @@ fn a_frame_with_labels_submits_without_validation_errors() {
         show_uv_overlap: false,
         show_validation: false,
         turntable_active: false,
+        pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     };
 
     // Both background modes of the label channel, because the chip flag
@@ -381,6 +382,7 @@ fn the_two_grading_slots_behave_as_specified() {
         show_uv_overlap: false,
         show_validation: false,
         turntable_active: false,
+        pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     };
 
     let target = device.create_texture(&wgpu::TextureDescriptor {

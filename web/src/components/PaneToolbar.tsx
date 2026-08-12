@@ -283,6 +283,8 @@ function PaneControls({ pane, settings, projection, active }: {
   // The global display settings: the turntable-speed submenu writes the
   // scene-wide rpm (per-pane is only the on/off toggle).
   const display = useViewState((s) => s.view?.display);
+  const backendCaps = useViewState((s) => s.backendCaps);
+  const paneSamples = useViewState((s) => s.paneSamples[pane] ?? null);
   const [lookOpen, setLookOpen] = useState(false);
   const patch = (p: Partial<PaneDisplaySettings>) => {
     setActivePane(pane);
@@ -335,16 +337,33 @@ function PaneControls({ pane, settings, projection, active }: {
       className={`pane-controls${active ? " active" : ""}`}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <GhostMenu label={labelOf(VIEW_MODES, settings.viewMode)}>
+      <GhostMenu
+        label={settings.paneEngine === "traced" ? "Path Traced" : labelOf(VIEW_MODES, settings.viewMode)}
+      >
         {VIEW_MODES.map(([v, label]) => (
           <GhostItem
             key={v}
             label={label}
-            checked={settings.viewMode === v}
-            onPick={() => patch({ viewMode: v })}
+            checked={settings.paneEngine === "raster" && settings.viewMode === v}
+            onPick={() => patch({ viewMode: v, paneEngine: "raster" })}
           />
         ))}
+        {backendCaps?.traced && (
+          <GhostItem
+            label="Path Traced"
+            checked={settings.paneEngine === "traced"}
+            onPick={() => patch({ paneEngine: "traced" })}
+          />
+        )}
       </GhostMenu>
+      {settings.paneEngine === "traced" && (
+        <span
+          className="ghost-info"
+          title="Samples accumulated by the path-traced preview; the image is still converging"
+        >
+          {paneSamples ? `${paneSamples[0]} spp` : "tracing..."}
+        </span>
+      )}
       {settings.inspectionMode !== "Shaded" && (
         <GhostMenu label={labelOf(INSPECTION_MODES, settings.inspectionMode)}>
           {INSPECTION_MODES.map(([v, label]) => (

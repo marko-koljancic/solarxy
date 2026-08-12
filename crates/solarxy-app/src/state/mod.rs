@@ -31,6 +31,7 @@ mod panes;
 pub(crate) use solarxy_core::raycast;
 mod render;
 pub(crate) mod review;
+mod still;
 mod update;
 pub(crate) mod view_state;
 
@@ -136,6 +137,16 @@ pub struct State {
     /// stream each frame. Fresh failures toast; the standing map is what
     /// the still render consults before reporting success.
     pub(super) cook_health: cook_health::CookHealth,
+    /// The still render in flight, if any. While it runs it owns the
+    /// shared render targets, so panes are not rendered.
+    pub(super) still: Option<still::StillState>,
+    /// The traced backend, built on the first traced still and kept for
+    /// the session. It sees no per-frame deltas (those feed the raster
+    /// backend alone), so every still start snapshots the scene into it.
+    pub(super) tracer: Option<solarxy_renderer::pathtrace::backend::PathBackend>,
+    /// Whether the tracer's environment lags the scene's. Set when an
+    /// HDRI is installed or cleared, or when the tracer is first built.
+    pub(super) traced_env_dirty: bool,
     /// The scene camera each pane looks through, or `None` for a free view.
     ///
     /// Viewer-scoped look-through: a bound pane follows the camera node's

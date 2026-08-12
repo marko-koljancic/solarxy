@@ -152,6 +152,7 @@ impl State {
                         show_uv_overlap: false,
                         show_validation: false,
                         turntable_active: false,
+                        pane_engine: solarxy_core::view_config::PaneEngine::Raster,
                     };
                     [pds; 4]
                 },
@@ -177,6 +178,9 @@ impl State {
             engine_scene: None,
             selected_object: None,
             cook_health: super::cook_health::CookHealth::default(),
+            still: None,
+            tracer: None,
+            traced_env_dirty: false,
             look_through: [None; 4],
             raster,
             env,

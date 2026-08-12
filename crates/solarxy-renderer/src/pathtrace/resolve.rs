@@ -80,11 +80,21 @@ impl TraceResolve {
         Self { layout, pipeline }
     }
 
-    /// Encodes the copy from `source` into `target`.
+    /// Encodes the copy from `source` into the `viewport`-sized corner of
+    /// `target`.
     ///
-    /// Clears rather than loads, because it writes every texel of the target it
-    /// is given and a load would only cost a read of pixels about to be
-    /// overwritten.
+    /// Clears rather than loads, because everything the target held is
+    /// about to be overwritten or belongs to a pane that has already been
+    /// composited this frame: panes render sequentially through the shared
+    /// target, so a whole-target clear here is the same discipline every
+    /// raster pass already follows.
+    ///
+    /// The viewport is the pane's size in texels, which can be smaller
+    /// than the target (a split layout sizes the shared target to its
+    /// largest pane) and larger than the source (the preview's resolution
+    /// scale). Under a viewport the quad's normalized coordinate becomes
+    /// pane-relative, which is what lets one fragment shader serve the
+    /// exact copy, the upscale, and the sub-target pane at once.
     ///
     /// The bind group is built per call rather than cached. A resolve happens
     /// once per pane per frame, against a source that can be reallocated by a
@@ -96,6 +106,7 @@ impl TraceResolve {
         encoder: &mut wgpu::CommandEncoder,
         source: &wgpu::TextureView,
         target: &wgpu::TextureView,
+        viewport: (u32, u32),
     ) {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Pathtrace Resolve Bind Group"),
@@ -122,6 +133,16 @@ impl TraceResolve {
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
+        #[allow(clippy::cast_precision_loss)]
+        pass.set_viewport(
+            0.0,
+            0.0,
+            viewport.0.max(1) as f32,
+            viewport.1.max(1) as f32,
+            0.0,
+            1.0,
+        );
+        pass.set_scissor_rect(0, 0, viewport.0.max(1), viewport.1.max(1));
         pass.draw(0..3, 0..1);
     }
 }

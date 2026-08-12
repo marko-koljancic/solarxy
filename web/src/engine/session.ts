@@ -414,6 +414,9 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
     client = c;
     useMirror.getState().setRegistry(c.registrySnapshot());
     useViewState.getState().setView(c.viewState());
+    // Constants on the Rust side, so once at boot is the whole read; the
+    // pane display menu offers the traced mode from this.
+    useViewState.getState().setBackendCaps(c.backendCaps());
     // The host caches the gizmo's snap steps and orientation; push the current
     // prefs in once, then keep it in step for the rest of the session.
     pushGizmoSettings();
@@ -1148,6 +1151,8 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "viewChanged") refreshViewState();
     else if (ev.type === "attrPinStats") useAttrPinStats.getState().set(ev.capacity, ev.total);
     else if (ev.type === "renderProgress") useRenderJob.getState().progress(ev);
+    else if (ev.type === "paneSamples")
+      useViewState.getState().setPaneSamples(ev.pane, ev.samples, ev.target);
   }
   // The gizmo's live delta. Polled here rather than pushed from `pointerMove`,
   // which stays void so the drag keeps costing zero boundary crossings; the

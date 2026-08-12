@@ -687,6 +687,10 @@ export interface PaneDisplaySettings {
   showValidation: boolean;
   /** Live per-pane turntable spin; session-temporary, not persisted. */
   turntableActive: boolean;
+  /** Which backend draws this pane's 3D content. A traced pane is still a
+   * 3D pane (same navigation, picking and toolbar semantics); only the
+   * encode differs. Pinned to `solarxy_core::view_config::PaneEngine`. */
+  paneEngine: "raster" | "traced";
 }
 
 /** A free pane's own rendering intent, pinned to
@@ -767,7 +771,23 @@ export type HostEvent =
       sample: number;
       samples: number;
       done: boolean;
-    };
+    }
+  | { type: "paneSamples"; pane: number; samples: number; target: number };
+
+/** What one render backend can do, pinned to the Rust `BackendCaps`
+ * constants. `progressive` is what drives a sample counter: repeated
+ * frames of an unchanged pane keep improving the image. */
+export interface BackendCaps {
+  progressive: boolean;
+  supportsInstancing: boolean;
+  writesAovs: boolean;
+}
+
+/** Both backends' capabilities, for menu gating. */
+export interface BackendCapsSet {
+  raster: BackendCaps;
+  traced: BackendCaps;
+}
 
 /** One finished tile of a still render, as it crosses the boundary.
  *

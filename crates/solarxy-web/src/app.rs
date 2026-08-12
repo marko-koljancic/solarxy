@@ -28,7 +28,9 @@ use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
 use solarxy_core::validation::{
     ValidationConfig, ValidationResult, ValidationThresholds, validate_raw_model_with_config,
 };
-use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings, PaneLook, ViewLayout};
+use solarxy_core::view_config::{
+    DisplaySettings, PaneDisplaySettings, PaneEngine, PaneLook, ViewLayout,
+};
 use solarxy_core::geometry::compute_bounds;
 use solarxy_core::AABB;
 use solarxy_graph::assets::AssetTable;
@@ -49,7 +51,8 @@ use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::environment::SceneEnvironment;
-use solarxy_renderer::backend::{FrameCtx, PaneContent, RenderBackend, UvSource};
+use solarxy_renderer::backend::{FrameCtx, FrameOutcome, PaneContent, RenderBackend, UvSource};
+use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
 use solarxy_renderer::capture::CaptureTarget;
 use solarxy_renderer::frame::{Renderer, RendererInit};
 use solarxy_renderer::geometry::build_normals_geometry;
@@ -131,6 +134,7 @@ fn default_pane_settings() -> PaneDisplaySettings {
         show_uv_overlap: false,
         show_validation: false,
         turntable_active: false,
+        pane_engine: PaneEngine::Raster,
     }
 }
 
@@ -194,6 +198,14 @@ enum HostEvent {
         sample: u32,
         samples: u32,
         done: bool,
+    },
+    /// A traced pane's accumulation advanced: how many samples its mean
+    /// averages, of the preview's target. The counter that marks a
+    /// converging image as converging. Pushed on change, not per frame.
+    PaneSamples {
+        pane: usize,
+        samples: u32,
+        target: u32,
     },
 }
 
@@ -447,6 +459,16 @@ pub struct SolarxyApp {
     traced_env_dirty: bool,
     /// Finished tiles waiting for the frontend to take them.
     still_tiles: std::collections::VecDeque<solarxy_host::still::StillTile>,
+    /// Per-pane camera identity the traced preview last accumulated under.
+    /// A mismatch on encode resets that pane's accumulation, which is what
+    /// makes the preview converge only while the pane is quiescent.
+    traced_cam_keys: [Option<[f32; 13]>; 4],
+    /// The environment scalars the tracer last integrated against; a
+    /// change resets every traced pane, since the mean was of another sky.
+    traced_env_params: (f32, f32),
+    /// The last per-pane sample counts pushed to the frontend, so the
+    /// counter event fires on change rather than every frame.
+    last_pane_samples: [Option<(u32, u32)>; 4],
     /// Whether the normals/bounds visualization aggregate is stale
     /// (geometry changed, env rebuilt, or an overlay mode just turned on).
     viz_dirty: bool,
@@ -478,6 +500,66 @@ struct GizmoAddr {
 
 /// The solver's view of an engine gizmo target: the pose, without the
 /// addressing or the append bookkeeping.
+/// Everything one pane's encode and composite read that is derived from
+/// the host rather than handed in by the frame loop.
+struct PaneInputs {
+    background: ResolvedBackground,
+    bounds: AABB,
+    look: CompositeLook,
+    scene_present: bool,
+    outline: bool,
+    grid_plane: Option<u32>,
+    /// Whether this pane's 3D content goes to the tracer instead of the
+    /// rasterizer this frame. Decided (and its housekeeping run) before
+    /// the pane content is built, because the content can borrow the UV
+    /// preview scene while the housekeeping needs the whole host.
+    traced: bool,
+}
+
+/// What the traced preview converges to. High enough that a resting pane
+/// keeps improving for minutes at one sample per frame, low enough that
+/// the counter's target still means something.
+const PREVIEW_TARGET_SAMPLES: u32 = 4096;
+
+/// The traced preview's settings: one sample per animation frame (the
+/// pacing that keeps the page responsive), half resolution, and the
+/// edge-aware filter on, because a one-sample frame is unusable without
+/// it. Asserted before every preview encode rather than held, since the
+/// still job authors its own settings on the same backend.
+fn preview_trace_settings() -> TraceSettings {
+    TraceSettings {
+        samples: PREVIEW_TARGET_SAMPLES,
+        chunk: 1,
+        denoise: true,
+        resolution_scale: 0.5,
+        ..TraceSettings::default()
+    }
+}
+
+/// The fields of a camera a traced accumulation is valid under. Aspect
+/// included, because a resize reshapes every ray; the projection kind
+/// rides as a discriminant.
+fn camera_key(c: &Camera) -> [f32; 13] {
+    [
+        c.eye.x,
+        c.eye.y,
+        c.eye.z,
+        c.target.x,
+        c.target.y,
+        c.target.z,
+        c.up.x,
+        c.up.y,
+        c.up.z,
+        c.fovy,
+        c.aspect,
+        c.ortho_scale,
+        match c.projection {
+            solarxy_core::preferences::ProjectionMode::Perspective => 0.0,
+            solarxy_core::preferences::ProjectionMode::Orthographic => 1.0,
+        },
+    ]
+}
+
 fn gizmo_pose(t: &GizmoTarget) -> GizmoPose {
     GizmoPose {
         translate: t.translate,
@@ -756,6 +838,9 @@ impl SolarxyApp {
             tracer: None,
             traced_env_dirty: true,
             still_tiles: std::collections::VecDeque::new(),
+            traced_cam_keys: [None; 4],
+            traced_env_params: (0.0, 0.0),
+            last_pane_samples: [None; 4],
             viz_dirty: true,
             attr_viz: AttrVizState::default(),
             label_colors: {
@@ -831,6 +916,7 @@ impl SolarxyApp {
             }
             self.apply_scene_environment(&delta);
         }
+        self.feed_traced_preview(&delta);
 
         // The manipulator is pull-based: recompute what it should be, every
         // frame, from the engine's own view of the world. A selection change or
@@ -2361,6 +2447,7 @@ impl SolarxyApp {
     ) -> Result<JsValue, JsError> {
         let settings: PaneDisplaySettings = serde_wasm_bindgen::from_value(settings)
             .map_err(|e| JsError::new(&format!("bad pane settings: {e}")))?;
+        let mut engine_flip = None;
         if let Some(slot) = self.view.pane_settings.get_mut(pane) {
             // Turning the overlap display on arms a fresh statistic run
             // (the desktop `O`-toggle behavior).
@@ -2375,9 +2462,74 @@ impl SolarxyApp {
             {
                 self.viz_dirty = true;
             }
+            if settings.pane_engine != slot.pane_engine {
+                engine_flip = Some(settings.pane_engine);
+            }
             *slot = settings;
         }
+        if let Some(engine) = engine_flip {
+            // Flipping to the tracer builds it on first use and hands it
+            // the scene it has never seen: the per-frame delta feed only
+            // reaches it while a pane is watching, so a scene edited with
+            // every pane raster has moved on without it. The snapshot
+            // reconciles, so an unchanged scene is a hierarchy-cache hit.
+            if engine == PaneEngine::Traced {
+                if self.tracer.is_none() {
+                    self.tracer = Some(PathBackend::new(&self.device, &self.queue));
+                    self.traced_env_dirty = true;
+                }
+                let delta = self.engine.scene_snapshot();
+                if let Some(t) = self.tracer.as_mut() {
+                    t.apply_snapshot(&self.device, &self.queue, &delta);
+                }
+            }
+            // Either direction resets the pane: the first traced frame is
+            // sample one rather than a stale mean, and a return to raster
+            // leaves nothing parked.
+            if let Some(t) = self.tracer.as_mut() {
+                t.invalidate_pane(pane);
+            }
+            if let Some(slot) = self.traced_cam_keys.get_mut(pane) {
+                *slot = None;
+            }
+            if let Some(slot) = self.last_pane_samples.get_mut(pane) {
+                *slot = None;
+            }
+        }
         self.view_state()
+    }
+
+    /// What each render backend can do, for the frontend's menu gating.
+    ///
+    /// Constants, so the answer needs no device and cannot fail: a menu
+    /// deciding whether to offer the traced mode should not have to build
+    /// a tracer to ask.
+    #[wasm_bindgen(js_name = backendCaps)]
+    pub fn backend_caps(&self) -> Result<JsValue, JsError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CapsDto {
+            progressive: bool,
+            supports_instancing: bool,
+            writes_aovs: bool,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct BackendCapsDto {
+            raster: CapsDto,
+            traced: CapsDto,
+        }
+        fn dto(c: solarxy_renderer::backend::BackendCaps) -> CapsDto {
+            CapsDto {
+                progressive: c.progressive,
+                supports_instancing: c.supports_instancing,
+                writes_aovs: c.writes_aovs,
+            }
+        }
+        to_js(&BackendCapsDto {
+            raster: dto(solarxy_host::RasterBackend::CAPS),
+            traced: dto(PathBackend::CAPS),
+        })
     }
 
     /// Replaces the global display settings (layout, split, turntable,
@@ -3416,8 +3568,126 @@ impl SolarxyApp {
         );
     }
 
+    /// Keep a watched tracer in step with the frame: the scene delta, the
+    /// environment scalars, and any host-side view mutation each reset the
+    /// accumulation, which is the preview's whole reset contract (camera
+    /// moves are per pane and handled at encode). Does nothing while no
+    /// pane is traced, so a session that never traces pays one boolean.
+    fn feed_traced_preview(&mut self, delta: &solarxy_core::scene::SceneDelta) {
+        let any_traced = self
+            .view
+            .pane_settings
+            .iter()
+            .any(|p| p.pane_mode == PaneMode::Scene3D && p.pane_engine == PaneEngine::Traced);
+        if !any_traced || self.tracer.is_none() {
+            return;
+        }
+        if !delta.ops.is_empty()
+            && let Some(t) = self.tracer.as_mut()
+        {
+            // The same feed the raster gets: the delta lands and every
+            // accumulation resets, since the mean was of another scene.
+            // The camera keys reset with it so each pane re-anchors its
+            // pose on its next encode.
+            t.apply(&self.device, &self.queue, delta);
+            t.invalidate();
+            self.traced_cam_keys = [None; 4];
+        }
+        let env_params = (
+            self.view.display.hdri_intensity,
+            self.view.display.hdri_rotation,
+        );
+        if self.traced_env_dirty || env_params != self.traced_env_params {
+            self.sync_traced_environment();
+            self.traced_env_params = env_params;
+            if let Some(t) = self.tracer.as_mut() {
+                t.invalidate();
+                self.traced_cam_keys = [None; 4];
+            }
+        }
+        if self
+            .host_events
+            .iter()
+            .any(|e| matches!(e, HostEvent::ViewChanged))
+            && let Some(t) = self.tracer.as_mut()
+        {
+            t.invalidate();
+            self.traced_cam_keys = [None; 4];
+        }
+    }
+
+    /// One traced pane's pre-encode housekeeping: assert the preview's
+    /// settings, reset the accumulation when the pane's camera moved, and
+    /// re-apply the viewer rig.
+    fn prepare_traced_pane(&mut self, i: usize) {
+        // Asserted per encode rather than held, because the still job
+        // authors its own settings on the same backend and whichever ran
+        // last would otherwise win.
+        if let Some(t) = self.tracer.as_mut() {
+            t.set_settings(preview_trace_settings());
+        }
+        let Some(cam) = self.view.cameras.get(i).and_then(Option::as_ref) else {
+            return;
+        };
+        let key = camera_key(&cam.camera);
+        if self.traced_cam_keys.get(i).copied().flatten() != Some(key) {
+            if let Some(t) = self.tracer.as_mut() {
+                t.invalidate_pane(i);
+            }
+            if let Some(slot) = self.traced_cam_keys.get_mut(i) {
+                *slot = Some(key);
+            }
+        }
+        // The viewer rig is re-applied every traced frame, not only on
+        // reset: it is scene data shared by every pane, and with two
+        // traced panes the last writer would otherwise win across frames.
+        // A no-op under authored lights, and a constant write while the
+        // camera rests, so it never disturbs a converging mean.
+        let camera = cam.camera;
+        if let Some(t) = self.tracer.as_mut() {
+            solarxy_host::apply_viewer_rig(
+                &self.device,
+                &self.queue,
+                t,
+                self.raster.scene(),
+                &camera,
+            );
+        }
+    }
+
+    /// Push a traced pane's sample counter, on change rather than per
+    /// frame. A `Complete` outcome is a converged pane: the count parks
+    /// at the target instead of vanishing.
+    fn push_pane_samples(&mut self, i: usize, outcome: FrameOutcome) {
+        let counts = match outcome {
+            FrameOutcome::Converging {
+                samples,
+                target_samples,
+            } => Some((samples, target_samples)),
+            FrameOutcome::Complete => self
+                .last_pane_samples
+                .get(i)
+                .copied()
+                .flatten()
+                .map(|(_, target)| (target, target)),
+        };
+        if counts.is_some()
+            && let Some(slot) = self.last_pane_samples.get_mut(i)
+            && *slot != counts
+        {
+            *slot = counts;
+            if let Some((samples, target)) = counts {
+                self.host_events.push(HostEvent::PaneSamples {
+                    pane: i,
+                    samples,
+                    target,
+                });
+            }
+        }
+    }
+
     /// Brings the tracer's environment up to date with the scene's, which is
-    /// what makes a traced still light the way the viewport does.
+    /// what makes a traced render light the way the viewport does.
     ///
     /// The traced scene cache deliberately drops the environment op, on the
     /// reasoning that a host already holds the decoded and convolved image and
@@ -4215,13 +4485,10 @@ impl SolarxyApp {
     /// desktop does not; the light-rig guard, which writes through `&mut self`;
     /// and the draw list and the UV source, which this shell resolves against
     /// the document rather than a loaded file.
-    fn render_pane(
-        &mut self,
-        i: usize,
-        pane: PaneRect,
-        surface_view: &wgpu::TextureView,
-        is_split: bool,
-    ) {
+    /// One pane's per-frame host writes (LUTs, manipulator, camera
+    /// helpers, split lighting), and the derived [`PaneInputs`] its encode
+    /// and composite read.
+    fn prepare_pane(&mut self, i: usize, pane: PaneRect, is_split: bool) -> PaneInputs {
         let pds = self.view.pane_settings[i];
         let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
         let is_uv_map = pds.pane_mode == PaneMode::UvMap;
@@ -4244,26 +4511,61 @@ impl SolarxyApp {
             }
         }
 
-        let background = self.resolve_background(&pds);
-        let bounds = self.scene_bounds();
-        let look = self.pane_look(i);
-        // The composite folds bloom and ambient occlusion in only when there
-        // is something to fold them around. This shell used to pass a constant
-        // here, which put a glow on an empty viewport.
-        let scene_present = self.raster.scene().draw_objects().next().is_some();
-        let outline = self.renderer.selection_style
-            == solarxy_renderer::frame::SelectionStyle::Outline
-            && self
-                .selected_object
-                .is_some_and(|id| self.raster.scene().draw_object(id).is_some());
-        // The grid plane follows the pane camera: perspective keeps the XZ
-        // ground; an orthographic axis elevation (front/side) gets a view-plane
-        // grid so it is not seen edge-on. Keyed off the transition destination
-        // so a view-preset animation switches plane once, at click time, not
-        // partway through the lerp.
-        let grid_plane = self.view.cameras[i]
-            .as_ref()
-            .map(|c| grid_plane_for(&c.destination_camera()));
+        // A traced 3D pane goes to the tracer instead of the rasterizer;
+        // everything around the encode (the pane context, the composite,
+        // the look) is shared, which is the backend contract's point.
+        let traced = pds.pane_engine == PaneEngine::Traced
+            && !is_uv_map
+            && cam_data.is_some()
+            && self.tracer.is_some();
+        if traced {
+            self.prepare_traced_pane(i);
+        }
+
+        PaneInputs {
+            traced,
+            background: self.resolve_background(&pds),
+            bounds: self.scene_bounds(),
+            look: self.pane_look(i),
+            // The composite folds bloom and ambient occlusion in only when
+            // there is something to fold them around. This shell used to pass
+            // a constant here, which put a glow on an empty viewport.
+            scene_present: self.raster.scene().draw_objects().next().is_some(),
+            outline: self.renderer.selection_style
+                == solarxy_renderer::frame::SelectionStyle::Outline
+                && self
+                    .selected_object
+                    .is_some_and(|id| self.raster.scene().draw_object(id).is_some()),
+            // The grid plane follows the pane camera: perspective keeps the
+            // XZ ground; an orthographic axis elevation (front/side) gets a
+            // view-plane grid so it is not seen edge-on. Keyed off the
+            // transition destination so a view-preset animation switches
+            // plane once, at click time, not partway through the lerp.
+            grid_plane: self.view.cameras[i]
+                .as_ref()
+                .map(|c| grid_plane_for(&c.destination_camera())),
+        }
+    }
+
+    fn render_pane(
+        &mut self,
+        i: usize,
+        pane: PaneRect,
+        surface_view: &wgpu::TextureView,
+        is_split: bool,
+    ) {
+        let pds = self.view.pane_settings[i];
+        let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
+        let is_uv_map = pds.pane_mode == PaneMode::UvMap;
+        let PaneInputs {
+            background,
+            bounds,
+            look,
+            scene_present,
+            outline,
+            grid_plane,
+            traced,
+        } = self.prepare_pane(i, pane, is_split);
 
         // Field-level borrows from here on, so the shared body can take the
         // renderer mutably while the draw list borrows the scene.
@@ -4299,8 +4601,8 @@ impl SolarxyApp {
                 label: Some("Pane Encoder"),
             });
         let hdr_target = self.renderer.targets.hdr_resolve_view.clone();
-        let _outcome = self.raster.encode(
-            &mut FrameCtx {
+        let outcome = {
+            let mut ctx = FrameCtx {
                 device: &self.device,
                 queue: &self.queue,
                 renderer: &mut self.renderer,
@@ -4322,13 +4624,29 @@ impl SolarxyApp {
                 // a larger picture. Only the still render sets this.
                 window: None,
                 content,
-            },
-            &hdr_target,
-        );
-        let pass = self.raster.encoded(i).unwrap_or(solarxy_host::EncodedPane {
-            is_uv_map: false,
-            scene_present: false,
-        });
+            };
+            if traced {
+                self.tracer
+                    .as_mut()
+                    .map_or(FrameOutcome::Complete, |t| t.encode(&mut ctx, &hdr_target))
+            } else {
+                self.raster.encode(&mut ctx, &hdr_target)
+            }
+        };
+        if traced {
+            self.push_pane_samples(i, outcome);
+        }
+        let pass = if traced {
+            solarxy_host::EncodedPane {
+                is_uv_map: false,
+                scene_present,
+            }
+        } else {
+            self.raster.encoded(i).unwrap_or(solarxy_host::EncodedPane {
+                is_uv_map: false,
+                scene_present: false,
+            })
+        };
 
         solarxy_host::composite_and_submit(
             &self.queue,

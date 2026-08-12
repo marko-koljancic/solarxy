@@ -13,6 +13,9 @@ impl State {
             self.capture_requested = true;
             self.screenshot_expand_review = false;
         }
+        if actions.render_still {
+            self.start_still_render();
+        }
         if actions.close_model {
             self.close_document();
         }

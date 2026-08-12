@@ -49,6 +49,7 @@ mod screenshot_modal;
 mod sidebar;
 mod snapshot;
 mod status_bar;
+mod still_modal;
 mod theme;
 mod update_modal;
 mod viewport_context_menu;

@@ -4,7 +4,13 @@
 // components mutate through the session's view actions.
 
 import { create } from "zustand";
-import type { EnvironmentState, PaneRectDto, ToolMode, ViewStateDto } from "../engine/types";
+import type {
+  BackendCapsSet,
+  EnvironmentState,
+  PaneRectDto,
+  ToolMode,
+  ViewStateDto,
+} from "../engine/types";
 
 interface ViewStateStore {
   view: ViewStateDto | null;
@@ -26,6 +32,12 @@ interface ViewStateStore {
   /** The live gizmo drag's delta text ("X +1.250 m"), or null when nothing is
    * dragging. Polled from the host once per frame. */
   gizmoReadout: string | null;
+  /** Per-pane traced-preview sample counts, `[samples, target]` or null.
+   * Only meaningful while that pane's engine is traced; the toolbar reads
+   * visibility from the pane settings, not from this. */
+  paneSamples: (readonly [number, number] | null)[];
+  /** Both backends' capabilities, read once at boot. Null until then. */
+  backendCaps: BackendCapsSet | null;
   setView: (view: ViewStateDto) => void;
   setPaneRects: (rects: PaneRectDto[]) => void;
   setActivePaneMirror: (pane: number) => void;
@@ -35,6 +47,8 @@ interface ViewStateStore {
   setEnvironment: (env: EnvironmentState) => void;
   setToolMode: (tool: ToolMode) => void;
   setGizmoReadout: (text: string | null) => void;
+  setPaneSamples: (pane: number, samples: number, target: number) => void;
+  setBackendCaps: (caps: BackendCapsSet) => void;
 }
 
 export const useViewState = create<ViewStateStore>((set) => ({
@@ -46,6 +60,8 @@ export const useViewState = create<ViewStateStore>((set) => ({
   environment: null,
   toolMode: "select",
   gizmoReadout: null,
+  paneSamples: [null, null, null, null],
+  backendCaps: null,
   setView: (view) => set({ view }),
   setPaneRects: (rects) =>
     set((s) => (s.view ? { view: { ...s.view, paneRects: rects } } : s)),
@@ -60,4 +76,12 @@ export const useViewState = create<ViewStateStore>((set) => ({
     // Guarded: this runs every frame, and an unconditional set would re-render
     // every readout consumer 60 times a second for no reason.
     set((s) => (s.gizmoReadout === text ? s : { gizmoReadout: text })),
+  // No equality guard: the host already pushes this event on change only.
+  setPaneSamples: (pane, samples, target) =>
+    set((s) => {
+      const next = s.paneSamples.slice();
+      next[pane] = [samples, target] as const;
+      return { paneSamples: next };
+    }),
+  setBackendCaps: (caps) => set({ backendCaps: caps }),
 }));
