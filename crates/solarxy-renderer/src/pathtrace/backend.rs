@@ -211,6 +211,10 @@ impl PathBackend {
         // point cloud silently vanish.
         supports_topology: TopologyMask::TRIANGLES,
         writes_aovs: true,
+        // Occlusion is already in the image: a path that leaves a crevice is
+        // one the traversal blocked. There is no prepass and nothing fills
+        // the buffer, so the finishing chain must not reach for it.
+        writes_occlusion: false,
     };
 
     /// Builds every pipeline and an empty scene.
@@ -773,13 +777,9 @@ mod tests {
 
     #[test]
     fn capabilities_describe_a_progressive_backend_without_naming_it() {
-        let caps = BackendCaps {
-            progressive: true,
-            max_lights: None,
-            supports_instancing: true,
-            supports_topology: TopologyMask::TRIANGLES,
-            writes_aovs: true,
-        };
+        // The real constant, not a literal rebuilt here, which would agree
+        // with itself whatever the backend later declared.
+        let caps = PathBackend::CAPS;
         assert!(caps.progressive);
         // Unbounded is not a large number, which is the whole point of the
         // `Option`: a host says "every light in the scene" rather than "8192".
@@ -787,6 +787,10 @@ mod tests {
         assert!(!caps.supports_topology.contains(TopologyMask::POINTS));
         assert!(!caps.supports_topology.contains(TopologyMask::LINES));
         assert!(caps.writes_aovs);
+        // Occlusion is in the image already. Nothing here fills the buffer the
+        // finishing chain would multiply by, so a host must not reach for it,
+        // and this is the only thing that says so.
+        assert!(!caps.writes_occlusion);
     }
 
     #[test]

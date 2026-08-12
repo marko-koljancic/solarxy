@@ -730,7 +730,11 @@ impl StillRenderJob {
                 .clone()
         });
         let bloom = ctx.renderer.post.bloom_enabled && ctx.scene_present;
-        let ssao = ctx.renderer.post.ssao_enabled && ctx.scene_present;
+        // Asked of the backend that just drew the tile, because the buffer the
+        // chain would multiply by is only filled by one that runs the prepass.
+        // Bloom needs no such question: it reads the colour.
+        let ssao =
+            ctx.renderer.post.ssao_enabled && ctx.scene_present && backend.caps().writes_occlusion;
         ctx.renderer.post.composite.write_params(
             ctx.queue,
             bloom,

@@ -151,6 +151,7 @@ fn overlap_at(h: &mut Harness, backend: &mut RasterBackend, zoom: f32) -> f32 {
             is_uv_map: true,
             scene_present: true,
             outline: false,
+            writes_occlusion: solarxy_host::RasterBackend::CAPS.writes_occlusion,
         },
     );
 

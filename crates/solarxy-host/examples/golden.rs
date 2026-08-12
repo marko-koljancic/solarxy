@@ -827,6 +827,7 @@ fn capture_through_host(
             is_uv_map: false,
             scene_present: true,
             outline: false,
+            writes_occlusion: solarxy_host::RasterBackend::CAPS.writes_occlusion,
         },
     );
 }

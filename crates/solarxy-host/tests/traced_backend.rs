@@ -94,6 +94,7 @@ fn frame(h: &mut Harness, backend: &mut dyn RenderBackend, look: CompositeLook) 
             is_uv_map: false,
             scene_present: true,
             outline: false,
+            writes_occlusion: PathBackend::CAPS.writes_occlusion,
         },
     );
     outcome

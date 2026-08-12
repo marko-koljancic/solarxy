@@ -292,6 +292,9 @@ impl State {
                 is_uv_map: encoded.is_uv_map,
                 scene_present: encoded.scene_present,
                 outline,
+                // Every desktop pane rasterizes; the shell's traced path is
+                // the still render, which resolves this for itself.
+                writes_occlusion: solarxy_host::RasterBackend::CAPS.writes_occlusion,
             },
         );
     }

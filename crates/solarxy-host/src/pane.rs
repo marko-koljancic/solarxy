@@ -328,6 +328,13 @@ pub struct PaneComposite {
     /// Whether to blit the selection rim after tone mapping. `false` on a
     /// shell with no selection concept.
     pub outline: bool,
+    /// [`BackendCaps::writes_occlusion`] of the backend that drew this pane.
+    ///
+    /// Carried per pane rather than read once per frame because panes may run
+    /// different backends in the same layout, and the buffer the chain would
+    /// multiply by is shared between them: a traced pane compositing against
+    /// it would be darkened by its raster neighbour's answer.
+    pub writes_occlusion: bool,
 }
 
 /// Composite one pane into the surface and submit its encoder.
@@ -342,7 +349,8 @@ pub fn composite_and_submit(
     c: &PaneComposite,
 ) {
     let pane_bloom = renderer.post.bloom_enabled && !c.is_uv_map && c.scene_present;
-    let pane_ssao = renderer.post.ssao_enabled && !c.is_uv_map && c.scene_present;
+    let pane_ssao =
+        renderer.post.ssao_enabled && !c.is_uv_map && c.scene_present && c.writes_occlusion;
     renderer.post.composite.write_params(
         queue,
         pane_bloom,

@@ -168,6 +168,17 @@ pub struct BackendCaps {
     /// Whether this backend produces auxiliary outputs (albedo, normal, depth)
     /// alongside colour.
     pub writes_aovs: bool,
+    /// Whether this backend fills the screen-space occlusion buffer the
+    /// finishing chain multiplies by.
+    ///
+    /// The rasterizer derives it from a depth and normal prepass. A backend
+    /// that shades by tracing already has the occlusion in its image and runs
+    /// no such prepass, so the buffer it would be multiplied by holds another
+    /// pane's answer, or the last frame's. A host reads this rather than
+    /// asking which backend it is, and the effect is switched off for that
+    /// pane alone; bloom is unaffected, because it reads the colour every
+    /// backend writes.
+    pub writes_occlusion: bool,
 }
 
 /// The primitive topologies a backend draws.
@@ -378,6 +389,7 @@ mod tests {
             supports_instancing: true,
             supports_topology: TopologyMask::ALL,
             writes_aovs: false,
+            writes_occlusion: true,
         };
         let traced = BackendCaps {
             progressive: true,
@@ -385,6 +397,7 @@ mod tests {
             supports_instancing: true,
             supports_topology: TopologyMask::TRIANGLES,
             writes_aovs: true,
+            writes_occlusion: false,
         };
         assert!(raster.max_lights.is_some_and(|n| n == 8));
         assert!(traced.max_lights.is_none());

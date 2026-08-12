@@ -42,7 +42,7 @@ use solarxy_graph::{Command, Engine, EventBatch};
 use solarxy_kernel::transfer;
 use solarxy_renderer::manipulator::{self, ManipulatorState};
 
-use solarxy_host::HostViewState;
+use solarxy_host::{HostViewState, RasterBackend};
 use solarxy_host::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
 use solarxy_host::display_defaults::{self, DisplayDefaults};
 use solarxy_host::gizmo::{self, GizmoPose, GizmoState, ToolMode};
@@ -4547,6 +4547,10 @@ impl SolarxyApp {
         }
     }
 
+    // One pane's frame, start to finish: the context, the backend that draws
+    // it, the composite. Most of the body is a single struct literal, so the
+    // only extraction available is one taking twenty parameters.
+    #[allow(clippy::too_many_lines)]
     fn render_pane(
         &mut self,
         i: usize,
@@ -4636,6 +4640,11 @@ impl SolarxyApp {
         if traced {
             self.push_pane_samples(i, outcome);
         }
+        let caps = if traced {
+            PathBackend::CAPS
+        } else {
+            RasterBackend::CAPS
+        };
         let pass = if traced {
             solarxy_host::EncodedPane {
                 is_uv_map: false,
@@ -4661,6 +4670,7 @@ impl SolarxyApp {
                 is_uv_map: pass.is_uv_map,
                 scene_present: pass.scene_present,
                 outline,
+                writes_occlusion: caps.writes_occlusion,
             },
         );
     }

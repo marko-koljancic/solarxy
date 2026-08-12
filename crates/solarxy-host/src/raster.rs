@@ -74,6 +74,9 @@ impl RasterBackend {
         supports_instancing: true,
         supports_topology: TopologyMask::ALL,
         writes_aovs: false,
+        // The depth and normal prepass this backend runs is where the buffer
+        // comes from.
+        writes_occlusion: true,
     };
 
     #[must_use]
@@ -158,21 +161,19 @@ mod tests {
 
     #[test]
     fn capabilities_describe_the_rasterizer_without_naming_it() {
-        // Constructed without a device: `caps` reads no GPU state, which is
-        // what lets a host gate its interface before anything is uploaded.
-        let caps = BackendCaps {
-            progressive: false,
-            max_lights: Some(MAX_LIGHTS as u32),
-            supports_instancing: true,
-            supports_topology: TopologyMask::ALL,
-            writes_aovs: false,
-        };
+        // The real constant, not a literal rebuilt here: reachable without a
+        // device is the property being asserted, and a copy of the values
+        // would agree with itself whatever the backend later declared.
+        let caps = RasterBackend::CAPS;
         assert!(!caps.progressive);
-        assert_eq!(caps.max_lights, Some(8));
+        assert_eq!(caps.max_lights, Some(MAX_LIGHTS as u32));
         assert!(caps.supports_topology.contains(TopologyMask::POINTS));
         assert!(caps.supports_topology.contains(TopologyMask::LINES));
         assert!(caps.supports_topology.contains(TopologyMask::TRIANGLES));
         assert!(!caps.writes_aovs);
+        // The prepass this backend runs is what fills the buffer the finishing
+        // chain multiplies by, so it is the one that may claim it.
+        assert!(caps.writes_occlusion);
     }
 
     #[test]
