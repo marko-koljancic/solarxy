@@ -91,6 +91,10 @@ pub(super) struct InputState {
     pub(super) uv_last_mouse_pos: Option<(f32, f32)>,
     pub(super) uv_left_pressed: bool,
     pub(super) uv_middle_pressed: bool,
+    /// A camera button is held in a 3D pane. What tells a pointer move that
+    /// it is a navigation drag, which is the gesture that releases a
+    /// look-through binding; a plain click never does.
+    pub(super) nav_button_down: bool,
 }
 
 pub struct State {
@@ -127,6 +131,15 @@ pub struct State {
     /// selects engine-side and leaves the viewport alone, which is what
     /// the web shell does with the same gesture.
     pub(super) selected_object: Option<solarxy_core::scene::SceneObjectId>,
+    /// The scene camera each pane looks through, or `None` for a free view.
+    ///
+    /// Viewer-scoped look-through: a bound pane follows the camera node's
+    /// pose each frame and composites with the camera's look, and any local
+    /// navigation releases the pane back to a free view rather than writing
+    /// the pose back to the node the way the web's locked mode does. That
+    /// write-back is authoring machinery, and it waits for the desktop node
+    /// canvas. Session state, deliberately not persisted, matching the web.
+    pub(super) look_through: [Option<solarxy_core::scene::SceneObjectId>; 4],
     /// The rasterizer, behind the render backend contract, owning the
     /// multi-object dynamic scene drawn beside `scene`.
     ///

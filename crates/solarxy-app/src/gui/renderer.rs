@@ -514,6 +514,9 @@ impl EguiRenderer {
             hdri_available: pt_hdri_available,
             customs: pt_customs,
             uv_overlap_pct: pt_uv_overlap_pct,
+            cameras: pt_cameras,
+            look_through: pt_look_through,
+            look_through_change: pt_look_through_change,
         } = pane_toolbar;
         let mut viewport_rect_logical: Option<egui::Rect> = None;
 
@@ -587,6 +590,9 @@ impl EguiRenderer {
                     hdri_available: pt_hdri_available,
                     customs: pt_customs,
                     uv_overlap_pct: pt_uv_overlap_pct,
+                    cameras: pt_cameras,
+                    look_through: pt_look_through,
+                    look_through_change: pt_look_through_change,
                 },
             };
             DockArea::new(dock_state)

@@ -220,6 +220,32 @@ impl State {
         }
     }
 
+    /// Snap every bound pane's camera to its camera node's current pose.
+    ///
+    /// Runs every frame, so a camera node moved by a scene edit or reload
+    /// carries its panes with it, matching the web shell. The clone ends
+    /// the `raster` borrow before the pane cameras are mutated. A binding
+    /// whose node no longer exists follows nothing and keeps its last
+    /// pose, exactly as on the web.
+    fn follow_look_through_cameras(&mut self) {
+        let updates: Vec<(usize, solarxy_core::scene::CameraDef)> = {
+            let Some(cams) = self.raster.scene().cameras() else {
+                return;
+            };
+            (0..4)
+                .filter_map(|i| {
+                    let id = self.look_through[i]?;
+                    cams.iter().find(|c| c.id == id).map(|d| (i, d.clone()))
+                })
+                .collect()
+        };
+        for (i, def) in updates {
+            if let Some(cam) = self.view.cameras.get_mut(i).and_then(Option::as_mut) {
+                solarxy_host::cameras::apply_camera_def(&mut cam.camera, &def);
+            }
+        }
+    }
+
     pub(super) fn update_wireframe_params(&self) {
         let pds = &self.view.pane_settings[0];
         solarxy_host::write_wireframe_params(
@@ -456,6 +482,7 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        self.follow_look_through_cameras();
         let hdri_poll = self.pending_hdri.as_ref().map(|p| p.receiver.try_recv());
         match hdri_poll {
             Some(Ok(Ok(new_ibl))) => {

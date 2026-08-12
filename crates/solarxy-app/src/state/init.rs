@@ -176,6 +176,7 @@ impl State {
             engine: None,
             engine_scene: None,
             selected_object: None,
+            look_through: [None; 4],
             raster,
             env,
             env_bounds,
@@ -189,6 +190,7 @@ impl State {
                 uv_left_pressed: false,
                 uv_middle_pressed: false,
                 modifiers: ModifiersState::empty(),
+                nav_button_down: false,
             },
             review: super::review::ReviewState {
                 author: preferences.review.author.clone(),

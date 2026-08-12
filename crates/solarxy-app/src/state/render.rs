@@ -160,14 +160,40 @@ impl State {
 
         let background = self.resolve_background(&pds);
         let bounds = self.scene_bounds();
-        // This shell has no camera nodes yet, so every pane is a free view and
-        // resolves to its own look.
+        // A pane looking through a camera composites with the shot's look
+        // and its grading tables, resolved through the one precedence site;
+        // a free pane keeps its own. `set_lut` dedupes on content, so the
+        // common case (free panes, or every pane through one camera) costs
+        // two comparisons per pane and rebuilds nothing.
+        let cam_look: Option<solarxy_core::scene::CameraLook> = self.look_through[i.min(3)]
+            .and_then(|id| {
+                self.raster
+                    .scene()
+                    .cameras()
+                    .and_then(|cams| cams.iter().find(|c| c.id == id))
+                    .map(|c| c.look.clone())
+            });
         let look = solarxy_renderer::composite::resolve_look(
-            None,
+            cam_look.as_ref(),
             &solarxy_core::view_config::PaneLook::from_tone(
                 self.renderer.post.tone_mode,
                 self.renderer.post.exposure,
             ),
+        );
+        let (lut_a, lut_b) = cam_look
+            .as_ref()
+            .map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
+        self.renderer.set_lut(
+            &self.device,
+            &self.queue,
+            solarxy_renderer::lut::LutSlot::A,
+            lut_a.as_deref(),
+        );
+        self.renderer.set_lut(
+            &self.device,
+            &self.queue,
+            solarxy_renderer::lut::LutSlot::B,
+            lut_b.as_deref(),
         );
         let scene_present = self.scene_present();
         let outline = self.renderer.selection_style
@@ -446,6 +472,37 @@ impl State {
         // `apply_to_state` re-borrows the same field below.
         let hdri_available = self.renderer.ibl_res.ibl.equirect.is_some();
         let uv_overlap_pct = self.renderer.uv_overlap.overlap_pct;
+        // The open scene's cameras, named the way the Node Tree names them,
+        // for the toolbar's Look Through submenu. Empty with no engine open.
+        let scene_cameras: Vec<(u64, String)> = match &self.engine {
+            Some(engine) => self
+                .raster
+                .scene()
+                .cameras()
+                .map(|cams| {
+                    let doc = engine.document();
+                    let registry = engine.registry();
+                    let root = doc.graph(solarxy_graph::document::GraphContext::Root).ok();
+                    cams.iter()
+                        .map(|c| {
+                            let name = root
+                                .as_ref()
+                                .and_then(|g| {
+                                    g.nodes()
+                                        .find(|n| n.id.0 == c.id.0)
+                                        .map(|n| solarxy_graph::naming::node_name(n, registry))
+                                })
+                                .unwrap_or_else(|| format!("Camera {}", c.id.0));
+                            (c.id.0, name)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let look_through_mirror: [Option<u64>; 4] =
+            std::array::from_fn(|i| self.look_through[i].map(|id| id.0));
+        let mut look_through_change = None;
         let pane_toolbar = crate::gui::PaneToolbarData {
             rects: &pane_rects,
             active: ap,
@@ -455,6 +512,9 @@ impl State {
             hdri_available,
             customs: &self.preferences.view.custom_backgrounds,
             uv_overlap_pct,
+            cameras: &scene_cameras,
+            look_through: look_through_mirror,
+            look_through_change: &mut look_through_change,
         };
         // The screenshot modal is suppressed on any capture frame so it
         // cannot land in the shot; a re-capture additionally forces every
@@ -489,10 +549,27 @@ impl State {
             suppress_screenshot_modal,
         );
 
-        if let Some((i, proj)) = projection_change
-            && let Some(cam) = &mut self.view.cameras[i]
+        if let Some((i, proj)) = projection_change {
+            // A projection picked on a bound pane takes the view over;
+            // without the release the per-frame follow would silently
+            // revert the choice on the next frame.
+            self.release_look_through_pane(i);
+            if let Some(cam) = &mut self.view.cameras[i] {
+                cam.set_projection(proj);
+            }
+        }
+
+        if let Some((i, change)) = look_through_change
+            && i < 4
         {
-            cam.set_projection(proj);
+            // Applied after `render_ui` like a projection change; the pose
+            // lands on the next frame's follow, one frame after the click.
+            self.look_through[i] = match change {
+                crate::gui::LookThroughChange::Bind(id) => {
+                    Some(solarxy_core::scene::SceneObjectId(id))
+                }
+                crate::gui::LookThroughChange::Free => None,
+            };
         }
 
         let changes = snap_after.apply_to_state(

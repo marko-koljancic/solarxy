@@ -171,6 +171,9 @@ impl State {
         }
         self.clear_scene_objects();
         self.environment.invalidate();
+        // Bindings name camera nodes of the previous document; a fresh scene
+        // starts on free views.
+        self.look_through = [None; 4];
 
         let warnings = loaded.warnings.len();
         let view = loaded.sidecar.view.clone();
@@ -324,6 +327,7 @@ impl State {
     pub fn close_scene(&mut self) {
         self.engine = None;
         self.engine_scene = None;
+        self.look_through = [None; 4];
         self.clear_scene_objects();
         self.environment.invalidate();
         self.reset_env_for_empty_scene();
