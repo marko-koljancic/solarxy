@@ -1721,23 +1721,7 @@ impl SolarxyApp {
             &self.renderer.layouts.camera,
             camera,
         ));
-        // The look belongs to the camera being shot through. Falling back to
-        // the active pane's is right only when the render names no camera, and
-        // that is exactly when the shot *is* the active pane's view.
-        let camera_look = opts.camera.and_then(|node| {
-            let id = SceneObjectId(node.0);
-            self.raster
-                .scene()
-                .cameras()
-                .and_then(|cams| cams.iter().find(|c| c.id == id).map(|c| c.look.clone()))
-        });
-        self.still_look = match camera_look.as_ref() {
-            Some(look) => solarxy_renderer::composite::resolve_look(
-                Some(look),
-                &self.pane_looks[self.view.active_pane],
-            ),
-            None => self.pane_look(self.view.active_pane),
-        };
+        self.prepare_still_look(opts.camera);
 
         self.still_tiles.clear();
         self.still = Some(StillRenderJob::new(spec));
@@ -4708,6 +4692,50 @@ impl SolarxyApp {
     /// which rebuilds the composite bind group once per pane per frame;
     /// that is a known cost of one shared pair, and caching a bind group
     /// per distinct pair is the fix if it ever shows up in a profile.
+    /// Resolve the look a still composites with, and bind the tables it asks
+    /// for.
+    ///
+    /// The look belongs to the camera being shot through. Falling back to the
+    /// active pane's camera is right only when the render node names none, and
+    /// that is exactly when the shot *is* the active pane's view, grade and
+    /// all.
+    ///
+    /// Binding here is what [`Self::bind_pane_luts`] cannot do for a still.
+    /// There is one table pair for the whole renderer, the pane path is its
+    /// only other binder, and a running job replaces that path wholesale: with
+    /// nothing binding for the job's duration the composite reads whatever the
+    /// last drawn pane left behind. Once at the start is enough, because the
+    /// tables cannot change while a job runs, and it is self-healing, because
+    /// the pane path rebinds its own on the first ordinary frame afterwards.
+    /// The bind dedupes on content hash, so an ungraded shot costs two
+    /// comparisons.
+    fn prepare_still_look(&mut self, camera: Option<NodeId>) {
+        let camera_look = camera
+            .and_then(|node| {
+                let id = SceneObjectId(node.0);
+                self.raster
+                    .scene()
+                    .cameras()
+                    .and_then(|cams| cams.iter().find(|c| c.id == id).map(|c| c.look.clone()))
+            })
+            .or_else(|| self.pane_camera_look(self.view.active_pane).cloned());
+        let pane_fallback = self
+            .pane_looks
+            .get(self.view.active_pane)
+            .copied()
+            .unwrap_or_default();
+        self.still_look =
+            solarxy_renderer::composite::resolve_look(camera_look.as_ref(), &pane_fallback);
+
+        let (lut_a, lut_b) = camera_look
+            .as_ref()
+            .map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
+        self.renderer
+            .set_lut(&self.device, &self.queue, LutSlot::A, lut_a.as_deref());
+        self.renderer
+            .set_lut(&self.device, &self.queue, LutSlot::B, lut_b.as_deref());
+    }
+
     fn bind_pane_luts(&mut self, pane: usize) {
         let (a, b) = self
             .pane_camera_look(pane)

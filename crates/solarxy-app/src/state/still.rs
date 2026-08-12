@@ -127,6 +127,21 @@ impl State {
             solarxy_host::cameras::apply_camera_def(&mut camera.camera, def);
             cam_look = Some(def.look.clone());
         }
+        // A render node naming no camera means the shot is the active pane's
+        // view, and that pane may itself be looking through a graded camera.
+        // Falling back to tone and exposure alone would drop a grade the pane
+        // is showing, so the still would not be a photograph of what was
+        // framed. The pose needs no such fallback: it already came from the
+        // pane's camera above, which follows the node it is bound to.
+        if cam_look.is_none() {
+            cam_look = self.look_through[ap.min(3)].and_then(|id| {
+                self.raster
+                    .scene()
+                    .cameras()
+                    .and_then(|cams| cams.iter().find(|c| c.id == id))
+                    .map(|c| c.look.clone())
+            });
+        }
         camera.camera.aspect = aspect;
 
         // The shot's look, through the one precedence site, and the
