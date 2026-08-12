@@ -19,6 +19,7 @@
 //! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
 
 mod capture;
+pub(crate) mod cook_health;
 #[cfg(debug_assertions)]
 mod dev;
 pub(crate) mod engine_scene;
@@ -131,6 +132,10 @@ pub struct State {
     /// selects engine-side and leaves the viewport alone, which is what
     /// the web shell does with the same gesture.
     pub(super) selected_object: Option<solarxy_core::scene::SceneObjectId>,
+    /// Which nodes' cooks are failing, absorbed from the engine's event
+    /// stream each frame. Fresh failures toast; the standing map is what
+    /// the still render consults before reporting success.
+    pub(super) cook_health: cook_health::CookHealth,
     /// The scene camera each pane looks through, or `None` for a free view.
     ///
     /// Viewer-scoped look-through: a bound pane follows the camera node's

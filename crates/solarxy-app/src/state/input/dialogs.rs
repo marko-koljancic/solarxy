@@ -172,8 +172,10 @@ impl State {
         self.clear_scene_objects();
         self.environment.invalidate();
         // Bindings name camera nodes of the previous document; a fresh scene
-        // starts on free views.
+        // starts on free views. The cook ledger describes the previous
+        // document too, and the new engine re-reports any failure.
         self.look_through = [None; 4];
+        self.cook_health.clear();
 
         let warnings = loaded.warnings.len();
         let view = loaded.sidecar.view.clone();
@@ -328,6 +330,7 @@ impl State {
         self.engine = None;
         self.engine_scene = None;
         self.look_through = [None; 4];
+        self.cook_health.clear();
         self.clear_scene_objects();
         self.environment.invalidate();
         self.reset_env_for_empty_scene();

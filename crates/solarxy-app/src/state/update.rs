@@ -290,11 +290,32 @@ impl State {
             engine.submit_job_result(ctx, id, result);
         }
 
+        // Surface fresh cook failures. The engine emits a status event
+        // only on a transition, so this toasts once per failed cook, not
+        // once per frame; warnings never ride this stream (they are
+        // pull-based on the driver), so bake announcements and migration
+        // notices stay out of the toast queue by construction. Names are
+        // resolved while the engine borrow is live, toasted after it ends.
+        let mut fresh = self.cook_health.absorb(&batch.events);
+        fresh.extend(self.cook_health.absorb(&cooked));
+        let toasts: Vec<String> = fresh
+            .into_iter()
+            .map(|(id, message)| {
+                let name = find_node_name(engine, id);
+                format!("{name} failed to cook: {message}")
+            })
+            .collect();
+
         if dirty || !cooked.is_empty() {
             let delta = engine.take_scene_delta();
             if !delta.ops.is_empty() {
                 self.pending_scene_deltas.push(delta);
             }
+        }
+
+        for message in toasts {
+            self.gui
+                .set_toast(&message, crate::gui::ToastSeverity::Error);
         }
     }
 
@@ -747,4 +768,16 @@ pub(super) fn build_bounds_env(
         &renderer.ibl_res.ltc,
     );
     env
+}
+
+/// A node's display name looked up across every context, root first,
+/// because a cook status event carries no context. Falls back to the
+/// bare id for a node that vanished between the event and this frame.
+fn find_node_name(engine: &solarxy_graph::Engine, id: NodeId) -> String {
+    let doc = engine.document();
+    let registry = engine.registry();
+    std::iter::once(GraphContext::Root)
+        .chain(doc.subflow_owners().map(GraphContext::Subflow))
+        .find_map(|ctx| doc.graph(ctx).ok().and_then(|g| g.node(id)))
+        .map_or_else(|| format!("Node {}", id.0), |n| node_name(n, registry))
 }
