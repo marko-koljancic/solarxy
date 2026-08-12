@@ -374,6 +374,42 @@ fn a_build_without_the_window_says_so_rather_than_refusing_the_flag() {
     }
 }
 
+/// A scene file whose bytes are not a scene exits two, saying so on stderr.
+///
+/// Two rather than three: the file is named correctly and is the right kind,
+/// and what failed is reading it. Three is for a scene that read fine and then
+/// could not be rendered. A build system retries the two differently, so the
+/// distinction is the point.
+#[test]
+fn a_corrupt_scene_file_exits_two_with_nothing_on_standard_output() {
+    let dir = std::env::temp_dir().join("solarxy-render-contract");
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let corrupt = dir.join("corrupt.slxy");
+    // A scene file is a zip archive. Bytes that are not one fail at the
+    // container before anything reads a document out of it.
+    std::fs::write(&corrupt, b"PK\x03\x04 and then nothing that follows").expect("the file writes");
+
+    let Some(out) = render(&[
+        corrupt.to_str().expect("utf8 path"),
+        "--out",
+        "/dev/null.png",
+    ]) else {
+        return;
+    };
+    assert_eq!(
+        code(&out),
+        2,
+        "stderr said: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty(), "a failure wrote to standard output");
+    assert!(
+        !out.stderr.is_empty(),
+        "a failure said nothing about why it failed"
+    );
+    let _ = std::fs::remove_file(&corrupt);
+}
+
 /// Naming a render node the scene does not have exits three.
 ///
 /// Three is the scene's code: the invocation was well formed and the file
