@@ -79,5 +79,5 @@ CMD ["--help"]
 LABEL org.opencontainers.image.title="solarxy-cli"
 LABEL org.opencontainers.image.description="Solarxy CLI — 3D asset validation for CI/CD pipelines"
 LABEL org.opencontainers.image.source="https://github.com/marko-koljancic/solarxy"
-LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
 LABEL org.opencontainers.image.documentation="https://github.com/marko-koljancic/solarxy/blob/main/docs/integrations/gitlab.md"

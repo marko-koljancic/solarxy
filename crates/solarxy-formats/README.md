@@ -55,4 +55,4 @@ This crate re-exports the core geometry types from `solarxy-core`:
 
 ## License
 
-MIT
+GPL-3.0-or-later. See the workspace [LICENSE](../../LICENSE).

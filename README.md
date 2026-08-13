@@ -1,6 +1,6 @@
 # solarxy
 
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Rust](https://img.shields.io/badge/Rust-1.92%2B-orange.svg)
 ![Release](https://github.com/marko-koljancic/solarxy/actions/workflows/release.yml/badge.svg)
 ![GitHub Release](https://img.shields.io/github/v/release/marko-koljancic/solarxy)
@@ -187,15 +187,31 @@ Solarxy is a Rust workspace of 15 members: the root GUI binary plus 14 crates sp
 
 ## Contributing
 
-Contributions are welcome. Feel free to open an issue or submit a pull request. See the [Contributing](https://github.com/marko-koljancic/solarxy/wiki/Contributing) page for details.
+Contributions are welcome. Feel free to open an issue or submit a pull request. See the [Contributing](https://github.com/marko-koljancic/solarxy/wiki/Contributing) page for build instructions and conventions, and [CONTRIBUTING.md](.github/CONTRIBUTING.md) for the terms a contribution arrives under: a `Signed-off-by` line on every commit, and a copyright grant that leaves the copyright with you.
 
 ## License
 
-Licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+Licensed under the GNU General Public License, version 3 or later. See the
+[LICENSE](LICENSE) file for the full text.
+
+**Earlier releases stay MIT.** Versions through 0.8.2 were published under the MIT license,
+and that grant cannot be withdrawn, so anyone holding one of those releases keeps MIT terms
+for it. Copyleft begins at 0.9.0.
+
+**An additional permission applies.** Under section 7 of the GPL, the copyright holder
+authorizes combining Solarxy with graph-layout software under the Eclipse Public License 2.0
+and with font software under the SIL Open Font License 1.1 or the Ubuntu Font Licence 1.0.
+Both are free software licenses the Free Software Foundation classifies as GPL-incompatible,
+so without this the browser build's second auto-layout algorithm and the interface typefaces
+could not ship. The grant is stated in full in
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES.md).
 
 The path-traced renderer ports code from MIT-licensed work by other authors, and the
-published algorithms it implements are credited alongside it. Both are recorded in
-[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES.md), which ships inside every distribution.
+published algorithms it implements are credited alongside it. Both are recorded in the same
+file, which ships inside every distribution.
+
+The reusable validation GitHub Action under `packaging/github-action/` is **deliberately MIT**,
+not GPL, because it runs inside other people's pipelines. Its license sits beside it.
 
 ## Contact
 

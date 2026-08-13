@@ -94,4 +94,4 @@ match args.mode {
 
 ## License
 
-MIT
+GPL-3.0-or-later. See the workspace [LICENSE](../../LICENSE).

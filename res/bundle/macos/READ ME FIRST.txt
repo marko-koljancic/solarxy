@@ -70,5 +70,15 @@ Shell scripts from a DMG are quarantined the same way. Two options:
 
 License
 -------
-MIT. See the project repository at
-https://github.com/marko-koljancic/solarxy for source and license text.
+GNU General Public License, version 3 or later. The full text is in the
+LICENSE file beside this one, and also inside the app at
+Solarxy.app/Contents/Resources/LICENSE.
+
+You are free to use, study, share and modify Solarxy. If you distribute a
+modified version, you must pass on the same freedoms and make your source
+available. Complete source for this build is at
+https://github.com/marko-koljancic/solarxy at the tag matching this version.
+
+THIRD-PARTY-NOTICES.md, also beside this file, carries the attribution for
+work Solarxy ports code from, and the additional permission that lets the
+interface typeface ship with it.

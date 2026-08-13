@@ -1,17 +1,61 @@
 # Third-party notices
 
-Solarxy is MIT licensed; see `LICENSE`. This file covers the third-party work Solarxy
-**ports code from**, which its licenses require to be carried with every distribution.
+Solarxy is licensed under GPL-3.0-or-later; see `LICENSE`. Releases through 0.8.2 were
+published under the MIT license, and that grant cannot be withdrawn, so those versions stay
+MIT for anyone who holds them. 0.9.0 is where the present terms begin.
 
-It is deliberately not a list of dependencies. Solarxy's Cargo and npm dependencies are
-declared in `Cargo.lock` and `web/package-lock.json` and carry their own terms; what is
-recorded here is source that was read, translated and adapted into Solarxy's own files,
-where the obligation is to reproduce the copyright notice and the license text.
+This file carries two different kinds of thing, and the difference matters. The first section
+is an **additional permission** granted under section 7 of the GPL. That is a term of Solarxy's
+own license rather than an attribution, and it is here because it has to travel with every copy.
+Everything after it is the third-party work Solarxy **ports code from**, whose licenses require
+the notice to be carried with every distribution.
 
-Below the license texts, a second section credits the published algorithms Solarxy
-implements. Those are citations rather than obligations: an algorithm is not copyrightable
-and no license attaches, but a reader deserves to know what a piece of shader code is an
-implementation of.
+It is still not a list of dependencies. Solarxy's Cargo and npm dependencies are declared in
+`Cargo.lock` and `web/package-lock.json` and carry their own terms; what is recorded below is
+source that was read, translated and adapted into Solarxy's own files, where the obligation is
+to reproduce the copyright notice and the license text. Two dependencies are named anyway, in
+the section 7 permission, because a permission that does not say what it covers grants nothing.
+
+After the license texts, a further section credits the published algorithms Solarxy implements.
+Those are citations rather than obligations: an algorithm is not copyrightable and no license
+attaches, but a reader deserves to know what a piece of shader code is an implementation of.
+
+## Additional permission under GNU GPL version 3 section 7
+
+Copyright (C) 2026 Marko Koljancic
+
+If you modify Solarxy, or any covered work, by linking or combining it with the works described
+below, or with modified versions of them, the licensor of Solarxy grants you additional
+permission to convey the resulting work. Corresponding Source for a non-source form of such a
+combination shall include the source for the parts of those works used as well as that of the
+covered work.
+
+The permission covers two classes of work, and nothing else:
+
+- **Graph-layout software under the Eclipse Public License version 2.0.** The node canvas loads
+  such a library on demand to offer a second auto-layout algorithm beside its default one. It is
+  used unmodified and remains a separate file in the build output.
+
+- **Font software under the SIL Open Font License version 1.1 or the Ubuntu Font Licence
+  version 1.0.** The desktop binary embeds its interface typeface directly, and the web build
+  ships web fonts. In both cases the font is data the program renders with rather than part of
+  its code.
+
+Both licenses are free software licenses that the Free Software Foundation classifies as
+incompatible with the GPL, which is what makes this permission necessary rather than decorative.
+Section 7 exists precisely so a copyright holder can authorize a combination the license would
+otherwise refuse, and granting it is what let Solarxy adopt copyleft without deleting working
+features to get there.
+
+The permission is deliberately narrow. It names two classes of bundled work and weakens the
+license in no other respect. It is stated here rather than appended to `LICENSE` so that the
+text of the GNU General Public License is reproduced verbatim and unmodified, which is what
+license-detection tooling matches on.
+
+Each covered work's own license text lives with that work: the layout library ships its license
+in its own package, and the desktop typeface's license is at `res/Lilex/OFL.txt` in the source
+tree. Packaging those texts into the distributed artifacts alongside this file is a known gap,
+tracked separately, and it predates this license change rather than being introduced by it.
 
 ## three-gpu-pathtracer
 

@@ -71,4 +71,4 @@ This crate is part of the [Solarxy](https://github.com/marko-koljancic/solarxy) 
 
 ## License
 
-MIT
+GPL-3.0-or-later. See the workspace [LICENSE](../../LICENSE).
