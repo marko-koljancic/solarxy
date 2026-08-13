@@ -41,7 +41,7 @@ Progress has three surfaces, all reading one stream, and all of them report on
 |---|---|---|
 | Plain line | the default | One row, rewritten in place on a terminal and written once per step in a log |
 | Dashboard | `--tui` | Tile grid, sample gauge with an estimate, per-stage timings, what was asked for, throughput, and the picture as it converges |
-| Window | `--watch` | The picture, on screen, holding the finished frame until dismissed |
+| Window | `--watch` | The picture, on screen, with pan, zoom and pass selection, holding the finished frame until dismissed |
 
 Two things worth knowing about them. The dashboard **falls back to the plain
 line** when standard error is not a terminal or is smaller than it needs, and
@@ -50,6 +50,16 @@ output, `--tui` and `--json` compose. And a run with either of the two picture
 surfaces asks the renderer for a **finer tiling**, because pixels reach a
 surface only when a tile finishes and an ordinary image is a single tile. The
 image written is unchanged either way.
+
+The window's controls: drag pans, the wheel zooms about the cursor, and `F`
+or the Fit button returns to the letterbox fit, which is the default;
+resizing refits. The canvas around the picture is a checker that never moves
+with it. A pass selector defaults to the beauty and lists the passes `--aov`
+requested, with an unrequested pass disabled and naming the flag that would
+produce it; a raster run, which writes no passes, shows the beauty alone.
+Switching passes never restarts the render. Escape or `q` cancels it, as
+does closing the window; a float render previews clamped and encoded, and
+the chrome says so, because the file is where the real values are.
 
 Exit codes are the taxonomy a build system branches on: 0 rendered, 1 usage,
 2 input, 3 cook, 4 no adapter, 5 device lost, 6 cancelled, 7 output.
