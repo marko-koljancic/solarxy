@@ -141,6 +141,27 @@
                                 Source='$(var.CargoTargetBinDir)\solarxy.exe'
                                 KeyPath='yes'/>
                         </Component>
+
+                        <!--
+                          The ported-source notices, beside the executable.
+                          Required rather than decorative: the renderer ports
+                          MIT-licensed work whose terms say the notice travels
+                          with every copy, and an installer is a copy.
+
+                          Source is repo-relative like the install-source
+                          marker below. This component is one of the reasons
+                          `allow-dirty = ["msi"]` is set in dist-workspace.toml:
+                          `dist` regenerates this file and would otherwise drop
+                          it, exactly as it would drop the product icon.
+                        -->
+                        <Component Id='notices' Guid='*'>
+                            <File
+                                Id='third_party_notices'
+                                Name='THIRD-PARTY-NOTICES.md'
+                                DiskId='1'
+                                Source='THIRD-PARTY-NOTICES.md'
+                                KeyPath='yes'/>
+                        </Component>
                     </Directory>
                 </Directory>
             </Directory>
@@ -225,6 +246,7 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='notices'/>
             <ComponentRef Id='InstallSourceMarker'/>
             <ComponentRef Id='ApplicationShortcut'/>
 

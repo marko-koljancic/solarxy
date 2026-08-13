@@ -193,6 +193,10 @@ Contributions are welcome. Feel free to open an issue or submit a pull request. 
 
 Licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
+The path-traced renderer ports code from MIT-licensed work by other authors, and the
+published algorithms it implements are credited alongside it. Both are recorded in
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES.md), which ships inside every distribution.
+
 ## Contact
 
 [Marko Koljancic](https://koljam.com/)

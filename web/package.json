@@ -7,6 +7,8 @@
     "build:wasm": "bash ../crates/solarxy-web/build-wasm.sh web/src/wasm/pkg",
     "predev": "npm run build:wasm",
     "dev": "vite",
+    "notices": "node -e \"require('fs').copyFileSync('../THIRD-PARTY-NOTICES.md','public/THIRD-PARTY-NOTICES.md')\"",
+    "prebuild": "npm run notices",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
