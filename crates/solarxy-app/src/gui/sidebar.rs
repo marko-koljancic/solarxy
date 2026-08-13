@@ -1,4 +1,8 @@
 use solarxy_core::preferences::{MaterialOverride, ToneMode};
+use solarxy_core::view_config::{
+    MAX_BLOOM_STRENGTH, MAX_BLOOM_THRESHOLD, MAX_SSAO_STRENGTH, MIN_BLOOM_STRENGTH,
+    MIN_BLOOM_THRESHOLD, MIN_SSAO_STRENGTH,
+};
 
 use super::snapshot::GuiSnapshot;
 
@@ -62,7 +66,39 @@ pub(super) fn draw_sidebar_content(ui: &mut egui::Ui, s: &mut GuiSnapshot) {
             .default_open(true)
             .show(ui, |ui| {
                 checkbox_with_tooltip(ui, &mut s.bloom_enabled, "Bloom", "Shift+D");
+                ui.add_enabled_ui(s.bloom_enabled, |ui| {
+                    ui.add(
+                        egui::Slider::new(
+                            &mut s.post_strengths.bloom_strength,
+                            MIN_BLOOM_STRENGTH..=MAX_BLOOM_STRENGTH,
+                        )
+                        .text("Bloom Strength"),
+                    )
+                    .on_hover_text("How much of the blurred bright pass is added back.");
+                    ui.add(
+                        egui::Slider::new(
+                            &mut s.post_strengths.bloom_threshold,
+                            MIN_BLOOM_THRESHOLD..=MAX_BLOOM_THRESHOLD,
+                        )
+                        .text("Bloom Threshold"),
+                    )
+                    .on_hover_text("Luminance a pixel has to exceed before it blooms.");
+                });
                 checkbox_with_tooltip(ui, &mut s.ssao_enabled, "SSAO", "Shift+O");
+                ui.add_enabled_ui(s.ssao_enabled, |ui| {
+                    ui.add(
+                        egui::Slider::new(
+                            &mut s.post_strengths.ssao_strength,
+                            MIN_SSAO_STRENGTH..=MAX_SSAO_STRENGTH,
+                        )
+                        .text("Occlusion Strength"),
+                    )
+                    .on_hover_text(
+                        "How far the composite blends towards the occlusion buffer. \
+                         The AO Preview inspection mode shows the raw buffer and is \
+                         deliberately unaffected by this.",
+                    );
+                });
                 combo_with_tooltip(ui, "Tone Map", "Shift+T", &mut s.tone_mode, ToneMode::ALL);
                 ui.horizontal(|ui| {
                     ui.add(

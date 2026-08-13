@@ -459,6 +459,12 @@ pub struct SolarxyApp {
     traced_env_dirty: bool,
     /// Finished tiles waiting for the frontend to take them.
     still_tiles: std::collections::VecDeque<solarxy_host::still::StillTile>,
+    /// Whether the traced preview runs its edge-aware filter.
+    ///
+    /// A preference rather than a per-pane setting, matching the two effects
+    /// it sits beside in the panel: it describes how the preview is built,
+    /// not what any one pane is showing.
+    preview_denoise: bool,
     /// Per-pane camera identity the traced preview last accumulated under.
     /// A mismatch on encode resets that pane's accumulation, which is what
     /// makes the preview converge only while the pane is quiescent.
@@ -523,14 +529,19 @@ const PREVIEW_TARGET_SAMPLES: u32 = 4096;
 
 /// The traced preview's settings: one sample per animation frame (the
 /// pacing that keeps the page responsive), half resolution, and the
-/// edge-aware filter on, because a one-sample frame is unusable without
-/// it. Asserted before every preview encode rather than held, since the
-/// still job authors its own settings on the same backend.
-fn preview_trace_settings() -> TraceSettings {
+/// edge-aware filter, which defaults on because a one-sample frame is
+/// unusable without it. Asserted before every preview encode rather than
+/// held, since the still job authors its own settings on the same backend.
+///
+/// The filter is the one value a person can turn off, and the reason to is
+/// judging what the tracer actually produced rather than what the filter
+/// made of it, which matters most at the sample counts where the filter is
+/// doing the most work.
+fn preview_trace_settings(denoise: bool) -> TraceSettings {
     TraceSettings {
         samples: PREVIEW_TARGET_SAMPLES,
         chunk: 1,
-        denoise: true,
+        denoise,
         resolution_scale: 0.5,
         ..TraceSettings::default()
     }
@@ -838,6 +849,9 @@ impl SolarxyApp {
             tracer: None,
             traced_env_dirty: true,
             still_tiles: std::collections::VecDeque::new(),
+            // On, matching the shipped behaviour, until a preference push
+            // says otherwise; boot pushes one before the first traced frame.
+            preview_denoise: true,
             traced_cam_keys: [None; 4],
             traced_env_params: (0.0, 0.0),
             last_pane_samples: [None; 4],
@@ -1171,6 +1185,10 @@ impl SolarxyApp {
         point_size: f32,
         ssao_enabled: bool,
         bloom_enabled: bool,
+        bloom_strength: f32,
+        bloom_threshold: f32,
+        ssao_strength: f32,
+        preview_denoise: bool,
         apply_wireframe: bool,
         apply_background: bool,
     ) {
@@ -1183,6 +1201,18 @@ impl SolarxyApp {
         // needs no reload and no host event.
         self.renderer.post.ssao_enabled = ssao_enabled;
         self.renderer.post.bloom_enabled = bloom_enabled;
+        // Clamped by the setter, so a hand-edited stored preference cannot
+        // push the composite somewhere the sliders cannot reach.
+        self.renderer
+            .post
+            .set_strengths(solarxy_core::view_config::PostStrengths {
+                bloom_strength,
+                bloom_threshold,
+                ssao_strength,
+            });
+        // The preview's filter. Held here rather than baked into
+        // `preview_trace_settings`, which asserts it on every encode.
+        self.preview_denoise = preview_denoise;
         self.view.display.turntable_rpm = if turntable_rpm.is_finite() {
             turntable_rpm.clamp(1.0, 60.0)
         } else {
@@ -3608,7 +3638,7 @@ impl SolarxyApp {
         // authors its own settings on the same backend and whichever ran
         // last would otherwise win.
         if let Some(t) = self.tracer.as_mut() {
-            t.set_settings(preview_trace_settings());
+            t.set_settings(preview_trace_settings(self.preview_denoise));
         }
         let Some(cam) = self.view.cameras.get(i).and_then(Option::as_ref) else {
             return;

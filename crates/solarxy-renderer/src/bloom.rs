@@ -4,9 +4,7 @@
 use crate::bind_groups::BindGroupLayouts;
 use crate::pipelines::Pipelines;
 use crate::texture;
-
-const BLOOM_THRESHOLD: f32 = 0.8;
-pub const BLOOM_STRENGTH: f32 = 0.8;
+use solarxy_core::view_config::PostStrengths;
 
 pub struct BloomState {
     _ping_texture: wgpu::Texture,
@@ -14,6 +12,13 @@ pub struct BloomState {
     _pong_texture: wgpu::Texture,
     pong_view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
+    /// The threshold and strength this pass extracts and adds with.
+    ///
+    /// Held rather than taken as an argument because `render` is called from
+    /// the shared pane path, and a per-call value would have to be threaded
+    /// from the shell through a signature that has nothing else to do with
+    /// the look. Written only by [`crate::frame::PostProcessing::set_strengths`].
+    strengths: PostStrengths,
     params_buffer: wgpu::Buffer,
     params_bind_group: wgpu::BindGroup,
     extract_bind_group: wgpu::BindGroup,
@@ -35,7 +40,13 @@ impl BloomState {
         let (pong_texture, pong_view) =
             texture::create_bloom_texture(device, width, height, "Bloom Pong");
 
-        let bloom_params_data: [f32; 4] = [BLOOM_THRESHOLD, BLOOM_STRENGTH, 0.0, 0.0];
+        let strengths = PostStrengths::default();
+        let bloom_params_data: [f32; 4] = [
+            strengths.bloom_threshold,
+            strengths.bloom_strength,
+            0.0,
+            0.0,
+        ];
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Bloom Params Uniform"),
             contents: bytemuck::cast_slice(&bloom_params_data),
@@ -63,6 +74,7 @@ impl BloomState {
             _pong_texture: pong_texture,
             pong_view,
             sampler,
+            strengths,
             params_buffer,
             params_bind_group,
             extract_bind_group,
@@ -101,6 +113,11 @@ impl BloomState {
         self.pong_view = pong_view;
     }
 
+    /// See [`crate::frame::PostProcessing::set_strengths`], the only caller.
+    pub(crate) fn set_strengths(&mut self, strengths: PostStrengths) {
+        self.strengths = strengths;
+    }
+
     pub fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -110,8 +127,8 @@ impl BloomState {
         height: u32,
     ) {
         let full_texel: [f32; 4] = [
-            BLOOM_THRESHOLD,
-            BLOOM_STRENGTH,
+            self.strengths.bloom_threshold,
+            self.strengths.bloom_strength,
             1.0 / width.max(1) as f32,
             1.0 / height.max(1) as f32,
         ];
@@ -141,7 +158,12 @@ impl BloomState {
 
         let half_w = (width / 2).max(1) as f32;
         let half_h = (height / 2).max(1) as f32;
-        let half_texel: [f32; 4] = [BLOOM_THRESHOLD, BLOOM_STRENGTH, 1.0 / half_w, 1.0 / half_h];
+        let half_texel: [f32; 4] = [
+            self.strengths.bloom_threshold,
+            self.strengths.bloom_strength,
+            1.0 / half_w,
+            1.0 / half_h,
+        ];
         queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&half_texel));
 
         {

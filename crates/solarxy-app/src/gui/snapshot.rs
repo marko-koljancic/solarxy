@@ -16,6 +16,7 @@ use solarxy_core::preferences::{
     BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
     ProjectionMode, ToneMode, UvMapBackground, UvMode, ViewMode,
 };
+use solarxy_core::view_config::PostStrengths;
 use solarxy_renderer::frame::PostProcessing;
 use crate::state::view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings};
 
@@ -54,6 +55,10 @@ pub(crate) struct GuiSnapshot {
     pub hdri_intensity: f32,
     pub bloom_enabled: bool,
     pub ssao_enabled: bool,
+    /// The three post intensities. One field rather than three because they
+    /// reach the renderer through a single setter, so a snapshot that
+    /// carried them separately would only be reassembled at the write.
+    pub post_strengths: PostStrengths,
     pub tone_mode: ToneMode,
     pub exposure: f32,
     pub ibl_mode: IblMode,
@@ -99,6 +104,7 @@ impl GuiSnapshot {
             hdri_intensity: display.hdri_intensity,
             bloom_enabled: post.bloom_enabled,
             ssao_enabled: post.ssao_enabled,
+            post_strengths: post.strengths(),
             tone_mode: post.tone_mode,
             exposure: post.exposure,
             ibl_mode,
@@ -117,7 +123,12 @@ impl GuiSnapshot {
             composite_params_changed: self.bloom_enabled != prev.bloom_enabled
                 || self.ssao_enabled != prev.ssao_enabled
                 || self.tone_mode != prev.tone_mode
-                || (self.exposure - prev.exposure).abs() > f32::EPSILON,
+                || (self.exposure - prev.exposure).abs() > f32::EPSILON
+                // Exact inequality, for the reason the intensity comparison
+                // below gives: this asks whether a slider moved, not whether
+                // two computed floats agree, and a tolerance would swallow
+                // the smallest drag the widget can produce.
+                || self.post_strengths != prev.post_strengths,
             // Intensity joins the mode here because both are
             // IBL-derived uniforms and both reach the GPU only
             // through `rebuild_light_bind_group`; unlike rotation,
@@ -179,6 +190,7 @@ impl GuiSnapshot {
 
         post.bloom_enabled = self.bloom_enabled;
         post.ssao_enabled = self.ssao_enabled;
+        post.set_strengths(self.post_strengths);
         post.tone_mode = self.tone_mode;
         post.exposure = self.exposure;
 
@@ -231,6 +243,7 @@ mod tests {
             hdri_intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
             bloom_enabled: false,
             ssao_enabled: false,
+            post_strengths: PostStrengths::default(),
             tone_mode: ToneMode::Reinhard,
             exposure: 1.0,
             ibl_mode: IblMode::Full,
@@ -259,6 +272,26 @@ mod tests {
         assert!(c.composite_params_changed);
         assert!(!c.background_changed);
         assert!(!c.ibl_changed);
+    }
+
+    #[test]
+    fn diff_post_strength_drag_marks_composite_params() {
+        // One test per value: they reach the uniform by different routes
+        // (the composite writes two of them, the bloom pass the third), so
+        // a diff that noticed only one would still look like it worked.
+        for mutate in [
+            (|s: &mut GuiSnapshot| s.post_strengths.bloom_strength = 1.4) as fn(&mut GuiSnapshot),
+            |s: &mut GuiSnapshot| s.post_strengths.bloom_threshold = 0.3,
+            |s: &mut GuiSnapshot| s.post_strengths.ssao_strength = 0.55,
+        ] {
+            let prev = baseline();
+            let mut next = prev;
+            mutate(&mut next);
+            let c = next.diff(&prev);
+            assert!(c.composite_params_changed);
+            assert!(!c.background_changed);
+            assert!(!c.ibl_changed);
+        }
     }
 
     #[test]

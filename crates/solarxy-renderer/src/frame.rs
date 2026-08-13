@@ -115,6 +115,34 @@ pub struct PostProcessing {
     pub luts: crate::lut::LutSlots,
     pub tone_mode: ToneMode,
     pub exposure: f32,
+    /// Private, unlike every field above it, because two passes hold a copy
+    /// and [`Self::set_strengths`] is what keeps them in step. A public
+    /// field would let a shell write this one and leave both copies stale.
+    strengths: solarxy_core::view_config::PostStrengths,
+}
+
+impl PostProcessing {
+    /// The intensities the two effects are currently built with.
+    #[must_use]
+    pub fn strengths(&self) -> solarxy_core::view_config::PostStrengths {
+        self.strengths
+    }
+
+    /// The single place the bloom and occlusion intensities change.
+    ///
+    /// The same shape lighting uses: two passes hold the value and a shell
+    /// that wrote one of them would leave a still compositing with an
+    /// intensity the viewport is not showing. Clamping happens here, once,
+    /// because the value arrives from two preference files and a slider and
+    /// only the slider carries a range of its own.
+    ///
+    /// Takes effect on the next write of each pass's uniform, which is the
+    /// next frame: nothing here touches the GPU.
+    pub fn set_strengths(&mut self, strengths: solarxy_core::view_config::PostStrengths) {
+        self.strengths = strengths.clamped();
+        self.bloom.set_strengths(self.strengths);
+        self.composite.set_strengths(self.strengths);
+    }
 }
 
 pub struct IblResources {
@@ -801,6 +829,9 @@ impl Renderer {
                 luts,
                 tone_mode: init.tone_mode,
                 exposure: init.exposure,
+                // Both passes were built from the same default, so the three
+                // copies agree before anything calls the setter.
+                strengths: solarxy_core::view_config::PostStrengths::default(),
             },
             ibl_res: IblResources {
                 ibl,

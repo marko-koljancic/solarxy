@@ -61,6 +61,80 @@ pub const MAX_HDRI_INTENSITY: f32 = 8.0;
 /// Each pane's 3D content is the pane rect minus this strip at the top.
 pub const PANE_TOOLBAR_HEIGHT: f32 = 22.0;
 
+/// How much of the blurred bright pass is added back. Neutral is not zero:
+/// these are the values the two effects shipped with as compiled-in
+/// constants, so a configuration that has never touched a control has to
+/// render exactly what the previous release rendered.
+pub const DEFAULT_BLOOM_STRENGTH: f32 = 0.8;
+/// Luminance above which a pixel contributes to the bright pass.
+pub const DEFAULT_BLOOM_THRESHOLD: f32 = 0.8;
+/// How far the composite blends towards the occlusion buffer.
+pub const DEFAULT_SSAO_STRENGTH: f32 = 0.8;
+
+/// The usable ranges. Zero on any of the three is the effect turned off by
+/// another name, which the existing toggles already express, so it is a
+/// legitimate floor rather than a degenerate one. The bloom ceiling is
+/// where the add stops reading as glow and starts reading as a blown
+/// image; occlusion is a blend factor and so cannot exceed one.
+pub const MIN_BLOOM_STRENGTH: f32 = 0.0;
+pub const MAX_BLOOM_STRENGTH: f32 = 4.0;
+pub const MIN_BLOOM_THRESHOLD: f32 = 0.0;
+pub const MAX_BLOOM_THRESHOLD: f32 = 4.0;
+pub const MIN_SSAO_STRENGTH: f32 = 0.0;
+pub const MAX_SSAO_STRENGTH: f32 = 1.0;
+
+/// The three post-processing intensities, as one value.
+///
+/// Renderer-global rather than per pane, which is the same shape the two
+/// effects themselves have: one post-processing state and one set of
+/// targets. The per-pane look the camera owns (exposure, tone, grade)
+/// deliberately excludes these, because a strength describes how the
+/// effect is built rather than how the shot is graded.
+///
+/// [`Default`] is the shipped look. That is load-bearing in the same way
+/// [`crate::scene::CameraLook`]'s neutral default is: it is what lets the
+/// controls ship without moving a single golden capture.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostStrengths {
+    pub bloom_strength: f32,
+    pub bloom_threshold: f32,
+    pub ssao_strength: f32,
+}
+
+impl Default for PostStrengths {
+    fn default() -> Self {
+        Self {
+            bloom_strength: DEFAULT_BLOOM_STRENGTH,
+            bloom_threshold: DEFAULT_BLOOM_THRESHOLD,
+            ssao_strength: DEFAULT_SSAO_STRENGTH,
+        }
+    }
+}
+
+impl PostStrengths {
+    /// Clamped into the usable ranges.
+    ///
+    /// Applied where the value enters the renderer rather than where a
+    /// control writes it, because the value arrives from three places (two
+    /// preference files and a slider) and only one of them is a widget with
+    /// a range of its own.
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            bloom_strength: self
+                .bloom_strength
+                .clamp(MIN_BLOOM_STRENGTH, MAX_BLOOM_STRENGTH),
+            bloom_threshold: self
+                .bloom_threshold
+                .clamp(MIN_BLOOM_THRESHOLD, MAX_BLOOM_THRESHOLD),
+            ssao_strength: self
+                .ssao_strength
+                .clamp(MIN_SSAO_STRENGTH, MAX_SSAO_STRENGTH),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisplaySettings {

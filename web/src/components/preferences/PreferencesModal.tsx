@@ -157,6 +157,24 @@ function DisplayTab({ draft, patch }: TabProps) {
         />
       </Row>
       <Row
+        label="Occlusion strength"
+        doc="How far the composite blends towards the occlusion buffer. The AO Preview inspection mode shows the raw buffer and is deliberately unaffected by this."
+      >
+        <input
+          className="input-field"
+          type="number"
+          min={0}
+          max={1}
+          step={0.05}
+          disabled={!d.ssaoEnabled}
+          value={d.ssaoStrength}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setD({ ssaoStrength: Math.min(1, Math.max(0, v)) });
+          }}
+        />
+      </Row>
+      <Row
         label="Bloom"
         doc="Glow on emissive and very bright surfaces. Applies immediately, renderer-wide."
       >
@@ -164,6 +182,52 @@ function DisplayTab({ draft, patch }: TabProps) {
           type="checkbox"
           checked={d.bloomEnabled}
           onChange={(e) => setD({ bloomEnabled: e.target.checked })}
+        />
+      </Row>
+      <Row
+        label="Bloom strength"
+        doc="How much of the blurred bright pass is added back on top of the image."
+      >
+        <input
+          className="input-field"
+          type="number"
+          min={0}
+          max={4}
+          step={0.1}
+          disabled={!d.bloomEnabled}
+          value={d.bloomStrength}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setD({ bloomStrength: Math.min(4, Math.max(0, v)) });
+          }}
+        />
+      </Row>
+      <Row
+        label="Bloom threshold"
+        doc="Luminance a pixel has to exceed before it contributes to the glow. Lower blooms more of the image."
+      >
+        <input
+          className="input-field"
+          type="number"
+          min={0}
+          max={4}
+          step={0.1}
+          disabled={!d.bloomEnabled}
+          value={d.bloomThreshold}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setD({ bloomThreshold: Math.min(4, Math.max(0, v)) });
+          }}
+        />
+      </Row>
+      <Row
+        label="Denoise traced preview"
+        doc="Runs the edge-aware filter on the path-traced viewport preview, which is unusable without it at one sample per frame. Turn it off to judge what the tracer produced rather than what the filter made of it. A still render's own denoise is set on the render node."
+      >
+        <input
+          type="checkbox"
+          checked={d.previewDenoise}
+          onChange={(e) => setD({ previewDenoise: e.target.checked })}
         />
       </Row>
       </Section>

@@ -1027,6 +1027,9 @@ impl State {
         self.preferences.display.exposure = self.renderer.post.exposure;
         self.preferences.display.inspection_mode = pds.inspection_mode;
         self.preferences.display.texel_density_target = pds.texel_density_target;
+        self.preferences
+            .display
+            .set_post_strengths(self.renderer.post.strengths());
         preferences::save(&self.preferences)
     }
 

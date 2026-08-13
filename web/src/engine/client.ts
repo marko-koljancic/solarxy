@@ -260,6 +260,13 @@ export class SolarxyClient {
       d.pointSize,
       d.ssaoEnabled,
       d.bloomEnabled,
+      // Named at the call site because the three that follow are all
+      // numbers of the same kind and the boundary takes them positionally;
+      // a swap here would be silent. Rust clamps them.
+      d.bloomStrength,
+      d.bloomThreshold,
+      d.ssaoStrength,
+      d.previewDenoise,
       applyWireframe,
       applyBackground,
     );

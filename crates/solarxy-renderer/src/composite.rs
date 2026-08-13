@@ -2,17 +2,14 @@
 //! per-pane viewport/scissor rectangle that splits the surface in F2/F3.
 
 use crate::bind_groups::BindGroupLayouts;
-use crate::bloom::BLOOM_STRENGTH;
 use crate::lut::{LutSlot, LutSlots};
 use crate::pipelines::Pipelines;
 use crate::ssao::SsaoState;
 use solarxy_core::preferences::{InspectionMode, ToneMode};
 use solarxy_core::scene::CameraLook;
-use solarxy_core::view_config::PaneLook;
+use solarxy_core::view_config::{PaneLook, PostStrengths};
 use solarxy_core::{LUT_LOG_MAX_STOP, LUT_LOG_MIN_STOP};
 use wgpu::util::DeviceExt;
-
-const SSAO_STRENGTH: f32 = 0.8;
 
 /// The shot's rendering intent, resolved for one pane.
 ///
@@ -98,6 +95,15 @@ impl CompositeLook {
 }
 
 pub struct CompositeState {
+    /// The bloom and occlusion intensities every pane composites with.
+    ///
+    /// Held rather than passed, for the reason the module documentation of
+    /// [`CompositeLook`] gives about positional arguments: the value is the
+    /// same for every pane and every still, and threading it through the
+    /// five call sites that write this uniform is how one of them ends up
+    /// stale and a still stops matching the viewport it was framed in.
+    /// Written only by [`crate::frame::PostProcessing::set_strengths`].
+    strengths: PostStrengths,
     params_buffer: wgpu::Buffer,
     params_bind_group: wgpu::BindGroup,
     bind_group: wgpu::BindGroup,
@@ -117,12 +123,14 @@ impl CompositeState {
         tone_mode: ToneMode,
         exposure: f32,
     ) -> Self {
+        let strengths = PostStrengths::default();
         let params_data = build_params(
             bloom_enabled,
             ssao_enabled,
             &CompositeLook::from_tone(tone_mode, exposure),
             luts,
             InspectionMode::Shaded,
+            strengths,
         );
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Composite Params Uniform"),
@@ -147,10 +155,16 @@ impl CompositeState {
         );
 
         Self {
+            strengths,
             params_buffer,
             params_bind_group,
             bind_group,
         }
+    }
+
+    /// See [`crate::frame::PostProcessing::set_strengths`], the only caller.
+    pub(crate) fn set_strengths(&mut self, strengths: PostStrengths) {
+        self.strengths = strengths;
     }
 
     /// Rebuild the group. Called on surface resize, when the HDR target's
@@ -243,7 +257,14 @@ impl CompositeState {
         luts: &LutSlots,
         inspection_mode: InspectionMode,
     ) {
-        let params = build_params(bloom_enabled, ssao_enabled, look, luts, inspection_mode);
+        let params = build_params(
+            bloom_enabled,
+            ssao_enabled,
+            look,
+            luts,
+            inspection_mode,
+            self.strengths,
+        );
         queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
     }
 }
@@ -353,6 +374,7 @@ fn build_params(
     look: &CompositeLook,
     luts: &LutSlots,
     inspection_mode: InspectionMode,
+    strengths: PostStrengths,
 ) -> CompositeParams {
     // A slot is on only when it holds a real table: a strength left turned
     // up on an empty slot must not blend towards the identity texture that
@@ -363,10 +385,10 @@ fn build_params(
     let a = luts.sampling(LutSlot::A);
     let b = luts.sampling(LutSlot::B);
     CompositeParams {
-        bloom_strength: BLOOM_STRENGTH,
+        bloom_strength: strengths.bloom_strength,
         bloom_enabled: u32::from(bloom_enabled),
         ssao_enabled: u32::from(ssao_enabled),
-        ssao_strength: SSAO_STRENGTH,
+        ssao_strength: strengths.ssao_strength,
 
         tone_mode: look.tone_mode.as_u32(),
         exposure: look.exposure,

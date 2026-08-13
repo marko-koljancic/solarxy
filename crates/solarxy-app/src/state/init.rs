@@ -103,7 +103,13 @@ impl State {
             ibl_mode: preferences.display.ibl_mode,
             uv_checker_png: include_bytes!("../../../../res/textures/uv-checker_1k.png"),
         };
-        let renderer = Renderer::new(&device, &queue, &config, &renderer_init)?;
+        let mut renderer = Renderer::new(&device, &queue, &config, &renderer_init)?;
+        // Seeded through the setter rather than through `RendererInit`, because
+        // the setter is what keeps the two passes holding the value in step and
+        // nothing has composited yet: the first uniform write is a frame away.
+        renderer
+            .post
+            .set_strengths(preferences.display.post_strengths());
         // Built before the renderer moves into `State`: the backend keeps its
         // own handle on the layouts so it can upload without being handed the
         // renderer back.
