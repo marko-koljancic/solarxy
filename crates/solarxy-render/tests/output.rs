@@ -168,6 +168,94 @@ fn the_same_seed_writes_the_same_bytes() {
     }
 }
 
+/// Notes what the last preview claimed about itself.
+///
+/// The watch window picks a pass from what the run requested and says which
+/// engine drew the picture; both facts ride the preview, so they are pinned
+/// at the seam a surface actually reads rather than inferred from the files.
+#[derive(Default)]
+struct PlaneWitness {
+    saw: bool,
+    aux: bool,
+    depth: bool,
+    engine: Option<RenderEngine>,
+}
+
+impl solarxy_render::RenderSink for PlaneWitness {
+    fn report(&mut self, _progress: &solarxy_render::RenderProgress) {}
+
+    fn preview(&mut self, image: &solarxy_render::Preview<'_>) {
+        let pixels = (image.width as usize) * (image.height as usize);
+        if let Some(plane) = image.aux {
+            assert_eq!(plane.len(), pixels * 16, "the aux plane is not whole");
+        }
+        if let Some(plane) = image.depth {
+            assert_eq!(plane.len(), pixels * 4, "the depth plane is not whole");
+        }
+        self.saw = true;
+        self.aux = image.aux.is_some();
+        self.depth = image.depth.is_some();
+        self.engine = Some(image.engine);
+    }
+}
+
+/// The preview carries a pass exactly when the run asked for it, and names
+/// the engine that drew the picture.
+#[test]
+fn the_preview_carries_the_passes_the_run_asked_for() {
+    let cases: [(RenderEngine, Vec<AovKind>, bool, bool); 3] = [
+        (
+            RenderEngine::PathTraced,
+            vec![AovKind::Albedo, AovKind::Depth],
+            true,
+            true,
+        ),
+        (RenderEngine::PathTraced, vec![], false, false),
+        (RenderEngine::Raster, vec![], false, false),
+    ];
+    for (engine, aovs, want_aux, want_depth) in cases {
+        let dir = scratch(&format!("preview-planes-{engine:?}-{}", aovs.len()));
+        let opts = RenderOptions {
+            output: Some(Output::File(dir.join("out.png"))),
+            engine: Some(engine),
+            width: Some(64),
+            height: Some(48),
+            samples: Some(2),
+            seed: Some(3),
+            aovs,
+            ..RenderOptions::default()
+        };
+        let mut sink = PlaneWitness::default();
+        match solarxy_render::run_render(&model(), &opts, &mut sink) {
+            Ok(_) => {
+                assert!(sink.saw, "{engine:?}: no preview arrived at all");
+                assert_eq!(
+                    sink.aux, want_aux,
+                    "{engine:?}: the aux plane did not match the request"
+                );
+                assert_eq!(
+                    sink.depth, want_depth,
+                    "{engine:?}: the depth plane did not match the request"
+                );
+                assert_eq!(
+                    sink.engine,
+                    Some(engine),
+                    "the preview named the wrong engine"
+                );
+            }
+            Err(RenderError::NoAdapter) => {
+                assert!(
+                    std::env::var("SOLARXY_REQUIRE_GPU").as_deref() != Ok("1"),
+                    "SOLARXY_REQUIRE_GPU=1 but no usable GPU adapter"
+                );
+                eprintln!("skipping: no GPU adapter available");
+                return;
+            }
+            Err(other) => panic!("the render failed: {other}"),
+        }
+    }
+}
+
 /// Keeps the picture the render last handed over.
 ///
 /// Comparing the written files would compare compressed bytes, where one
