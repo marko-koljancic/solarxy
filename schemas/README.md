@@ -64,26 +64,24 @@ Each schema is pinned to its `format_version` field. A breaking schema change
 ships as a new file (`solarxy-config.v2.json`); old files keep their old URL
 indefinitely.
 
-## Schemastore submission (0.6.0)
+## Schemastore
 
-A PR against [`github.com/SchemaStore/schemastore`][ss] is queued for after
-the 0.6.0 tag lands. Once accepted, the schema becomes auto-discovered for
+The schema is published in [SchemaStore][ss], so it is auto-discovered for
 files named `solarxy.toml` in any editor with a JSON Schema-aware TOML
-language server (VS Code Even Better TOML, JetBrains, taplo, etc.), with no
-`#:schema` header required in the user's config file.
+language server (VS Code Even Better TOML, JetBrains, taplo, and the rest).
+No `#:schema` header is needed in the user's config file.
 
-Submission body draft:
+- Pull request [SchemaStore/schemastore#5721][pr], merged 2026-05-22.
+- Upstream path `src/schemas/json/solarxy-config.json`, mirrored from
+  `solarxy-config.v1.json` in this directory.
+- Catalog entry matches `solarxy.toml` and serves the schema from
+  <https://www.schemastore.org/solarxy-config.json>.
 
-```
-Adds: src/schemas/json/solarxy-config.json (mirrored from
-https://raw.githubusercontent.com/marko-koljancic/solarxy/main/schemas/solarxy-config.v1.json)
-
-File-matching: solarxy.toml
-
-The schema is generated from the canonical Rust types (schemars derive) and
-covered by an in-repo drift test. format_version: 1 for the 0.6.0 cycle.
-```
-
-Tracking issue / PR link: _(filled in after 0.6.0 tag, before submitting)_
+The upstream copy is a **mirror, not a fetch**: nothing upstream re-reads this
+repository. A change to the canonical schema here therefore does not reach
+editors until it is submitted upstream again. The drift test above keeps the
+file honest against the Rust types, and keeps nothing honest against
+SchemaStore.
 
 [ss]: https://github.com/SchemaStore/schemastore
+[pr]: https://github.com/SchemaStore/schemastore/pull/5721

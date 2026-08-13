@@ -11,7 +11,7 @@
 class SolarxyCli < Formula
   desc "Solarxy CLI: terminal companion to the Solarxy 3D model viewer"
   homepage "https://github.com/marko-koljancic/solarxy"
-  version "0.6.0"
+  version "0.9.0"
   license "GPL-3.0-or-later"
 
   on_macos do
