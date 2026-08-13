@@ -58,6 +58,11 @@ RUN if [[ "${SOLARXY_VERSION}" == "latest" ]]; then \
     mkdir -p /tmp/cli; \
     tar -xJf /tmp/cli.tar.xz -C /tmp/cli --strip-components=1; \
     install -m 0755 /tmp/cli/solarxy-cli /usr/local/bin/solarxy-cli; \
+    install -d /usr/share/doc/solarxy-cli; \
+    install -m 0644 /tmp/cli/LICENSE /usr/share/doc/solarxy-cli/LICENSE; \
+    if [[ -f /tmp/cli/THIRD-PARTY-NOTICES.md ]]; then \
+    install -m 0644 /tmp/cli/THIRD-PARTY-NOTICES.md /usr/share/doc/solarxy-cli/THIRD-PARTY-NOTICES.md; \
+    fi; \
     /usr/local/bin/solarxy-cli --about
 
 # ---------- stage 2: runtime ----------
@@ -68,6 +73,20 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=fetch /usr/local/bin/solarxy-cli /usr/local/bin/solarxy-cli
+
+# The terms ship inside the image rather than only in the label below. Every
+# other channel already carries them: the archives via dist-workspace.toml, the
+# bundles via the native-bundle action, the Flatpak via its manifest, the MSI
+# via wix/main.wxs. The container was the one that did not.
+#
+# Two asymmetries in the fetch stage above are deliberate. LICENSE is in every
+# archive cargo-dist has ever built, so it is taken unconditionally, and it is
+# whatever that release actually shipped under: MIT for a pinned pre-0.9.0
+# version, GPL from 0.9.0 on. THIRD-PARTY-NOTICES.md only enters the archives
+# from 0.9.0, so it is taken only when present; copying it unconditionally
+# would break every build that pins an older release, including `latest` until
+# 0.9.0 is tagged.
+COPY --from=fetch /usr/share/doc/solarxy-cli /usr/share/doc/solarxy-cli
 
 # CI runners conventionally mount the repo at /workspace (GitLab) or
 # similar. Keep WORKDIR there so relative --paths globs work without ceremony.
