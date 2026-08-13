@@ -483,6 +483,26 @@ impl RenderBackend for PathBackend {
         self.sync(device, queue);
     }
 
+    /// Store the lens, and drop any accumulation taken through a different
+    /// one.
+    ///
+    /// The invalidate is the point: an aperture is integrated over, so a mean
+    /// gathered at one f-number is not a partial result of another. Skipped
+    /// when nothing moved, because a host that calls this every frame with an
+    /// unchanged lens would otherwise never converge.
+    fn set_lens(&mut self, lens: solarxy_core::scene::CameraLens) {
+        if (self.settings.aperture_radius - lens.aperture_radius).abs() < f32::EPSILON
+            && (self.settings.focus_distance - lens.focus_distance).abs() < f32::EPSILON
+            && self.settings.aperture_blades == lens.blades
+        {
+            return;
+        }
+        self.settings.aperture_radius = lens.aperture_radius.max(0.0);
+        self.settings.focus_distance = lens.focus_distance.max(0.0);
+        self.settings.aperture_blades = lens.blades;
+        self.invalidate();
+    }
+
     /// Draw one chunk of samples into this pane's mean and resolve it into
     /// `target`.
     ///

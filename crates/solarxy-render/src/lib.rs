@@ -1062,6 +1062,15 @@ fn build_camera(
     #[allow(clippy::cast_precision_loss)]
     let aspect = settings.width as f32 / settings.height.max(1) as f32;
     let mut camera = CameraState::new(device, &host.renderer.layouts.camera, &host.bounds, aspect);
+    // The lens rides with the camera it belongs to, and a shot with no camera
+    // is a pinhole. Set unconditionally so a render that falls back to framing
+    // the bounds cannot inherit an aperture from anywhere.
+    backend.set_lens(
+        camera_def
+            .as_ref()
+            .map(solarxy_host::cameras::lens_for)
+            .unwrap_or_default(),
+    );
     if let Some(def) = camera_def.as_ref() {
         solarxy_host::cameras::apply_camera_def(&mut camera.camera, def);
         // After the definition, not before: the shot's aspect comes from the

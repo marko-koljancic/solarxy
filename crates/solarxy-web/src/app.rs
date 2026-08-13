@@ -1707,6 +1707,13 @@ impl SolarxyApp {
             t.set_settings(settings);
             t.invalidate();
         }
+        // After the settings, which reset the lens to the pinhole default.
+        // Resolved before the job's camera is built below so a still and the
+        // pane it was launched from cannot disagree about the aperture.
+        let lens = self.still_lens(opts.camera);
+        if let Some(t) = self.tracer.as_mut() {
+            t.set_lens(lens);
+        }
         let spec = self.still_spec(&opts, engine);
         // The job's own camera. Built from the named `camera` node when there
         // is one, and otherwise from the active pane's current view copied by
@@ -3640,6 +3647,18 @@ impl SolarxyApp {
         if let Some(t) = self.tracer.as_mut() {
             t.set_settings(preview_trace_settings(self.preview_denoise));
         }
+        // A pane bound to a camera previews through that camera's lens; a
+        // free view is a pinhole. Asserted per encode like the settings above
+        // and for the same reason: the still job authors its own on the same
+        // backend, so whichever ran last would otherwise win. `set_lens` is a
+        // no-op when nothing moved, which is what lets a pane keep converging.
+        let pane_lens = self
+            .pane_camera_def(i)
+            .map(solarxy_host::cameras::lens_for)
+            .unwrap_or_default();
+        if let Some(t) = self.tracer.as_mut() {
+            t.set_lens(pane_lens);
+        }
         let Some(cam) = self.view.cameras.get(i).and_then(Option::as_ref) else {
             return;
         };
@@ -4695,13 +4714,34 @@ impl SolarxyApp {
     /// exactly what the last delta carried, including the tables the
     /// camera's cook decoded.
     fn pane_camera_look(&self, pane: usize) -> Option<&solarxy_core::scene::CameraLook> {
+        self.pane_camera_def(pane).map(|c| &c.look)
+    }
+
+    /// The camera definition a pane is bound to, if it is looking through one.
+    fn pane_camera_def(&self, pane: usize) -> Option<&solarxy_core::scene::CameraDef> {
         let node = (*self.look_through.get(pane)?)?;
         self.raster
             .scene()
             .cameras()?
             .iter()
             .find(|c| c.id == solarxy_core::scene::SceneObjectId(node.0))
-            .map(|c| &c.look)
+    }
+
+    /// The lens a shot takes: the named camera's, or the active pane's
+    /// camera's, or a pinhole. The same precedence the look resolves by,
+    /// because both describe the shot rather than the viewport.
+    fn still_lens(&self, camera: Option<NodeId>) -> solarxy_core::scene::CameraLens {
+        camera
+            .and_then(|node| {
+                let id = SceneObjectId(node.0);
+                self.raster
+                    .scene()
+                    .cameras()
+                    .and_then(|cams| cams.iter().find(|c| c.id == id))
+            })
+            .or_else(|| self.pane_camera_def(self.view.active_pane))
+            .map(solarxy_host::cameras::lens_for)
+            .unwrap_or_default()
     }
 
     /// The resolved look a pane composites with.

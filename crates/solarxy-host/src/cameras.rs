@@ -104,3 +104,134 @@ pub fn apply_camera_def(cam: &mut Camera, def: &solarxy_core::scene::CameraDef) 
         cam.ortho_scale = def.ortho_scale;
     }
 }
+
+/// The lens a shot is taken through, with its one implicit value resolved.
+///
+/// Focus distance zero does not mean the focal plane is at the camera; it
+/// means the camera focuses on what it is aimed at, which is what the node's
+/// help promises and what makes aiming a camera also focus it. Resolving that
+/// here rather than in a shader keeps the rule in one place and keeps it
+/// readable, and every host that renders through a camera gets the same
+/// answer.
+///
+/// A camera definition arrives from a node that may not have cooked, so a
+/// negative or non-finite value is treated as unset rather than written
+/// through to the sampler.
+#[must_use]
+pub fn lens_for(def: &solarxy_core::scene::CameraDef) -> solarxy_core::scene::CameraLens {
+    let mut lens = def.lens;
+    if !lens.aperture_radius.is_finite() || lens.aperture_radius < 0.0 {
+        lens.aperture_radius = 0.0;
+    }
+    if !lens.focus_distance.is_finite() || lens.focus_distance <= 0.0 {
+        let d = [
+            def.target[0] - def.position[0],
+            def.target[1] - def.position[1],
+            def.target[2] - def.position[2],
+        ];
+        let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        // A camera sitting on its own target focuses on nothing, so it stays a
+        // pinhole rather than acquiring a focal plane at zero distance, which
+        // would defocus the entire image.
+        lens.focus_distance = dist;
+        if dist <= 0.0 {
+            lens.aperture_radius = 0.0;
+        }
+    }
+    lens
+}
+
+#[cfg(test)]
+mod tests {
+    use solarxy_core::scene::{CameraDef, CameraLens};
+
+    fn def(position: [f32; 3], target: [f32; 3], lens: CameraLens) -> CameraDef {
+        CameraDef {
+            id: solarxy_core::scene::SceneObjectId(0),
+            kind: solarxy_core::scene::CameraKind::Perspective,
+            position,
+            target,
+            up: [0.0, 1.0, 0.0],
+            fov_y: std::f32::consts::FRAC_PI_4,
+            near: 0.1,
+            far: 100.0,
+            ortho_scale: 1.0,
+            aspect: 1.0,
+            show_gizmo: false,
+            gizmo_size: 1.0,
+            look: solarxy_core::scene::CameraLook::default(),
+            lens,
+        }
+    }
+
+    #[test]
+    fn an_unset_focus_distance_becomes_the_distance_to_the_target() {
+        // The node's help promises that aiming a camera also focuses it, and
+        // zero is what a camera carries until somebody types a number. Reading
+        // it literally would put the focal plane on the lens and defocus the
+        // whole image.
+        let lens = super::lens_for(&def(
+            [0.0, 0.0, 4.0],
+            [0.0, 0.0, 1.0],
+            CameraLens {
+                aperture_radius: 0.01,
+                focus_distance: 0.0,
+                blades: 0,
+            },
+        ));
+        assert!((lens.focus_distance - 3.0).abs() < 1e-5);
+        assert!((lens.aperture_radius - 0.01).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn an_authored_focus_distance_wins_over_the_target() {
+        let lens = super::lens_for(&def(
+            [0.0, 0.0, 4.0],
+            [0.0, 0.0, 1.0],
+            CameraLens {
+                aperture_radius: 0.01,
+                focus_distance: 12.5,
+                blades: 6,
+            },
+        ));
+        assert!((lens.focus_distance - 12.5).abs() < f32::EPSILON);
+        assert_eq!(lens.blades, 6);
+    }
+
+    #[test]
+    fn a_camera_sitting_on_its_target_stays_a_pinhole() {
+        // Nothing to focus on and no distance to derive, so the aperture is
+        // dropped rather than paired with a focal plane at zero, which would
+        // blur every pixel of the image.
+        let lens = super::lens_for(&def(
+            [1.0, 2.0, 3.0],
+            [1.0, 2.0, 3.0],
+            CameraLens {
+                aperture_radius: 0.02,
+                focus_distance: 0.0,
+                blades: 0,
+            },
+        ));
+        assert!((lens.aperture_radius - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn a_nonsense_aperture_is_treated_as_unset() {
+        // A camera definition can arrive from a node that has not cooked.
+        for bad in [f32::NAN, f32::INFINITY, -1.0] {
+            let lens = super::lens_for(&def(
+                [0.0, 0.0, 4.0],
+                [0.0, 0.0, 0.0],
+                CameraLens {
+                    aperture_radius: bad,
+                    focus_distance: 2.0,
+                    blades: 0,
+                },
+            ));
+            assert!(
+                (lens.aperture_radius - 0.0).abs() < f32::EPSILON,
+                "{bad} survived into the sampler"
+            );
+        }
+    }
+}

@@ -117,6 +117,10 @@ impl State {
             ),
         };
         let mut cam_look = None;
+        // The lens follows the look exactly, and for the same reason: both
+        // describe the shot rather than the viewport, so both take the named
+        // camera when there is one and the pane's camera when there is not.
+        let mut cam_lens = None;
         if let Some(cam_node) = settings.camera
             && let Some(def) = self
                 .raster
@@ -126,6 +130,7 @@ impl State {
         {
             solarxy_host::cameras::apply_camera_def(&mut camera.camera, def);
             cam_look = Some(def.look.clone());
+            cam_lens = Some(solarxy_host::cameras::lens_for(def));
         }
         // A render node naming no camera means the shot is the active pane's
         // view, and that pane may itself be looking through a graded camera.
@@ -134,13 +139,15 @@ impl State {
         // framed. The pose needs no such fallback: it already came from the
         // pane's camera above, which follows the node it is bound to.
         if cam_look.is_none() {
-            cam_look = self.look_through[ap.min(3)].and_then(|id| {
+            let bound = self.look_through[ap.min(3)].and_then(|id| {
                 self.raster
                     .scene()
                     .cameras()
                     .and_then(|cams| cams.iter().find(|c| c.id == id))
-                    .map(|c| c.look.clone())
+                    .cloned()
             });
+            cam_look = bound.as_ref().map(|c| c.look.clone());
+            cam_lens = bound.as_ref().map(solarxy_host::cameras::lens_for);
         }
         camera.camera.aspect = aspect;
 
@@ -195,6 +202,10 @@ impl State {
                     denoise: settings.denoise,
                     ..TraceSettings::default()
                 });
+                // After the settings, which reset the lens to the pinhole
+                // default: a free shot is a pinhole and a shot through a
+                // camera is whatever that camera's aperture says.
+                t.set_lens(cam_lens.unwrap_or_default());
                 t.invalidate();
             }
         }

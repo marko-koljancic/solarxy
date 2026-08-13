@@ -96,6 +96,22 @@ pub trait RenderBackend {
         None
     }
 
+    /// Focus the backend's camera model on the shot's lens.
+    ///
+    /// Separate from the camera itself, which arrives per frame on
+    /// [`FrameCtx::camera`], because a lens is a property of the shot rather
+    /// than of the view: it changes when the camera node changes, not when
+    /// somebody orbits. A host calls this wherever it resolves which camera
+    /// is being rendered through, and passes
+    /// [`solarxy_core::scene::CameraLens::default`] for a free view, which
+    /// is a pinhole.
+    ///
+    /// Defaulted to a no-op, and that is the rasterizer's honest answer
+    /// rather than a refusal: it draws one sample per pixel and has no
+    /// aperture to integrate over. Faking the effect there would be a
+    /// depth-driven blur, which is a different thing wearing this one's name.
+    fn set_lens(&mut self, _lens: solarxy_core::scene::CameraLens) {}
+
     /// Encode a depth pass for `pane` and hand back the texture it wrote.
     ///
     /// Its own call rather than a lane of [`RenderBackend::aov_sources`]
