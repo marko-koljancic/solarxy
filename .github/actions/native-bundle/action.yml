@@ -86,8 +86,8 @@ runs:
         chmod +x "$APP/Contents/MacOS/solarxy-cli"
         cp res/bundle/solarxy.icns "$APP/Contents/Resources/Solarxy.icns"
         # The ported-source notices travel inside the bundle, which is what the
-        # MIT terms attach to, and again beside it in the DMG so a reader does
-        # not have to know that an app is a directory to find them.
+        # ported work's terms attach to, and again beside it in the DMG so a
+        # reader does not have to know that an app is a directory to find them.
         cp THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/"
         cp LICENSE "$APP/Contents/Resources/"
 
@@ -122,6 +122,11 @@ runs:
         cp "res/bundle/macos/Install CLI.command" "$STAGE/"
         cp "res/bundle/macos/READ ME FIRST.txt" "$STAGE/"
         cp THIRD-PARTY-NOTICES.md "$STAGE/"
+        # Also at the DMG root, not only inside the .app, because READ ME
+        # FIRST.txt tells the reader the license is beside it and because a
+        # user who drags the app out and discards the image should not have
+        # to open a bundle to find the terms.
+        cp LICENSE "$STAGE/"
 
         mkdir -p bundle-out
         OUT="bundle-out/Solarxy-${V}-${ARCH}.dmg"
