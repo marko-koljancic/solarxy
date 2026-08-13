@@ -13,13 +13,15 @@
 #   ./bundle-out/Solarxy-<ver>-<arch>.dmg
 #
 # Usage:
-#   ./packaging/scripts/build_local_dmg.sh                 # defaults to current arch, v0.6.0
-#   V=0.6.0 TARGET=x86_64-apple-darwin ./packaging/scripts/build_local_dmg.sh
+#   ./scripts/build_local_dmg.sh                           # current arch, workspace version
+#   V=0.9.0 TARGET=x86_64-apple-darwin ./scripts/build_local_dmg.sh
 #
 set -euo pipefail
 
 # ---- Defaults (can be overridden via env) ---------------------------------
-: "${V:=0.6.0}"
+# Read from the workspace rather than carried here, because a version literal in
+# this file is what went three releases stale the last time.
+: "${V:=$(grep -m1 '^version' "$(dirname "$0")/../Cargo.toml" | cut -d'"' -f2)}"
 if [ -z "${TARGET:-}" ]; then
     case "$(uname -m)" in
         arm64)  TARGET="aarch64-apple-darwin" ;;
@@ -30,7 +32,7 @@ fi
 : "${BINARY:=target/release/solarxy}"
 : "${CLI_BINARY:=target/release/solarxy-cli}"
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [ ! -x "$BINARY" ]; then
