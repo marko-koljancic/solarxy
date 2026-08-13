@@ -328,7 +328,8 @@ pub struct PaneComposite {
     /// Whether to blit the selection rim after tone mapping. `false` on a
     /// shell with no selection concept.
     pub outline: bool,
-    /// [`BackendCaps::writes_occlusion`] of the backend that drew this pane.
+    /// [`solarxy_renderer::backend::BackendCaps::writes_occlusion`] of the backend
+    /// that drew this pane.
     ///
     /// Carried per pane rather than read once per frame because panes may run
     /// different backends in the same layout, and the buffer the chain would

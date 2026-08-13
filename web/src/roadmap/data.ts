@@ -14,7 +14,7 @@
  */
 
 export const NODE_TYPE_COUNT = 77;
-export const CRATE_COUNT = 13;
+export const CRATE_COUNT = 15;
 export const CONTEXT_COUNT = 4;
 export const SHELL_COUNT = 3;
 export const VALIDATION_KIND_COUNT = 11;
@@ -22,7 +22,7 @@ export const CARD_COUNT = 72;
 export const PROGRAM_RELEASE_COUNT = 13;
 export const RELEASES_TO_1_0 = 4;
 export const JOURNEY_COUNT = 16;
-export const LIVE_VERSION = "v0.8.2";
+export const LIVE_VERSION = "v0.9.0";
 
 export interface Section {
   id: string;
@@ -910,7 +910,6 @@ export const RELEASE_PLAN: ReleasePlanEntry[] = [
   {
     v: "v0.9.0",
     code: "Path-traced rendering",
-    kind: "next",
     theme: "A physically based GPU path tracer, and the CLI as a render surface",
     items: [
       "A compute path tracer on core WebGPU (12.5): global illumination, soft area-light shadows, optical depth of field, unbounded light count.",
@@ -922,6 +921,7 @@ export const RELEASE_PLAN: ReleasePlanEntry[] = [
   {
     v: "v0.9.5",
     code: "Desktop node canvas",
+    kind: "next",
     theme: "Node editing on the desktop; the desktop wiring closes",
     items: [
       "The egui node canvas, palette, parameter panel, transform gizmo and undo.",
@@ -1010,7 +1010,7 @@ export const PROGRAM: ProgramEntry[] = [
   {
     v: "0.9.0",
     code: "Path-traced rendering",
-    kind: "next",
+    kind: "shipped",
     era: "pre",
     theme: "A GPU path tracer, and the CLI as a render surface",
     cards: ["12.5", "17.3"],
@@ -1019,7 +1019,7 @@ export const PROGRAM: ProgramEntry[] = [
   {
     v: "0.9.5",
     code: "Desktop node canvas",
-    kind: "planned",
+    kind: "next",
     era: "pre",
     theme: "Node editing on the desktop; card 18.1 closes",
     cards: ["18.1"],
@@ -1102,13 +1102,13 @@ export const DISPOSITIONS: Disposition[] = [
   {
     key: "shipped",
     label: "Shipped",
-    n: 14,
-    blurb: "Already released, most recently the 0.8.2 rendering foundations, including the scene clock whose transport bar shipped in 0.8.1.",
+    n: 16,
+    blurb: "Already released, most recently the 0.9.0 path tracer and the render command that made the terminal a first-class render surface.",
   },
   {
     key: "scheduled",
     label: "Scheduled",
-    n: 31,
+    n: 29,
     blurb: "Assigned to a named release between v0.9.0 and v1.5.0.",
   },
   {
@@ -1343,7 +1343,6 @@ export const JOURNEYS: Journey[] = [
 ];
 
 export const COVERAGE_RELEASES: string[] = [
-  "0.9.0",
   "0.9.5",
   "0.10.0",
   "1.0.0",
@@ -1355,22 +1354,22 @@ export const COVERAGE_RELEASES: string[] = [
 ];
 
 export const COVERAGE: Record<string, number[]> = {
-  J1: [0, 1, 1, 0, 0, 1, 0, 0, 1],
-  J2: [0, 0, 1, 0, 0, 0, 0, 0, 0],
-  J3: [1, 0, 0, 0, 1, 0, 0, 0, 0],
-  J4: [0, 0, 0, 1, 0, 0, 0, 0, 0],
-  J5: [0, 1, 0, 1, 0, 0, 0, 0, 1],
-  J6: [0, 1, 0, 0, 0, 1, 0, 0, 0],
-  J7: [0, 1, 0, 0, 0, 0, 0, 0, 1],
-  J8: [0, 0, 0, 0, 0, 1, 0, 0, 0],
-  J9: [0, 0, 0, 1, 0, 0, 0, 1, 0],
-  J10: [0, 1, 0, 0, 0, 0, 1, 0, 1],
-  J11: [1, 0, 0, 0, 0, 0, 0, 0, 0],
-  J12: [1, 0, 0, 1, 0, 0, 0, 0, 0],
-  J13: [0, 1, 0, 0, 0, 0, 0, 0, 0],
-  J14: [1, 0, 0, 0, 1, 0, 0, 0, 0],
-  J15: [0, 0, 1, 0, 0, 0, 1, 0, 0],
-  J16: [0, 0, 1, 0, 0, 0, 0, 1, 0],
+  J1: [1, 1, 0, 0, 1, 0, 0, 1],
+  J2: [0, 1, 0, 0, 0, 0, 0, 0],
+  J3: [0, 0, 0, 1, 0, 0, 0, 0],
+  J4: [0, 0, 1, 0, 0, 0, 0, 0],
+  J5: [1, 0, 1, 0, 0, 0, 0, 1],
+  J6: [1, 0, 0, 0, 1, 0, 0, 0],
+  J7: [1, 0, 0, 0, 0, 0, 0, 1],
+  J8: [0, 0, 0, 0, 1, 0, 0, 0],
+  J9: [0, 0, 1, 0, 0, 0, 1, 0],
+  J10: [1, 0, 0, 0, 0, 1, 0, 1],
+  J11: [0, 0, 0, 0, 0, 0, 0, 0],
+  J12: [0, 0, 1, 0, 0, 0, 0, 0],
+  J13: [1, 0, 0, 0, 0, 0, 0, 0],
+  J14: [0, 0, 0, 1, 0, 0, 0, 0],
+  J15: [0, 1, 0, 0, 0, 1, 0, 0],
+  J16: [0, 1, 0, 0, 0, 0, 1, 0],
 };
 
 export const UX_CONTRACT: string[] = [
@@ -2147,7 +2146,7 @@ export const CARDS: Card[] = [
     tier: "Near",
     planned: "0.9.0",
     what: "A physically based path tracer for reference-quality stills: global illumination, soft area-light shadows, optical depth of field, and an unbounded light count.",
-    why: "Photoreal output; the top of the quality ladder. Scheduled as v0.9.0 with a build-ready spec.",
+    why: "Photoreal output; the top of the quality ladder. Shipped in v0.9.0.",
     dep: "Depends on v0.8.2's material model, HDR environment, instancing and shared host. Supersedes the earlier tiled raster still-render plan rather than sitting on it.",
     risk: "Regraded from Research once the feasibility spike ran: a full tracer runs on core WebGPU with no feature or limit change. Remaining risks are the wasm payload, one browser's WGSL uniformity analysis, and convergence time.",
   },

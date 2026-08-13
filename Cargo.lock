@@ -4060,7 +4060,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-app"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4103,7 +4103,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-bvh"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "bytemuck",
  "cgmath",
@@ -4112,7 +4112,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-cli"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "axoupdater",
@@ -4135,7 +4135,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-core"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "cgmath",
@@ -4154,7 +4154,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-formats"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "base64 0.22.1",
  "cgmath",
@@ -4173,7 +4173,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-graph"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "cgmath",
  "serde",
@@ -4190,7 +4190,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-host"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4209,7 +4209,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-imaging"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "solarxy-core",
  "thiserror 2.0.17",
@@ -4217,7 +4217,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-kernel"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "bytemuck",
  "cgmath",
@@ -4228,7 +4228,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-render"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "cgmath",
  "clap",
@@ -4247,7 +4247,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-renderer"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -4266,7 +4266,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-scenefile"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "schemars",
  "serde",
@@ -4278,7 +4278,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-validate"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "clap",
  "glob",
@@ -4297,7 +4297,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-web"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "bytemuck",
  "cgmath",
