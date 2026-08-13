@@ -120,6 +120,57 @@ impl StillReadback {
     }
 }
 
+/// The readback a format and a space name.
+///
+/// Takes the words rather than an enum because the callers are boundaries: a
+/// dialog and a command line both hand over what a person chose. Anything that
+/// is not a float image is the eight-bit display path, and a float one is
+/// scene-referred unless it asks for the finished look, which is the command
+/// line's default and so the browser's too. One vocabulary for one idea.
+#[must_use]
+pub fn readback_for(format: &str, space: &str) -> StillReadback {
+    if !format.eq_ignore_ascii_case("exr") {
+        return StillReadback::Display8;
+    }
+    if space.eq_ignore_ascii_case("display") {
+        StillReadback::DisplayFloat
+    } else {
+        StillReadback::SceneLinear
+    }
+}
+
+/// Clamps and sRGB-encodes a float image for a screen that cannot show it.
+///
+/// Every surface that previews a float render needs this and none of them
+/// should invent their own: the browser's still dialog and the command line's
+/// watch window are both showing a preview of a file judged elsewhere, and two
+/// display transforms would make them disagree about a render neither of them
+/// is authoritative about.
+///
+/// The clamp *is* the tone mapping for a scene-referred image, which is why
+/// both surfaces say so rather than letting it look like the picture.
+///
+/// `bytes` is four `f32` a pixel; the result is four bytes a pixel, opaque.
+#[must_use]
+pub fn float_to_rgba8(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len() / 4);
+    for px in bytes.chunks_exact(16) {
+        for c in 0..3 {
+            let i = c * 4;
+            let v = f32::from_le_bytes([px[i], px[i + 1], px[i + 2], px[i + 3]]).clamp(0.0, 1.0);
+            let encoded = if v <= 0.003_130_8 {
+                v * 12.92
+            } else {
+                1.055 * v.powf(1.0 / 2.4) - 0.055
+            };
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            out.push((encoded * 255.0).round().clamp(0.0, 255.0) as u8);
+        }
+        out.push(255);
+    }
+    out
+}
+
 /// Which renderer draws the still.
 ///
 /// Authored, not detected. See the module documentation.
@@ -1051,5 +1102,71 @@ mod tests {
         // drawn once, and reporting 256 would leave a progress bar at one part
         // in 256 forever.
         assert_eq!(job.progress().samples, 1);
+    }
+
+    #[test]
+    fn a_format_and_a_space_name_one_readback() {
+        assert_eq!(
+            super::readback_for("png", "sceneLinear"),
+            StillReadback::Display8
+        );
+        // Space is meaningless for an eight-bit image and is ignored rather
+        // than refused, because the caller is a dialog that always has one.
+        assert_eq!(
+            super::readback_for("png", "display"),
+            StillReadback::Display8
+        );
+        assert_eq!(
+            super::readback_for("exr", "sceneLinear"),
+            StillReadback::SceneLinear
+        );
+        assert_eq!(
+            super::readback_for("exr", "display"),
+            StillReadback::DisplayFloat
+        );
+        // Scene-referred is the default a float image falls back to, matching
+        // the command line, so an unknown word cannot silently apply a look.
+        assert_eq!(
+            super::readback_for("EXR", "nonsense"),
+            StillReadback::SceneLinear
+        );
+    }
+
+    #[test]
+    fn a_float_preview_clamps_and_encodes_the_way_the_watch_window_does() {
+        // Black, mid grey, white and an over-range value, as four pixels.
+        let mut bytes = Vec::new();
+        for px in [
+            [0.0f32, 0.0, 0.0, 1.0],
+            [0.5, 0.5, 0.5, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+            [8.0, 8.0, 8.0, 1.0],
+        ] {
+            for c in px {
+                bytes.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        let out = super::float_to_rgba8(&bytes);
+        assert_eq!(out.len(), 16, "four bytes a pixel, opaque");
+        assert_eq!(&out[0..4], &[0, 0, 0, 255]);
+        // 0.5 linear is 188 through the sRGB transfer, not 128. A preview that
+        // wrote 128 would be showing the image twice as dark as its file.
+        assert_eq!(&out[4..8], &[188, 188, 188, 255]);
+        assert_eq!(&out[8..12], &[255, 255, 255, 255]);
+        // Over range clamps rather than wrapping: the clamp is the whole of
+        // the tone mapping here, which is what the surfaces tell the reader.
+        assert_eq!(&out[12..16], &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn the_float_preview_is_the_low_end_of_the_curve_too() {
+        // The linear segment below the knee, which a pure power curve gets
+        // visibly wrong in the darks.
+        let mut bytes = Vec::new();
+        for c in [0.001_f32, 0.001, 0.001, 1.0] {
+            bytes.extend_from_slice(&c.to_le_bytes());
+        }
+        let out = super::float_to_rgba8(&bytes);
+        assert_eq!(out[0], 3, "0.001 linear is 3, through the linear segment");
     }
 }

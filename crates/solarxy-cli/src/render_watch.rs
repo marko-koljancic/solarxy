@@ -61,27 +61,14 @@ impl Frame {
         let rgba = match image.format {
             PreviewFormat::Rgba8 => image.pixels.to_vec(),
             // Clamped and encoded, which for a scene-referred image is the
-            // whole of the tone mapping. Said plainly in the reference: a float
-            // render is judged from its file, and this is a preview.
-            PreviewFormat::Rgba32F => image
-                .pixels
-                .chunks_exact(16)
-                .flat_map(|p| {
-                    let channel = |i: usize| {
-                        let v = f32::from_le_bytes([p[i], p[i + 1], p[i + 2], p[i + 3]])
-                            .clamp(0.0, 1.0);
-                        // sRGB, so a scene-linear plane is not shown twice as
-                        // dark as the file it is a preview of.
-                        let encoded = if v <= 0.003_130_8 {
-                            v * 12.92
-                        } else {
-                            1.055 * v.powf(1.0 / 2.4) - 0.055
-                        };
-                        (encoded * 255.0).round().clamp(0.0, 255.0) as u8
-                    };
-                    [channel(0), channel(4), channel(8), 255]
-                })
-                .collect(),
+            // whole of the tone mapping. Said plainly in the reference: a
+            // float render is judged from its file, and this is a preview.
+            //
+            // Shared with the browser's still dialog, which shows a float
+            // render the same way for the same reason. Two display transforms
+            // would make the two surfaces disagree about a render neither is
+            // authoritative about.
+            PreviewFormat::Rgba32F => solarxy_render::float_to_rgba8(image.pixels),
         };
         Self {
             width: image.width,

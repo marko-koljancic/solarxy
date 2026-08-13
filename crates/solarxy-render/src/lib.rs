@@ -46,6 +46,11 @@ use solarxy_graph::nodes::RenderSettings;
 /// Re-exported so a caller can name the engine without taking a dependency on
 /// the graph crate for one enum.
 pub use solarxy_graph::nodes::RenderEngine;
+/// Re-exported for the same reason, and for one more: the command line's watch
+/// window and the browser's still dialog both show a float render through this,
+/// and a second copy of it would let the two surfaces disagree about a render
+/// neither of them is authoritative about.
+pub use solarxy_host::still::float_to_rgba8;
 use solarxy_host::headless::HeadlessHost;
 use solarxy_host::raster::RasterBackend;
 use solarxy_host::still::{StillCtx, StillEngine, StillRenderJob, StillSpec, StillStep};

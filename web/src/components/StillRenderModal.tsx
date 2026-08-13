@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getClient } from "../engine/session";
-import type { GraphContext, RenderSettings } from "../engine/types";
+import type { GraphContext, RenderSettings, StillFormat, StillSpace } from "../engine/types";
 import { pushToast } from "../store/toasts";
 import { useRenderJob } from "../store/renderJob";
 import { Modal } from "./Modal";
@@ -38,6 +38,13 @@ export interface StillRenderRequest {
 /** Above this many megapixels the canvas is worth warning about. */
 const CANVAS_WARN_MP = 24;
 
+/** The largest float still the host will assemble, in megapixels.
+ *
+ * Mirrors `MAX_FLOAT_STILL_PIXELS` in the wasm host, which is what actually
+ * refuses. Stated here too so the dialog can say why the button is off before
+ * somebody spends minutes finding out. */
+const FLOAT_MAX_MP = 16;
+
 function download(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -58,6 +65,13 @@ export function StillRenderModal({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [started, setStarted] = useState(false);
   const [finished, setFinished] = useState(false);
+  // The format is a property of the render rather than of the save, so it is
+  // chosen here and locked once tiles start arriving.
+  const [format, setFormat] = useState<StillFormat>("png");
+  const [space, setSpace] = useState<StillSpace>("sceneLinear");
+  // What the finished render actually is, read back from the host rather than
+  // from what was asked for, so a label cannot drift from the file.
+  const [renderedSpace, setRenderedSpace] = useState<StillSpace | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const busy = job.busy;
 
@@ -118,7 +132,7 @@ export function StillRenderModal({
     setError(null);
     setFinished(false);
     try {
-      getClient().startStillRender(request.ctx, request.node);
+      getClient().startStillRender(request.ctx, request.node, format, space);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -126,6 +140,7 @@ export function StillRenderModal({
       return;
     }
     useRenderJob.getState().start(request.settings.width, request.settings.height);
+    setRenderedSpace(getClient().stillFloatSpace());
     setStarted(true);
   };
 
@@ -146,6 +161,33 @@ export function StillRenderModal({
       download(blob, `solarxy_still_${stamp}.png`);
     }, "image/png");
   };
+
+  const saveExr = () => {
+    try {
+      const bytes = getClient().saveStillExr();
+      // Copied out of the wasm heap before it becomes a Blob, for the reason
+      // the tile drain gives: a view into that heap dies at the next
+      // allocation the module makes.
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      download(new Blob([new Uint8Array(bytes)], { type: "image/x-exr" }), `solarxy_still_${stamp}.exr`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      pushToast(message, "error");
+    }
+  };
+
+  // A scene-referred render is shown through a clamp and an sRGB encode,
+  // because a canvas is eight bits and scene-referred light is not. Said out
+  // loud, because the difference between the preview and the file is the whole
+  // point of saving the file.
+  const previewNote =
+    renderedSpace === "sceneLinear"
+      ? "Preview is clamped and display-encoded; the file carries the scene-referred floats."
+      : renderedSpace === "display"
+        ? "Preview matches the file, which carries the same look without the quantization."
+        : null;
+
+  const oversizeForFloat = format === "exr" && megapixels > FLOAT_MAX_MP;
 
   const pct = job.tiles > 0 ? (job.tile + job.sample / Math.max(1, job.samples)) / job.tiles : 0;
 
@@ -191,6 +233,47 @@ export function StillRenderModal({
             </span>
           </Row>
         )}
+        <Row
+          label="Format"
+          doc="Chosen before rendering, because it decides what the renderer reads back and cannot change once tiles are arriving. PNG is eight bits with the look already applied. EXR is 32-bit float, which is what a compositing package wants."
+        >
+          <Select
+            ariaLabel="Format"
+            value={format}
+            options={[
+              { value: "png", label: "PNG (8-bit)" },
+              { value: "exr", label: "EXR (32-bit float)" },
+            ]}
+            onChange={(v) => setFormat(v as StillFormat)}
+            disabled={busy}
+          />
+        </Row>
+        {format === "exr" && (
+          <Row
+            label="Space"
+            doc="Which floats the file carries. Scene-linear is light with no exposure, tone map or grade applied, which is what a compositing package expects to be handed and what lets it apply a look of its own. Display is the finished look without the quantization. The same choice, and the same default, as the command line."
+          >
+            <Select
+              ariaLabel="Space"
+              value={space}
+              options={[
+                { value: "sceneLinear", label: "Scene-linear" },
+                { value: "display", label: "Display-referred" },
+              ]}
+              onChange={(v) => setSpace(v as StillSpace)}
+              disabled={busy}
+            />
+          </Row>
+        )}
+        {format === "exr" && megapixels > FLOAT_MAX_MP && (
+          <Row label="" doc="">
+            <span className="prefs-unit">
+              A float still is limited to {FLOAT_MAX_MP} megapixels and this one is{" "}
+              {megapixels.toFixed(1)}. Render it smaller, or take it from the command line, which
+              writes the same image with no such limit.
+            </span>
+          </Row>
+        )}
       </Section>
 
       <div className="still-preview">
@@ -202,6 +285,9 @@ export function StillRenderModal({
           aria-label="The still being rendered"
         />
       </div>
+      {started && previewNote && (
+        <div className="prefs-unit">{previewNote}</div>
+      )}
 
       {started && (
         <>
@@ -231,7 +317,12 @@ export function StillRenderModal({
         <button className="btn" disabled={busy || !finished} onClick={save}>
           Save PNG
         </button>
-        <button className="btn primary" disabled={busy} onClick={start}>
+        {renderedSpace && (
+          <button className="btn" disabled={busy || !finished} onClick={saveExr}>
+            Save EXR
+          </button>
+        )}
+        <button className="btn primary" disabled={busy || oversizeForFloat} onClick={start}>
           {started ? "Render again" : "Render"}
         </button>
       </div>

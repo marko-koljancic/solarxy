@@ -4309,6 +4309,7 @@ dependencies = [
  "serde_json",
  "solarxy-bvh",
  "solarxy-core",
+ "solarxy-formats",
  "solarxy-graph",
  "solarxy-host",
  "solarxy-kernel",

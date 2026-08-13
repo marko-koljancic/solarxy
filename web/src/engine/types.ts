@@ -799,8 +799,24 @@ export interface StillTileDto {
   y: number;
   width: number;
   height: number;
+  /** Always four bytes a pixel, whatever the render's own depth. A float
+   * still's tiles are clamped and sRGB-encoded on the Rust side before they
+   * cross, because the canvas is eight bits by construction and the floats
+   * have no business here except inside the encoded file. */
   pixels: Uint8Array;
 }
+
+/** What a still is saved as. Chosen before the render starts, because the
+ * format decides what the tiles are and cannot change once they arrive. */
+export type StillFormat = "png" | "exr";
+
+/** Which floats a float still carries. The same two the headless command
+ * offers, with the same default, so there is one vocabulary for the idea.
+ *
+ * `sceneLinear` is light with no exposure, tone map or grade applied, which is
+ * what a compositing package expects to be handed. `display` is the finished
+ * look without the quantization. Meaningless for a PNG, and ignored there. */
+export type StillSpace = "sceneLinear" | "display";
 
 /** What a `render` node is asking for, resolved by the engine.
  *

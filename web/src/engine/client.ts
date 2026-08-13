@@ -38,6 +38,8 @@ import type {
   ScreenshotOpts,
   ScreenshotResult,
   RenderSettings,
+  StillFormat,
+  StillSpace,
   StillTileDto,
   SaveExtra,
   SlxyLoadResult,
@@ -166,8 +168,30 @@ export class SolarxyClient {
    * The job then advances one chunk per frame on its own: nothing here drives
    * it. Progress arrives as `renderProgress` host events and finished tiles
    * through `takeStillTile`, which is why this returns nothing. */
-  startStillRender(ctx: GraphContext, node: number): void {
-    this.app.startStillRender(ctx, node);
+  startStillRender(
+    ctx: GraphContext,
+    node: number,
+    format: StillFormat,
+    space: StillSpace,
+  ): void {
+    this.app.startStillRender(ctx, node, format, space);
+  }
+
+  /** The finished float still, EXR-encoded.
+   *
+   * Encoded by the same writer the headless command uses, so a file saved here
+   * and one rendered on the command line are the same file. Throws when the
+   * still was not rendered as a float image, which the dialog prevents by only
+   * offering the save for a render that was. */
+  saveStillExr(): Uint8Array {
+    return this.app.saveStillExr() as Uint8Array;
+  }
+
+  /** Which space the running or finished still's float image is in, or
+   * undefined when it has none. Read from the render rather than from what the
+   * dialog asked for, so a label cannot drift from the file. */
+  stillFloatSpace(): StillSpace | undefined {
+    return (this.app.stillFloatSpace() ?? undefined) as StillSpace | undefined;
   }
 
   /** What a `render` node is asking for, for the dialog to show before

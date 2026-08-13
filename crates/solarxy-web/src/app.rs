@@ -459,6 +459,10 @@ pub struct SolarxyApp {
     traced_env_dirty: bool,
     /// Finished tiles waiting for the frontend to take them.
     still_tiles: std::collections::VecDeque<solarxy_host::still::StillTile>,
+    /// The floating-point image being assembled, when the running still is a
+    /// float one. `None` for the ordinary eight-bit still, which is assembled
+    /// on a canvas the browser owns and never needs a copy here.
+    still_float: Option<FloatStill>,
     /// Whether the traced preview runs its edge-aware filter.
     ///
     /// A preference rather than a per-pane setting, matching the two effects
@@ -526,6 +530,95 @@ struct PaneInputs {
 /// keeps improving for minutes at one sample per frame, low enough that
 /// the counter's target still means something.
 const PREVIEW_TARGET_SAMPLES: u32 = 4096;
+
+/// The largest floating-point still the browser will assemble, in pixels.
+///
+/// Not the eight-bit limit, which stays at the job's own 8192 edge. A float
+/// save holds three `f32` a pixel in this module's heap while the render runs
+/// and then encodes from them, so the peak is roughly forty bytes a pixel
+/// against the canvas path's four, inside a thirty-two-bit address space that
+/// is also holding the document, the tracer's buffers and the page. Sixteen
+/// megapixels puts the peak near 290 MB, which a tab can be asked for.
+///
+/// The same shape as the screenshot path's four-megapixel ceiling, and for the
+/// same reason: a limit with a stated number beats an allocation failure,
+/// which on wasm takes the whole tab rather than the operation.
+const MAX_FLOAT_STILL_PIXELS: u64 = 16_000_000;
+
+/// Pixels as megapixels, for a message a person reads.
+#[allow(clippy::cast_precision_loss)]
+fn megapixels(pixels: u64) -> f64 {
+    pixels as f64 / 1_000_000.0
+}
+
+/// Reinterprets a float plane's bytes.
+///
+/// The still job hands every float plane back as its bytes, so a tile is one
+/// copy rather than a typed buffer per plane. The headless crate carries the
+/// same three lines for the same reason; duplicating them here is cheaper than
+/// giving the wasm build a dependency on a crate that reads files.
+fn floats_of(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
+}
+
+/// How a still's floating-point image is assembled, when one is being kept.
+///
+/// Three channels rather than four, because that is what the encoder takes and
+/// a still has its background already in it, so an alpha lane would be a
+/// constant one pretending to be a matte. Dropping it here rather than at
+/// encode time saves a quarter of the buffer at the size where that matters.
+struct FloatStill {
+    width: u32,
+    height: u32,
+    /// Scene-referred or display-referred, matching the readback that filled
+    /// it. Carried so the encode cannot mislabel what it wrote.
+    scene_linear: bool,
+    /// `width * height * 3`, in image order. Empty when the still is
+    /// eight-bit, which is the ordinary case and costs nothing.
+    rgb: Vec<f32>,
+}
+
+impl FloatStill {
+    fn new(readback: solarxy_host::still::StillReadback, width: u32, height: u32) -> Option<Self> {
+        use solarxy_host::still::StillReadback;
+        if readback == StillReadback::Display8 {
+            return None;
+        }
+        let len = (width as usize) * (height as usize) * 3;
+        Some(Self {
+            width,
+            height,
+            scene_linear: readback == StillReadback::SceneLinear,
+            rgb: vec![0.0; len],
+        })
+    }
+
+    /// Copies one finished tile's colour into its place in the image.
+    ///
+    /// The tile arrives as four `f32` a pixel and lands as three; the alpha a
+    /// still carries is a constant one.
+    fn place(&mut self, rect: solarxy_host::still::TileRect, pixels: &[u8]) {
+        let src = floats_of(pixels);
+        for row in 0..rect.height {
+            for col in 0..rect.width {
+                let s = ((row * rect.width + col) as usize) * 4;
+                let x = rect.x + col;
+                let y = rect.y + row;
+                if x >= self.width || y >= self.height {
+                    continue;
+                }
+                let d = ((y as usize) * (self.width as usize) + (x as usize)) * 3;
+                match (src.get(s..s + 3), self.rgb.get_mut(d..d + 3)) {
+                    (Some(p), Some(slot)) => slot.copy_from_slice(p),
+                    _ => continue,
+                }
+            }
+        }
+    }
+}
 
 /// The traced preview's settings: one sample per animation frame (the
 /// pacing that keeps the page responsive), half resolution, and the
@@ -849,6 +942,7 @@ impl SolarxyApp {
             tracer: None,
             traced_env_dirty: true,
             still_tiles: std::collections::VecDeque::new(),
+            still_float: None,
             // On, matching the shipped behaviour, until a preference push
             // says otherwise; boot pushes one before the first traced frame.
             preview_denoise: true,
@@ -1647,12 +1741,19 @@ impl SolarxyApp {
     }
 
     #[wasm_bindgen(js_name = startStillRender)]
-    pub fn start_still_render(&mut self, ctx: JsValue, node: f64) -> Result<(), JsError> {
+    pub fn start_still_render(
+        &mut self,
+        ctx: JsValue,
+        node: f64,
+        format: &str,
+        space: &str,
+    ) -> Result<(), JsError> {
         use solarxy_host::still::{StillEngine, StillRenderJob};
 
         if self.still.is_some() {
             return Err(JsError::new("a still render is already running"));
         }
+        let readback = solarxy_host::still::readback_for(format, space);
         // Resolved here rather than accepted from the caller, and re-resolved
         // rather than carried over from the dialog's read: what runs is what
         // the node says at the moment Render is pressed.
@@ -1714,7 +1815,26 @@ impl SolarxyApp {
         if let Some(t) = self.tracer.as_mut() {
             t.set_lens(lens);
         }
-        let spec = self.still_spec(&opts, engine);
+        let spec = self.still_spec(&opts, engine, readback);
+        // Refused here rather than at save, because the buffer this needs is
+        // allocated as the render runs and a refusal after minutes of work is
+        // no kindness. The eight-bit path is unaffected and keeps its full
+        // range: it holds four bytes a pixel on a canvas the browser owns,
+        // while a float save holds twelve in this module's own heap and then
+        // encodes from them.
+        if readback != solarxy_host::still::StillReadback::Display8 {
+            let pixels = u64::from(spec.width) * u64::from(spec.height);
+            if pixels > MAX_FLOAT_STILL_PIXELS {
+                return Err(JsError::new(&format!(
+                    "a floating-point still is limited to {} megapixels and this one is {:.1}; \
+                     render it smaller, or take it from the command line, which writes the same \
+                     image with no such limit",
+                    MAX_FLOAT_STILL_PIXELS / 1_000_000,
+                    megapixels(pixels)
+                )));
+            }
+        }
+        self.still_float = FloatStill::new(readback, spec.width, spec.height);
         // The job's own camera. Built from the named `camera` node when there
         // is one, and otherwise from the active pane's current view copied by
         // value: either way the panes are untouched, which is what makes
@@ -1772,6 +1892,10 @@ impl SolarxyApp {
         self.still = None;
         self.still_camera = None;
         self.still_tiles.clear();
+        // Dropped with the job: a cancelled render has a half-filled image and
+        // nothing should be able to save it, quite apart from the tens of
+        // megabytes it would otherwise sit on until the next render.
+        self.still_float = None;
         // The next frame renders the panes again, and the frame after that
         // resizes the targets back to the layout.
     }
@@ -1787,6 +1911,16 @@ impl SolarxyApp {
         let Some(tile) = self.still_tiles.pop_front() else {
             return JsValue::UNDEFINED;
         };
+        // A float tile lands in the image being assembled here and reaches the
+        // dialog as eight bits, which is the whole arrangement: the canvas
+        // cannot show sixteen bytes a pixel, and the floats have no business
+        // crossing the boundary except as the encoded file they end up in.
+        let rgba8 = if let Some(f) = self.still_float.as_mut() {
+            f.place(tile.rect, &tile.pixels);
+            std::borrow::Cow::Owned(solarxy_host::still::float_to_rgba8(&tile.pixels))
+        } else {
+            std::borrow::Cow::Borrowed(tile.pixels.as_slice())
+        };
         let obj = js_sys::Object::new();
         let set = |k: &str, v: &JsValue| {
             let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), v);
@@ -1797,9 +1931,48 @@ impl SolarxyApp {
         set("height", &JsValue::from_f64(f64::from(tile.rect.height)));
         set(
             "pixels",
-            &JsValue::from(js_sys::Uint8Array::from(tile.pixels.as_slice())),
+            &JsValue::from(js_sys::Uint8Array::from(rgba8.as_ref())),
         );
         obj.into()
+    }
+
+    /// Encodes the finished floating-point still and hands back the file.
+    ///
+    /// The bytes of a real EXR, written by the same encoder the headless
+    /// command uses, so there is one implementation of the format and a file
+    /// saved here opens identically to one rendered on the command line. The
+    /// download itself is the frontend's: this module has no business knowing
+    /// about anchors and object URLs.
+    ///
+    /// Errors rather than returning nothing when there is no float image,
+    /// because reaching this without one means the dialog offered a save it
+    /// could not honour.
+    #[wasm_bindgen(js_name = saveStillExr)]
+    pub fn save_still_exr(&self) -> Result<js_sys::Uint8Array, JsError> {
+        let Some(f) = self.still_float.as_ref() else {
+            return Err(JsError::new(
+                "this still was not rendered as a floating-point image",
+            ));
+        };
+        let img = solarxy_core::geometry::RawImageHdr::new(f.rgb.clone(), f.width, f.height);
+        let bytes = solarxy_formats::export::encode_exr_rgb_bytes(&img)
+            .map_err(|e| JsError::new(&format!("the image could not be encoded: {e}")))?;
+        Ok(js_sys::Uint8Array::from(bytes.as_slice()))
+    }
+
+    /// Whether the running or finished still can be saved as a float image,
+    /// and in which space, so the dialog labels its own buttons from the
+    /// render rather than from what it asked for.
+    #[wasm_bindgen(js_name = stillFloatSpace)]
+    #[must_use]
+    pub fn still_float_space(&self) -> Option<String> {
+        self.still_float.as_ref().map(|f| {
+            if f.scene_linear {
+                "sceneLinear".to_string()
+            } else {
+                "display".to_string()
+            }
+        })
     }
 
     /// Advances the running job by one chunk and reports where it got to.
@@ -3525,6 +3698,7 @@ impl SolarxyApp {
         &self,
         opts: &solarxy_graph::nodes::RenderSettings,
         engine: solarxy_host::still::StillEngine,
+        readback: solarxy_host::still::StillReadback,
     ) -> solarxy_host::still::StillSpec {
         solarxy_host::still::StillSpec {
             width: opts.width,
@@ -3536,11 +3710,13 @@ impl SolarxyApp {
             // whatever the viewport had.
             screen_space_post: self.renderer.post.bloom_enabled,
             tile_budget: solarxy_host::still::TILE_BUDGET_PIXELS,
-            // The browser saves an eight-bit image; float output is the
-            // headless command's, which has a file format that can hold it.
-            readback: solarxy_host::still::StillReadback::Display8,
-            // And no auxiliary passes, for the same reason: an eight-bit normal
-            // map is not worth writing.
+            // Chosen in the dialog before the render starts, because the
+            // readback decides what the tiles are and cannot be changed once
+            // they are arriving.
+            readback,
+            // No auxiliary passes: delivering several files out of one dialog
+            // is a design question rather than a wiring one, and the command
+            // line is where a person gets them until it is answered.
             aux: false,
             depth: false,
         }
