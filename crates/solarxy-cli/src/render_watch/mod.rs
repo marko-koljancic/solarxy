@@ -30,12 +30,13 @@
 //! still, and after the render finishes the hold loop pumps on its own clock
 //! and the window is as responsive as any other.
 
+mod passes;
 mod view;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use solarxy_render::{Preview, PreviewFormat, RenderProgress, RenderSink};
+use solarxy_render::{AovKind, Preview, PreviewFormat, RenderProgress, RenderSink};
 use winit::application::ApplicationHandler;
 use winit::event::{MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -43,6 +44,7 @@ use winit::keyboard::{Key, NamedKey};
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 use winit::window::{Window, WindowId};
 
+use passes::{PassKind, PassSelector};
 use view::{Rect, ViewTransform};
 
 /// The longest edge the window opens at.
@@ -69,39 +71,89 @@ struct Frame {
     float: bool,
 }
 
-impl Frame {
+/// The planes as they last arrived, kept raw so switching passes replays
+/// them from here rather than asking the render for anything.
+///
+/// Only what the run requested is ever present: an unrequested plane is
+/// `None` on the preview itself, so holding these costs nothing a run did
+/// not ask to produce.
+struct Latest {
+    width: u32,
+    height: u32,
+    color: Vec<u8>,
+    format: PreviewFormat,
+    aux: Option<Vec<u8>>,
+    depth: Option<Vec<u8>>,
+}
+
+impl Latest {
     fn from_preview(image: &Preview<'_>) -> Self {
-        let rgba = match image.format {
-            PreviewFormat::Rgba8 => image.pixels.to_vec(),
-            // Clamped and encoded, which for a scene-referred image is the
-            // whole of the tone mapping. Said plainly in the reference: a
-            // float render is judged from its file, and this is a preview.
-            //
-            // Shared with the browser's still dialog, which shows a float
-            // render the same way for the same reason. Two display transforms
-            // would make the two surfaces disagree about a render neither is
-            // authoritative about.
-            PreviewFormat::Rgba32F => solarxy_render::float_to_rgba8(image.pixels),
-        };
         Self {
             width: image.width,
             height: image.height,
-            rgba,
-            float: image.format == PreviewFormat::Rgba32F,
+            color: image.pixels.to_vec(),
+            format: image.format,
+            aux: image.aux.map(<[u8]>::to_vec),
+            depth: image.depth.map(<[u8]>::to_vec),
         }
     }
+}
 
-    /// The window size this picture wants: its own proportions, bounded.
-    fn window_size(&self) -> (u32, u32) {
-        let (w, h) = (self.width.max(1), self.height.max(1));
-        if w <= MAX_EDGE && h <= MAX_EDGE {
-            return (w, h);
-        }
-        if w >= h {
-            (MAX_EDGE, (MAX_EDGE * h / w).max(1))
-        } else {
-            ((MAX_EDGE * w / h).max(1), MAX_EDGE)
-        }
+/// The beauty, as display bytes.
+///
+/// A float image is clamped and encoded, which for a scene-referred one is
+/// the whole of the tone mapping. Said plainly in the reference: a float
+/// render is judged from its file, and this is a preview.
+///
+/// Shared with the browser's still dialog, which shows a float render the
+/// same way for the same reason. Two display transforms would make the two
+/// surfaces disagree about a render neither is authoritative about.
+fn beauty_rgba8(latest: &Latest) -> (Vec<u8>, bool) {
+    match latest.format {
+        PreviewFormat::Rgba8 => (latest.color.clone(), false),
+        PreviewFormat::Rgba32F => (solarxy_render::float_to_rgba8(&latest.color), true),
+    }
+}
+
+/// The selected pass as the picture the window shows.
+///
+/// A pass whose plane is somehow absent falls back to the beauty rather
+/// than to a blank: the selector should never offer one, and if it did the
+/// honest recovery is the picture that always exists.
+fn frame_for(pass: PassKind, latest: &Latest) -> Frame {
+    let (rgba, float) = match pass {
+        PassKind::Beauty => beauty_rgba8(latest),
+        PassKind::Albedo => match latest.aux.as_ref() {
+            Some(aux) => (passes::albedo_rgba8(aux), false),
+            None => beauty_rgba8(latest),
+        },
+        PassKind::Normal => match latest.aux.as_ref() {
+            Some(aux) => (passes::normal_rgba8(aux), false),
+            None => beauty_rgba8(latest),
+        },
+        PassKind::Depth => match latest.depth.as_ref() {
+            Some(depth) => (passes::depth_rgba8(depth), false),
+            None => beauty_rgba8(latest),
+        },
+    };
+    Frame {
+        width: latest.width,
+        height: latest.height,
+        rgba,
+        float,
+    }
+}
+
+/// The window size a picture wants: its own proportions, bounded.
+fn window_size(width: u32, height: u32) -> (u32, u32) {
+    let (w, h) = (width.max(1), height.max(1));
+    if w <= MAX_EDGE && h <= MAX_EDGE {
+        return (w, h);
+    }
+    if w >= h {
+        (MAX_EDGE, (MAX_EDGE * h / w).max(1))
+    } else {
+        ((MAX_EDGE * w / h).max(1), MAX_EDGE)
     }
 }
 
@@ -497,6 +549,13 @@ struct WatchApp {
     gpu: Option<Gpu>,
     chrome: Option<Chrome>,
     frame: Option<Frame>,
+    /// The raw planes the last preview carried, replayed on a pass switch.
+    latest: Option<Latest>,
+    /// Which passes this run can show, and which one the reader chose.
+    selector: PassSelector,
+    /// The pass the uploaded picture was converted from, so a switch or a
+    /// fresh preview is noticed and anything else is not re-uploaded.
+    shown: Option<PassKind>,
     /// Where the picture sits: the fit until the reader pans or zooms.
     view: ViewTransform,
     /// The pointer, in window pixels, as the zoom anchor and the drag origin.
@@ -696,6 +755,28 @@ impl WatchApp {
         ))
     }
 
+    /// Convert and upload the selected pass, when what is shown is stale.
+    ///
+    /// Stale means a fresh preview arrived or the reader switched passes;
+    /// everything else finds the uploaded picture current and does nothing,
+    /// which is what keeps one pass per tile the whole of the upload cost.
+    fn sync_frame(&mut self) {
+        let wanted = self.selector.selected();
+        if self.shown == Some(wanted) {
+            return;
+        }
+        let Some(latest) = self.latest.as_ref() else {
+            return;
+        };
+        let Some(gpu) = self.gpu.as_mut() else {
+            return;
+        };
+        let frame = frame_for(wanted, latest);
+        gpu.upload(&frame);
+        self.frame = Some(frame);
+        self.shown = Some(wanted);
+    }
+
     fn paint(&mut self) {
         let Some(window) = self.window.clone() else {
             return;
@@ -713,9 +794,10 @@ impl WatchApp {
             let input = chrome.state.take_egui_input(&window);
             let zoom_percent = self.view.rect(pic, win).w / pic.0.max(1) as f32 * 100.0;
             let mut fit = false;
-            let out = chrome
-                .ctx
-                .run(input, |ctx| chrome_ui(ctx, &mut fit, zoom_percent, float));
+            let selector = &mut self.selector;
+            let out = chrome.ctx.run(input, |ctx| {
+                chrome_ui(ctx, selector, &mut fit, zoom_percent, float);
+            });
             chrome
                 .state
                 .handle_platform_output(&window, out.platform_output);
@@ -727,6 +809,10 @@ impl WatchApp {
         } else {
             None
         };
+
+        // The chrome may have switched passes this very frame; showing the
+        // old one for even a tile would make the selector feel broken.
+        self.sync_frame();
 
         let rect = self.view.rect(pic, win);
         let pixels_per_point = window.scale_factor() as f32;
@@ -744,9 +830,15 @@ impl WatchApp {
     }
 }
 
-/// The overlay strip: the way back to the fit, the zoom, and the caveat a
-/// float preview carries.
-fn chrome_ui(ctx: &egui::Context, fit: &mut bool, zoom_percent: f32, float: bool) {
+/// The overlay strip: the pass selector, the way back to the fit, the zoom,
+/// and the caveat a float preview carries.
+fn chrome_ui(
+    ctx: &egui::Context,
+    selector: &mut PassSelector,
+    fit: &mut bool,
+    zoom_percent: f32,
+    float: bool,
+) {
     egui::TopBottomPanel::top("watch chrome")
         .frame(
             egui::Frame::new()
@@ -756,6 +848,26 @@ fn chrome_ui(ctx: &egui::Context, fit: &mut bool, zoom_percent: f32, float: bool
         .show_separator_line(false)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
+                // The selector: the beauty always exists; under raster no
+                // other pass could, so none is shown; under tracing an
+                // unrequested pass is disabled naming the flag that would
+                // have produced it, in the label rather than behind a hover.
+                if selector.beauty_only() {
+                    let _ = ui.selectable_label(true, PassKind::Beauty.label());
+                } else {
+                    for kind in PassKind::ALL {
+                        if selector.available(kind) {
+                            let chosen = selector.selected() == kind;
+                            if ui.selectable_label(chosen, kind.label()).clicked() {
+                                selector.choose(kind);
+                            }
+                        } else if let Some(aov) = kind.aov() {
+                            let text = format!("{} (--aov {})", kind.label(), aov.as_str());
+                            ui.add_enabled(false, egui::Button::selectable(false, text));
+                        }
+                    }
+                }
+                ui.separator();
                 if ui.button("Fit (F)").clicked() {
                     *fit = true;
                 }
@@ -781,9 +893,13 @@ impl WatchSink {
     /// Open nothing yet. The window is sized by the first picture, which is the
     /// first moment anything knows what shape the render is.
     ///
+    /// `requested` is what `--aov` asked for, which is what the pass
+    /// selector offers; what the run can actually show arrives with the
+    /// first preview, which names its engine.
+    ///
     /// # Errors
     /// If the platform will not give an event loop at all.
-    pub fn new(cancel: Arc<AtomicBool>) -> Result<Self, String> {
+    pub fn new(cancel: Arc<AtomicBool>, requested: &[AovKind]) -> Result<Self, String> {
         let events = EventLoop::new().map_err(|e| format!("no event loop: {e}"))?;
         Ok(Self {
             events,
@@ -792,6 +908,9 @@ impl WatchSink {
                 gpu: None,
                 chrome: None,
                 frame: None,
+                latest: None,
+                selector: PassSelector::new(requested),
+                shown: None,
                 view: ViewTransform::new(),
                 cursor: (0.0, 0.0),
                 drag: None,
@@ -849,11 +968,15 @@ impl RenderSink for WatchSink {
     }
 
     fn preview(&mut self, image: &Preview<'_>) {
-        let frame = Frame::from_preview(image);
+        self.app.selector.saw_engine(image.engine);
+        let latest = Latest::from_preview(image);
         if self.app.window.is_none() {
-            self.app.wanted = Some(frame.window_size());
+            self.app.wanted = Some(window_size(latest.width, latest.height));
         }
-        self.app.frame = Some(frame);
+        self.app.latest = Some(latest);
+        // Fresh planes: whatever pass is on screen was converted from the
+        // tile before this one.
+        self.app.shown = None;
         // The platform hands over a window on its own schedule rather than when
         // asked, so the first picture is given a moment to get one.
         let wait = if self.app.window.is_none() {
@@ -862,9 +985,7 @@ impl RenderSink for WatchSink {
             std::time::Duration::ZERO
         };
         self.pump(wait);
-        if let (Some(gpu), Some(frame)) = (self.app.gpu.as_mut(), self.app.frame.as_ref()) {
-            gpu.upload(frame);
-        }
+        self.app.sync_frame();
         self.app.paint();
     }
 }
@@ -877,25 +998,47 @@ mod tests {
     /// survives the bound is the shape.
     #[test]
     fn a_large_render_opens_at_a_size_that_fits_a_screen() {
-        let huge = Frame {
-            width: 8192,
-            height: 4608,
-            rgba: Vec::new(),
-            float: false,
-        };
-        let (w, h) = huge.window_size();
+        let (w, h) = window_size(8192, 4608);
         assert_eq!(w, MAX_EDGE);
         assert_eq!(h, 720, "the shape did not survive the bound");
 
         // And a picture that already fits is left alone, so an ordinary render
         // opens at its own size.
-        let small = Frame {
-            width: 640,
-            height: 480,
-            rgba: Vec::new(),
-            float: false,
+        assert_eq!(window_size(640, 480), (640, 480));
+    }
+
+    /// Switching passes replays the planes the previews already carried:
+    /// each pass converts to its own picture, and a pass whose plane is
+    /// absent falls back to the beauty rather than to a blank.
+    #[test]
+    fn a_pass_switch_replays_the_cached_planes() {
+        let latest = Latest {
+            width: 1,
+            height: 1,
+            color: vec![10, 20, 30, 255],
+            format: PreviewFormat::Rgba8,
+            aux: Some(
+                [0.5f32, 0.25, 1.0, 0.0]
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect(),
+            ),
+            depth: None,
         };
-        assert_eq!(small.window_size(), (640, 480));
+
+        let beauty = frame_for(PassKind::Beauty, &latest);
+        assert_eq!(beauty.rgba, latest.color, "the beauty is the color plane");
+
+        let albedo = frame_for(PassKind::Albedo, &latest);
+        assert_ne!(
+            albedo.rgba, beauty.rgba,
+            "the albedo pass showed the beauty"
+        );
+        assert_eq!(albedo.rgba.len(), 4);
+
+        // No depth plane arrived, so the honest recovery is the beauty.
+        let depth = frame_for(PassKind::Depth, &latest);
+        assert_eq!(depth.rgba, beauty.rgba, "an absent plane did not fall back");
     }
 
     /// A device against a plain texture, for the tests that draw.
@@ -1201,7 +1344,7 @@ mod tests {
         for channel in [half, half, half, one] {
             pixels.extend_from_slice(&channel);
         }
-        let frame = Frame::from_preview(&Preview {
+        let latest = Latest::from_preview(&Preview {
             width: 1,
             height: 1,
             pixels: &pixels,
@@ -1210,6 +1353,7 @@ mod tests {
             depth: None,
             engine: solarxy_render::RenderEngine::PathTraced,
         });
+        let frame = frame_for(PassKind::Beauty, &latest);
         // Linear 0.5 is about 188 of 255 through the sRGB transfer, not 128.
         assert_eq!(frame.rgba[0], 188, "{:?}", &frame.rgba[..4]);
         assert_eq!(frame.rgba[3], 255);

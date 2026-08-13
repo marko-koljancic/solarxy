@@ -60,7 +60,10 @@ use solarxy_renderer::pathtrace::backend::PathBackend;
 use solarxy_renderer::scene::BackgroundModeExt;
 
 pub use error::RenderError;
-pub use files::{AovKind, ExrSpace};
+// The pass extraction helpers travel with the preview: a sink that shows a
+// pass must read the planes exactly the way the file writer reads them, or
+// the window and the sibling file would disagree about one buffer.
+pub use files::{AovKind, ExrSpace, albedo_from_auxiliary, floats_of, normal_from_auxiliary};
 pub use report::{RENDER_REPORT_SCHEMA_VERSION, RenderReport};
 
 /// How far along a render is.
@@ -248,6 +251,17 @@ pub struct Preview<'a> {
     pub height: u32,
     pub pixels: &'a [u8],
     pub format: PreviewFormat,
+    /// The auxiliary plane, present exactly when the run asked for albedo or
+    /// normal: four `f32` a pixel, albedo in the first three lanes and the
+    /// packed world normal in the fourth, as the still job hands them over.
+    pub aux: Option<&'a [u8]>,
+    /// The depth plane, present exactly when the run asked for it: one `f32`
+    /// a pixel, measured along the camera's axis, `1e30` where the ray hit
+    /// nothing.
+    pub depth: Option<&'a [u8]>,
+    /// The engine that drew the picture, so a surface can say which passes
+    /// could exist rather than guessing from which ones do.
+    pub engine: RenderEngine,
 }
 
 /// How to read [`Preview::pixels`].
@@ -523,6 +537,7 @@ fn run(
             look,
             format,
             scene_present,
+            engine: settings.engine,
         },
         started,
     )?;
@@ -877,6 +892,9 @@ struct StillView<'a> {
     look: solarxy_renderer::composite::CompositeLook,
     format: wgpu::TextureFormat,
     scene_present: bool,
+    /// Carried from the resolved settings rather than mapped back from the
+    /// job's spec, so the still-engine translation stays written once.
+    engine: RenderEngine,
 }
 
 /// Runs the job to completion, resizing the shared targets per tile, and
@@ -985,6 +1003,9 @@ fn drive(
                     } else {
                         PreviewFormat::Rgba32F
                     },
+                    aux: out.aux.as_deref(),
+                    depth: out.depth.as_deref(),
+                    engine: view.engine,
                 });
             }
             StillStep::Done => break,

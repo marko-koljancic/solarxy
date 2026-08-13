@@ -547,7 +547,10 @@ fn run_render(args: &solarxy_cli::parser::RenderArgs, theme: Option<&str>) -> Ex
     let mut sinks = Sinks::default();
     #[cfg(feature = "watch")]
     if args.watch {
-        match solarxy_cli::render_watch::WatchSink::new(std::sync::Arc::clone(&cancel_for_sinks)) {
+        match solarxy_cli::render_watch::WatchSink::new(
+            std::sync::Arc::clone(&cancel_for_sinks),
+            &opts.aovs,
+        ) {
             Ok(watch) => sinks.watch = Some(watch),
             Err(why) => eprintln!("the render window could not open: {why}. The render continues."),
         }
