@@ -466,6 +466,11 @@ fn run(
         });
     }
     backend.apply(&device, &queue, &delta);
+    // Asked right after the ingest, which is where the count is made. The
+    // tracer intersects triangles, so a scene carrying curves or point clouds
+    // renders its triangles and drops the rest; saying so is the difference
+    // between a limitation and a hole somebody finds later.
+    warnings.extend(backend.skipped_primitives_warning());
 
     // A raster backend knows the scene's extent; a traced one is asked the same
     // question through the raster ingest that ran beside it, so both frame the

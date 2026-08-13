@@ -772,6 +772,7 @@ export type HostEvent =
       samples: number;
       done: boolean;
     }
+  | { type: "renderNotice"; message: string }
   | { type: "paneSamples"; pane: number; samples: number; target: number };
 
 /** What one render backend can do, pinned to the Rust `BackendCaps`

@@ -186,6 +186,16 @@ impl State {
             if let Some(t) = self.tracer.as_mut() {
                 t.apply_snapshot(&self.device, &self.queue, &delta);
             }
+            // Said at the start rather than at the end, because the useful
+            // moment to learn that your curves will not be in the picture is
+            // before you wait for the picture.
+            if let Some(note) = self
+                .tracer
+                .as_ref()
+                .and_then(RenderBackend::skipped_primitives_warning)
+            {
+                self.gui.set_toast(&note, ToastSeverity::Warning);
+            }
             self.sync_traced_environment();
             let shot_camera = camera.camera;
             self.light_traced_still_camera(&shot_camera);

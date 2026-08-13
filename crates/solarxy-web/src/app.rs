@@ -199,6 +199,12 @@ enum HostEvent {
         samples: u32,
         done: bool,
     },
+    /// The renderer left something out of the scene it just ingested.
+    ///
+    /// Pushed once when a traced render starts rather than when it finishes,
+    /// because the useful moment to learn that your curves will not be in the
+    /// picture is before you wait for the picture.
+    RenderNotice { message: String },
     /// A traced pane's accumulation advanced: how many samples its mean
     /// averages, of the preview's target. The counter that marks a
     /// converging image as converging. Pushed on change, not per frame.
@@ -1790,6 +1796,13 @@ impl SolarxyApp {
             let delta = self.engine.scene_snapshot();
             if let Some(t) = self.tracer.as_mut() {
                 t.apply_snapshot(&self.device, &self.queue, &delta);
+            }
+            if let Some(message) = self
+                .tracer
+                .as_ref()
+                .and_then(solarxy_renderer::backend::RenderBackend::skipped_primitives_warning)
+            {
+                self.host_events.push(HostEvent::RenderNotice { message });
             }
         }
         self.sync_traced_environment();

@@ -1151,6 +1151,9 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "viewChanged") refreshViewState();
     else if (ev.type === "attrPinStats") useAttrPinStats.getState().set(ev.capacity, ev.total);
     else if (ev.type === "renderProgress") useRenderJob.getState().progress(ev);
+    // A warning rather than an error: the render is going ahead, and what it
+    // is about to leave out is something the person still has time to act on.
+    else if (ev.type === "renderNotice") pushToast(ev.message, "warn");
     else if (ev.type === "paneSamples")
       useViewState.getState().setPaneSamples(ev.pane, ev.samples, ev.target);
   }

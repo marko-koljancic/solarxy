@@ -477,6 +477,20 @@ impl PathBackend {
     }
 }
 
+impl PathBackend {
+    /// What the last ingest made of the scene.
+    ///
+    /// Exposed so a shell can tell somebody what was left out. The tracer
+    /// intersects triangles, so a scene carrying point clouds or poly-lines
+    /// renders its triangles and drops the rest; the count is kept during
+    /// ingest and was, until 0.9.0, kept and never shown, which made a missing
+    /// curve something you noticed rather than something you were told.
+    #[must_use]
+    pub fn scene_stats(&self) -> crate::pathtrace::scene::TraceSceneStats {
+        self.cache.stats()
+    }
+}
+
 impl RenderBackend for PathBackend {
     fn apply(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, delta: &SceneDelta) {
         self.cache.apply(delta);
@@ -490,6 +504,11 @@ impl RenderBackend for PathBackend {
     /// gathered at one f-number is not a partial result of another. Skipped
     /// when nothing moved, because a host that calls this every frame with an
     /// unchanged lens would otherwise never converge.
+    fn skipped_primitives_warning(&self) -> Option<String> {
+        let stats = self.cache.stats();
+        skipped_primitives_message(stats.skipped_points, stats.skipped_lines)
+    }
+
     fn set_lens(&mut self, lens: solarxy_core::scene::CameraLens) {
         if (self.settings.aperture_radius - lens.aperture_radius).abs() < f32::EPSILON
             && (self.settings.focus_distance - lens.focus_distance).abs() < f32::EPSILON
@@ -823,5 +842,73 @@ mod tests {
         // On by default, because the speckle it removes is the one stage-four
         // limitation this stage closes.
         assert!(s.firefly_clamp > 0.0);
+    }
+}
+
+/// The sentence a shell shows when a traced render leaves geometry out.
+///
+/// Free-standing so it can be tested without a device, and shared so the
+/// browser, the desktop and the command line say the same thing rather than
+/// three things that drift.
+///
+/// Both counts are meshes rather than primitives, which is what the ingest
+/// counts and what a person can act on: "one of your objects is missing" is
+/// more useful than a vertex total.
+#[must_use]
+pub fn skipped_primitives_message(points: u32, lines: u32) -> Option<String> {
+    if points == 0 && lines == 0 {
+        return None;
+    }
+    let part = |n: u32, one: &str, many: &str| match n {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        _ => Some(format!("{n} {many}")),
+    };
+    let listed: Vec<String> = [
+        part(points, "point cloud", "point clouds"),
+        part(lines, "poly-line object", "poly-line objects"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    Some(format!(
+        "the path tracer skipped {} because it intersects triangles only; \
+         render with the rasterizer if they are the subject",
+        listed.join(" and ")
+    ))
+}
+
+#[cfg(test)]
+mod skipped_tests {
+    use super::skipped_primitives_message;
+
+    #[test]
+    fn a_scene_of_triangles_says_nothing() {
+        assert!(skipped_primitives_message(0, 0).is_none());
+    }
+
+    #[test]
+    fn one_of_each_is_singular_and_both_are_named() {
+        let m = skipped_primitives_message(1, 1).expect("a message");
+        assert!(m.contains("1 point cloud "), "{m}");
+        assert!(m.contains("1 poly-line object"), "{m}");
+        assert!(!m.contains("clouds"), "singular, not plural: {m}");
+    }
+
+    #[test]
+    fn only_what_was_skipped_is_named() {
+        // A scene with curves and no point clouds must not be told about
+        // point clouds it does not have.
+        let m = skipped_primitives_message(0, 4).expect("a message");
+        assert!(m.contains("4 poly-line objects"), "{m}");
+        assert!(!m.contains("point"), "{m}");
+        assert!(!m.contains(" and "), "nothing to join: {m}");
+    }
+
+    #[test]
+    fn the_message_says_what_to_do_instead() {
+        let m = skipped_primitives_message(3, 0).expect("a message");
+        assert!(m.contains("3 point clouds"), "{m}");
+        assert!(m.contains("rasterizer"), "a limitation with no remedy: {m}");
     }
 }

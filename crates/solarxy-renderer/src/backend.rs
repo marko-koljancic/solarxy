@@ -96,6 +96,19 @@ pub trait RenderBackend {
         None
     }
 
+    /// What this backend left out of the scene it last ingested, phrased for
+    /// somebody who is about to wonder where their curves went.
+    ///
+    /// `None` when nothing was dropped, which is the ordinary case and is why
+    /// this returns an option rather than a count: a caller pushes it into a
+    /// warning list and says nothing when there is nothing to say.
+    ///
+    /// Defaulted to `None` because the rasterizer draws points and lines
+    /// perfectly well and has nothing to apologise for.
+    fn skipped_primitives_warning(&self) -> Option<String> {
+        None
+    }
+
     /// Focus the backend's camera model on the shot's lens.
     ///
     /// Separate from the camera itself, which arrives per frame on
