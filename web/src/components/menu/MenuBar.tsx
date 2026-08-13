@@ -54,6 +54,10 @@ const SAMPLE_SCENES: { label: string; file: string }[] = [
   { label: "Procedural Look-dev", file: "procedural-lookdev.slxy" },
   // The flagship: everything above composed into one scene.
   { label: "The Orrery", file: "the-orrery.slxy" },
+  // Last because it teaches the renderer rather than the node graph: it is
+  // the one sample whose point is what the traced still does that the
+  // viewport preview cannot.
+  { label: "Cornell Box", file: "cornell-box.slxy" },
 ];
 
 export function MenuBar() {

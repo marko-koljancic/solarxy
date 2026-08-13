@@ -69,6 +69,87 @@ fn every_bundled_sample_loads_and_cooks_clean() {
     }
 }
 
+/// The Cornell box must still be made of glass, metal and matte.
+///
+/// The sweep above proves it loads and cooks, which a box of five grey
+/// walls would also pass. What makes the scene worth shipping is that one
+/// traced still shows refraction, a mirror reflection and colour bleeding
+/// at once, and exactly one of those three depends on a material property
+/// no other sample sets. A merge that dropped transmission, or a rename of
+/// the parameter, would leave the scene cooking clean and rendering three
+/// diffuse objects.
+#[test]
+fn the_cornell_box_keeps_its_glass_metal_and_matte() {
+    let path = samples_dir().join("cornell-box.slxy");
+    if !path.is_file() {
+        eprintln!("skipping: no cornell-box.slxy at {}", path.display());
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("sample readable");
+    let mut engine = Engine::new().expect("builtin registry");
+    engine.load_slxy(&bytes).expect("cornell-box loads");
+    for _ in 0..8 {
+        if engine.cook(&mut || true).is_empty() {
+            break;
+        }
+    }
+
+    let materials: Vec<_> = engine
+        .display_geometries()
+        .iter()
+        .flat_map(|(_, set, _)| set.materials.clone())
+        .collect();
+    assert!(
+        !materials.is_empty(),
+        "the box cooked no materials at all; the walls carry their own \
+         precisely so the merge cannot collapse them"
+    );
+
+    // Fully transmissive, and refracting rather than passing straight
+    // through: an index of one is glass-shaped geometry that bends nothing.
+    let glass = materials
+        .iter()
+        .find(|m| m.transmission > 0.99)
+        .expect("no fully transmissive material: the glass ball is not glass");
+    assert!(
+        glass.ior > 1.4,
+        "the glass has an index of {}, which refracts nothing worth seeing",
+        glass.ior
+    );
+
+    // The other two showcase surfaces, each the thing the tracer renders
+    // differently from the raster preview beside it.
+    assert!(
+        materials
+            .iter()
+            .any(|m| m.metallic_factor > 0.99 && m.roughness_factor < 0.1),
+        "no smooth metal: the mirror ball is what shows the reflection"
+    );
+    assert!(
+        materials
+            .iter()
+            .any(|m| m.transmission < 0.01 && m.metallic_factor < 0.01 && m.roughness_factor > 0.5),
+        "no rough dielectric: the matte block is what picks up the wall colour"
+    );
+
+    // Two coloured walls, or there is no colour to bleed. Red and green
+    // are the whole reason the scene is recognisable.
+    let saturated = materials
+        .iter()
+        .filter(|m| {
+            let [r, g, b, _] = m.base_color_factor;
+            let hi = r.max(g).max(b);
+            let lo = r.min(g).min(b);
+            hi - lo > 0.2
+        })
+        .count();
+    assert!(
+        saturated >= 2,
+        "expected the red and green walls to survive the merge, found \
+         {saturated} saturated materials"
+    );
+}
+
 /// The animated sample must actually animate.
 ///
 /// The sweep above proves every scene loads and cooks, which an entirely
