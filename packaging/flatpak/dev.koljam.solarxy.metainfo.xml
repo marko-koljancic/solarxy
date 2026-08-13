@@ -64,6 +64,21 @@
   </provides>
 
   <releases>
+    <release version="0.9.0" date="2026-08-13">
+      <description>
+        <p>
+          Path-traced rendering. A second renderer joins the real-time one: a
+          physically based GPU path tracer that renders converged stills with
+          global illumination, soft shadows from every light, real depth of
+          field, and the camera's own colour grade, tiled to eight thousand
+          pixels an edge. A per-pane preview converges in the viewport, and a
+          new render command makes the terminal a first-class host: scene
+          file in, PNG or floating-point EXR out with albedo, normal and
+          depth passes, deterministic under a fixed seed, with progress on a
+          plain line, a dashboard, or a live window.
+        </p>
+      </description>
+    </release>
     <release version="0.8.2" date="2026-08-06">
       <description>
         <p>
