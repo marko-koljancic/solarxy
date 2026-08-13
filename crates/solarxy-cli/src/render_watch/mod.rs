@@ -23,17 +23,27 @@
 //! calls the surface, not the other way round. On macOS that pump has to happen
 //! on the main thread, which is where a command-line render runs, and is the
 //! reason this cannot later move to a worker without a redesign.
+//!
+//! The same shape bounds how fluid the chrome can be: a drag or a wheel is
+//! answered at the next pump, and pumps happen when the render reports.
+//! While samples are landing that is often; between them the picture holds
+//! still, and after the render finishes the hold loop pumps on its own clock
+//! and the window is as responsive as any other.
+
+mod view;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use solarxy_render::{Preview, PreviewFormat, RenderProgress, RenderSink};
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 use winit::window::{Window, WindowId};
+
+use view::{Rect, ViewTransform};
 
 /// The longest edge the window opens at.
 ///
@@ -54,6 +64,9 @@ struct Frame {
     height: u32,
     /// Eight bits a channel, in the order a texture takes them.
     rgba: Vec<u8>,
+    /// Whether the render is a float one, whose preview here is clamped and
+    /// encoded while the file keeps the real values. The chrome says so.
+    float: bool,
 }
 
 impl Frame {
@@ -74,6 +87,7 @@ impl Frame {
             width: image.width,
             height: image.height,
             rgba,
+            float: image.format == PreviewFormat::Rgba32F,
         }
     }
 
@@ -91,6 +105,14 @@ impl Frame {
     }
 }
 
+/// What one paint hands the device beyond the picture: the chrome's shapes,
+/// where they go, and the textures they brought with them.
+type ChromeDraw<'a> = (
+    &'a [egui::ClippedPrimitive],
+    &'a egui_wgpu::ScreenDescriptor,
+    &'a egui::TexturesDelta,
+);
+
 /// What is needed to put a picture on a window, once there is one.
 struct Gpu {
     surface: wgpu::Surface<'static>,
@@ -100,8 +122,16 @@ struct Gpu {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// The image rectangle and the window size, as the shader reads them.
+    view_uniform: wgpu::Buffer,
     /// The uploaded picture and its binding, rebuilt when the size changes.
     texture: Option<(wgpu::Texture, wgpu::BindGroup, u32, u32)>,
+    /// The chrome's painter, and the non-sRGB view format it writes through,
+    /// the same arrangement the desktop shell uses for the same reason: egui
+    /// encodes its own colours, so handing it the sRGB view would encode
+    /// them twice.
+    chrome: egui_wgpu::Renderer,
+    chrome_format: wgpu::TextureFormat,
 }
 
 impl Gpu {
@@ -142,6 +172,7 @@ impl Gpu {
             .find(wgpu::TextureFormat::is_srgb)
             .or_else(|| caps.formats.first().copied())
             .ok_or_else(|| "the surface offers no format".to_owned())?;
+        let chrome_format = format.remove_srgb_suffix();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -149,12 +180,23 @@ impl Gpu {
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
+            view_formats: vec![chrome_format],
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
 
         let (pipeline, layout, sampler) = blit_pipeline(&device, format);
+        let view_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("watch view"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let chrome = egui_wgpu::Renderer::new(
+            &device,
+            chrome_format,
+            egui_wgpu::RendererOptions::default(),
+        );
 
         Ok(Self {
             surface,
@@ -164,18 +206,21 @@ impl Gpu {
             pipeline,
             layout,
             sampler,
+            view_uniform,
             texture: None,
+            chrome,
+            chrome_format,
         })
     }
 }
 
-/// The pipeline that puts a picture on a target, and the two things it binds.
+/// The pipeline that puts a picture on a target, and the three things it binds.
 ///
 /// Free of any window, so the same shader and the same layout a window uses can
 /// be built against a plain texture and read back. That is the only way to
-/// check the one thing in this file that is easy to get wrong and impossible to
-/// notice from a screenshot description: whether the picture arrives the right
-/// way up.
+/// check the two things in this file that are easy to get wrong and impossible
+/// to notice from a screenshot description: whether the picture arrives the
+/// right way up, and whether the canvas stays out of it.
 fn blit_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -201,6 +246,16 @@ fn blit_pipeline(
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
                 count: None,
             },
         ],
@@ -241,6 +296,29 @@ fn blit_pipeline(
         ..Default::default()
     });
     (pipeline, layout, sampler)
+}
+
+/// The `View` uniform's bytes: the image rectangle, then the window size.
+///
+/// Packed by hand because this crate carries no byte-cast dependency for the
+/// sake of eight floats, on the little-endian layout every shipped target
+/// shares.
+fn view_uniform_bytes(rect: Rect, window: (u32, u32)) -> [u8; 32] {
+    let values: [f32; 8] = [
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        window.0 as f32,
+        window.1 as f32,
+        0.0,
+        0.0,
+    ];
+    let mut bytes = [0u8; 32];
+    for (slot, value) in values.iter().enumerate() {
+        bytes[slot * 4..slot * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    bytes
 }
 
 impl Gpu {
@@ -287,6 +365,10 @@ impl Gpu {
                         binding: 1,
                         resource: wgpu::BindingResource::Sampler(&self.sampler),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.view_uniform.as_entire_binding(),
+                    },
                 ],
             });
             self.texture = Some((texture, bind, wanted.0, wanted.1));
@@ -315,8 +397,9 @@ impl Gpu {
         );
     }
 
-    /// Draw whatever is uploaded, letterboxed into the window.
-    fn draw(&mut self, picture: (u32, u32)) {
+    /// Draw whatever is uploaded into its rectangle, the canvas around it,
+    /// and the chrome on top.
+    fn draw(&mut self, rect: Rect, chrome: Option<ChromeDraw<'_>>) {
         let Some((_, bind, _, _)) = self.texture.as_ref() else {
             return;
         };
@@ -325,6 +408,11 @@ impl Gpu {
             // will ask again, and a render must not stop because a window did.
             return;
         };
+        self.queue.write_buffer(
+            &self.view_uniform,
+            0,
+            &view_uniform_bytes(rect, (self.config.width.max(1), self.config.height.max(1))),
+        );
         let view = surface
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -333,6 +421,14 @@ impl Gpu {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("watch blit"),
             });
+        if let Some((shapes, screen, delta)) = chrome {
+            for (id, image_delta) in &delta.set {
+                self.chrome
+                    .update_texture(&self.device, &self.queue, *id, image_delta);
+            }
+            self.chrome
+                .update_buffers(&self.device, &self.queue, &mut encoder, shapes, screen);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("watch blit"),
@@ -349,37 +445,67 @@ impl Gpu {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            // The letterbox, as a viewport rather than as shader arithmetic:
-            // the quad is always the whole clip space and the rectangle it is
-            // drawn into is what keeps the picture's proportions.
-            let (x, y, w, h) = letterbox(
-                picture,
-                (self.config.width.max(1), self.config.height.max(1)),
-            );
-            pass.set_viewport(x, y, w, h, 0.0, 1.0);
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, bind, &[]);
             pass.draw(0..3, 0..1);
         }
+        if let Some((shapes, screen, _)) = chrome {
+            let chrome_view = surface.texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(self.chrome_format),
+                ..Default::default()
+            });
+            let mut pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("watch chrome"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &chrome_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                })
+                .forget_lifetime();
+            self.chrome.render(&mut pass, shapes, screen);
+            drop(pass);
+        }
         self.queue.submit(Some(encoder.finish()));
         surface.present();
+        if let Some((_, _, delta)) = chrome {
+            for id in &delta.free {
+                self.chrome.free_texture(id);
+            }
+        }
     }
 }
 
-/// The largest rectangle of `into` with the proportions of `picture`, centred.
-fn letterbox(picture: (u32, u32), into: (u32, u32)) -> (f32, f32, f32, f32) {
-    let (pw, ph) = (picture.0.max(1) as f32, picture.1.max(1) as f32);
-    let (ww, wh) = (into.0.max(1) as f32, into.1.max(1) as f32);
-    let scale = (ww / pw).min(wh / ph);
-    let (w, h) = (pw * scale, ph * scale);
-    (((ww - w) / 2.0).max(0.0), ((wh - h) / 2.0).max(0.0), w, h)
+/// The chrome's two halves: the context that lays it out and the winit
+/// bridge that feeds it events.
+struct Chrome {
+    ctx: egui::Context,
+    state: egui_winit::State,
 }
 
 /// The window, and everything it does in response to the platform.
 struct WatchApp {
     window: Option<Arc<Window>>,
     gpu: Option<Gpu>,
+    chrome: Option<Chrome>,
     frame: Option<Frame>,
+    /// Where the picture sits: the fit until the reader pans or zooms.
+    view: ViewTransform,
+    /// The pointer, in window pixels, as the zoom anchor and the drag origin.
+    cursor: (f32, f32),
+    /// The cursor position a drag last panned from, while a button is down.
+    drag: Option<(f32, f32)>,
+    /// Set when an event moved something visible, so the pump repaints once
+    /// rather than every handler painting on its own.
+    wants_paint: bool,
     /// The size the window should open at, once there is a picture to size it
     /// by. Before the first tile there is nothing to be the shape of.
     wanted: Option<(u32, u32)>,
@@ -387,6 +513,26 @@ struct WatchApp {
     dismissed: bool,
     /// Said once. A window that cannot open should say so and then be quiet.
     complained: bool,
+}
+
+/// Escape or `q`, the two ways a reader cancels from the window. Read before
+/// the chrome sees the key: stopping a render must never depend on which
+/// widget has focus.
+fn cancel_key(event: &winit::event::KeyEvent) -> bool {
+    event.state.is_pressed()
+        && matches!(
+            event.logical_key,
+            Key::Named(NamedKey::Escape) | Key::Character(_)
+        )
+        && matches!(
+            event.logical_key.to_text(),
+            None | Some("q") | Some("Q") | Some("\u{1b}")
+        )
+}
+
+/// `f`, the way back to the letterbox fit.
+fn fit_key(event: &winit::event::KeyEvent) -> bool {
+    event.state.is_pressed() && matches!(event.logical_key.to_text(), Some("f") | Some("F"))
 }
 
 impl ApplicationHandler for WatchApp {
@@ -407,25 +553,85 @@ impl ApplicationHandler for WatchApp {
     }
 
     fn window_event(&mut self, _active: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        match event {
-            WindowEvent::CloseRequested => self.dismissed = true,
-            WindowEvent::KeyboardInput { event, .. } => {
-                if event.state.is_pressed()
-                    && matches!(
-                        event.logical_key,
-                        Key::Named(NamedKey::Escape) | Key::Character(_)
-                    )
-                    && matches!(
-                        event.logical_key.to_text(),
-                        None | Some("q") | Some("Q") | Some("\u{1b}")
-                    )
-                {
-                    self.dismissed = true;
-                }
+        // Closing and cancelling are the window's own contract, honoured
+        // before the chrome is offered anything.
+        match &event {
+            WindowEvent::CloseRequested => {
+                self.dismissed = true;
+                return;
             }
+            WindowEvent::KeyboardInput { event: key, .. } if cancel_key(key) => {
+                self.dismissed = true;
+                return;
+            }
+            _ => {}
+        }
+        // The chrome sees everything else first; what it consumes it keeps.
+        let consumed = match (self.chrome.as_mut(), self.window.as_ref()) {
+            (Some(chrome), Some(window)) => {
+                let response = chrome.state.on_window_event(window, &event);
+                self.wants_paint |= response.repaint;
+                response.consumed
+            }
+            _ => false,
+        };
+        let sizes = self.sizes();
+        match event {
             WindowEvent::Resized(size) => {
                 if let Some(gpu) = self.gpu.as_mut() {
                     gpu.resize(size.width, size.height);
+                }
+                // Resizing refits, which is the contract, and also what keeps
+                // a half-dragged view from surviving into a new window shape
+                // it was never composed against.
+                self.view.reset();
+                self.wants_paint = true;
+            }
+            WindowEvent::KeyboardInput { event: key, .. } => {
+                if !consumed && fit_key(&key) {
+                    self.view.reset();
+                    self.wants_paint = true;
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let here = (position.x as f32, position.y as f32);
+                if let Some(from) = self.drag {
+                    if consumed {
+                        // A drag that wandered onto the chrome ends rather
+                        // than fighting it over the pointer.
+                        self.drag = None;
+                    } else if let Some((pic, win)) = sizes {
+                        self.view.pan((here.0 - from.0, here.1 - from.1), pic, win);
+                        self.drag = Some(here);
+                        self.wants_paint = true;
+                    }
+                }
+                self.cursor = here;
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left | MouseButton::Middle,
+                ..
+            } => {
+                if state.is_pressed() {
+                    if !consumed {
+                        self.drag = Some(self.cursor);
+                    }
+                } else {
+                    // A release ends a drag wherever it lands, chrome
+                    // included, or a button let go over a widget would leave
+                    // the picture glued to the pointer.
+                    self.drag = None;
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                if !consumed && let Some((pic, win)) = sizes {
+                    let factor = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => 1.2f32.powf(y),
+                        MouseScrollDelta::PixelDelta(p) => (p.y as f32 / 200.0).exp(),
+                    };
+                    self.view.zoom_about(self.cursor, factor, pic, win);
+                    self.wants_paint = true;
                 }
             }
             WindowEvent::RedrawRequested => self.paint(),
@@ -451,6 +657,16 @@ impl WatchApp {
                 let window = Arc::new(window);
                 match Gpu::new(&window) {
                     Ok(gpu) => {
+                        let ctx = egui::Context::default();
+                        let state = egui_winit::State::new(
+                            ctx.clone(),
+                            egui::ViewportId::ROOT,
+                            &window,
+                            None,
+                            None,
+                            None,
+                        );
+                        self.chrome = Some(Chrome { ctx, state });
                         self.gpu = Some(gpu);
                         self.window = Some(window);
                     }
@@ -470,12 +686,85 @@ impl WatchApp {
         }
     }
 
+    /// The picture and window sizes, once both exist.
+    fn sizes(&self) -> Option<((u32, u32), (u32, u32))> {
+        let frame = self.frame.as_ref()?;
+        let gpu = self.gpu.as_ref()?;
+        Some((
+            (frame.width, frame.height),
+            (gpu.config.width.max(1), gpu.config.height.max(1)),
+        ))
+    }
+
     fn paint(&mut self) {
-        let (Some(gpu), Some(frame)) = (self.gpu.as_mut(), self.frame.as_ref()) else {
+        let Some(window) = self.window.clone() else {
             return;
         };
-        gpu.draw((frame.width, frame.height));
+        let (pic, float) = match self.frame.as_ref() {
+            Some(f) => ((f.width, f.height), f.float),
+            None => return,
+        };
+        let win = match self.gpu.as_ref() {
+            Some(g) => (g.config.width.max(1), g.config.height.max(1)),
+            None => return,
+        };
+
+        let chrome_out = if let Some(chrome) = self.chrome.as_mut() {
+            let input = chrome.state.take_egui_input(&window);
+            let zoom_percent = self.view.rect(pic, win).w / pic.0.max(1) as f32 * 100.0;
+            let mut fit = false;
+            let out = chrome
+                .ctx
+                .run(input, |ctx| chrome_ui(ctx, &mut fit, zoom_percent, float));
+            chrome
+                .state
+                .handle_platform_output(&window, out.platform_output);
+            let shapes = chrome.ctx.tessellate(out.shapes, out.pixels_per_point);
+            if fit {
+                self.view.reset();
+            }
+            Some((shapes, out.textures_delta))
+        } else {
+            None
+        };
+
+        let rect = self.view.rect(pic, win);
+        let pixels_per_point = window.scale_factor() as f32;
+        let Some(gpu) = self.gpu.as_mut() else {
+            return;
+        };
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [win.0, win.1],
+            pixels_per_point,
+        };
+        match chrome_out.as_ref() {
+            Some((shapes, delta)) => gpu.draw(rect, Some((shapes.as_slice(), &screen, delta))),
+            None => gpu.draw(rect, None),
+        }
     }
+}
+
+/// The overlay strip: the way back to the fit, the zoom, and the caveat a
+/// float preview carries.
+fn chrome_ui(ctx: &egui::Context, fit: &mut bool, zoom_percent: f32, float: bool) {
+    egui::TopBottomPanel::top("watch chrome")
+        .frame(
+            egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha(160))
+                .inner_margin(egui::Margin::same(6)),
+        )
+        .show_separator_line(false)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Fit (F)").clicked() {
+                    *fit = true;
+                }
+                ui.label(format!("{zoom_percent:.0}%"));
+                if float {
+                    ui.weak("clamped preview; the file holds the real values");
+                }
+            });
+        });
 }
 
 /// The window, driven by the render that reports to it.
@@ -501,7 +790,12 @@ impl WatchSink {
             app: WatchApp {
                 window: None,
                 gpu: None,
+                chrome: None,
                 frame: None,
+                view: ViewTransform::new(),
+                cursor: (0.0, 0.0),
+                drag: None,
+                wants_paint: false,
                 wanted: None,
                 dismissed: false,
                 complained: false,
@@ -514,6 +808,11 @@ impl WatchSink {
     /// Let the platform have a turn, and pass on a dismissal.
     fn pump(&mut self, wait: std::time::Duration) {
         self.events.pump_app_events(Some(wait), &mut self.app);
+        // One paint per pump however many events wanted one, at the moment
+        // the batch is done rather than inside it.
+        if std::mem::take(&mut self.app.wants_paint) {
+            self.app.paint();
+        }
         if self.app.dismissed && !self.told {
             // The same flag the interrupt handler and the dashboard's quit key
             // set, so a render stops by one path however it was asked to.
@@ -574,35 +873,6 @@ impl RenderSink for WatchSink {
 mod tests {
     use super::*;
 
-    /// A picture keeps its proportions inside the window, whichever way round
-    /// the two are, and is centred in whatever is left.
-    #[test]
-    fn the_letterbox_keeps_the_pictures_proportions() {
-        // Wider than the window: bars above and below.
-        let (x, y, w, h) = letterbox((400, 100), (800, 800));
-        assert!(
-            (w - 800.0).abs() < 0.01 && (h - 200.0).abs() < 0.01,
-            "{w}x{h}"
-        );
-        assert!(x.abs() < 0.01 && (y - 300.0).abs() < 0.01, "{x},{y}");
-
-        // Taller: bars at the sides.
-        let (x, y, w, h) = letterbox((100, 400), (800, 800));
-        assert!(
-            (w - 200.0).abs() < 0.01 && (h - 800.0).abs() < 0.01,
-            "{w}x{h}"
-        );
-        assert!((x - 300.0).abs() < 0.01 && y.abs() < 0.01, "{x},{y}");
-
-        // Exactly the shape of the window: no bars at all.
-        let (x, y, w, h) = letterbox((640, 480), (1280, 960));
-        assert!(x.abs() < 0.01 && y.abs() < 0.01, "{x},{y}");
-        assert!(
-            (w - 1280.0).abs() < 0.01 && (h - 960.0).abs() < 0.01,
-            "{w}x{h}"
-        );
-    }
-
     /// A still may be eight thousand pixels an edge; a screen is not. What
     /// survives the bound is the shape.
     #[test]
@@ -611,6 +881,7 @@ mod tests {
             width: 8192,
             height: 4608,
             rgba: Vec::new(),
+            float: false,
         };
         let (w, h) = huge.window_size();
         assert_eq!(w, MAX_EDGE);
@@ -622,22 +893,13 @@ mod tests {
             width: 640,
             height: 480,
             rgba: Vec::new(),
+            float: false,
         };
         assert_eq!(small.window_size(), (640, 480));
     }
 
-    /// The picture arrives the right way up, and the right way round.
-    ///
-    /// The one thing here that is easy to get wrong and impossible to see from
-    /// a description of a screenshot: texture space runs down and clip space
-    /// runs up, so a fullscreen triangle that forgets to flip draws a render
-    /// upside down and nothing else in the file would notice.
-    ///
-    /// Built against a plain texture rather than a surface, so it needs no
-    /// window and no display, and skips where there is no adapter the way
-    /// every other test that wants a device does.
-    #[test]
-    fn the_picture_arrives_the_right_way_up() {
+    /// A device against a plain texture, for the tests that draw.
+    fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let Ok(adapter) =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -647,23 +909,30 @@ mod tests {
                 "SOLARXY_REQUIRE_GPU=1 but no usable GPU adapter"
             );
             eprintln!("skipping: no GPU adapter available");
-            return;
+            return None;
         };
-        let Ok((device, queue)) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("watch blit test"),
-                required_features: wgpu::Features::empty(),
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::default(),
-                trace: wgpu::Trace::Off,
-            }))
-        else {
+        let Ok(pair) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("watch blit test"),
+            required_features: wgpu::Features::empty(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::Off,
+        })) else {
             eprintln!("skipping: no device");
-            return;
+            return None;
         };
+        Some(pair)
+    }
 
-        // Four distinct corners, so every way of getting this wrong shows.
+    /// Draw a 2x2 picture into `rect` of a `target` px square window and read
+    /// the result back, padded rows and all.
+    fn draw_and_read(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rect: Rect,
+        target_px: u32,
+    ) -> Vec<u8> {
         const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
         let corners: [[u8; 4]; 4] = [
             [255, 0, 0, 255],   // top left, red
@@ -707,7 +976,18 @@ mod tests {
             },
         );
 
-        let (pipeline, layout, sampler) = blit_pipeline(&device, FORMAT);
+        let (pipeline, layout, sampler) = blit_pipeline(device, FORMAT);
+        let view_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("view"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(
+            &view_buffer,
+            0,
+            &view_uniform_bytes(rect, (target_px, target_px)),
+        );
         let view = picture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -721,14 +1001,18 @@ mod tests {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: view_buffer.as_entire_binding(),
+                },
             ],
         });
 
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("target"),
             size: wgpu::Extent3d {
-                width: 2,
-                height: 2,
+                width: target_px,
+                height: target_px,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -740,10 +1024,10 @@ mod tests {
         });
         let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
         // 256 bytes a row is the copy alignment, so the readback is padded and
-        // only the first eight bytes of each row are the picture.
+        // only the leading bytes of each row are the picture.
         let read = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
-            size: 256 * 2,
+            size: 256 * u64::from(target_px),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -782,12 +1066,12 @@ mod tests {
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(256),
-                    rows_per_image: Some(2),
+                    rows_per_image: Some(target_px),
                 },
             },
             wgpu::Extent3d {
-                width: 2,
-                height: 2,
+                width: target_px,
+                height: target_px,
                 depth_or_array_layers: 1,
             },
         );
@@ -809,16 +1093,102 @@ mod tests {
                 Err(e) => panic!("the readback was dropped: {e}"),
             }
         }
-        let data = slice.get_mapped_range().to_vec();
+        slice.get_mapped_range().to_vec()
+    }
 
+    /// The picture arrives the right way up, and the right way round.
+    ///
+    /// The one thing here that is easy to get wrong and impossible to see from
+    /// a description of a screenshot: screen space runs down and clip space
+    /// runs up, so a fullscreen triangle that forgets to flip draws a render
+    /// upside down and nothing else in the file would notice.
+    ///
+    /// Built against a plain texture rather than a surface, so it needs no
+    /// window and no display, and skips where there is no adapter the way
+    /// every other test that wants a device does.
+    #[test]
+    fn the_picture_arrives_the_right_way_up() {
+        let Some((device, queue)) = test_device() else {
+            return;
+        };
+        // The rectangle is the whole window, so this is the fit at 1:1.
+        let data = draw_and_read(
+            &device,
+            &queue,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 2.0,
+                h: 2.0,
+            },
+            2,
+        );
         let pixel = |x: usize, y: usize| -> [u8; 4] {
             let at = y * 256 + x * 4;
             [data[at], data[at + 1], data[at + 2], data[at + 3]]
         };
-        assert_eq!(pixel(0, 0), corners[0], "the top left corner moved");
-        assert_eq!(pixel(1, 0), corners[1], "the top right corner moved");
-        assert_eq!(pixel(0, 1), corners[2], "the bottom left corner moved");
-        assert_eq!(pixel(1, 1), corners[3], "the bottom right corner moved");
+        assert_eq!(pixel(0, 0), [255, 0, 0, 255], "the top left corner moved");
+        assert_eq!(pixel(1, 0), [0, 255, 0, 255], "the top right corner moved");
+        assert_eq!(
+            pixel(0, 1),
+            [0, 0, 255, 255],
+            "the bottom left corner moved"
+        );
+        assert_eq!(
+            pixel(1, 1),
+            [255, 255, 0, 255],
+            "the bottom right corner moved"
+        );
+    }
+
+    /// The canvas surrounds the picture without showing through it.
+    ///
+    /// A 2x2 picture drawn into the middle of a 4x4 window: the border must be
+    /// the checker's grey, the same grey all round at this scale since the
+    /// cell is larger than the window, and the picture's own pixels must be
+    /// exactly the picture, opaque.
+    #[test]
+    fn the_canvas_surrounds_an_opaque_picture() {
+        let Some((device, queue)) = test_device() else {
+            return;
+        };
+        let data = draw_and_read(
+            &device,
+            &queue,
+            Rect {
+                x: 1.0,
+                y: 1.0,
+                w: 2.0,
+                h: 2.0,
+            },
+            4,
+        );
+        let pixel = |x: usize, y: usize| -> [u8; 4] {
+            let at = y * 256 + x * 4;
+            [data[at], data[at + 1], data[at + 2], data[at + 3]]
+        };
+
+        let corner = pixel(0, 0);
+        for (x, y) in [(3, 0), (0, 3), (3, 3)] {
+            assert_eq!(
+                pixel(x, y),
+                corner,
+                "the canvas is not one grey inside one cell at ({x},{y})"
+            );
+        }
+        assert!(
+            corner[0] > 0 && corner[0] < 80 && corner[0] == corner[1] && corner[1] == corner[2],
+            "the canvas is not a dark grey: {corner:?}"
+        );
+        assert_eq!(corner[3], 255, "the canvas is not opaque");
+
+        // The picture itself, untouched by the canvas and opaque over it.
+        assert_eq!(pixel(1, 1), [255, 0, 0, 255], "the picture's top left");
+        assert_eq!(
+            pixel(2, 2),
+            [255, 255, 0, 255],
+            "the picture's bottom right"
+        );
     }
 
     /// Float pixels reach the window encoded rather than raw, or a
@@ -836,9 +1206,13 @@ mod tests {
             height: 1,
             pixels: &pixels,
             format: PreviewFormat::Rgba32F,
+            aux: None,
+            depth: None,
+            engine: solarxy_render::RenderEngine::PathTraced,
         });
         // Linear 0.5 is about 188 of 255 through the sRGB transfer, not 128.
         assert_eq!(frame.rgba[0], 188, "{:?}", &frame.rgba[..4]);
         assert_eq!(frame.rgba[3], 255);
+        assert!(frame.float, "a float preview forgot what it was");
     }
 }

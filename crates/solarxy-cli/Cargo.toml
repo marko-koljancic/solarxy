@@ -26,7 +26,15 @@ render = ["dep:solarxy-render", "dep:ctrlc"]
 # a window, and a build for a machine with no display should not carry the
 # code that would. The distribution build turns it on; a build without it
 # answers `--watch` with a message rather than refusing to parse the flag.
-watch = ["render", "dep:winit", "dep:wgpu", "dep:pollster"]
+watch = [
+    "render",
+    "dep:winit",
+    "dep:wgpu",
+    "dep:pollster",
+    "dep:egui",
+    "dep:egui-wgpu",
+    "dep:egui-winit",
+]
 
 [dependencies]
 solarxy-render = { path = "../solarxy-render", features = ["clap"], optional = true }
@@ -59,6 +67,13 @@ axoupdater = { version = "0.10", features = ["blocking"], optional = true }
 winit = { version = "0.30.12", optional = true }
 wgpu = { version = "27.0.1", optional = true }
 pollster = { version = "0.4.0", optional = true }
+# The window's chrome: the pass selector, the fit affordance and the zoom
+# readout. The same versions the desktop shell pins, so these too add edges
+# to the graph rather than packages to the lockfile. Ratified as the watch
+# window's toolkit when its widget need outgrew a textured quad.
+egui = { version = "0.33", optional = true }
+egui-wgpu = { version = "0.33", optional = true }
+egui-winit = { version = "0.33", optional = true }
 
 [package.metadata.dist]
 installers = ["shell", "powershell"]
