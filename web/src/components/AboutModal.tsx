@@ -1,6 +1,7 @@
 // The About dialog: name, version, a short positioning line, the project
-// links (repository + wiki), and a discrete copyright. Esc / backdrop /
-// Done dismiss. The version is the build-time package version
+// links (repository + wiki), the license with a source offer, and a discrete
+// copyright. Esc / backdrop / Done dismiss. The version is the build-time
+// package version
 // (__APP_VERSION__, single-sourced from package.json by vite.config.ts),
 // so a release bump reaches this dialog with no edit here.
 //
@@ -13,6 +14,13 @@ import { Modal } from "./Modal";
 
 const REPO_URL = "https://github.com/marko-koljancic/solarxy";
 const WIKI_URL = "https://github.com/marko-koljancic/solarxy/wiki";
+
+/** Both are copied out of the repository root by the prebuild step, so they
+ * are served by the app itself rather than linked off-site. That matters: a
+ * visitor is handed compiled WebAssembly, and the license has to arrive with
+ * it rather than live somewhere the visitor is trusted to go looking. */
+const LICENSE_URL = "/LICENSE.txt";
+const NOTICES_URL = "/THIRD-PARTY-NOTICES.md";
 
 /** The capability pages, in the order a new user meets them. Exported for
  * tests, which check that every href resolves under the wiki. */
@@ -36,6 +44,14 @@ export function aboutCopyrightLine(now = new Date()): string {
 /** A wiki page's full URL. */
 export function docUrl(page: string): string {
   return `${WIKI_URL}/${page}`;
+}
+
+/** Source for the build that is running, pinned to its release tag rather
+ * than the default branch. The obligation is to offer the source that
+ * corresponds to THIS binary, and `main` stops corresponding the moment it
+ * moves. Exported for tests. */
+export function aboutSourceUrl(version = __APP_VERSION__): string {
+  return `${REPO_URL}/tree/v${version}`;
 }
 
 export function AboutModal({ onClose }: { onClose: () => void }) {
@@ -71,6 +87,20 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
         {" · "}
         <a href={WIKI_URL} target="_blank" rel="noreferrer">
           Documentation wiki
+        </a>
+      </p>
+      <p className="about-license">
+        Free software under the{" "}
+        <a href={LICENSE_URL} target="_blank" rel="noreferrer">
+          GNU GPL, version 3 or later
+        </a>
+        . Use it, study it, share it, change it.{" "}
+        <a href={aboutSourceUrl()} target="_blank" rel="noreferrer">
+          Source for this build
+        </a>
+        {" · "}
+        <a href={NOTICES_URL} target="_blank" rel="noreferrer">
+          Third-party notices
         </a>
       </p>
       <p className="about-copyright">{aboutCopyrightLine()}</p>

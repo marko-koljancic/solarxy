@@ -2762,6 +2762,14 @@ body.reduce-motion .cook-arc {
   color: var(--text-secondary);
   font-size: 1.1rem;
 }
+/* The license sits above the copyright and reads with it as one block. Quiet,
+   but a step louder than the copyright: it grants the reader something, so it
+   is worth reading rather than merely worth having. */
+.about-license {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.6;
+}
 .about-copyright {
   color: var(--text-secondary);
   font-size: 1rem;
