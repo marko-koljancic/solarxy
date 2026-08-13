@@ -20,7 +20,7 @@ export const SHELL_COUNT = 3;
 export const VALIDATION_KIND_COUNT = 11;
 export const CARD_COUNT = 72;
 export const PROGRAM_RELEASE_COUNT = 13;
-export const RELEASES_TO_1_0 = 4;
+export const RELEASES_TO_1_0 = 3;
 export const JOURNEY_COUNT = 16;
 export const LIVE_VERSION = "v0.9.0";
 
