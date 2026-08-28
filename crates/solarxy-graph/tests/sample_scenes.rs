@@ -105,12 +105,23 @@ fn the_cornell_box_keeps_its_glass_metal_and_matte() {
          precisely so the merge cannot collapse them"
     );
 
-    // Fully transmissive, and refracting rather than passing straight
-    // through: an index of one is glass-shaped geometry that bends nothing.
+    // Fully transmissive, and a solid rather than a pane. Thickness is the
+    // field that decides it: at zero the kernel treats the surface as thin
+    // film and refracts a second time through the opposite interface, which
+    // returns every ray to the direction it arrived on. A ball authored that
+    // way bends nothing, casts no shadow, and is optically a flat window.
     let glass = materials
         .iter()
         .find(|m| m.transmission > 0.99)
         .expect("no fully transmissive material: the glass ball is not glass");
+    assert!(
+        glass.thickness != 0.0,
+        "the glass ball has no thickness, so it is thin film: it refracts \
+         twice through parallel interfaces and passes light straight through"
+    );
+    // The index decides how hard the interface bends, not whether it bends
+    // at all, so this stands on its own: at 1.0 a solid still refracts
+    // nothing worth seeing.
     assert!(
         glass.ior > 1.4,
         "the glass has an index of {}, which refracts nothing worth seeing",

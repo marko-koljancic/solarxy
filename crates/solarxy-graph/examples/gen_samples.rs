@@ -1401,6 +1401,17 @@ fn cornell_box() -> Builder {
     b.set(g, glass_m, "metallic", ParamValue::Float(0.0));
     b.set(g, glass_m, "transmission", ParamValue::Float(1.0));
     b.set(g, glass_m, "ior", ParamValue::Float(1.5));
+    // What makes the ball a solid rather than a pane, and the whole reason
+    // it refracts at all. At zero the tracer reads the surface as thin film
+    // and refracts a second time through the opposite interface, handing
+    // every ray back the direction it arrived on: no lensing, no caustic,
+    // no shadow. The kernel only asks whether this is zero, so the value is
+    // a look choice rather than a measurement, and the ball's own diameter
+    // is the one that reads as solid glass at this camera distance.
+    b.set(g, glass_m, "thickness", ParamValue::Float(0.6));
+    // Absorption stays off, which is what the defaults already say: white
+    // at a distance of zero. The ball is water-clear on purpose, because a
+    // tint would compete with the coloured walls for the same read.
     b.set(
         g,
         glass_m,
@@ -1422,14 +1433,16 @@ fn cornell_box() -> Builder {
     b.note(
         g,
         [110.0, 150.0],
-        [380.0, 200.0],
+        [380.0, 260.0],
         "Five single-sided planes, not one inverted box: the viewport culls \
          back faces and the tracer shades both, so a box would render and \
          preview differently. Each wall carries its own material because \
          the merge deduplicates identical ones, and two of them have to \
          stay red and green.\n\nThe block is diffuse (watch it pick up the \
          wall colours), the near-white ball is a mirror, and the clear ball \
-         refracts. Only the first survives the raster preview intact.",
+         refracts: it carries a thickness, which is what makes it a solid \
+         rather than a pane with nothing behind it. Only the first survives \
+         the raster preview intact.",
     );
 
     // The scene's only light, and the ceiling panel the shadow comes from.
