@@ -220,7 +220,9 @@ fn the_preview_carries_the_passes_the_run_asked_for() {
             engine: Some(engine),
             width: Some(64),
             height: Some(48),
-            samples: Some(2),
+            // Only the accumulating engine takes a sample count; the
+            // rasterizer refuses one rather than ignoring it.
+            samples: matches!(engine, RenderEngine::PathTraced).then_some(2),
             seed: Some(3),
             aovs,
             ..RenderOptions::default()
@@ -325,7 +327,9 @@ fn two_tile_budgets_render_the_same_image() {
                 engine: Some(engine),
                 width: Some(160),
                 height: Some(120),
-                samples: Some(4),
+                // Only the accumulating engine takes a sample count; the
+                // rasterizer refuses one rather than ignoring it.
+                samples: matches!(engine, RenderEngine::PathTraced).then_some(4),
                 seed: Some(11),
                 tile_budget: Some(budget),
                 ..RenderOptions::default()
@@ -434,5 +438,74 @@ fn the_normal_pass_holds_directions() {
             (length - 1.0).abs() < 1e-3,
             "a normal that is not a direction: {n:?}"
         );
+    }
+}
+
+/// A rasterized render refuses the accumulation settings rather than ignoring
+/// them.
+///
+/// The documentation promises that a flag which cannot take effect is refused,
+/// and named asking for samples on a rasterized render as its example. It was
+/// the one case the check did not cover: the colour space was refused as
+/// documented, while a sample count or a bounce budget exited zero and did
+/// nothing at all. Three settings describe an image built by accumulating
+/// frames, and a backend that draws each pixel once has nowhere to put any of
+/// them.
+///
+/// Decided on the capability rather than on which backend it is, so a later
+/// accumulating backend needs no change here.
+#[test]
+fn a_rasterized_render_refuses_the_settings_it_cannot_accumulate() {
+    for (opts, flag) in [
+        (
+            RenderOptions {
+                samples: Some(64),
+                ..RenderOptions::default()
+            },
+            "--spp",
+        ),
+        (
+            RenderOptions {
+                bounces: Some(9),
+                ..RenderOptions::default()
+            },
+            "--bounces",
+        ),
+        (
+            RenderOptions {
+                denoise: Some(true),
+                ..RenderOptions::default()
+            },
+            "--denoise",
+        ),
+    ] {
+        let message = refusal(&RenderOptions {
+            output: Some(Output::File(PathBuf::from("/dev/null.png"))),
+            engine: Some(RenderEngine::Raster),
+            ..opts
+        });
+        assert!(
+            message.contains(flag),
+            "a rasterized render should refuse {flag} by name, got: {message}"
+        );
+    }
+}
+
+/// And the path-traced engine accepts all three, so the refusal above is about
+/// the capability rather than about the flags being unwelcome.
+#[test]
+fn the_accumulating_engine_accepts_what_the_rasterizer_refuses() {
+    let opts = RenderOptions {
+        output: Some(Output::File(PathBuf::from("/dev/null.png"))),
+        engine: Some(RenderEngine::PathTraced),
+        samples: Some(1),
+        bounces: Some(1),
+        denoise: Some(false),
+        ..RenderOptions::default()
+    };
+    // Anything other than a refusal is beyond this test: it asserts only that
+    // these three are not refused, not that a render succeeds without a device.
+    if let Err(RenderError::OptionIneffective(message)) = render(&opts) {
+        panic!("the tracer should accept its own settings, got: {message}");
     }
 }

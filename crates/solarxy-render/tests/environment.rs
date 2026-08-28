@@ -211,9 +211,13 @@ fn render_floats(scene_path: &Path, out: &Path, engine: RenderEngine) -> Option<
         engine: Some(engine),
         width: Some(64),
         height: Some(64),
-        samples: Some(8),
+        // Only the accumulating engine takes these three; the rasterizer
+        // refuses them rather than ignoring them, so this helper asks for them
+        // only where they can act. The seed is shared, because both engines
+        // read it.
+        samples: matches!(engine, RenderEngine::PathTraced).then_some(8),
+        denoise: matches!(engine, RenderEngine::PathTraced).then_some(false),
         seed: Some(1),
-        denoise: Some(false),
         ..RenderOptions::default()
     };
     match solarxy_render::run_render(scene_path, &opts, &mut solarxy_render::Silent) {

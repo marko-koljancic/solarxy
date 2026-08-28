@@ -329,14 +329,35 @@ fn caps_of(engine: RenderEngine) -> solarxy_renderer::backend::BackendCaps {
 fn check_options(opts: &RenderOptions, engine: Option<RenderEngine>) -> Result<(), RenderError> {
     let output = opts.output.as_ref();
     if let Some(engine) = engine {
-        if !opts.aovs.is_empty() && !caps_of(engine).writes_aovs {
+        let caps = caps_of(engine);
+        let named = match engine {
+            RenderEngine::Raster => "raster",
+            RenderEngine::PathTraced => "path-traced",
+        };
+        if !opts.aovs.is_empty() && !caps.writes_aovs {
             return Err(RenderError::OptionIneffective(format!(
-                "the {} engine writes no auxiliary passes, so --aov cannot take effect",
-                match engine {
-                    RenderEngine::Raster => "raster",
-                    RenderEngine::PathTraced => "path-traced",
-                }
+                "the {named} engine writes no auxiliary passes, so --aov cannot take effect"
             )));
+        }
+        // Sample count, bounce budget and denoising all describe an image
+        // built by accumulating frames. A backend that draws once has nowhere
+        // to put them, and silently ignoring them is exactly what the doc
+        // comment above refuses: the run succeeds and the setting the caller
+        // asked for did nothing. Judged on the capability rather than on which
+        // backend it is, so a future accumulating backend needs no change here.
+        if !caps.progressive {
+            for (asked, flag) in [
+                (opts.samples.is_some(), "--spp"),
+                (opts.bounces.is_some(), "--bounces"),
+                (opts.denoise.is_some(), "--denoise/--no-denoise"),
+            ] {
+                if asked {
+                    return Err(RenderError::OptionIneffective(format!(
+                        "the {named} engine draws each pixel once rather than accumulating \
+                         samples, so {flag} cannot take effect"
+                    )));
+                }
+            }
         }
         return Ok(());
     }

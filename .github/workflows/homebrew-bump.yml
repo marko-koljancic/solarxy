@@ -148,6 +148,30 @@ jobs:
             sed -i -E "/solarxy-cli-${triple}\.tar\.xz\"/{n;s/(sha256 )\"[^\"]*\"/\1\"${sha}\"/}" tap/Formula/solarxy-cli.rb
           done
 
+          # The license, taken from the formula this repository ships rather
+          # than assumed. It is bumped here because a relicense changes it and
+          # nothing else in this job would: the tap carried `MIT` for the whole
+          # of the GPL relicense, because this step rewrote the version and the
+          # checksums and left the one line that had actually changed.
+          #
+          # The cask has no license stanza, which is ordinary for a cask, so
+          # only the formula is touched.
+          LICENSE=$(sed -nE 's/^[[:space:]]*license "([^"]+)".*/\1/p' \
+            "${GITHUB_WORKSPACE}/packaging/homebrew/Formula/solarxy-cli.rb" | head -n1)
+          if [ -z "$LICENSE" ]; then
+            echo "::error::No license stanza in the in-repo formula template; refusing to guess."
+            exit 1
+          fi
+          sed -i -E "s/^(  license )\"[^\"]*\"/\1\"${LICENSE}\"/" tap/Formula/solarxy-cli.rb
+
+          # Asserted rather than assumed, on the pattern of the cask's
+          # `sha256 :no_check` guard below: a silent no-op here publishes the
+          # wrong licence for every user who installs from the tap.
+          if ! grep -qE "^[[:space:]]*license \"${LICENSE}\"" tap/Formula/solarxy-cli.rb; then
+            echo "::error::Formula license is not ${LICENSE} after bump."
+            exit 1
+          fi
+
       - name: Commit and push
         if: steps.gate.outputs.proceed == 'true'
         working-directory: tap
