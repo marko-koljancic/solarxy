@@ -32,14 +32,49 @@
 
 use solarxy_core::aabb::AABB;
 use solarxy_core::preferences::{BackgroundMode, IblMode, LineWeight, ToneMode};
+use solarxy_core::scene::{BackgroundKind, SceneDelta, SceneOp};
 use solarxy_renderer::environment::{SceneEnvironment, placeholder_bounds};
 use solarxy_renderer::frame::{Renderer, RendererInit};
+use solarxy_renderer::ibl::IblState;
 use solarxy_renderer::scene::BackgroundModeExt;
 use solarxy_renderer::visualization::VisualizationState;
 
 /// The checker the UV modes sample. Compiled in rather than loaded, because a
 /// headless caller has no asset directory and the renderer requires one.
 const UV_CHECKER_PNG: &[u8] = include_bytes!("../../../res/textures/uv-checker_1k.png");
+
+/// What a scene asked for through [`SceneOp::SetEnvironment`], after the
+/// image it named has been installed.
+///
+/// Returned rather than acted on in full, because a caller has two decisions
+/// left that this cannot make for it: the constant sky a path tracer falls
+/// back to where there is no image, and whether the visible backdrop is the
+/// image itself.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EnvironmentRequest {
+    /// Whether an image is now live in the host's image-based lighting.
+    pub image: bool,
+    /// The backdrop the scene asked to be shot against. Meaningless without
+    /// an image, exactly as [`BackgroundKind::HdriSky`] documents.
+    pub background: BackgroundKind,
+    /// Yaw on both the visible sky and the lighting, in radians.
+    pub rotation: f32,
+    /// Multiplier on the lighting contribution.
+    pub intensity: f32,
+}
+
+impl Default for EnvironmentRequest {
+    /// What a scene that authors no environment asks for: nothing, at the
+    /// intensity that leaves an authored image alone.
+    fn default() -> Self {
+        Self {
+            image: false,
+            background: BackgroundKind::Keep,
+            rotation: 0.0,
+            intensity: 1.0,
+        }
+    }
+}
 
 /// A renderer and the scene state beside it, with no window and no surface.
 ///
@@ -139,5 +174,64 @@ impl HeadlessHost {
             bounds,
             format,
         })
+    }
+
+    /// Installs the scene's lighting environment out of the delta: the third
+    /// surface's half of what both graphical shells already do with this op.
+    ///
+    /// A render is a property of the scene, so its environment comes from the
+    /// document rather than from a constant the caller picks. Without this the
+    /// image-based lighting stays at whatever the renderer was built with, and
+    /// a scene lit by a sunset renders as though lit by a grey room, on both
+    /// engines: image-based lighting is the raster path's main ambient term,
+    /// and a tracer with no environment integrates against its fallback sky.
+    ///
+    /// The last op wins, matching the op's own "replace the whole environment"
+    /// contract. There is no dedupe against what is already installed, because
+    /// unlike a shell this applies a delta once and then renders.
+    ///
+    /// Clearing is a real answer and leaves the image-based lighting alone:
+    /// "no environment" is not "a black environment", and what stands in for
+    /// the absence is the caller's decision, not this one's.
+    pub fn apply_scene_environment(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        delta: &SceneDelta,
+    ) -> EnvironmentRequest {
+        let mut request = EnvironmentRequest::default();
+        for op in &delta.ops {
+            let SceneOp::SetEnvironment {
+                hdri,
+                rotation,
+                intensity,
+                background,
+            } = op
+            else {
+                continue;
+            };
+            request.rotation = *rotation;
+            request.intensity = *intensity;
+            request.background = *background;
+            request.image = false;
+            if let Some(image) = hdri {
+                self.renderer.ibl_res.ibl = IblState::from_hdr_image(device, queue, image);
+                request.image = true;
+            }
+        }
+        if request.image {
+            // The lighting chokepoint, which also retargets the skybox at the
+            // equirect that was just installed. Running it only on an install
+            // keeps a scene that authored nothing byte-identical to one that
+            // never reached here.
+            crate::rebuild_light_bind_group(
+                device,
+                queue,
+                &mut self.renderer,
+                &mut self.env,
+                request.intensity,
+            );
+        }
+        request
     }
 }

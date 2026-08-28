@@ -159,6 +159,101 @@ impl Builder {
 
 const ROOT: GraphContext = GraphContext::Root;
 
+/// One pixel of a Radiance image: a shared mantissa and a single exponent.
+///
+/// Radiance stores a float triple in four bytes by giving the three channels
+/// one exponent, which is why a high-dynamic-range file is the size of an
+/// ordinary one and why it still holds a sun a thousand times brighter than
+/// the sky beside it.
+fn rgbe(rgb: [f32; 3]) -> [u8; 4] {
+    let peak = rgb[0].max(rgb[1]).max(rgb[2]);
+    if peak < 1e-32 {
+        return [0, 0, 0, 0];
+    }
+    let exponent = peak.log2().floor() as i32 + 1;
+    let scale = 256.0 / exp2(exponent);
+    [
+        (rgb[0] * scale).clamp(0.0, 255.0) as u8,
+        (rgb[1] * scale).clamp(0.0, 255.0) as u8,
+        (rgb[2] * scale).clamp(0.0, 255.0) as u8,
+        (exponent + 128).clamp(0, 255) as u8,
+    ]
+}
+
+fn exp2(e: i32) -> f32 {
+    if e >= 0 {
+        (1u64 << e.min(62)) as f32
+    } else {
+        1.0 / (1u64 << (-e).min(62)) as f32
+    }
+}
+
+/// A small equirectangular sky, generated rather than shipped as a file.
+///
+/// Every other asset in these samples is parametric, and an environment has no
+/// reason to be the exception: a committed image would be a binary blob in a
+/// public repository whose provenance somebody would eventually have to answer
+/// for, where this is a hundred lines that produce the same bytes on every
+/// machine. Sixty-four by thirty-two is coarse for a mirror and ample for
+/// everything else, because image-based lighting convolves it to a handful of
+/// coefficients anyway.
+///
+/// The shape is a studio sky: a cool zenith falling to a warm horizon, a dim
+/// warm floor below it, and one soft sun to put a highlight on a curved
+/// surface and give the shadow a direction.
+fn studio_hdri() -> Vec<u8> {
+    const W: usize = 64;
+    const H: usize = 32;
+
+    let mut bytes = Vec::from(*b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n");
+    bytes.extend_from_slice(format!("-Y {H} +X {W}\n").as_bytes());
+
+    // Where the sun sits, as a fraction of the way around and down.
+    let sun_u = 0.62_f32;
+    let sun_v = 0.30_f32;
+
+    for y in 0..H {
+        let mut row = Vec::with_capacity(W * 4);
+        // 0 at the zenith, 1 at the nadir.
+        let v = (y as f32 + 0.5) / H as f32;
+        for x in 0..W {
+            let u = (x as f32 + 0.5) / W as f32;
+            let mut rgb = if v < 0.5 {
+                // Sky: cool overhead, warming as it falls to the horizon.
+                let t = v / 0.5;
+                [0.20 + 0.34 * t, 0.24 + 0.30 * t, 0.33 + 0.16 * t]
+            } else {
+                // Ground: a dim warm bounce, darkening underfoot.
+                // A studio sweep rather than a floor: brightest where it
+                // meets the horizon and falling away underneath, because the
+                // only part of it a camera pitched down at a subject ever
+                // sees is that first band.
+                let t = (v - 0.5) / 0.5;
+                let fall = 1.0 - 0.75 * t * t;
+                [0.30 * fall, 0.26 * fall, 0.22 * fall]
+            };
+            // The sun, as a soft falloff rather than a disc: a hard edge at
+            // this resolution is four pixels and reads as a square.
+            let du = (u - sun_u).abs().min(1.0 - (u - sun_u).abs());
+            let dv = v - sun_v;
+            let d = (du * du * 4.0 + dv * dv).sqrt();
+            let sun = (1.0 - (d / 0.22).min(1.0)).powi(3) * 6.0;
+            for c in 0..3 {
+                rgb[c] += sun * [1.0, 0.93, 0.82][c];
+            }
+            row.extend_from_slice(&rgbe(rgb));
+        }
+        // A scanline whose first pixel begins `2, 2` is read as a run-length
+        // header rather than as a colour. Nothing in this palette lands there,
+        // and one unit of a mantissa is invisible if it ever does.
+        if row[0] == 2 && row[1] == 2 {
+            row[1] = 3;
+        }
+        bytes.extend_from_slice(&row);
+    }
+    bytes
+}
+
 fn sub(id: NodeId) -> GraphContext {
     GraphContext::Subflow(id)
 }
@@ -681,9 +776,9 @@ fn procedural_lookdev() -> Builder {
         [240.0, -160.0],
         [280.0, 160.0],
         "Voronoi cells for the large structure, fine noise on top, mixed \
-         and then shaped with levels. Every map here is generated: the \
-         scene carries no image files, so it is a few kilobytes and looks \
-         the same on any machine.",
+         and then shaped with levels. Every map here is generated, and so \
+         is the sky lighting the shot, so the whole scene is a few \
+         kilobytes and looks the same on any machine.",
     );
 
     // --- material ---------------------------------------------------
@@ -757,6 +852,42 @@ fn procedural_lookdev() -> Builder {
          widening it broadens the highlight and softens the shadow edge \
          the way a larger softbox would. Rotate it and the shading \
          follows.",
+    );
+
+    // The sky, which is what makes this look-dev rather than a lit object:
+    // a surface is judged against the environment it will live in, and the
+    // reflections and the ambient both come from here rather than from a
+    // constant. Generated by this file, so the scene still carries no
+    // photograph and still opens the same everywhere.
+    let sky = b
+        .engine
+        .stage_asset("studio-sky.hdr", "image/vnd.radiance", studio_hdri());
+    let env = b.add(ROOT, "environment", [720.0, 230.0]);
+    b.rename(ROOT, env, "studio");
+    b.set(ROOT, env, "hdri", ParamValue::Asset(sky));
+    b.set(ROOT, env, "rotation", ParamValue::Float(20.0));
+    b.set(ROOT, env, "background", ParamValue::Enum("hdri_sky".into()));
+
+    let render = b.add(ROOT, "render", [920.0, 130.0]);
+    b.set(
+        ROOT,
+        render,
+        "camera_path",
+        ParamValue::NodeRef(Some(camera)),
+    );
+    b.set(ROOT, render, "engine", ParamValue::Enum("traced".into()));
+    b.set(ROOT, render, "width", ParamValue::Int(960));
+    b.set(ROOT, render, "height", ParamValue::Int(720));
+
+    b.note(
+        ROOT,
+        [920.0, 300.0],
+        [280.0, 190.0],
+        "The environment lights the shot and is the backdrop behind it, so \
+         rotating it moves the highlight and the reflection together. \
+         Press Render on the render node to shoot it: the same file \
+         renders the same picture from the command line, because the \
+         environment is scene data rather than a viewport setting.",
     );
     b
 }

@@ -39,7 +39,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use solarxy_core::preferences::BackgroundMode;
-use solarxy_core::scene::CameraDef;
+use solarxy_core::scene::{BackgroundKind, CameraDef};
 use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings, PaneLook, ViewLayout};
 use solarxy_graph::document::GraphContext;
 use solarxy_graph::nodes::RenderSettings;
@@ -51,13 +51,13 @@ pub use solarxy_graph::nodes::RenderEngine;
 /// and a second copy of it would let the two surfaces disagree about a render
 /// neither of them is authoritative about.
 pub use solarxy_host::still::float_to_rgba8;
-use solarxy_host::headless::HeadlessHost;
+use solarxy_host::headless::{EnvironmentRequest, HeadlessHost};
 use solarxy_host::raster::RasterBackend;
 use solarxy_host::still::{StillCtx, StillEngine, StillRenderJob, StillSpec, StillStep};
 use solarxy_renderer::backend::RenderBackend;
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::pathtrace::backend::PathBackend;
-use solarxy_renderer::scene::BackgroundModeExt;
+use solarxy_renderer::pathtrace::environment::TraceEnvironment;
 
 pub use error::RenderError;
 // The pass extraction helpers travel with the preview: a sink that shows a
@@ -460,16 +460,25 @@ fn run(
     let mut host = HeadlessHost::new(&device, &queue, format, 64, 64)
         .map_err(|e| RenderError::Device(e.to_string()))?;
 
-    let background_mode = BackgroundMode::GRADIENT;
+    // The scene's own environment, before anything is built from it. Until
+    // this existed the delta carried it and the one consumer with no window
+    // dropped it, so a document lit by an image rendered from a terminal
+    // against a constant and from a browser against the image.
+    let environment = host.apply_scene_environment(&device, &queue, &delta);
+
+    // A background mode is a viewing preference and a headless render has no
+    // viewer whose preference it could be, so only the scene gets to move it:
+    // a document that asked to be shot against its own sky is, and everything
+    // else keeps the gradient the graphical shells default a pane to, which is
+    // what makes the same document agree across the three surfaces.
+    let background_mode = if environment.image && environment.background == BackgroundKind::HdriSky
+    {
+        BackgroundMode::HDRI_SKY
+    } else {
+        BackgroundMode::GRADIENT
+    };
     let background = background_mode.resolve(&[]);
-    let mut backend = build_backend(
-        &device,
-        &queue,
-        &host,
-        &settings,
-        opts.seed,
-        background.sky_colors(),
-    );
+    let mut backend = build_backend(&device, &queue, &host, &settings, opts.seed, environment);
     // The ingest is where a traced render builds its ray hierarchy, and for a
     // large model that is the longest step before any pixel is drawn. Reported
     // before it rather than after, because a sink saying nothing for a minute is
@@ -1031,9 +1040,12 @@ fn build_backend(
     host: &HeadlessHost,
     settings: &RenderSettings,
     seed: Option<u32>,
-    sky: ([f32; 3], [f32; 3]),
+    environment: EnvironmentRequest,
 ) -> Box<dyn RenderBackend> {
     match settings.engine {
+        // Nothing to install: the raster path reads image-based lighting off
+        // the host's renderer, which already has the scene's, and the sky it
+        // draws is the background resolved beside it.
         RenderEngine::Raster => Box::new(RasterBackend::new(Arc::clone(&host.renderer.layouts))),
         RenderEngine::PathTraced => {
             let mut t = PathBackend::new(device, queue);
@@ -1047,12 +1059,41 @@ fn build_backend(
                 trace.seed = seed;
             }
             t.set_settings(trace);
-            // The constant sky the kernel falls back to when the scene carries
-            // no environment image, taken from the same background the raster
-            // path resolves so the two agree rather than coincide. Without it
-            // the tracer integrates against its own near-black default and a
-            // scene with no environment renders almost unlit.
-            t.set_sky(sky.0, sky.1);
+            // The traced scene cache drops the environment op by design, on
+            // the reasoning that a host already holds the decoded and
+            // convolved image and should build from that rather than keep a
+            // second copy of the largest asset in a scene. This is the third
+            // surface's half of that decision. Nothing is uploaded twice: the
+            // equirect the sky pass retains and the equirect the kernel walks
+            // are one texture, so only the two distribution tables are built.
+            let ibl = &host.renderer.ibl_res.ibl;
+            match (
+                environment.image,
+                ibl.equirect.as_ref(),
+                ibl.distribution.as_ref(),
+            ) {
+                (true, Some(equirect), Some(distribution)) => {
+                    let built = TraceEnvironment::from_shared_equirect(
+                        device,
+                        queue,
+                        &equirect.view,
+                        distribution,
+                    );
+                    t.set_environment(device, built, environment.intensity, environment.rotation);
+                }
+                // No image is no environment, and black is how the kernel is
+                // told so: it drops an all-zero sky from the direct-lighting
+                // estimator's choice entirely, rather than spending half of
+                // every draw connecting to something that returns nothing. A
+                // render is a property of the scene, so a document lit by
+                // nothing but its own lights renders that way here, the same
+                // as it does in a still from the browser. The raster arm above
+                // keeps the resolved background instead, because there
+                // image-based lighting is the ambient term rather than one arm
+                // of an estimator, and a shell's raster still keeps its
+                // background too.
+                _ => t.set_sky([0.0; 3], [0.0; 3]),
+            }
             Box::new(t)
         }
     }
