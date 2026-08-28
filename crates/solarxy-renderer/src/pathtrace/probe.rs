@@ -970,12 +970,19 @@ impl BsdfProbeMode {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
 pub struct BsdfTap {
-    /// Outgoing direction, **tangent space**, z up. `w` unused.
+    /// Outgoing direction, **tangent space**, z up. `w` carries the side.
     ///
     /// The probe fixes the surface's frame, so a direction handed in this way and
     /// one handed back round-trip exactly through an orthonormal rotation. That is
     /// what lets a test compare a sampled direction against a density it computes
     /// in the same space.
+    ///
+    /// A negative `w` builds a back-facing surface, which inverts the index ratio
+    /// and is the only way a test reaches total internal reflection: the probe
+    /// used to fix the front face, so the ratio was always below one and a
+    /// refraction could never fail. The side rides this slot rather than a field
+    /// of its own because the tap is a pinned 48 bytes with a row in the layout
+    /// suite, and zero, the default, is still the front face.
     pub wo: [f32; 4],
     /// Incident direction, tangent space. Read in
     /// [`BsdfProbeMode::Evaluate`] only.
@@ -1015,7 +1022,23 @@ impl BsdfProbe {
     /// check is watching: it is where the WGSL front end either accepts the lobes
     /// or does not.
     #[must_use]
+    /// The probe with the lobe-weight split skewed, for the unbiasedness guard.
+    ///
+    /// The lobe weights are a **sampling** density: they appear in the selection
+    /// step and in the mixture density, and in nothing else. Any positive
+    /// assignment therefore has to leave the estimator's expectation alone, and
+    /// that invariance is the only available proof that they are a density
+    /// rather than a response. A test drives two of these with different skews
+    /// and compares what they integrate to.
+    pub fn with_lobe_bias(device: &wgpu::Device, layouts: &PathtraceLayouts, bias: f32) -> Self {
+        Self::build(device, layouts, f64::from(bias))
+    }
+
     pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts) -> Self {
+        Self::build(device, layouts, 0.0)
+    }
+
+    fn build(device: &wgpu::Device, layouts: &PathtraceLayouts, bias: f64) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Pathtrace BSDF Probe Shader"),
             source: wgpu::ShaderSource::Wgsl(BSDF_PROBE_KERNEL.into()),
@@ -1063,6 +1086,7 @@ impl BsdfProbe {
                         ("BSDF_TAP_WIDTH", f64::from(TAP_WIDTH)),
                         ("BSDF_RESULT_WIDTH", BSDF_RESULT_WIDTH as f64),
                         ("BSDF_PROBE_MODE", mode.index() as f64),
+                        ("BSDF_TRANSMISSION_BIAS", bias),
                     ],
                     zero_initialize_workgroup_memory: false,
                 },

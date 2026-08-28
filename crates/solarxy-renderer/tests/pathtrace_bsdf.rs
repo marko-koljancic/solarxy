@@ -159,9 +159,16 @@ impl Harness {
 
     /// Draws `SAMPLES` directions for one outgoing direction and one material.
     fn sample(&self, material: u32, wo: [f32; 3], seed: u32) -> Vec<Sampled> {
+        self.sample_side(material, wo, seed, 0.0)
+    }
+
+    /// The same, on a chosen side. A negative `side` builds a back-facing
+    /// surface, which inverts the index ratio and is the only way to reach total
+    /// internal reflection from a test.
+    fn sample_side(&self, material: u32, wo: [f32; 3], seed: u32, side: f32) -> Vec<Sampled> {
         let taps: Vec<BsdfTap> = (0..SAMPLES)
             .map(|i| BsdfTap {
-                wo: [wo[0], wo[1], wo[2], 0.0],
+                wo: [wo[0], wo[1], wo[2], side],
                 wi: [0.0; 4],
                 material,
                 sample_index: i,
@@ -461,18 +468,39 @@ fn the_white_furnace_never_creates_energy() {
     // rather than asserted so a later change can be read against it.
     const STEPS: usize = 6;
 
-    let materials: Vec<TracedMaterial> = (0..STEPS)
-        .flat_map(|m| {
-            (0..STEPS).map(move |r| {
-                #[allow(clippy::cast_precision_loss)]
-                let denom = (STEPS - 1) as f32;
-                #[allow(clippy::cast_precision_loss)]
-                RawMaterialData {
-                    base_color_factor: [1.0, 1.0, 1.0, 1.0],
-                    metallic_factor: m as f32 / denom,
-                    roughness_factor: r as f32 / denom,
-                    ..Default::default()
-                }
+    // The transmission axis. Plane zero is exactly the grid this test has always
+    // swept, so its printed numbers stay directly comparable against every
+    // earlier run and the two new planes are what the transmission rewrite is
+    // evidence for.
+    //
+    // Thickness has to vary rather than be fixed, because it is the field the
+    // sampler and the density branch on: a thin wall mirrors a reflection and a
+    // solid refracts, and a sweep holding it constant would leave half the lobe
+    // unmeasured.
+    const PLANES: [(f32, f32, &str); 3] = [
+        (0.0, 0.0, "opaque"),
+        (1.0, 0.0, "transmissive, thin"),
+        (1.0, 1.0, "transmissive, solid"),
+    ];
+
+    let materials: Vec<TracedMaterial> = PLANES
+        .iter()
+        .flat_map(|&(transmission, thickness, _)| {
+            (0..STEPS).flat_map(move |m| {
+                (0..STEPS).map(move |r| {
+                    #[allow(clippy::cast_precision_loss)]
+                    let denom = (STEPS - 1) as f32;
+                    #[allow(clippy::cast_precision_loss)]
+                    RawMaterialData {
+                        base_color_factor: [1.0, 1.0, 1.0, 1.0],
+                        metallic_factor: m as f32 / denom,
+                        roughness_factor: r as f32 / denom,
+                        transmission,
+                        thickness,
+                        ior: 1.5,
+                        ..Default::default()
+                    }
+                })
             })
         })
         .map(|raw| traced(&raw))
@@ -489,37 +517,74 @@ fn the_white_furnace_never_creates_energy() {
         ("normal incidence", [0.0, 0.0, 1.0]),
         ("oblique", direction(0.35, 0.0)),
     ] {
-        println!("furnace, {label}: rows are metalness, columns roughness");
-        for m in 0..STEPS {
-            let mut row = String::new();
-            for r in 0..STEPS {
-                #[allow(clippy::cast_possible_truncation)]
-                let material = (m * STEPS + r) as u32;
-                let albedo = directional_albedo(&harness.sample(material, wo, 0x9E37_79B9));
-                let worst = albedo.iter().fold(0.0f32, |a, b| a.max(*b));
-                assert!(
-                    worst <= ALBEDO_CEILING,
-                    "furnace, {label}: metalness {m}/{}, roughness {r}/{} has a \
-                     directional albedo of {worst:.4}, which creates energy",
-                    STEPS - 1,
-                    STEPS - 1
-                );
-                row.push_str(&format!(" {worst:.3}"));
+        for (plane, &(_, thickness, plane_label)) in PLANES.iter().enumerate() {
+            println!("furnace, {label}, {plane_label}: rows are metalness, columns roughness");
+            if thickness != 0.0 {
+                // Read this plane against about 0.44 rather than against one.
+                // A refracting crossing compresses radiance by the square of
+                // the index ratio, its reciprocal applies on the way out, and a
+                // round trip through a solid is exactly one. This measures a
+                // single crossing, so a number far below unity here is the
+                // physics and not a deficit.
+                println!("    (a single refracting crossing; the round trip is one)");
             }
-            println!("  m={m}:{row}");
+            for m in 0..STEPS {
+                let mut row = String::new();
+                for r in 0..STEPS {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let material = ((plane * STEPS + m) * STEPS + r) as u32;
+                    let albedo = directional_albedo(&harness.sample(material, wo, 0x9E37_79B9));
+                    let worst = albedo.iter().fold(0.0f32, |a, b| a.max(*b));
+                    // A refracting crossing is exempt from the ceiling, and the
+                    // exemption is real physics rather than a tolerance for a
+                    // known bug. Radiance is not conserved across a refracting
+                    // interface; radiance over the square of the index is. A
+                    // crossing therefore scales by the square of the index
+                    // ratio, about 0.44 entering and 2.25 leaving, so a single
+                    // one legitimately sits either side of unity while the round
+                    // trip is exactly one.
+                    //
+                    // The exemption costs something and it is worth naming: a
+                    // genuine energy defect on a transmissive solid cell would
+                    // no longer be caught here. The instruments that do cover
+                    // it are the histogram comparison, which holds the value and
+                    // the density to each other, and the analytic checks beside
+                    // this sweep, which pin both crossings to numbers.
+                    let ceiling = if thickness == 0.0 {
+                        ALBEDO_CEILING
+                    } else {
+                        ALBEDO_CEILING / (1.0f32 / 1.5).powi(2)
+                    };
+                    assert!(
+                        worst <= ceiling,
+                        "furnace, {label}, {plane_label}: metalness {m}/{}, \
+                         roughness {r}/{} has a directional albedo of \
+                         {worst:.4}, above the {ceiling:.4} a single refracting \
+                         crossing is allowed",
+                        STEPS - 1,
+                        STEPS - 1
+                    );
+                    row.push_str(&format!(" {worst:.3}"));
+                }
+                println!("  m={m}:{row}");
+            }
         }
     }
 }
 
 #[test]
-fn transmission_is_measured_rather_than_asserted() {
-    // The transmission lobe's density does not describe its sampler: the source it
-    // is ported from perturbs the macronormal by a uniform sphere offset and then
-    // reports the reciprocal of one minus Fresnel, which is a weight above one
-    // rather than a density. This test does not assert agreement, because there is
-    // none to assert. It records the disagreement, so the number moves when the
-    // lobe is replaced by the correct formulation and nobody has to rediscover
-    // that it was wrong.
+fn the_transmission_lobe_transmits_and_keeps_its_energy() {
+    // This test used to be called `transmission_is_measured_rather_than_asserted`
+    // and asserted nothing about agreement, because there was none to assert: the
+    // lobe perturbed the macronormal by a uniform sphere offset and reported the
+    // reciprocal of one minus Fresnel, a weight above one standing where a
+    // density belongs. Its comment said the number would move when the lobe was
+    // replaced by the correct formulation, and it has.
+    //
+    // The printed line is kept verbatim so the record stays continuous and this
+    // run is directly comparable against every earlier one. What the agreement
+    // between sampler and density is worth is now asserted next door, by the
+    // histogram comparison this lobe was exempt from.
     let raw = RawMaterialData {
         transmission: 1.0,
         roughness_factor: 0.2,
@@ -820,4 +885,362 @@ fn the_sphere_grid_renders() {
             .expect("write the sphere grid png");
         println!("wrote {path}");
     }
+}
+
+/// Smooth glass transmits nearly everything it receives.
+///
+/// **This is a floor, and the suite had only a ceiling.** Every other energy
+/// assertion in this file bounds the directional albedo from above, because the
+/// failure it was built to catch is a lobe that manufactures light. That leaves
+/// the opposite failure completely invisible: a lobe that transmits nothing at
+/// all passes every test here, and black glass is a passing build.
+///
+/// The failure is not hypothetical, and it has a specific shape worth naming.
+/// The transmission lobe's returned value and its density have to be a matched
+/// pair. Make the density real while the value stays a constant and the ratio
+/// scales as one over the microfacet distribution, which at the roughness clamp
+/// is a density of order 1e12 against a value of order one. The result is black,
+/// and it is blackest on smooth glass, which is the common case.
+///
+/// So the instrument is a near-smooth transmissive surface viewed head-on,
+/// where the answer is known: almost everything gets through, short only of
+/// what Fresnel reflects, about four percent at an index of 1.5.
+#[test]
+fn smooth_glass_transmits_rather_than_swallowing() {
+    // The roughness clamp, so the lobe is as close to a delta as it is ever
+    // asked to be, which is where a value-density mismatch is most extreme.
+    let solid = RawMaterialData {
+        transmission: 1.0,
+        roughness_factor: 1e-3,
+        base_color_factor: [1.0, 1.0, 1.0, 1.0],
+        ior: 1.5,
+        thickness: 1.0,
+        ..Default::default()
+    };
+    let thin = RawMaterialData {
+        thickness: 0.0,
+        ..solid.clone()
+    };
+    let Some(harness) = Harness::new(vec![traced(&solid), traced(&thin)]) else {
+        return;
+    };
+
+    // Fresnel at normal incidence for this index: what the surface is entitled
+    // to reflect, and therefore all the transmission lobe is entitled to lose.
+    let f0 = ((1.0 - 1.5) / (1.0 + 1.5f32)).powi(2);
+    // Radiance compression across a refracting interface. A solid crossing
+    // carries it and a thin wall does not, because a thin wall is not a
+    // refraction: the ray leaves along the direction it arrived on. Entering is
+    // this factor and leaving is its reciprocal, so a round trip is one, and a
+    // single crossing measured here is legitimately far below unity.
+    let eta_sq = (1.0f32 / 1.5).powi(2);
+
+    for (material, label, compression) in [(0u32, "solid", eta_sq), (1u32, "thin", 1.0f32)] {
+        // What the whole surface should return: the transmitted share, times
+        // the compression if it refracts, plus the reflected share.
+        let expected = (1.0 - f0) * compression + f0;
+        // Generous, because this is a tripwire rather than a measurement: it has
+        // to fire on a collapse toward zero, not on a few percent of drift. The
+        // paired assertion that value and density really match is the histogram
+        // comparison.
+        let floor = expected * 0.5;
+        let wo = [0.0, 0.0, 1.0];
+        let samples = harness.sample(material, wo, 0x9E37_79B9);
+        let albedo = directional_albedo(&samples);
+        let worst = albedo.iter().fold(0.0f32, |a, b| a.max(*b));
+        let best = albedo.iter().fold(f32::INFINITY, |a, b| a.min(*b));
+        let transmitted = samples.iter().filter(|s| s.lobe == 3).count();
+        println!(
+            "{label} glass at normal incidence: albedo {:.4} {:.4} {:.4}, \
+             expected about {expected:.4}, {transmitted} of {SAMPLES} samples \
+             took the transmission lobe",
+            albedo[0], albedo[1], albedo[2]
+        );
+
+        assert!(
+            best > floor,
+            "{label} glass has a directional albedo of {best:.4} where it should \
+             be about {expected:.4}. Smooth glass that swallows what it receives \
+             is the signature of a transmission value and a transmission \
+             density describing different distributions, which is the failure \
+             that has to be caught by a number rather than by looking at a \
+             render, because a render just shows something dark."
+        );
+        assert!(
+            worst <= ALBEDO_CEILING,
+            "{label} glass has a directional albedo of {worst:.4}, which \
+             creates energy"
+        );
+    }
+}
+
+/// The transmission lobe agrees with its density.
+///
+/// **This lobe carried an exemption from this comparison, and the exemption was
+/// the defect.** Its sampler perturbed the flat macronormal by a uniform sphere
+/// offset, and its stated density returned the reciprocal of what survived
+/// Fresnel reflection, which is a weight above one rather than a density. Those
+/// two describe different distributions, so the comparison could not have
+/// passed and was never asked. What was recorded instead was the disagreement,
+/// against the day the lobe was replaced.
+///
+/// Both halves are now derived from each other: one visible-normal draw, and a
+/// density that is that distribution times the Jacobian of whichever map the
+/// draw went through. So the exemption is spent and the lobe is held to the
+/// same standard as every other one.
+///
+/// The two cases are genuinely two maps and both are covered. A solid refracts
+/// through the micronormal. A thin wall mirrors the reflection about it, which
+/// is measure-preserving, so its density is the reflection density and it is
+/// admissible here by construction.
+#[test]
+fn the_transmission_lobe_agrees_with_its_density() {
+    // Rough, for the reason the comparison's own doc gives: the analytic side
+    // has to resolve the lobe with an affordable quadrature, and a near-mirror
+    // lobe lands in one bin and asserts nothing. At the roughness this lobe's
+    // predecessor was measured at, 0.2, the three-bin minimum is not met.
+    let solid = RawMaterialData {
+        transmission: 1.0,
+        roughness_factor: 1.0,
+        base_color_factor: [1.0, 1.0, 1.0, 1.0],
+        ior: 1.5,
+        thickness: 1.0,
+        ..Default::default()
+    };
+    let thin = RawMaterialData {
+        thickness: 0.0,
+        ..solid.clone()
+    };
+    let Some(harness) = Harness::new(vec![traced(&solid), traced(&thin)]) else {
+        return;
+    };
+
+    for (material, label) in [(0u32, "solid"), (1u32, "thin")] {
+        for (wo, angle) in [
+            ([0.0, 0.0, 1.0], "normal"),
+            (direction(0.6, 0.0), "oblique"),
+        ] {
+            let samples = harness.sample(material, wo, 0x9E37_79B9);
+            let transmitted = samples.iter().filter(|s| s.lobe == 3).count();
+            assert!(
+                transmitted > 100,
+                "{label} glass at {angle} incidence took the transmission lobe \
+                 only {transmitted} times, so this case exercises nothing"
+            );
+            assert_histogram_matches(
+                &harness,
+                &format!("transmission, {label}, {angle}"),
+                material,
+                wo,
+                0x9E37_79B9,
+            );
+        }
+    }
+}
+
+/// The transmitted sample carries the cosine exactly once.
+///
+/// The instrument is thin glass at the roughness clamp, and the choice is what
+/// gives the test teeth. A thin wall's transmitted direction is the reverse of
+/// the outgoing one, exactly, so the incident and outgoing cosines are equal.
+/// A cosine folded twice therefore costs a factor of exactly that cosine, and a
+/// surface that should return everything it receives returns the cosine instead.
+///
+/// At normal incidence that factor is one and the mistake is invisible, which is
+/// why a head-on check proves nothing here. At a cosine of 0.15 it is a factor of
+/// nearly seven.
+///
+/// It is asserted against an analytic expectation rather than looked at: a thin
+/// wall neither absorbs nor compresses radiance, so what it reflects plus what it
+/// transmits is everything that arrived, at every angle.
+#[test]
+fn the_transmitted_sample_carries_its_cosine_once() {
+    let thin = RawMaterialData {
+        transmission: 1.0,
+        roughness_factor: 1e-3,
+        base_color_factor: [1.0, 1.0, 1.0, 1.0],
+        ior: 1.5,
+        thickness: 0.0,
+        ..Default::default()
+    };
+    let Some(harness) = Harness::new(vec![traced(&thin)]) else {
+        return;
+    };
+
+    let mut worst_shortfall = 0.0f32;
+    for cos_theta in [1.0f32, 0.6, 0.3, 0.15] {
+        let wo = if cos_theta >= 1.0 {
+            [0.0, 0.0, 1.0]
+        } else {
+            direction(cos_theta, 0.0)
+        };
+        let albedo = directional_albedo(&harness.sample(0, wo, 0x9E37_79B9));
+        let measured = albedo.iter().fold(0.0f32, |a, b| a.max(*b));
+        println!(
+            "thin glass at cos {cos_theta:.2}: albedo {measured:.4}, \
+             a doubled cosine would read about {cos_theta:.4}"
+        );
+
+        assert!(
+            (measured - 1.0).abs() < 0.05,
+            "thin smooth glass at a cosine of {cos_theta:.2} has a directional \
+             albedo of {measured:.4} where it should return everything it \
+             receives. A value near {cos_theta:.4} means the cosine is folded \
+             twice: once inside the response and again at the exit."
+        );
+        worst_shortfall = worst_shortfall.max(1.0 - measured);
+    }
+    println!("worst shortfall across the sweep {worst_shortfall:.4}");
+}
+
+/// Total internal reflection reflects rather than losing the light.
+///
+/// Past the critical angle a ray inside a denser medium cannot leave: all of it
+/// reflects. **No test in this suite could reach that case before**, because the
+/// probe built a front-facing surface unconditionally, so the index ratio was
+/// always below one and a refraction could never fail. That blind spot hid a
+/// defect worth the name.
+///
+/// The Fresnel that chose the lobe and the Fresnel that valued it were different
+/// functions. The lobe weights have always used the one that knows about the
+/// critical angle, so past it they correctly sent every sample to reflection;
+/// the value then used plain Schlick, which does not know, and returned the four
+/// percent a dielectric reflects head-on. Around ninety-five percent of the
+/// light was lost at each interior bounce, which is a first-order reason glass
+/// read as grey murk rather than as glass.
+#[test]
+fn total_internal_reflection_keeps_its_energy() {
+    let glass = RawMaterialData {
+        transmission: 1.0,
+        roughness_factor: 1e-3,
+        base_color_factor: [1.0, 1.0, 1.0, 1.0],
+        ior: 1.5,
+        thickness: 1.0,
+        ..Default::default()
+    };
+    let Some(harness) = Harness::new(vec![traced(&glass)]) else {
+        return;
+    };
+
+    // Inside glass of index 1.5 the critical angle sits at a cosine of about
+    // 0.745. Above it light still leaves; below it none can.
+    let critical = (1.0f32 - (1.0f32 / 1.5).powi(2)).sqrt();
+    println!("critical angle at a cosine of {critical:.4}");
+
+    for cos_theta in [0.9f32, 0.5, 0.25] {
+        let wo = direction(cos_theta, 0.0);
+        // A negative side, so the surface is built back-facing and the index
+        // ratio inverts. This is what the probe could not express before.
+        let samples = harness.sample_side(0, wo, 0x9E37_79B9, -1.0);
+        let albedo = directional_albedo(&samples);
+        let measured = albedo.iter().fold(0.0f32, |a, b| a.max(*b));
+        let crossed = samples
+            .iter()
+            .filter(|s| s.pdf > 0.0 && s.wi[2] < 0.0)
+            .count();
+        let past_critical = cos_theta < critical;
+        println!(
+            "inside glass at cos {cos_theta:.2}: albedo {measured:.4}, \
+             {crossed} of {SAMPLES} samples left the medium, \
+             past critical {past_critical}"
+        );
+
+        // Leaving a denser medium expands radiance by the square of the index
+        // ratio, the reciprocal of the compression on the way in, so a crossing
+        // that transmits is allowed above unity here. Once nothing can leave,
+        // the response is pure reflection and the ordinary ceiling applies.
+        let ceiling = if crossed > 0 {
+            ALBEDO_CEILING / (1.0f32 / 1.5).powi(2)
+        } else {
+            ALBEDO_CEILING
+        };
+        assert!(
+            measured <= ceiling,
+            "inside glass at a cosine of {cos_theta:.2} has a directional albedo \
+             of {measured:.4}, above the {ceiling:.4} this crossing is allowed"
+        );
+        if past_critical {
+            assert_eq!(
+                crossed, 0,
+                "past the critical angle nothing can leave the medium, yet \
+                 {crossed} samples did"
+            );
+            assert!(
+                measured > 0.9,
+                "past the critical angle every photon reflects, so this should \
+                 return almost everything it received; it returned \
+                 {measured:.4}. A value near 0.04 is the signature of the \
+                 reflected value being priced by a Fresnel that does not know \
+                 about the critical angle."
+            );
+        }
+    }
+}
+
+/// The lobe weights are a sampling density, and the estimator does not care
+/// which one they are.
+///
+/// This is the guard the transmission rewrite owes, and it is worth stating why
+/// it is the right one. Changing the reflection and transmission shares changes
+/// which lobe a sample comes from, and it changes the mixture density that
+/// sample is charged, because the weights appear in both places and in nothing
+/// else. Those two effects have to cancel exactly. If they do not, the weights
+/// are secretly acting as a response rather than as a density, and every image
+/// is quietly wrong by a factor that no picture would reveal.
+///
+/// The previous split floored the reflection share at 0.25 where Fresnel wants
+/// about 0.04. That was a variance defect rather than a bias one, precisely
+/// because of this invariance, and this test is what makes that claim checkable
+/// rather than asserted.
+///
+/// Driven through a pipeline-overridable constant that nothing ships a way to
+/// set, on the precedent of the estimator override.
+#[test]
+fn the_lobe_split_does_not_move_what_the_estimator_integrates_to() {
+    use solarxy_renderer::pathtrace::probe::BsdfProbe;
+
+    let glass = RawMaterialData {
+        transmission: 1.0,
+        roughness_factor: 0.4,
+        base_color_factor: [1.0, 1.0, 1.0, 1.0],
+        ior: 1.5,
+        thickness: 1.0,
+        ..Default::default()
+    };
+    let Some(mut harness) = Harness::new(vec![traced(&glass)]) else {
+        return;
+    };
+
+    let wo = direction(0.7, 0.0);
+    // Different seeds as well as different splits, so agreement cannot come from
+    // the two runs drawing the same numbers.
+    let unbiased = directional_albedo(&harness.sample(0, wo, 0x9E37_79B9));
+
+    // A large deliberate skew: it moves the reflection share from about four
+    // percent to about sixty-four, which starves the transmission lobe by more
+    // than an order of magnitude.
+    harness.probe = BsdfProbe::with_lobe_bias(&harness.gpu.device, &harness.gpu.pathtrace, 0.6);
+    let skewed = directional_albedo(&harness.sample(0, wo, 0x5DEE_CE66));
+
+    let a = unbiased.iter().fold(0.0f32, |x, y| x.max(*y));
+    let b = skewed.iter().fold(0.0f32, |x, y| x.max(*y));
+    let error = (a - b).abs() / a;
+    println!(
+        "directional albedo {a:.4} at the shipped split, {b:.4} with the \
+         reflection share skewed by 0.6: {:.2}% apart",
+        error * 100.0
+    );
+
+    assert!(
+        error < 0.02,
+        "the estimator integrated to {a:.4} at the shipped lobe split and \
+         {b:.4} with the split deliberately skewed, {:.2}% apart. The weights \
+         are a sampling density: they decide which lobe a sample comes from and \
+         they decide the mixture density it is charged, and those two have to \
+         cancel. A difference here means they are acting as a response, and \
+         every image carries a factor nobody can see. Tolerance is two percent, \
+         which is headroom over the sampling error of 8192 stratified draws of \
+         a bounded integrand.",
+        error * 100.0
+    );
 }

@@ -1355,6 +1355,31 @@ impl PathKernel {
     /// composition or does not.
     #[must_use]
     pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts, uniforms: &PathUniforms) -> Self {
+        Self::build(device, layouts, uniforms, 0.0)
+    }
+
+    /// The kernel with the lobe-weight split skewed, for the unbiasedness guard.
+    ///
+    /// The weights are a sampling density and appear only in the selection step
+    /// and the mixture density, so a scene rendered at two different splits has
+    /// to converge to the same image. Nothing ships a way to set this; it exists
+    /// to be tested, exactly as the estimator override does.
+    #[must_use]
+    pub fn with_lobe_bias(
+        device: &wgpu::Device,
+        layouts: &PathtraceLayouts,
+        uniforms: &PathUniforms,
+        bias: f32,
+    ) -> Self {
+        Self::build(device, layouts, uniforms, f64::from(bias))
+    }
+
+    fn build(
+        device: &wgpu::Device,
+        layouts: &PathtraceLayouts,
+        uniforms: &PathUniforms,
+        bias: f64,
+    ) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Pathtrace Path Shader"),
             source: wgpu::ShaderSource::Wgsl(PATH_KERNEL.into()),
@@ -1376,7 +1401,10 @@ impl PathKernel {
                 module: &module,
                 entry_point: Some("path_main"),
                 compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &[("PATH_ESTIMATOR", estimator.index() as f64)],
+                    constants: &[
+                        ("PATH_ESTIMATOR", estimator.index() as f64),
+                        ("BSDF_TRANSMISSION_BIAS", bias),
+                    ],
                     zero_initialize_workgroup_memory: false,
                 },
                 cache: None,

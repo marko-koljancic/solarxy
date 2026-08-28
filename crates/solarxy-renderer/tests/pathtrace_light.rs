@@ -1199,6 +1199,21 @@ fn a_transmissive_blocker_tints_the_shadow_it_casts() {
 /// pane from a refractive solid, and the rule under test is that the shadow
 /// walk reads the same field the same way.
 fn sheet_shadow_means(gpu: &common::Gpu, thickness: f32) -> ([f64; 3], [f64; 3]) {
+    sheet_shadow_means_biased(gpu, thickness, 0.0)
+}
+
+/// The same, with the lobe-weight split deliberately skewed.
+///
+/// The weights are a sampling density: they choose the lobe and they set the
+/// mixture density the sample is charged, and nothing else reads them. A scene
+/// rendered at two different splits therefore has to converge to the same
+/// image, and that is the acceptance criterion this release owes for the
+/// rewritten transmission lobe, read literally rather than at one shading point.
+fn sheet_shadow_means_biased(
+    gpu: &common::Gpu,
+    thickness: f32,
+    lobe_bias: f32,
+) -> ([f64; 3], [f64; 3]) {
     use solarxy_core::geometry::RawMaterialData;
     use solarxy_core::preferences::ProjectionMode;
     use solarxy_renderer::camera::{Camera, CameraUniform};
@@ -1319,7 +1334,7 @@ fn sheet_shadow_means(gpu: &common::Gpu, thickness: f32) -> ([f64; 3], [f64; 3])
 
     let target = TraceTarget::new(&gpu.device, &gpu.pathtrace, WIDTH, HEIGHT);
     let uniforms = PathUniforms::new(&gpu.device, &camera_buffer);
-    let kernel = PathKernel::new(&gpu.device, &gpu.pathtrace, &uniforms);
+    let kernel = PathKernel::with_lobe_bias(&gpu.device, &gpu.pathtrace, &uniforms, lobe_bias);
     let environment = EnvParams::constant([0.0; 3], [0.0; 3]);
     uniforms.write(
         &gpu.queue,
@@ -1689,5 +1704,50 @@ fn the_estimators_agree_under_a_refractive_solid() {
          scattering estimator's {scatter:.6}. Exceeding it means a straight \
          line through a refractive solid is still delivering light that no \
          actual path delivers, which is the defect this rule exists to remove."
+    );
+}
+
+/// A rendered scene converges to the same image whichever way the lobe split is
+/// set.
+///
+/// The scene-level reading of the invariance the probe suite asserts at one
+/// shading point, and the literal form of the criterion the transmission rewrite
+/// owes. The lobe weights decide which lobe a sample is drawn from and they set
+/// the mixture density that sample is charged against; those are the only two
+/// places they are read, so the two effects have to cancel and the picture must
+/// not move.
+///
+/// A whole render carries variance the probe does not, so the tolerance is
+/// looser than the probe's two percent and looser than the estimator
+/// comparisons' half a percent: skewing the split deliberately starves one lobe,
+/// which costs samples where they are most needed.
+#[test]
+fn a_rendered_scene_does_not_move_when_the_lobe_split_does() {
+    let Some(gpu) = common::gpu_or_skip() else {
+        return;
+    };
+
+    // The solid, because it is the case the rewritten lobe is about and the one
+    // whose transport runs entirely through the transmission branch.
+    let (shipped, _) = sheet_shadow_means_biased(&gpu, 0.5, 0.0);
+    // Reflection share from about four percent to about sixty-four, which is
+    // more than an order of magnitude off the sampling optimum.
+    let (skewed, _) = sheet_shadow_means_biased(&gpu, 0.5, 0.6);
+
+    println!("under the solid: shipped split {shipped:.5?}, skewed split {skewed:.5?}");
+    let error = (shipped[0] - skewed[0]).abs() / shipped[0].max(1e-6);
+    println!("{:.2}% apart", error * 100.0);
+
+    assert!(
+        error < 0.05,
+        "the same scene rendered to {:.5} at the shipped lobe split and {:.5} \
+         with the split skewed, {:.2}% apart. The weights are a sampling \
+         density and are read in exactly two places, the selection and the \
+         mixture density, so those two have to cancel and the image must not \
+         move. A difference here means they are acting as a response instead, \
+         and every render carries a factor no picture would reveal.",
+        shipped[0],
+        skewed[0],
+        error * 100.0
     );
 }

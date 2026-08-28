@@ -39,6 +39,19 @@ const MIN_ROUGHNESS: f32 = 1e-3;
 // that ends up in a denominator.
 const MIN_INCIDENT_COS: f32 = 1e-3;
 
+// The smallest share of samples the reflection lobe keeps on a transmissive
+// surface. Numerical rather than aesthetic; the reason is at `get_lobe_weights`.
+const TRANS_SPECULAR_FLOOR: f32 = 0.01;
+
+// A test-only skew on the reflection and transmission shares.
+//
+// The lobe weights are a sampling density: they appear in the selection and in
+// the mixture density, and nowhere else. Any positive assignment therefore has
+// to leave the estimator's expectation alone, and that invariance is the only
+// available proof that they are a density rather than a response. Nothing ships
+// a way to set this, exactly as the estimator override ships none.
+override BSDF_TRANSMISSION_BIAS: f32 = 0.0;
+
 // The sheen fit's two coefficient rows, at alpha = 1 and alpha = 0.
 // Estevez and Kulla, section 3.
 const VELVET_P0: array<f32, 5> = array<f32, 5>(25.3245, 3.32435, 0.16801, -1.27393, -4.85967);
@@ -213,6 +226,22 @@ fn ggx_distribution(h: vec3f, alpha: vec2f) -> f32 {
 fn ggx_reflection_adjusted_pdf(v: vec3f, h: vec3f, alpha: vec2f) -> f32 {
     let n_dot_v = max(v.z, MIN_INCIDENT_COS);
     return ggx_distribution(h, alpha) * ggx_shadow_mask_g1(v, alpha) / (4.0 * n_dot_v);
+}
+
+// The density of `ggx_direction` over the HALF VECTOR, before any Jacobian.
+//
+// Heitz, equation (3). `ggx_reflection_adjusted_pdf` above is this divided by
+// the Jacobian of reflection, `4 * dot(v, h)`, which is where its cancellation
+// of `HdotV` comes from. The two are written separately rather than one in
+// terms of the other on purpose: the reflection form is what three passing
+// histogram comparisons already pin, it differs from this one when `dot(v, h)`
+// is not positive, and it stays byte for byte what it was.
+//
+// Refraction has a different Jacobian, so it needs the unadjusted density.
+fn ggx_vndf_half_pdf(v: vec3f, h: vec3f, alpha: vec2f) -> f32 {
+    let n_dot_v = max(v.z, MIN_INCIDENT_COS);
+    return ggx_distribution(h, alpha) * ggx_shadow_mask_g1(v, alpha)
+        * max(0.0, dot(v, h)) / n_dot_v;
 }
 
 // The Charlie velvet sheen distribution. Estevez and Kulla, equation (2).
@@ -438,13 +467,28 @@ fn fresnel_mix(
     v_dot_h: f32,
     f0_color: vec3f,
     ior: f32,
+    eta: f32,
     weight: f32,
     base: vec3f,
     layer: vec3f,
 ) -> vec3f {
     var f0 = ior_to_f0(ior) * f0_color;
     f0 = min(f0, vec3f(1.0));
-    let fr = schlick_fresnel_v3(abs(v_dot_h), f0, vec3f(1.0));
+    // `evaluate_fresnel` rather than Schlick alone, because Schlick does not
+    // know about the critical angle and this one does.
+    //
+    // The Fresnel that picks the lobe and the Fresnel that values it have to be
+    // the same function. `get_lobe_weights` has always used this one, so past
+    // the critical angle on the inside of a solid it correctly routed every
+    // sample to reflection, and this then reflected the four percent Schlick
+    // gives at normal incidence and dropped the rest. Total internal reflection
+    // lost most of its energy, once per interior bounce, which is a first-order
+    // reason glass read as grey rather than as glass.
+    //
+    // Provably inert everywhere else: total internal reflection needs an index
+    // ratio above one, which `surface_from` grants only on a back face that
+    // transmits. Every opaque material and every front face is bit-identical.
+    let fr = evaluate_fresnel(abs(v_dot_h), eta, f0, vec3f(1.0));
     let max_fr = max(max(fr.r, fr.g), fr.b);
     return (1.0 - weight * max_fr) * base + weight * fr * layer;
 }
@@ -767,59 +811,185 @@ fn diffuse_direction(uv: vec2f) -> vec3f {
     return normalize(d);
 }
 
-// The transmitted direction.
+// Whether this surface transmits as a thin wall rather than as a solid.
 //
-// **Ported knowingly, and it is the weakest thing in this file.** It does not
-// sample the visible-normal distribution: it perturbs the flat macronormal by a
-// uniform sphere offset scaled by roughness, so the direction it produces and the
-// value `transmission_pdf` returns are not a sampler and its density. The source
-// carries a correct Walter et al. formulation, commented out, reverted because it
-// produced black pixels; that block is the known replacement and this is what
-// ships until the furnace measurement says it has to change.
+// `thickness` is the authored field, and an index of one is folded in here
+// because it is optically the same thing and because it is the one true
+// singularity in the refraction density below: the denominator
+// `dot(wi, h) + eta * dot(wo, h)` vanishes exactly when eta is one. It also
+// removes a latent NaN that predates this lobe, since a thin surface at an
+// index of one transmits along exactly `-wo`, and `half_vector_eta` would then
+// normalize the zero vector.
+fn transmission_is_thin(surf: Surface) -> bool {
+    return surf.thin_film || abs(surf.eta - 1.0) < 1e-3;
+}
+
+// One transmitted sample: the direction, the micronormal it went through, and
+// whether it exists at all.
+struct TransmissionSample {
+    wi: vec3f,
+    h: vec3f,
+    valid: bool,
+}
+
+// The transmitted direction, drawn from the visible-normal distribution.
 //
-// Returns the zero vector when the perturbed interface cannot refract at all, so
-// the caller can reject the sample rather than normalize a zero.
-fn transmission_direction(wo: vec3f, surf: Surface, uv: vec2f) -> vec3f {
-    let h = normalize(vec3f(0.0, 0.0, 1.0) + sample_sphere(uv) * surf.alpha.y);
-    var wi = refract(normalize(-wo), h, surf.eta);
-    if dot(wi, wi) < BSDF_EPSILON {
-        return vec3f(0.0);
-    }
-    if surf.thin_film {
-        // A thin wall refracts twice through parallel interfaces, which returns
-        // the ray to its original direction and displaces it by nothing, because
-        // there is no interior to cross.
-        wi = -refract(normalize(-wi), -vec3f(0.0, 0.0, 1.0), 1.0 / surf.eta);
-        if dot(wi, wi) < BSDF_EPSILON {
-            return vec3f(0.0);
+// One micronormal draw feeds two maps. A solid refracts through it. A thin wall
+// does not refract twice through parallel interfaces, which is what this used to
+// do; it takes the reflection about the micronormal, mirrored to the far side.
+// Both agree with the old behaviour in the flat limit, where each returns `-wo`,
+// the straight-through direction a parallel slab produces.
+//
+// The thin form is chosen because it has a density and the double refraction did
+// not. Mirroring is a measure-preserving involution of the sphere, so the density
+// of the mirrored draw is the reflection density at the mirrored direction, which
+// `ggx_reflection_adjusted_pdf` already computes. The old form refracted through a
+// rough interface and back through a flat one, which is not a slab either.
+//
+// The doc this replaces said the visible-normal formulation had been reverted
+// upstream for producing black pixels. That warning was misaimed and is corrected
+// here rather than carried: the note it came from sits on a different reverted
+// block, and the formulation it names is separately wrong three ways, each of
+// which darkens. It pairs a real density with a constant value, it drops the
+// numerator of the refraction Jacobian, and it puts eta on the wrong term. The
+// first of those alone is black glass, and it is what
+// `smooth_glass_transmits_rather_than_swallowing` exists to catch.
+fn transmission_direction(wo: vec3f, surf: Surface, uv: vec2f) -> TransmissionSample {
+    var out: TransmissionSample;
+    out.h = ggx_direction(wo, surf.alpha, uv);
+    out.valid = false;
+    out.wi = vec3f(0.0);
+
+    if transmission_is_thin(surf) {
+        // Reflect about the micronormal, then mirror through the surface. At a
+        // flat micronormal this is exactly `-wo`.
+        let wr = -normalize(reflect(wo, out.h));
+        if wr.z <= 0.0 {
+            // A micronormal steep enough to send the reflection below the
+            // horizon has no mirrored partner above it.
+            //
+            // This is the ordinary microfacet horizon loss rather than anything
+            // this lobe introduces, and it was measured rather than assumed:
+            // against the specular lobe at matched roughness it rejects 2.5
+            // against 2.5 percent at 0.4, 11.1 against 11.5 at 0.6, 28.0
+            // against 29.1 at 0.8 and 48.2 against 50.0 at 1.0. It tracks the
+            // reflection lobe within two points everywhere and is always
+            // slightly the lower of the two, because the mirror maps a
+            // marginally different set of micronormals below the horizon. A
+            // better thin sampler would have to beat the specular lobe, not
+            // this one.
+            return out;
         }
+        out.wi = vec3f(wr.xy, -wr.z);
+        out.valid = true;
+        return out;
     }
-    return normalize(wi);
+
+    let wi = refract(normalize(-wo), out.h, surf.eta);
+    if dot(wi, wi) < BSDF_EPSILON {
+        // Total internal reflection at the micro scale. Rejected rather than
+        // reflected: a reflected sample would land on the far side of the
+        // surface from this lobe, and the mixture density would then owe a term
+        // for it whose support is the set of micronormals that turn back for
+        // this direction pair, which is not cheaply writable. Rejecting loses
+        // energy rather than creating it, so the furnace ceiling still holds and
+        // the loss prints as a deficit. It is unreachable on a front face, where
+        // the index ratio is below one and the discriminant cannot go negative.
+        return out;
+    }
+    out.wi = normalize(wi);
+    out.valid = true;
+    return out;
 }
 
-// What is transmitted: the base colour, scaled by how much of the surface
-// transmits at all. No microfacet term, which is the other half of why this lobe
-// is an approximation rather than a BTDF.
-fn transmission_color(surf: Surface) -> vec3f {
-    return surf.transmission * surf.color;
-}
-
-// **Not a probability density**, despite standing where one does.
+// The micronormal a transmitted pair went through, recovered from the pair.
 //
-// It is the reciprocal of what is left after Fresnel reflection, which is a
-// weight above one rather than a density, and it is what the source returns. The
-// consequence is real: transmission's sample and its stated density disagree, so
-// glass carries more variance than the other lobes and its histogram comparison
-// fails by construction. That is measured and recorded rather than asserted away.
-fn transmission_pdf(wo: vec3f, surf: Surface) -> f32 {
-    let cos_theta = min(wo.z, 1.0);
-    let sin_theta = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
-    // Past the critical angle nothing is transmitted.
-    if surf.eta * sin_theta > 1.0 {
-        return 0.0;
+// Both entry points reach the transmission value and the transmission density
+// through this, so a sampled density and an evaluated one agree by construction
+// rather than by inspection. That is the same guarantee the half-vector-free
+// lobe weights give on the selection side.
+//
+// Solid: from `refract`, `wi = eta * (-wo) + (eta * dot(wo, h) - cos_t) * h`, so
+// `wi + eta * wo` is parallel to `h` and `half_vector_eta` recovers it exactly.
+// Thin: the mirrored direction is the reflection about `h`, so the ordinary half
+// vector of the outgoing and mirrored directions is `h` by definition.
+fn transmission_half(wo: vec3f, wi: vec3f, surf: Surface) -> vec3f {
+    if transmission_is_thin(surf) {
+        return half_vector(wo, vec3f(wi.xy, -wi.z));
     }
-    let reflectance = schlick_fresnel(cos_theta, surf.f0);
-    return 1.0 / max(BSDF_EPSILON, 1.0 - reflectance);
+    return half_vector_eta(wi, wo, surf.eta);
+}
+
+// The transmission lobe's response: a real BTDF rather than a constant.
+//
+// Walter et al., equation (21), with the radiance-compression factor for
+// camera-side transport. The value and the density below are one change and
+// cannot be separated: a real density against a constant value collapses as
+// roughness falls, which is the black glass this lobe was reverted for once
+// already.
+//
+// The `eta * eta` is radiance compression across a refracting interface, and it
+// is worth stating because its number looks alarming. Entering a denser medium
+// it is about 0.44 and leaving it is about 2.25, so a round trip through a solid
+// is exactly one. A furnace sweep measures a single crossing, so its transmissive
+// planes read around 0.44 at normal incidence, and that is the physics rather
+// than an energy deficit.
+//
+// `wi` is z-mirrored into `ggx_smith_visibility` because that helper floors the
+// incident cosine at `MIN_INCIDENT_COS`, so a genuinely negative `wi.z` would
+// silently return the wrong masking term. The factor of four recovers
+// `G2 / (|wo.z| |wi.z|)` from a helper that carries `G2 / (4 |wo.z| |wi.z|)`.
+fn transmission_btdf(wo: vec3f, wi: vec3f, h: vec3f, surf: Surface) -> vec3f {
+    // Metalness gates transmission, because a conductor does not transmit.
+    //
+    // This is the third place that rule is written and the last to learn it.
+    // `get_lobe_weights` has always folded metalness into the reflection share,
+    // and the shadow walk computes its survival as one minus metalness times
+    // transmission. The value did not, which was invisible while it was a
+    // constant paired with a weight rather than a density, and became energy
+    // creation the moment it became a real response: at a metalness of 0.2 the
+    // transmitted branch returned its full 0.96 while the reflected branch
+    // returned 0.232, and the furnace read 1.19. Gated, the two sum to one.
+    let tint = surf.transmission * (1.0 - surf.metalness) * surf.color;
+    let fresnel = evaluate_fresnel(abs(dot(wo, h)), surf.eta, vec3f(surf.f0), vec3f(1.0));
+    let survives = vec3f(1.0) - fresnel;
+
+    if transmission_is_thin(surf) {
+        // The thin case is the specular lobe evaluated at the mirrored
+        // direction, which is why it is admissible to the histogram comparison
+        // by construction rather than by argument.
+        return tint * survives * specular_brdf(wo, vec3f(wi.xy, -wi.z), h, surf.alpha);
+    }
+
+    let l_dot_h = dot(wi, h);
+    let v_dot_h = dot(wo, h);
+    let denom = l_dot_h + surf.eta * v_dot_h;
+    let jacobian = abs(l_dot_h * v_dot_h) / max(BSDF_EPSILON, denom * denom);
+    let d = ggx_distribution(h, surf.alpha);
+    let g_over_cos = 4.0 * ggx_smith_visibility(wo, vec3f(wi.xy, abs(wi.z)), surf.alpha);
+    return tint * survives * d * g_over_cos * jacobian * surf.eta * surf.eta;
+}
+
+// The density of `transmission_direction`, over the transmitted direction.
+//
+// A real probability density, which is what this was not. It used to return the
+// reciprocal of what survives Fresnel reflection, a weight above one standing
+// where a density belongs, and the disagreement between that and the sampler is
+// why this lobe carried a histogram exemption.
+//
+// Solid: the visible-normal density over half vectors times the Jacobian of
+// refraction, Walter et al. equation (17), in this file's convention where
+// `surf.eta` is the incident index over the transmitted one.
+// Thin: the reflection density, exactly, because mirroring preserves solid angle.
+fn transmission_pdf(wo: vec3f, wi: vec3f, h: vec3f, surf: Surface) -> f32 {
+    if transmission_is_thin(surf) {
+        return ggx_reflection_adjusted_pdf(wo, h, surf.alpha);
+    }
+    let l_dot_h = dot(wi, h);
+    let v_dot_h = dot(wo, h);
+    let denom = l_dot_h + surf.eta * v_dot_h;
+    let jacobian = abs(l_dot_h) / max(BSDF_EPSILON, denom * denom);
+    return ggx_vndf_half_pdf(wo, h, surf.alpha) * jacobian;
 }
 
 // Beer-Lambert attenuation through a volume, glTF's `KHR_materials_volume`.
@@ -863,7 +1033,29 @@ fn transmission_attenuation(dist: f32, att_color: vec3f, att_dist: f32) -> vec3f
 fn get_lobe_weights(wo: vec3f, wo_clearcoat: vec3f, surf: Surface) -> LobeWeights {
     let f_estimate = evaluate_fresnel(wo.z, surf.eta, vec3f(surf.f0), vec3f(1.0)).x;
 
-    let trans_specular_prob = mix(max(0.25, f_estimate), 1.0, surf.metalness);
+    // Fresnel decides the split, with a floor that exists for one numerical
+    // reason and no aesthetic one. At an index of exactly one the Fresnel term
+    // is exactly zero, a lobe with no selection probability contributes no term
+    // to the mixture density, and `direct_light` then rejects the connection
+    // outright and the surface goes black to every light. One percent is small
+    // enough that the split still follows Fresnel and large enough that the
+    // density is positive wherever the response is.
+    //
+    // This used to floor at 0.25, where a dielectric at normal incidence wants
+    // about 0.04, so the reflection lobe was oversampled sixfold and the
+    // transmission lobe starved by the same factor. The estimator was unbiased
+    // either way, because the mixture density agreed with the weights; what it
+    // cost was variance, all of it on the transmitted result.
+    //
+    // The upper end already handles total internal reflection and must keep
+    // doing so: past the critical angle `evaluate_fresnel` returns one, so this
+    // is one, the transmission weight is exactly zero, and the density's own
+    // guard skips its term.
+    let trans_specular_prob = clamp(
+        mix(max(TRANS_SPECULAR_FLOOR, f_estimate), 1.0, surf.metalness) + BSDF_TRANSMISSION_BIAS,
+        TRANS_SPECULAR_FLOOR,
+        1.0,
+    );
     let diff_specular_prob = 0.5 + 0.5 * surf.metalness;
 
     var w: LobeWeights;
@@ -909,6 +1101,25 @@ fn bsdf_evaluate(ctx: BxdfContext, surf: Surface, w: LobeWeights) -> BsdfEval {
     let n_dot_l = ctx.l.z;
     let n_dot_vc = ctx.vc.z;
 
+    // The transmitted micronormal, recovered once here and shared by the value
+    // and the density, so the two cannot describe different geometry. `ctx.h`
+    // keeps its meaning as the reflection half vector and the transmission
+    // branch does not read it.
+    //
+    // The reconstruction normalizes a sum that can be near zero in degenerate
+    // configurations, so it is guarded rather than allowed to produce a NaN that
+    // would propagate into the image.
+    var wh_t = vec3f(0.0, 0.0, 1.0);
+    var transmits = n_dot_l < 0.0 && surf.transmission > 0.0;
+    if transmits {
+        let recovered = transmission_half(ctx.v, ctx.l, surf);
+        if dot(recovered, recovered) > 0.5 {
+            wh_t = recovered;
+        } else {
+            transmits = false;
+        }
+    }
+
     if n_dot_l > 0.0 {
         // Reflection.
         let specular = specular_brdf(ctx.v, ctx.l, ctx.h, surf.alpha);
@@ -925,6 +1136,7 @@ fn bsdf_evaluate(ctx: BxdfContext, surf: Surface, w: LobeWeights) -> BsdfEval {
             ctx.v_dot_h,
             surf.specular_color,
             surf.ior,
+            surf.eta,
             surf.specular_intensity,
             diffuse,
             specular,
@@ -962,10 +1174,10 @@ fn bsdf_evaluate(ctx: BxdfContext, surf: Surface, w: LobeWeights) -> BsdfEval {
         material += sheen_lobe(ctx.v, ctx.l, ctx.h, surf.sheen_color, surf.sheen_roughness);
 
         out.color = material;
-    } else if surf.transmission > 0.0 {
+    } else if surf.transmission > 0.0 && transmits {
         // Transmission. It replaces rather than adds, which is correct because
         // the two branches are mutually exclusive on the sign of `wi.z`.
-        out.color = transmission_color(surf);
+        out.color = transmission_btdf(ctx.v, ctx.l, wh_t, surf);
     }
 
     // The clearcoat sits over whichever of the two happened, and reads the colour
@@ -995,9 +1207,23 @@ fn bsdf_evaluate(ctx: BxdfContext, surf: Surface, w: LobeWeights) -> BsdfEval {
         out.pdf += w.clearcoat
             * ggx_reflection_adjusted_pdf(ctx.vc, ctx.hc, vec2f(surf.clearcoat_alpha));
     }
-    if w.transmission > 0.0 && n_dot_l < 0.0 {
-        out.pdf += w.transmission * transmission_pdf(ctx.v, surf);
+    if w.transmission > 0.0 && transmits {
+        out.pdf += w.transmission * transmission_pdf(ctx.v, ctx.l, wh_t, surf);
     }
+
+    // The cosine, folded exactly once, here rather than at either exit.
+    //
+    // Both exits used to do this themselves and agreed only by inspection. One
+    // fold after the clearcoat blend is numerically identical to folding each
+    // branch before it, because `fresnel_coat` is linear in both of its colour
+    // arguments, and it cannot drift.
+    //
+    // It is correct for transmission as well as for reflection, which the issue
+    // that raised this doubted for a good reason: while the transmitted value
+    // was a constant rather than a distribution function it was not. Now that
+    // the value carries `1 / (|wo.z| |wi.z|)` the way the reflection branch
+    // always has, both want the same single cosine.
+    out.color *= abs(ctx.l.z);
 
     return out;
 }
@@ -1061,17 +1287,21 @@ fn bsdf_sample(
         wi = -normalize(reflect(wo, wh));
     } else if r <= cdf.z {
         rec.lobe = LOBE_TRANSMISSION;
-        wi = transmission_direction(wo, surf, uv);
-        // A perturbed interface that could not refract yields no sample. The
-        // density test agrees with this in the common case and not in every case,
-        // which is one more symptom of a sampler and a density that were not
-        // derived from each other.
-        if dot(wi, wi) < BSDF_EPSILON {
+        // A micronormal that could not refract, or whose mirrored partner lies
+        // below the horizon, yields no sample. That rejection is now part of the
+        // sampler's distribution rather than a disagreement with the density:
+        // the histogram comparison normalizes over every draw rather than over
+        // the survivors, so an atom of rejection is a legal outcome.
+        let t = transmission_direction(wo, surf, uv);
+        if !t.valid {
             rec.lobe = LOBE_NONE;
             return rec;
         }
-        rec.transmissive = true;
-        wh = half_vector_eta(wi, wo, surf.eta);
+        wi = t.wi;
+        // The micronormal it actually went through, rather than one recovered
+        // from the pair. `bsdf_evaluate` recovers the same vector from the same
+        // pair, which is what keeps the sampled and evaluated densities equal.
+        wh = t.h;
     } else {
         // The clearcoat, and also the terminal branch the source does not have.
         // Without it a rounding error above `cdf.w` would leave the direction
@@ -1083,6 +1313,13 @@ fn bsdf_sample(
         wi = normalize(surf.inv_frame * (surf.clearcoat_frame * wi_c));
         wh = normalize(surf.inv_frame * (surf.clearcoat_frame * wh_c));
     }
+
+    // Whether the sample crossed the interface, decided by where it went rather
+    // than by which lobe sent it. The transmission branch used to claim this for
+    // itself, but the specular lobe can also put a direction below the horizon on
+    // a transmissive surface, and such a sample crossed without charging the
+    // transmissive budget or entering the medium.
+    rec.transmissive = wi.z < 0.0;
 
     var ctx: BxdfContext;
     ctx.v = wo;
@@ -1096,12 +1333,12 @@ fn bsdf_sample(
     ctx.lc = normalize(surf.inv_clearcoat_frame * (surf.frame * wi));
     ctx.hc = normalize(surf.inv_clearcoat_frame * (surf.frame * wh));
 
+    // The cosine is already folded, inside `bsdf_evaluate`, so a caller only
+    // ever divides by the density. It used to be folded here and again at the
+    // other exit, agreeing only by inspection.
     let eval = bsdf_evaluate(ctx, surf, w);
     rec.pdf = eval.pdf;
-    // The cosine folds in here, once, so a caller only ever divides by the
-    // density. Its absolute value, because a transmitted direction is below the
-    // surface and its cosine is negative.
-    rec.color = eval.color * abs(wi.z);
+    rec.color = eval.color;
     rec.direction = normalize(surf.frame * wi);
     return rec;
 }
@@ -1147,7 +1384,7 @@ fn bsdf_result(world_wo: vec3f, world_wi: vec3f, surf: Surface) -> BsdfEval {
     ctx.hc = half_vector(wo_c, wi_c);
 
     let e = bsdf_evaluate(ctx, surf, w);
-    out.color = e.color * abs(wi.z);
+    out.color = e.color;
     out.pdf = e.pdf;
     return out;
 }

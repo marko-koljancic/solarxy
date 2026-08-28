@@ -23,7 +23,14 @@
 // probe's request struct crosses the boundary like any other record, and the
 // material probe's tap taught that lesson the loud way.
 struct BsdfTap {
-    // Outgoing direction, TANGENT space, z up. `w` unused.
+    // Outgoing direction, TANGENT space, z up.
+    //
+    // `w` carries the side: zero or positive is the front face, negative is the
+    // back. It is a sign on a slot that was already here rather than a new
+    // field, because the tap is a pinned 48 bytes with a row in the layout
+    // suite, and total internal reflection is otherwise unreachable from every
+    // test in the suite: the probe built a front face unconditionally, so the
+    // index ratio was always below one and `refract` could never fail.
     wo: vec4f,
     // Incident direction, tangent space. Read in evaluate mode only.
     wi: vec4f,
@@ -75,7 +82,8 @@ fn bsdf_probe(@builtin(global_invocation_id) gid: vec3<u32>) {
     // is unused and every tap falls back to its factor, which is what makes the
     // answer a property of the lobes rather than of the atlas.
     let s = material_sample(m, vec4f(0.0));
-    let surf = surface_from(m, s, vec3f(0.0, 0.0, 1.0), vec4f(1.0, 0.0, 0.0, 1.0), 1.0);
+    let side = select(1.0, -1.0, tap.wo.w < 0.0);
+    let surf = surface_from(m, s, vec3f(0.0, 0.0, 1.0), vec4f(1.0, 0.0, 0.0, 1.0), side);
 
     let wo_ts = normalize(tap.wo.xyz);
     let world_wo = surf.frame * wo_ts;
