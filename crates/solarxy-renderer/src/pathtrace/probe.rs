@@ -19,6 +19,12 @@
 //! guard measures a total and the Rust offset assertions measure one side, so two
 //! transposed sixteen-byte blocks satisfy both and shade wrong.
 //!
+//! [`RandProbe`] pins the sampler's decorrelation. Its subject is the pixel,
+//! which every other probe holds fixed: whether two pixels draw different point
+//! sets is invisible to any instrument that varies only the sample index, and
+//! the failure it exists for looked, in an image, like a faint stationary
+//! swirl across every smooth gradient.
+//!
 //! [`BsdfProbe`] pins the lobes to themselves. Its two subjects are whether the
 //! density a sampler reports describes the directions it actually produces, which
 //! only a histogram over many samples can answer, and whether the throughput
@@ -50,6 +56,12 @@ const PARITY_KERNEL: &str = concat!(
 const ATLAS_PROBE_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/atlas.wgsl"),
     include_str!("../shaders/pathtrace/atlas_probe.wgsl"),
+);
+
+/// The sampler kernel, composed over the sampler fragment that ships.
+const RAND_PROBE_KERNEL: &str = concat!(
+    include_str!("../shaders/pathtrace/rand.wgsl"),
+    include_str!("../shaders/pathtrace/rand_probe.wgsl"),
 );
 
 /// The material kernel, composed over all three fragments that ship. It binds
@@ -585,6 +597,174 @@ impl ColorReadback {
         drop(data);
         self.buffer.unmap();
         ColorPoll::Ready(colors)
+    }
+}
+
+/// One stratified draw the probe asks for.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
+pub struct RandTap {
+    /// The pixel the generator is seeded for. This is the field the probe
+    /// exists to vary: every other probe holds it at the origin.
+    pub pixel: [u32; 2],
+    /// Which sample of the sequence to draw.
+    pub sample_index: u32,
+    /// The total sample count, which is what turns stratification on.
+    pub strata: u32,
+    /// The per-render seed.
+    pub seed: u32,
+    /// The dimension label, as the kernel's `RNG_DIM_*` values.
+    pub dim: u32,
+    /// Nonzero draws the scalar path, zero the pair path; both rotate per
+    /// pixel and both need the instrument.
+    pub scalar: u32,
+    pub _pad: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<RandTap>() == 32);
+
+/// The sampler pipeline and its own io layout.
+///
+/// What it answers is whether two pixels draw different point sets, which no
+/// other probe can: they all fix the pixel and vary the sample index, the
+/// right shape for comparing a density to its sampler and a shape that is
+/// structurally blind to correlation across the image. It binds nothing but
+/// its own io, because the sampler is self-contained arithmetic; a wrong
+/// answer here is the sampler's own.
+pub struct RandProbe {
+    pipeline: wgpu::ComputePipeline,
+    io_layout: wgpu::BindGroupLayout,
+}
+
+impl RandProbe {
+    /// Builds the pipeline. Like the other probes, this is the call a browser
+    /// check is watching.
+    #[must_use]
+    pub fn new(device: &wgpu::Device) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Pathtrace Rand Probe Shader"),
+            source: wgpu::ShaderSource::Wgsl(RAND_PROBE_KERNEL.into()),
+        });
+        let io_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_rand_probe_io_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Pathtrace Rand Probe Pipeline Layout"),
+            bind_group_layouts: &[&io_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Pathtrace Rand Probe Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: Some("rand_probe"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[("TAP_WIDTH", f64::from(TAP_WIDTH))],
+                zero_initialize_workgroup_memory: false,
+            },
+            cache: None,
+        });
+        Self {
+            pipeline,
+            io_layout,
+        }
+    }
+
+    /// Encodes and submits one batch of taps, returning a readback to poll.
+    /// Each result carries the stratified pair in its first two lanes.
+    #[must_use]
+    pub fn submit(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        taps: &[RandTap],
+    ) -> ColorReadback {
+        let count = taps.len().max(1);
+        // An empty batch is a caller mistake rather than a scene state, but a
+        // zero-sized binding is invalid, so it becomes one tap of nothing.
+        let placeholder = [RandTap::default()];
+        let tap_bytes: &[u8] = if taps.is_empty() {
+            bytemuck::cast_slice(&placeholder)
+        } else {
+            bytemuck::cast_slice(taps)
+        };
+        let tap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Pathtrace Rand Taps"),
+            contents: tap_bytes,
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let result_bytes = (count * 16) as u64;
+        let result_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Rand Results"),
+            size: result_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Rand Results Readback"),
+            size: result_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let io = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtrace Rand Probe IO Bind Group"),
+            layout: &self.io_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: tap_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: result_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Pathtrace Rand Probe Encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Pathtrace Rand Probe Pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &io, &[]);
+            let rows = (count as u32).div_ceil(TAP_WIDTH);
+            pass.dispatch_workgroups(TAP_WIDTH / WORKGROUP_SIZE, rows.div_ceil(WORKGROUP_SIZE), 1);
+        }
+        encoder.copy_buffer_to_buffer(&result_buffer, 0, &staging, 0, result_bytes);
+        queue.submit(Some(encoder.finish()));
+
+        ColorReadback {
+            buffer: staging,
+            count,
+            receiver: None,
+        }
     }
 }
 

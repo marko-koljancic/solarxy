@@ -213,7 +213,12 @@ fn rand1_strat(rng: ptr<function, RngState>, dim: u32) -> f32 {
     // The jitter comes from the lattice rather than from another hash, so the
     // sequence still advances and two consecutive draws of the same dimension
     // at the same bounce are not identical.
-    return (f32(s) + rand1(rng)) / f32(n);
+    let value = (f32(s) + rand1(rng)) / f32(n);
+    // The same rotation as the pair path below, for the same reason: the
+    // permutation reorders the comb and never moves it, so without this every
+    // pixel picks lobes, lights and survival from one identical comb.
+    let rot = f32(rng_hash(p ^ 0x4b1bde59u)) / f32(0xffffffffu);
+    return fract(value + rot);
 }
 
 // A correlated multi-jittered pair in `[0, 1)^2`.
@@ -239,10 +244,26 @@ fn rand2_strat(rng: ptr<function, RngState>, dim: u32) -> vec2f {
     // Each axis is offset by the other's stratum, which is what makes this
     // correlated rather than two independent Latin hypercubes: the pair covers
     // the square, not just each margin.
-    return vec2f(
+    let pair = vec2f(
         (f32(sx) + (f32(sy) + j.y) / f32(n)) / f32(m),
         (f32(sy) + (f32(sx) + j.x) / f32(m)) / f32(n),
     );
+
+    // A Cranley-Patterson rotation, because the permutations above only reorder
+    // the cell set and never change it: without this, every pixel integrates a
+    // dimension with the identical quadrature rule and the residual error is a
+    // stationary pattern across the image instead of noise. The offset comes
+    // from `p`, which already folds the per-pixel scramble, the bounce and the
+    // dimension but not the sample index, so the whole point set shifts rigidly
+    // per pixel; a toroidal shift of a stratified set is still stratified. It
+    // consumes no lattice draw, so the stream does not advance with it, and it
+    // costs no binding, which is why it is here and the reference's blue-noise
+    // texture is not.
+    let rot = vec2f(
+        f32(rng_hash(p ^ 0x8f1bbcdcu)),
+        f32(rng_hash(p ^ 0x35a29f42u)),
+    ) / f32(0xffffffffu);
+    return fract(pair + rot);
 }
 
 // A uniform direction on the sphere, from a pair in `[0, 1)^2`.

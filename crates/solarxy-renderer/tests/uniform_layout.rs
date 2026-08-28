@@ -212,6 +212,17 @@ const CASES: &[Case] = &[
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::MaterialTap>(),
         rust_type: "solarxy_renderer::pathtrace::probe::MaterialTap",
     },
+    // The rand probe's tap, for the same reason as the material probe's: a
+    // request struct crosses the boundary like anything else, and its `vec2u`
+    // head aligns to 8 on both sides only while the five scalars behind it
+    // stay scalars and the pad stays two words.
+    Case {
+        shader: "pathtrace/rand_probe.wgsl",
+        prelude: &["pathtrace/rand.wgsl"],
+        struct_name: "RandTap",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::RandTap>(),
+        rust_type: "solarxy_renderer::pathtrace::probe::RandTap",
+    },
     // The BSDF probe's tap, for the same reason. Its scalar tail packs into the
     // third sixteen-byte block and needs no pad, which is a shape that only stays
     // true while all four fields are scalars: promoting any of them to a vector

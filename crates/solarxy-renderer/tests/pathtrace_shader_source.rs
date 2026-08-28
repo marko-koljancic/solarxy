@@ -147,6 +147,7 @@ const RECIPES: &[(&str, &[&str])] = &[
     ),
     ("the traversal probe", &["traverse.wgsl", "parity.wgsl"]),
     ("the atlas probe", &["atlas.wgsl", "atlas_probe.wgsl"]),
+    ("the rand probe", &["rand.wgsl", "rand_probe.wgsl"]),
     (
         "the material probe",
         &[
