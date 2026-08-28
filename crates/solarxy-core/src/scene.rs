@@ -515,6 +515,14 @@ pub enum SceneOp {
     /// is expensive, so a host is expected to dedupe on
     /// [`RawImageHdr::hash`](crate::RawImageHdr) and do nothing when the
     /// same environment arrives twice.
+    ///
+    /// A still is the exception to that first sentence, and the one place a
+    /// host is expected to read `None` as darkness. A render is a property of
+    /// the scene where a viewport background is a viewing preference, so a
+    /// document that authors no environment is rendered against none rather
+    /// than against whatever a pane happens to be showing. That is also the
+    /// only way a windowed shell and a terminal can produce the same image
+    /// from the same document, the terminal having no panes to borrow from.
     SetEnvironment {
         hdri: Option<Arc<RawImageHdr>>,
         /// Yaw applied to both the visible sky and the lighting it

@@ -1809,8 +1809,13 @@ impl SolarxyApp {
             {
                 self.host_events.push(HostEvent::RenderNotice { message });
             }
+            self.install_still_environment();
+            // The pane path owes an install from the moment the still takes
+            // the shared backend, or a traced pane resuming afterwards keeps
+            // the still's sky. Set here rather than where the job finishes so
+            // that a cancelled or failed render restores the panes too.
+            self.traced_env_dirty = true;
         }
-        self.sync_traced_environment();
         if let Some(t) = self.tracer.as_mut() {
             let mut settings = t.settings();
             settings.samples = opts.samples.max(1);
@@ -3812,7 +3817,12 @@ impl SolarxyApp {
             self.view.display.hdri_intensity,
             self.view.display.hdri_rotation,
         );
-        if self.traced_env_dirty || env_params != self.traced_env_params {
+        // Not while a still is running: the job owns the shared backend,
+        // including its environment, and a pane install here would swap a
+        // still's sky out from under it and reset the mean it has been
+        // accumulating. Leaving the flag set is what records that the install
+        // is owed once the job lets go.
+        if self.still.is_none() && (self.traced_env_dirty || env_params != self.traced_env_params) {
             self.sync_traced_environment();
             self.traced_env_params = env_params;
             if let Some(t) = self.tracer.as_mut() {
@@ -3913,8 +3923,9 @@ impl SolarxyApp {
         }
     }
 
-    /// Brings the tracer's environment up to date with the scene's, which is
-    /// what makes a traced render light the way the viewport does.
+    /// Brings a traced pane's environment up to date with the scene's, which
+    /// is what makes a traced pane light the way the raster pane beside it
+    /// does.
     ///
     /// The traced scene cache deliberately drops the environment op, on the
     /// reasoning that a host already holds the decoded and convolved image and
@@ -3923,17 +3934,16 @@ impl SolarxyApp {
     /// decision. Without it the kernel integrates against its own constant sky
     /// and an image lit by a sunset renders as though lit by a dim room.
     ///
-    /// Nothing here uploads the image. The equirect the sky pass retains and
-    /// the equirect the kernel walks are the same texture in the same format,
-    /// so the view is shared and only the two distribution tables are built,
-    /// from the distribution both HDRI routes already compute.
+    /// A still does not come through here. See `install_still_environment`
+    /// for what it installs instead, and why a pane and a still are allowed
+    /// to disagree about this one thing.
     fn sync_traced_environment(&mut self) {
         if self.tracer.is_none() {
             return;
         }
-        let intensity = self.view.display.hdri_intensity;
-        let rotation = self.view.display.hdri_rotation;
         if !std::mem::take(&mut self.traced_env_dirty) {
+            let intensity = self.view.display.hdri_intensity;
+            let rotation = self.view.display.hdri_rotation;
             if let Some(tracer) = self.tracer.as_mut() {
                 tracer.set_environment_params(intensity, rotation);
             }
@@ -3941,9 +3951,50 @@ impl SolarxyApp {
         }
         // Resolved before the tracer is borrowed, because resolving reads the
         // whole host and the tracer is a field of it.
-        let (top, bottom) = self
+        //
+        // Where the scene authors no image, a pane falls back to the same
+        // background the raster path resolves, so a traced pane and the raster
+        // pane beside it agree by construction rather than by coincidence.
+        let sky = self
             .resolve_background(&self.view.pane_settings[0])
             .sky_colors();
+        self.install_traced_environment(sky);
+    }
+
+    /// The environment a still integrates against, installed at the moment the
+    /// render starts.
+    ///
+    /// Where the scene authors an image this is the pane path's answer. Where
+    /// it authors none, a still gets no environment at all rather than the
+    /// background a pane happens to be showing: a render is a property of the
+    /// scene and a viewport background is a viewing preference, so a document
+    /// declaring itself lit by nothing but its own lights renders that way. It
+    /// is also the only way this shell and the terminal can agree, the
+    /// terminal having no panes to borrow a background from.
+    ///
+    /// Black rather than merely dim: the kernel excludes an all-zero sky from
+    /// the direct-lighting estimator's choice entirely, so the draws that were
+    /// going to a sky occluded from nearly every point inside a closed room go
+    /// to the lights that are really there instead.
+    ///
+    /// Installed unconditionally, because the dirty flag is the pane path's
+    /// cache over an image rebuild and a still has to overwrite whatever sky
+    /// the panes last left on the shared backend even when nothing is dirty.
+    fn install_still_environment(&mut self) {
+        self.install_traced_environment(([0.0; 3], [0.0; 3]));
+    }
+
+    /// Builds the traced environment from the scene's image and hands it to
+    /// the tracer, falling back to the given constant sky where the scene
+    /// authors no image.
+    ///
+    /// Nothing here uploads the image. The equirect the sky pass retains and
+    /// the equirect the kernel walks are the same texture in the same format,
+    /// so the view is shared and only the two distribution tables are built,
+    /// from the distribution both HDRI routes already compute.
+    fn install_traced_environment(&mut self, sky: ([f32; 3], [f32; 3])) {
+        let intensity = self.view.display.hdri_intensity;
+        let rotation = self.view.display.hdri_rotation;
         let ibl = &self.renderer.ibl_res.ibl;
         let built = match (ibl.equirect.as_ref(), ibl.distribution.as_ref()) {
             (Some(equirect), Some(distribution)) => Some(
@@ -3963,10 +4014,7 @@ impl SolarxyApp {
             Some(environment) => {
                 tracer.set_environment(&self.device, environment, intensity, rotation);
             }
-            // No image is not black. The kernel's constant sky comes from the
-            // same background the raster path resolves, so the two agree by
-            // construction rather than by coincidence.
-            None => tracer.set_sky(top, bottom),
+            None => tracer.set_sky(sky.0, sky.1),
         }
     }
 
