@@ -45,11 +45,17 @@ impl State {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: if cfg!(target_arch = "wasm32") {
-                    wgpu::Limits::downlevel_webgl2_defaults()
-                } else {
-                    wgpu::Limits::default()
-                },
+                // The desktop carried the same 256 MiB ceiling the browser
+                // did, so a large model working here has been a statement
+                // about which models were opened rather than about how this
+                // shell is configured. Both shells now raise the same size
+                // limits off the same helper.
+                //
+                // The branch that stood here selected WebGL2 downlevel
+                // limits under `cfg!(target_arch = "wasm32")`. It was dead:
+                // this crate is native-only and pulls winit, egui-wgpu and
+                // rfd. The web shell has its own device request.
+                required_limits: solarxy_renderer::limits::required_limits(&adapter.limits()),
                 memory_hints: Default::default(),
                 trace: wgpu::Trace::Off,
             })

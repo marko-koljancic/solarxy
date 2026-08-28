@@ -653,8 +653,12 @@ async fn build_path_kernel_at_core_limits() -> Result<(), String> {
             label: Some("solarxy core-limits device"),
             required_features: wgpu::Features::empty(),
             experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            // Exactly what both shells ask for. Asking for more here would
-            // prove something the shipped app cannot run.
+            // The core WebGPU floor, which is the capability both shells
+            // guarantee on every machine. They now raise two buffer size
+            // limits off the adapter where it offers more, so this is their
+            // floor rather than their request; pinning it here is the point,
+            // because a probe granted more would prove something the shipped
+            // app cannot rely on.
             required_limits: wgpu::Limits::default(),
             memory_hints: wgpu::MemoryHints::default(),
             trace: wgpu::Trace::Off,

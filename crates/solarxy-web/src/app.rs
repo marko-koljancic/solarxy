@@ -784,7 +784,7 @@ impl SolarxyApp {
                 label: Some("solarxy-web device"),
                 required_features: wgpu::Features::empty(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: wgpu::Limits::default(),
+                required_limits: solarxy_renderer::limits::required_limits(&adapter.limits()),
                 memory_hints: wgpu::MemoryHints::default(),
                 trace: wgpu::Trace::Off,
             })
@@ -1029,8 +1029,18 @@ impl SolarxyApp {
             // The backend collects upload failures rather than logging them:
             // it has no logging facility and this host is the layer that knows
             // where a message belongs.
+            //
+            // A console line alone was not enough. A mesh the device cannot
+            // hold is refused here, and the whole symptom that reported it
+            // was a viewport that stopped drawing with nothing in the
+            // interface saying why, so the refusal rides the same notice
+            // channel the renderer's other omissions use and reaches the
+            // user as a toast.
             for e in self.raster.take_errors() {
                 log(&format!("scene delta apply failed: {e}"));
+                self.host_events.push(HostEvent::RenderNotice {
+                    message: e.to_string(),
+                });
             }
             self.apply_scene_environment(&delta);
         }

@@ -60,7 +60,9 @@ pub fn harness() -> Option<Harness> {
         force_fallback_adapter: false,
     }))
     .ok()?;
-    // Exactly what both shells ask for. More would prove something the browser
+    // The core WebGPU floor. The shells raise two buffer size limits off the
+    // adapter where it offers more, so this is the floor they guarantee rather
+    // than the limits they receive; more here would prove something the browser
     // cannot run.
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("traced backend test device"),

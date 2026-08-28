@@ -20,12 +20,14 @@ pub struct Gpu {
     pub pathtrace: PathtraceLayouts,
 }
 
-/// A device with exactly the capabilities both shells request, or `None`.
+/// A device at the core WebGPU floor both shells guarantee, or `None`.
 ///
 /// `Features::empty()` and `Limits::default()` are not a convenience here: the
 /// milestone's whole shape depends on the tracer fitting inside core WebGPU, so
 /// a test that quietly asked for more would prove something the browser cannot
-/// run.
+/// run. The shells raise two buffer size limits off the adapter where it offers
+/// more, which is a capacity they may be granted rather than one anything here
+/// may depend on.
 fn gpu() -> Option<Gpu> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),

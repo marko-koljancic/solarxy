@@ -102,8 +102,10 @@ fn host() -> anyhow::Result<Host> {
         compatible_surface: None,
         force_fallback_adapter: false,
     }))?;
-    // Exactly what both shells ask for: an endurance run at more than the
-    // shipped limits would prove nothing about the shipped app.
+    // The core WebGPU floor, which is what the shells guarantee everywhere
+    // even though they now raise two buffer size limits off the adapter: an
+    // endurance run at more than the guaranteed floor would prove nothing
+    // about the machines the app has to hold up on.
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("still endurance"),
         required_features: wgpu::Features::empty(),

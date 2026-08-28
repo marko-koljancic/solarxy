@@ -68,9 +68,18 @@ impl State {
                 self.raster.apply(&self.device, &self.queue, &delta);
                 // The backend collects upload failures rather than logging
                 // them: it has no logging facility and this shell is the layer
-                // that knows a console line is what is wanted here.
+                // that knows where a message belongs.
+                //
+                // A toast rather than only a console line, because a mesh the
+                // device cannot hold is refused through here and the user
+                // would otherwise see a model simply fail to appear. The
+                // toast carries its own `tracing` event, so nothing is logged
+                // twice.
                 for e in self.raster.take_errors() {
-                    tracing::error!("Scene delta apply failed: {e}");
+                    self.gui.set_toast(
+                        &format!("Scene delta apply failed: {e}"),
+                        crate::gui::ToastSeverity::Error,
+                    );
                 }
                 self.apply_scene_environment(&delta);
             }

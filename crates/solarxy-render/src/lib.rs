@@ -882,10 +882,17 @@ struct Assembled {
     depth: Option<Vec<u8>>,
 }
 
-/// A device with no surface, asking for exactly what both shells ask for.
+/// A device with no surface, asking for what the GPU shells ask for.
 ///
-/// Requesting more would mean an image the shipped app cannot reproduce, which
-/// defeats the point of rendering the same scene here.
+/// The core WebGPU defaults are the floor, and the two buffer size limits are
+/// raised off the adapter exactly as the browser and the desktop raise them,
+/// through the same helper. This surface carried the identical 256 MiB ceiling
+/// and would have refused a large model from the command line for the same
+/// reason the browser did.
+///
+/// It does not make an image this renderer could not otherwise produce. A limit
+/// governs what fits, not what is drawn, so the picture is unchanged and only
+/// the size of scene that reaches the GPU moves.
 fn request_device() -> Result<(wgpu::Device, wgpu::Queue), RenderError> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
@@ -901,7 +908,7 @@ fn request_device() -> Result<(wgpu::Device, wgpu::Queue), RenderError> {
         label: Some("solarxy-render"),
         required_features: wgpu::Features::empty(),
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        required_limits: wgpu::Limits::default(),
+        required_limits: solarxy_renderer::limits::required_limits(&adapter.limits()),
         memory_hints: wgpu::MemoryHints::default(),
         trace: wgpu::Trace::Off,
     }))

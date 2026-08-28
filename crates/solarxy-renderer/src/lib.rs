@@ -70,6 +70,7 @@ pub mod ibl;
 pub mod input;
 pub mod labels;
 pub mod light;
+pub mod limits;
 pub mod ltc;
 pub mod lut;
 pub mod manipulator;
