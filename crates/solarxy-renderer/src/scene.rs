@@ -76,7 +76,7 @@ impl BackgroundModeExt for ResolvedBackground {
         // A gradient's contrast tracks the mean of its sky band; a solid
         // (or the pre-load HDRI fallback) tracks the flat clear colour.
         if self.kind == BgKind::Gradient {
-            (lum(self.sky_top) + lum(self.sky_bottom)) * 0.5
+            f32::midpoint(lum(self.sky_top), lum(self.sky_bottom))
         } else {
             lum(self.clear)
         }
@@ -392,6 +392,8 @@ pub fn lights_from_camera(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // rig constants and pass-through values, compared bit-exact
+
     use super::*;
     use cgmath::{InnerSpace, Point3, Vector3};
     use solarxy_core::preferences::ProjectionMode;

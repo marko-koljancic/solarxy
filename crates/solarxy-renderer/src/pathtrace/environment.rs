@@ -86,7 +86,7 @@ impl TraceEnvironment {
         // components and the texture is four: the alpha lane is written opaque
         // rather than left at whatever the allocation held.
         let mut texels = vec![0u8; (width as usize) * (height as usize) * 8];
-        for (i, px) in pixels.chunks_exact(3).enumerate() {
+        for (i, px) in pixels.as_chunks::<3>().0.iter().enumerate() {
             let out = i * 8;
             for (c, value) in px.iter().enumerate() {
                 let bytes = half::f16::from_f32(value.clamp(0.0, 65504.0)).to_le_bytes();

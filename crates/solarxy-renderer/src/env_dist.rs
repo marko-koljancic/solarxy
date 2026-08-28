@@ -281,6 +281,8 @@ fn luminance(r: f32, g: f32, b: f32) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact zeros, and a CDF normalized to end at exactly 1.0
+
     use super::*;
 
     /// A grey image, where every pixel has the same luminance and the only
@@ -311,7 +313,7 @@ mod tests {
         // for, which reads as a sky sampled through a kaleidoscope.
         let (w, h) = (16u32, 8u32);
         let mut pixels = flat(w, h, 0.0);
-        for (i, p) in pixels.chunks_exact_mut(3).enumerate() {
+        for (i, p) in pixels.as_chunks_mut::<3>().0.iter_mut().enumerate() {
             #[allow(clippy::cast_precision_loss)]
             let v = (i % 7) as f32;
             p[0] = v;
@@ -343,10 +345,11 @@ mod tests {
         // It is never chosen, because its marginal weight is zero, but a
         // variate that reaches it through a rounding error has to find a column.
         let (w, h) = (8u32, 4u32);
+        let black_row = 1usize;
         let mut pixels = flat(w, h, 1.0);
         for x in 0..w as usize {
             for c in 0..3 {
-                pixels[(1 * w as usize + x) * 3 + c] = 0.0;
+                pixels[(black_row * w as usize + x) * 3 + c] = 0.0;
             }
         }
         let dist = EnvDistribution::build(w, h, &pixels);
@@ -430,7 +433,7 @@ mod tests {
         // ignored the pixels entirely.
         let (w, h) = (48u32, 24u32);
         let mut pixels = flat(w, h, 0.0);
-        for (i, p) in pixels.chunks_exact_mut(3).enumerate() {
+        for (i, p) in pixels.as_chunks_mut::<3>().0.iter_mut().enumerate() {
             #[allow(clippy::cast_precision_loss)]
             let value = 0.05 + ((i * 37) % 23) as f32;
             p[0] = value;

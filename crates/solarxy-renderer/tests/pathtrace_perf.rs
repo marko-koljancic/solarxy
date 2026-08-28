@@ -233,7 +233,9 @@ fn primary_ray_throughput() {
     // Coverage before throughput, so the throughput figure can be read. Alpha
     // carries whether the ray hit anything.
     let covered = read_target(&gpu, &target)
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[3] > 0.0)
         .count();
     let pixels = f64::from(WIDTH) * f64::from(HEIGHT);
@@ -286,7 +288,9 @@ fn write_png(gpu: &common::Gpu, target: &TraceTarget, path: &str) {
     // The channel is already in `0..1` and this is a diagnostic, not the
     // composite chain: no exposure, no tone map, no transfer function.
     let bytes: Vec<u8> = floats
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| {
             [
                 (p[0].clamp(0.0, 1.0) * 255.0) as u8,

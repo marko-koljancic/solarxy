@@ -863,7 +863,7 @@ mod tests {
 
     /// Not an assertion: a way to look at the surface without a terminal.
     #[test]
-    #[ignore]
+    #[ignore = "manual preview, not an assertion"]
     fn preview() {
         let buffer = render(CAPS, 140, 45);
         println!("{}", screen(&buffer, 140, 45));
@@ -871,7 +871,7 @@ mod tests {
 
     /// Not an assertion: the help overlay over a dimmed grid.
     #[test]
-    #[ignore]
+    #[ignore = "manual preview, not an assertion"]
     fn preview_help() {
         let report = report();
         let model = ModelView::default();
@@ -885,7 +885,7 @@ mod tests {
     /// Not an assertion: the whole surface over a real model, which is the
     /// only way to judge the plots.
     #[test]
-    #[ignore]
+    #[ignore = "manual preview over a model on disk, not an assertion"]
     fn preview_a_real_model() {
         const DEFAULT: &str = concat!(
             env!("CARGO_MANIFEST_DIR"),

@@ -703,7 +703,11 @@ mod tests {
         for caps in every_pair() {
             let glyphs = caps.glyphs();
             let buffer = render_reference_at(caps);
-            let symbols: Vec<&str> = buffer.content().iter().map(|cell| cell.symbol()).collect();
+            let symbols: Vec<&str> = buffer
+                .content()
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect();
             assert!(
                 symbols.contains(&glyphs.border_focused.top_left),
                 "the focused frame is absent at {caps:?}"
@@ -723,7 +727,11 @@ mod tests {
         for caps in every_pair() {
             let glyphs = caps.glyphs();
             let buffer = render_reference_at(caps);
-            let symbols: Vec<&str> = buffer.content().iter().map(|cell| cell.symbol()).collect();
+            let symbols: Vec<&str> = buffer
+                .content()
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect();
             for (mark, name) in [
                 (glyphs.check, "complete"),
                 (glyphs.cross, "absent"),

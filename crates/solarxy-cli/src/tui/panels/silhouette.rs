@@ -134,7 +134,7 @@ fn project(panel: &Silhouette, ctx: &AnalyzeCtx<'_>, area: Rect) -> Vec<String> 
     let mut raster = Raster::new(area.width, area.height);
     let mut points = Vec::with_capacity(ctx.subject.model.vertex_count());
     for mesh in &ctx.subject.model.meshes {
-        for xyz in mesh.positions.chunks_exact(3) {
+        for xyz in mesh.positions.as_chunks::<3>().0 {
             let u = (xyz[right] - bounds.min[right]) / bounds.span(right);
             let mut v = (xyz[down] - bounds.min[down]) / bounds.span(down);
             if invert {

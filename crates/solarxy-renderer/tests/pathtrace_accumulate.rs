@@ -290,7 +290,12 @@ fn a_chunked_run_reaches_the_same_image_as_one_dispatch() {
     // than a hedge: at a percent this test would pass with the chunks drawing
     // entirely different samples.
     let mut worst = 0.0f64;
-    for (a, b) in whole.chunks_exact(4).zip(chunked.chunks_exact(4)) {
+    for (a, b) in whole
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(chunked.as_chunks::<4>().0)
+    {
         for c in 0..3 {
             let (x, y) = (f64::from(a[c]), f64::from(b[c]));
             let denom = x.abs().max(y.abs()).max(1e-4);
@@ -308,7 +313,12 @@ fn a_chunked_run_reaches_the_same_image_as_one_dispatch() {
     // own mean and the means are combined by chunk size -- so they get their own
     // tolerance rather than riding the colour's.
     let mut aux_worst = 0.0f64;
-    for (a, b) in whole_aux.chunks_exact(4).zip(chunked_aux.chunks_exact(4)) {
+    for (a, b) in whole_aux
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(chunked_aux.as_chunks::<4>().0)
+    {
         for c in 0..3 {
             let (x, y) = (f64::from(a[c]), f64::from(b[c]));
             aux_worst = aux_worst.max((x - y).abs());
@@ -405,8 +415,10 @@ fn the_clamp_bounds_what_a_path_found_after_it_scattered() {
     );
 
     let peak = |px: &[f32]| {
-        px.chunks_exact(4)
-            .map(luminance)
+        px.as_chunks::<4>()
+            .0
+            .iter()
+            .map(|px| luminance(px))
             .fold(0.0f32, |a, b| a.max(b))
     };
     let loose_peak = peak(&unclamped);

@@ -38,14 +38,14 @@ fn edges_of(mesh: &KernelMesh) -> KernelMesh {
     };
     match mesh.topology {
         MeshTopology::Triangles => {
-            for tri in mesh.indices.chunks_exact(3) {
+            for tri in mesh.indices.as_chunks::<3>().0 {
                 insert(tri[0], tri[1]);
                 insert(tri[1], tri[2]);
                 insert(tri[2], tri[0]);
             }
         }
         MeshTopology::Lines => {
-            for pair in mesh.indices.chunks_exact(2) {
+            for pair in mesh.indices.as_chunks::<2>().0 {
                 insert(pair[0], pair[1]);
             }
         }

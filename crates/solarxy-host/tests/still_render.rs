@@ -193,7 +193,7 @@ fn raster(h: &Harness) -> RasterBackend {
 fn difference(a: &[u8], b: &[u8]) -> f64 {
     let mut total = 0.0f64;
     let mut count = 0u64;
-    for (p, q) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+    for (p, q) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0) {
         for c in 0..3 {
             total += f64::from(i32::from(p[c]) - i32::from(q[c])).abs();
             count += 1;
@@ -319,7 +319,9 @@ fn a_traced_tile_carries_the_passes_that_were_asked_for() {
         .iter()
         .filter_map(|t| t.depth.as_ref())
         .flat_map(|d| {
-            d.chunks_exact(4)
+            d.as_chunks::<4>()
+                .0
+                .iter()
                 .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         })
         .collect();

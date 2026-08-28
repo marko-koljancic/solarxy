@@ -228,6 +228,8 @@ impl LightsUniform {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact values constructed by the tests
+
     use super::*;
 
     fn def(kind: LightKind) -> LightDef {

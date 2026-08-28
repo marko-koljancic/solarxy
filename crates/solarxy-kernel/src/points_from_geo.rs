@@ -164,8 +164,20 @@ fn centers_cloud(mesh: &KernelMesh) -> KernelMesh {
 /// The corner indices of each primitive under the mesh's topology.
 fn primitive_corners(mesh: &KernelMesh) -> Vec<Vec<u32>> {
     match mesh.topology {
-        MeshTopology::Triangles => mesh.indices.chunks_exact(3).map(<[u32]>::to_vec).collect(),
-        MeshTopology::Lines => mesh.indices.chunks_exact(2).map(<[u32]>::to_vec).collect(),
+        MeshTopology::Triangles => mesh
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|c| c.to_vec())
+            .collect(),
+        MeshTopology::Lines => mesh
+            .indices
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| c.to_vec())
+            .collect(),
         MeshTopology::Points => (0..mesh.positions.len() as u32).map(|i| vec![i]).collect(),
     }
 }

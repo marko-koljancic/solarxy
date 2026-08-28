@@ -446,7 +446,7 @@ impl ReviewState {
             if !(-1.0..=1.0).contains(&ndc_z) {
                 continue;
             }
-            let px = (ndc_x + 1.0) * 0.5 * viewport_size_px.0;
+            let px = f32::midpoint(ndc_x, 1.0) * viewport_size_px.0;
             let py = (1.0 - ndc_y) * 0.5 * viewport_size_px.1;
             let dx = px - cursor_px.0;
             let dy = py - cursor_px.1;

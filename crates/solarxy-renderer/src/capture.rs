@@ -196,7 +196,7 @@ impl PendingCapture {
             source_format,
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         ) {
-            for chunk in pixels.chunks_exact_mut(4) {
+            for chunk in pixels.as_chunks_mut::<4>().0 {
                 chunk.swap(0, 2);
             }
         }
@@ -248,12 +248,16 @@ impl PendingCapture {
         let bytes = self.unpad(bytes_per_pixel);
         let floats = match source_format {
             wgpu::TextureFormat::Rgba16Float => bytes
-                .chunks_exact(2)
-                .map(|b| f32::from(half::f16::from_le_bytes([b[0], b[1]])))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| f32::from(half::f16::from_le_bytes(*b)))
                 .collect(),
             _ => bytes
-                .chunks_exact(4)
-                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
                 .collect(),
         };
         CaptureFloatPoll::Ready(floats)

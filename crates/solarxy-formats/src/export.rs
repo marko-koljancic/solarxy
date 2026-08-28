@@ -91,12 +91,12 @@ fn obj_text(meshes: &[ExportMesh<'_>], mtl: Option<(&str, &[String])>) -> String
         };
         match mesh.topology {
             MeshTopology::Triangles => {
-                for tri in mesh.indices.chunks_exact(3) {
+                for tri in mesh.indices.as_chunks::<3>().0 {
                     let _ = writeln!(out, "f {} {} {}", f(tri[0]), f(tri[1]), f(tri[2]));
                 }
             }
             MeshTopology::Lines => {
-                for pair in mesh.indices.chunks_exact(2) {
+                for pair in mesh.indices.as_chunks::<2>().0 {
                     let _ = writeln!(out, "l {} {}", v_base + pair[0], v_base + pair[1]);
                 }
             }
@@ -242,7 +242,7 @@ pub fn write_stl_bytes(meshes: &[ExportMesh<'_>]) -> Result<Vec<u8>, FormatsErro
         if mesh.topology != MeshTopology::Triangles {
             continue;
         }
-        for tri in mesh.indices.chunks_exact(3) {
+        for tri in mesh.indices.as_chunks::<3>().0 {
             let p = |i: u32| mesh.positions[i as usize];
             let (a, b, c) = (p(tri[0]), p(tri[1]), p(tri[2]));
             let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -342,7 +342,7 @@ pub fn write_ply_bytes(meshes: &[ExportMesh<'_>]) -> Vec<u8> {
     let mut base = 0u32;
     for mesh in meshes {
         if mesh.topology == MeshTopology::Triangles {
-            for tri in mesh.indices.chunks_exact(3) {
+            for tri in mesh.indices.as_chunks::<3>().0 {
                 let _ = writeln!(
                     out,
                     "3 {} {} {}",
@@ -1064,7 +1064,9 @@ pub fn encode_jpeg_bytes(img: &RawImageData, quality: u8) -> Result<Vec<u8>, For
     // JPEG has no alpha: flatten onto opaque.
     let rgb: Vec<u8> = img
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|c| [c[0], c[1], c[2]])
         .collect();
     let mut out = std::io::Cursor::new(Vec::new());
@@ -1086,9 +1088,14 @@ pub fn encode_jpeg_bytes(img: &RawImageData, quality: u8) -> Result<Vec<u8>, For
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact factors that round-trip through export and reload
+
     use super::*;
 
-    fn quad() -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>) {
+    /// Owned quad buffers: positions, normals, tex coords, indices.
+    type QuadData = (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>);
+
+    fn quad() -> QuadData {
         (
             vec![
                 [0.0, 0.0, 0.0],
@@ -1102,9 +1109,7 @@ mod tests {
         )
     }
 
-    fn export_quad<'a>(
-        d: &'a (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>),
-    ) -> ExportMesh<'a> {
+    fn export_quad(d: &QuadData) -> ExportMesh<'_> {
         ExportMesh {
             name: "quad",
             positions: &d.0,
@@ -1643,9 +1648,9 @@ mod tests {
     /// A depth pass is one channel, and it is the one a compositor looks for.
     #[test]
     fn a_depth_pass_carries_a_single_channel_named_z() {
+        use exr::prelude::{ReadChannels, ReadLayers};
         let depth: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let bytes = encode_exr_depth_bytes(&depth, 4, 3).expect("exr");
-        use exr::prelude::{ReadChannels, ReadLayers};
         let image = exr::prelude::read()
             .no_deep_data()
             .largest_resolution_level()

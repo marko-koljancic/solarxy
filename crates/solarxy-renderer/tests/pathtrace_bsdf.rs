@@ -778,7 +778,12 @@ fn the_sphere_grid_renders() {
     // The mean is the one number worth printing even without a file: under the
     // furnace configuration it should sit just below the environment, and how far
     // below is the deficit averaged over the whole grid.
-    let mean: f64 = floats.chunks_exact(4).map(|p| f64::from(p[0])).sum::<f64>()
+    let mean: f64 = floats
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|p| f64::from(p[0]))
+        .sum::<f64>()
         / (f64::from(WIDTH) * f64::from(HEIGHT));
     println!(
         "mean red channel {mean:.4} against an environment of {:.4}",
@@ -791,7 +796,9 @@ fn the_sphere_grid_renders() {
         // that for a real render, and applying half of it here would misrepresent
         // both.
         let bytes: Vec<u8> = floats
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|p| {
                 let encode = |v: f32| {
                     let c = v.clamp(0.0, 1.0);

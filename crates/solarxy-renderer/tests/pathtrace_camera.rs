@@ -158,7 +158,9 @@ fn depth_map(gpu: &common::Gpu, camera: &Camera) -> Vec<(f32, bool)> {
     // Alpha carries whether anything was hit, which is what this channel puts
     // there so a reader can tell a miss from a black surface.
     spin(gpu, &mut readback)
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|px| (px[0], px[3] > 0.5))
         .collect()
 }

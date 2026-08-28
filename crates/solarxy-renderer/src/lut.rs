@@ -104,8 +104,8 @@ impl LutTexture {
         // undershoots below zero is a real thing to author.
         let one = f16::from_f32(1.0).to_ne_bytes();
         let mut texels: Vec<u8> = Vec::with_capacity((cube.size as usize).pow(3) * 4 * 2);
-        for entry in cube.data.chunks_exact(3) {
-            for c in &entry[..3] {
+        for entry in cube.data.as_chunks::<3>().0 {
+            for c in entry {
                 texels.extend_from_slice(&f16::from_f32(c.clamp(-F16_MAX, F16_MAX)).to_ne_bytes());
             }
             texels.extend_from_slice(&one);
@@ -275,7 +275,7 @@ mod tests {
     fn the_texel_conversion_pads_alpha_and_keeps_order() {
         let cube = LutCube::identity(2);
         let mut texels: Vec<f32> = Vec::new();
-        for entry in cube.data.chunks_exact(3) {
+        for entry in cube.data.as_chunks::<3>().0 {
             texels.extend([entry[0], entry[1], entry[2], 1.0]);
         }
         assert_eq!(texels.len(), 8 * 4);

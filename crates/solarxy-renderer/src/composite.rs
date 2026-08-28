@@ -465,6 +465,8 @@ fn create_bind_group(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // the look resolution copies values, it never computes them
+
     use super::*;
 
     /// Neutral has to mean bit-identical, not merely close: it is what

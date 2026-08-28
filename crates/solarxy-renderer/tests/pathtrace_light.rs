@@ -157,7 +157,9 @@ impl Harness {
             })
             .collect();
         let raw = self.run(LightProbeMode::Sample, &taps);
-        raw.chunks_exact(LIGHT_RESULT_WIDTH)
+        raw.as_chunks::<LIGHT_RESULT_WIDTH>()
+            .0
+            .iter()
             .map(|c| Drawn {
                 direction: [c[0][0], c[0][1], c[0][2]],
                 pdf: c[0][3],
@@ -182,7 +184,9 @@ impl Harness {
             })
             .collect();
         let raw = self.run(LightProbeMode::Intersect, &taps);
-        raw.chunks_exact(LIGHT_RESULT_WIDTH)
+        raw.as_chunks::<LIGHT_RESULT_WIDTH>()
+            .0
+            .iter()
             .map(|c| c[0][3])
             .collect()
     }
@@ -246,7 +250,7 @@ fn a_rect_light_density_integrates_to_the_solid_angle_it_subtends() {
     // disagree by any factor, or if both are wrong by the same factor, the mean
     // of one over the density misses the closed form by exactly that factor.
     let def = base_light(LightKind::RectArea);
-    let Some(harness) = Harness::new(TracedLight::pool(&[def.clone()])) else {
+    let Some(harness) = Harness::new(TracedLight::pool(std::slice::from_ref(&def))) else {
         return;
     };
 
@@ -405,8 +409,8 @@ fn a_point_light_with_a_radius_spreads_its_connections() {
 fn direction_spread(drawn: &[Drawn]) -> f32 {
     let mut mean = [0.0f32; 3];
     for d in drawn {
-        for axis in 0..3 {
-            mean[axis] += d.direction[axis];
+        for (m, v) in mean.iter_mut().zip(d.direction) {
+            *m += v;
         }
     }
     let len = (mean[0] * mean[0] + mean[1] * mean[1] + mean[2] * mean[2]).sqrt();
@@ -696,7 +700,7 @@ fn the_three_estimators_agree_on_the_same_scene() {
             }
         };
         let mut total = 0.0f64;
-        for px in pixels.chunks_exact(4) {
+        for px in pixels.as_chunks::<4>().0 {
             total += f64::from(px[0]) + f64::from(px[1]) + f64::from(px[2]);
             assert!(
                 px[0].is_finite() && px[1].is_finite() && px[2].is_finite(),
@@ -923,7 +927,7 @@ fn the_estimators_agree_through_a_blended_pane() {
             }
         };
         let mut total = 0.0f64;
-        for px in pixels.chunks_exact(4) {
+        for px in pixels.as_chunks::<4>().0 {
             total += f64::from(px[0]) + f64::from(px[1]) + f64::from(px[2]);
             assert!(
                 px[0].is_finite() && px[1].is_finite() && px[2].is_finite(),

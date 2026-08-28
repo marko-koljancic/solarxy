@@ -777,6 +777,7 @@ fn grown_captures() -> &'static [&'static str] {
 /// The shared composite derives its bloom and SSAO flags from the renderer,
 /// which this harness builds with both disabled, so it resolves to the same
 /// `false, false` the six hand-written copies passed.
+#[allow(clippy::too_many_arguments)] // each argument is a distinct GPU resource wired straight into the shared calls; a bundle would duplicate PaneScene
 fn capture_through_host(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -899,7 +900,7 @@ fn read_target(
     buffer.unmap();
 
     // BGRA -> RGBA.
-    for chunk in pixels.chunks_exact_mut(4) {
+    for chunk in pixels.as_chunks_mut::<4>().0 {
         chunk.swap(0, 2);
     }
     Ok(pixels)

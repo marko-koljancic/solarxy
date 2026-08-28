@@ -68,7 +68,7 @@ pub fn scatter_weighted(
         if mesh.topology != MeshTopology::Triangles {
             continue;
         }
-        for (tri, corners) in mesh.indices.chunks_exact(3).enumerate() {
+        for (tri, corners) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
             let [a, b, c] = triangle_positions(mesh, corners);
             let area = f64::from(cross_length(sub(b, a), sub(c, a))) * 0.5;
             let weight = area * triangle_density(mesh, corners, density);

@@ -1237,6 +1237,9 @@ fn cornell_box() -> Builder {
     const HGT: f64 = 2.0;
     const D: f64 = 2.4;
 
+    // One wall: name, plane size, translate, rotate, base colour.
+    type WallSpec = (&'static str, [f64; 2], [f64; 3], [f64; 3], [f32; 4]);
+
     let mut b = Builder::new();
     b.note(
         ROOT,
@@ -1260,7 +1263,7 @@ fn cornell_box() -> Builder {
     // A plane's own width and height are its X and Y before that rotation,
     // which is why the floor's height is the room's depth.
     // Order: floor, ceiling, back, left (red), right (green).
-    let walls: [(&str, [f64; 2], [f64; 3], [f64; 3], [f32; 4]); 5] = [
+    let walls: [WallSpec; 5] = [
         (
             "floor",
             [W, D],

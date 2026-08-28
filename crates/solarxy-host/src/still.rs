@@ -154,7 +154,7 @@ pub fn readback_for(format: &str, space: &str) -> StillReadback {
 #[must_use]
 pub fn float_to_rgba8(bytes: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(bytes.len() / 4);
-    for px in bytes.chunks_exact(16) {
+    for px in bytes.as_chunks::<16>().0 {
         for c in 0..3 {
             let i = c * 4;
             let v = f32::from_le_bytes([px[i], px[i + 1], px[i + 2], px[i + 3]]).clamp(0.0, 1.0);

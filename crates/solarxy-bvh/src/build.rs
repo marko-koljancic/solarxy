@@ -117,7 +117,7 @@ impl Bvh {
         let mut source = Vec::with_capacity(tri_count);
         let mut skipped = 0u32;
 
-        for (tri, corner) in indices.chunks_exact(3).enumerate() {
+        for (tri, corner) in indices.as_chunks::<3>().0.iter().enumerate() {
             let (Some(&a), Some(&b), Some(&c)) = (
                 positions.get(corner[0] as usize),
                 positions.get(corner[1] as usize),

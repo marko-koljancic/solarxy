@@ -1,6 +1,8 @@
 //! Engine facade tests: command application, event emission, cook
 //! integration, preview non-leakage, and serde round-trips.
 
+#![allow(clippy::float_cmp)] // exact literals stored and read back through the document
+
 use super::*;
 use crate::document::ContextKind;
 use crate::params::ParamValue;
@@ -2198,6 +2200,8 @@ fn scene_delta_lowers_the_cameras_look() {
 /// does: stage bytes, cook, and read the lowered scene op.
 #[test]
 fn a_staged_cube_reaches_the_camera_look() {
+    use std::fmt::Write as _;
+
     use solarxy_core::scene::SceneOp;
     let mut e = engine();
     let cam = add(&mut e, GraphContext::Root, "camera");
@@ -2207,7 +2211,7 @@ fn a_staged_cube_reaches_the_camera_look() {
     for b in 0..2 {
         for g in 0..2 {
             for r in 0..2 {
-                src.push_str(&format!("{r}.0 {g}.0 {b}.0\n"));
+                let _ = writeln!(src, "{r}.0 {g}.0 {b}.0");
             }
         }
     }
@@ -2421,7 +2425,8 @@ fn a_camera_saved_before_the_look_opens_neutral() {
 fn physical_camera_derives_fov_from_focal_and_sensor() {
     let mut e = engine();
     let cam = add(&mut e, GraphContext::Root, "camera");
-    for (key, val) in [("kind", ParamValue::Enum("physical".to_string()))] {
+    {
+        let (key, val) = ("kind", ParamValue::Enum("physical".to_string()));
         e.apply(Command::SetParam {
             ctx: GraphContext::Root,
             node: cam,
@@ -4474,6 +4479,24 @@ fn materials_survive_array_and_mirror() {
 /// instead of asserting on the hook.
 #[test]
 fn a_document_saved_before_the_copy_mode_split_opens_still_baked() {
+    /// Everything about the output a wrong migration would move: how the
+    /// copies are partitioned, whether they are placements or geometry, and
+    /// where the points actually are.
+    fn shape(e: &Engine, node: NodeId) -> (u32, Option<usize>, Vec<[f32; 3]>) {
+        let set = e
+            .cook
+            .outputs(node)
+            .expect("cooked")
+            .get("geometry")
+            .and_then(crate::registry::coerce::Value::as_geometry)
+            .expect("geometry out");
+        (
+            set.mesh_count(),
+            set.meshes[0].instances.as_ref().map(|i| i.len()),
+            set.meshes[0].positions.to_vec(),
+        )
+    }
+
     let (mut e, ctx) = subflow_engine();
     let prim = add(&mut e, ctx, "box");
     let arr = add(&mut e, ctx, "array");
@@ -4511,23 +4534,6 @@ fn a_document_saved_before_the_copy_mode_split_opens_still_baked() {
     .unwrap();
     e.cook(&mut || true);
 
-    /// Everything about the output a wrong migration would move: how the
-    /// copies are partitioned, whether they are placements or geometry, and
-    /// where the points actually are.
-    fn shape(e: &Engine, node: NodeId) -> (u32, Option<usize>, Vec<[f32; 3]>) {
-        let set = e
-            .cook
-            .outputs(node)
-            .expect("cooked")
-            .get("geometry")
-            .and_then(crate::registry::coerce::Value::as_geometry)
-            .expect("geometry out");
-        (
-            set.mesh_count(),
-            set.meshes[0].instances.as_ref().map(|i| i.len()),
-            set.meshes[0].positions.to_vec(),
-        )
-    }
     let want = shape(&e, arr);
     assert_eq!(want.0, 4, "the reference cook baked four copies");
     assert_eq!(want.1, None, "baked output carries no placement list");
@@ -4995,6 +5001,8 @@ fn every_downstream_node_agrees_with_its_baked_equivalent() {
 /// geometry input, a geometry output, and a body that reads one and returns
 /// the other. Nothing here mentions placements, and that is the point.
 fn carry_unaware_probe() -> crate::registry::NodeTypeDescriptor {
+    // Signature matches CookFn.
+    #[allow(clippy::unnecessary_wraps)]
     fn cook(
         _p: &crate::registry::resolve::ResolvedParams,
         inputs: &crate::cook::Inputs,
@@ -5187,7 +5195,11 @@ fn merging_a_scatter_with_its_surface_keeps_the_copies_instanced() {
     // One instanced prototype plus one plain surface, not one of each
     // baked and not a surface replicated forty times.
     assert!(set.is_instanced(), "the copies survived the merge");
-    let placed: Vec<usize> = set.meshes.iter().map(|m| m.instance_count()).collect();
+    let placed: Vec<usize> = set
+        .meshes
+        .iter()
+        .map(solarxy_kernel::KernelMesh::instance_count)
+        .collect();
     assert!(
         placed.contains(&40),
         "the prototype keeps its forty placements: {placed:?}"
@@ -5544,6 +5556,7 @@ fn cross_context_references_propagate_and_refuse_cycles() {
 #[test]
 fn context_kinds_and_node_refs_survive_a_slxy_round_trip() {
     use crate::engine::scenefile::SceneSidecar;
+    use crate::registry::param_spec::{NodePathAccept, ParamType};
 
     let mut e = engine();
     // A real geo container through the command path (kind from `opens`).
@@ -5564,7 +5577,6 @@ fn context_kinds_and_node_refs_survive_a_slxy_round_trip() {
 
     // The plain JSON form of a NodeRef is the raw id (or null): pin the
     // schema-v1 shape directly.
-    use crate::registry::param_spec::{NodePathAccept, ParamType};
     let ty = ParamType::NodePath {
         accept: NodePathAccept::TypeIs("camera".to_string()),
     };
@@ -5648,7 +5660,7 @@ fn texture_network_cooks_and_publishes_its_display_image() {
 }
 
 /// The 0.8.0 procedural chain cooks end to end and recooks on reseed:
-/// box -> scatter -> copy_to_points with a plane template. This is the
+/// box -> scatter -> `copy_to_points` with a plane template. This is the
 /// milestone's keep-last-good proof on a real graph: a reseeded scatter is
 /// a changed Points payload flowing through a downstream copy, and the
 /// recook must reach the output rather than being swallowed.
@@ -5869,7 +5881,7 @@ fn material_network_references_flow_across_three_contexts() {
     );
 }
 
-/// The export nodes: a geo_export taps the chain, its Save
+/// The export nodes: a `geo_export` taps the chain, its Save
 /// action encodes the committed geometry, and the bytes reimport through
 /// this workspace's own loaders (the round-trip acceptance criterion).
 #[test]
@@ -8107,7 +8119,7 @@ fn only_the_first_environment_node_wins() {
 /// the network it references has drained. The driver's forward-progress
 /// rule cooks a context's first eligible node without consulting the
 /// budget, so without the engine's deferral gate an interrupted pass
-/// cooked a tex_ref ahead of its source, and the resulting
+/// cooked a `tex_ref` ahead of its source, and the resulting
 /// unresolved-reference error was terminal: nothing re-dirtied the node,
 /// and the scene wedged. Driven at a budget of one extra node per pass,
 /// the worst case.

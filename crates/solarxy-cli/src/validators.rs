@@ -48,35 +48,6 @@ pub fn is_valid_model_path(path: &str) -> Result<PathBuf, String> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn valid_path_nonexistent_file() {
-        let result = is_valid_model_path("/nonexistent/model.obj");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("does not exist"));
-    }
-
-    #[test]
-    fn valid_path_unsupported_extension() {
-        let result = is_valid_model_path("Cargo.toml");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid file extension"));
-    }
-
-    #[test]
-    fn valid_path_directory_not_file() {
-        let result = is_valid_model_path("src");
-        assert!(result.is_err());
-        assert!(
-            result.unwrap_err().contains("not a file"),
-            "should reject directories"
-        );
-    }
-}
-
 /// What the render subcommand accepts: a scene file, or any model the loaders
 /// read.
 ///
@@ -109,5 +80,34 @@ pub fn is_valid_render_input(path: &str) -> Result<PathBuf, String> {
             "File has no extension, expected '.slxy' or {}",
             expected()
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_path_nonexistent_file() {
+        let result = is_valid_model_path("/nonexistent/model.obj");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn valid_path_unsupported_extension() {
+        let result = is_valid_model_path("Cargo.toml");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid file extension"));
+    }
+
+    #[test]
+    fn valid_path_directory_not_file() {
+        let result = is_valid_model_path("src");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("not a file"),
+            "should reject directories"
+        );
     }
 }

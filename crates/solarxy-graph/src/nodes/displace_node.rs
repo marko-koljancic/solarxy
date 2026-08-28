@@ -223,6 +223,8 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // bit-exact pass-through is the property under test
+
     use super::*;
     use crate::cook::InputSlot;
     use crate::params::ParamSource;
@@ -314,7 +316,7 @@ mod tests {
         let (out, warnings) = run(BTreeMap::new(), set.clone());
         assert_eq!(*out.meshes[0].positions, *set.meshes[0].positions);
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("N"), "{warnings:?}");
+        assert!(warnings[0].contains('N'), "{warnings:?}");
     }
 
     #[test]

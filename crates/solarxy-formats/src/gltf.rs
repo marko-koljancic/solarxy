@@ -553,38 +553,52 @@ fn image_data_to_raw(img: &::gltf::image::Data) -> Option<RawImageData> {
         ::gltf::image::Format::R8G8B8A8 => img.pixels.clone(),
         ::gltf::image::Format::R8G8B8 => img
             .pixels
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
             .collect(),
         ::gltf::image::Format::R16G16B16A16 => img
             .pixels
-            .chunks_exact(8)
+            .as_chunks::<8>()
+            .0
+            .iter()
             .flat_map(|c| [c[0], c[2], c[4], c[6]])
             .collect(),
         ::gltf::image::Format::R16G16B16 => img
             .pixels
-            .chunks_exact(6)
+            .as_chunks::<6>()
+            .0
+            .iter()
             .flat_map(|c| [c[0], c[2], c[4], 255])
             .collect(),
         ::gltf::image::Format::R8 => img.pixels.iter().flat_map(|&r| [r, r, r, 255]).collect(),
         ::gltf::image::Format::R16 => img
             .pixels
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|c| [c[0], c[0], c[0], 255])
             .collect(),
         ::gltf::image::Format::R8G8 => img
             .pixels
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|rg| [rg[0], rg[1], 0, 255])
             .collect(),
         ::gltf::image::Format::R16G16 => img
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|c| [c[0], c[2], 0, 255])
             .collect(),
         ::gltf::image::Format::R32G32B32A32FLOAT => img
             .pixels
-            .chunks_exact(16)
+            .as_chunks::<16>()
+            .0
+            .iter()
             .flat_map(|c| {
                 let r = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
                 let g = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
@@ -600,7 +614,9 @@ fn image_data_to_raw(img: &::gltf::image::Data) -> Option<RawImageData> {
             .collect(),
         ::gltf::image::Format::R32G32B32FLOAT => img
             .pixels
-            .chunks_exact(12)
+            .as_chunks::<12>()
+            .0
+            .iter()
             .flat_map(|c| {
                 let r = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
                 let g = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);

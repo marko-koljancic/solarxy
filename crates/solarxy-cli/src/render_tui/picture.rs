@@ -36,7 +36,9 @@ impl Picture {
     /// sees rather than what the channels hold.
     pub fn from_rgba8(width: u32, height: u32, pixels: &[u8]) -> Self {
         let luma = pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|p| {
                 let value =
                     0.2126 * f32::from(p[0]) + 0.7152 * f32::from(p[1]) + 0.0722 * f32::from(p[2]);
@@ -58,7 +60,9 @@ impl Picture {
     /// window and the file are where a float render is judged.
     pub fn from_rgba32f(width: u32, height: u32, pixels: &[u8]) -> Self {
         let luma = pixels
-            .chunks_exact(16)
+            .as_chunks::<16>()
+            .0
+            .iter()
             .map(|p| {
                 let channel = |i: usize| {
                     f32::from_le_bytes([p[i], p[i + 1], p[i + 2], p[i + 3]]).clamp(0.0, 1.0)

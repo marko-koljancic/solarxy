@@ -565,8 +565,10 @@ fn megapixels(pixels: u64) -> f64 {
 /// giving the wasm build a dependency on a crate that reads files.
 fn floats_of(bytes: &[u8]) -> Vec<f32> {
     bytes
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
         .collect()
 }
 
@@ -610,16 +612,18 @@ impl FloatStill {
         let src = floats_of(pixels);
         for row in 0..rect.height {
             for col in 0..rect.width {
-                let s = ((row * rect.width + col) as usize) * 4;
-                let x = rect.x + col;
-                let y = rect.y + row;
-                if x >= self.width || y >= self.height {
+                let src_at = ((row * rect.width + col) as usize) * 4;
+                let image_x = rect.x + col;
+                let image_y = rect.y + row;
+                if image_x >= self.width || image_y >= self.height {
                     continue;
                 }
-                let d = ((y as usize) * (self.width as usize) + (x as usize)) * 3;
-                match (src.get(s..s + 3), self.rgb.get_mut(d..d + 3)) {
-                    (Some(p), Some(slot)) => slot.copy_from_slice(p),
-                    _ => continue,
+                let dst_at = ((image_y as usize) * (self.width as usize) + (image_x as usize)) * 3;
+                if let (Some(p), Some(slot)) = (
+                    src.get(src_at..src_at + 3),
+                    self.rgb.get_mut(dst_at..dst_at + 3),
+                ) {
+                    slot.copy_from_slice(p);
                 }
             }
         }
@@ -1712,7 +1716,7 @@ impl SolarxyApp {
                 out.push(MarkerScreenDto {
                     id: m.id.0 as f64,
                     pane: i,
-                    x: (ndc.0 + 1.0) * 0.5 * pane.width / self.dpr,
+                    x: f32::midpoint(ndc.0, 1.0) * pane.width / self.dpr,
                     y: (1.0 - ndc.1) * 0.5 * pane.height / self.dpr,
                 });
             }
@@ -1747,6 +1751,7 @@ impl SolarxyApp {
     }
 
     #[wasm_bindgen(js_name = startStillRender)]
+    #[allow(clippy::too_many_lines)] // linear job-start sequence; splitting obscures it
     pub fn start_still_render(
         &mut self,
         ctx: JsValue,

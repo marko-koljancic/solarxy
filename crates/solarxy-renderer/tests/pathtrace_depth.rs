@@ -115,7 +115,7 @@ fn expected(cam: &Camera, positions: &[[f32; 3]], indices: &[u32]) -> Vec<f32> {
                 view_proj,
             );
             let mut nearest = f32::INFINITY;
-            for tri in indices.chunks_exact(3) {
+            for tri in indices.as_chunks::<3>().0 {
                 if let Some((t, _)) =
                     intersect_triangle(&ray, point(tri[0]), point(tri[1]), point(tri[2]))
                     && t < nearest

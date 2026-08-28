@@ -149,7 +149,7 @@ fn a_converged_pane_keeps_resolving_the_image_it_converged_to() {
     // And it is a picture rather than a black frame, so the equality above is
     // not two empty buffers agreeing.
     assert!(
-        converged.chunks_exact(4).any(|px| px[0] > 8),
+        converged.as_chunks::<4>().0.iter().any(|px| px[0] > 8),
         "the traced pane composited to black"
     );
 }
@@ -216,8 +216,10 @@ fn a_traced_pane_inherits_the_camera_owned_look() {
          the one applying it"
     );
     let brighter_anywhere = neutral
-        .chunks_exact(4)
-        .zip(graded.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(graded.as_chunks::<4>().0)
         .any(|(n, g)| g[0] > n[0] + 1);
     assert!(
         !brighter_anywhere,
@@ -234,8 +236,10 @@ fn a_traced_pane_inherits_the_camera_owned_look() {
     frame(&mut h, &mut backend, lifted);
     let red = read_surface(&h);
     let reds_rose = red
-        .chunks_exact(4)
-        .zip(neutral.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(neutral.as_chunks::<4>().0)
         .filter(|(r, n)| r[0] > n[0])
         .count();
     assert!(

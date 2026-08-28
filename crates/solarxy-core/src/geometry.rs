@@ -908,6 +908,8 @@ pub fn extract_edges(indices: &[u32]) -> Vec<u32> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact serde defaults, not computed values
+
     use super::*;
 
     /// A material serialized before the principled properties existed must

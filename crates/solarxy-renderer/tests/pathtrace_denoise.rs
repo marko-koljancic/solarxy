@@ -264,7 +264,12 @@ fn drain(
 fn error_against(image: &[f32], reference: &[f32]) -> f64 {
     let mut total = 0.0f64;
     let mut count = 0u64;
-    for (a, b) in image.chunks_exact(4).zip(reference.chunks_exact(4)) {
+    for (a, b) in image
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(reference.as_chunks::<4>().0)
+    {
         if b[3] <= 0.0 {
             continue;
         }
@@ -469,7 +474,9 @@ fn the_filter_fits_the_interactive_budget() {
 fn write_png(floats: &[f32], path: &str) {
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0) as u8;
     let bytes: Vec<u8> = floats
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| [byte(p[0]), byte(p[1]), byte(p[2]), 255])
         .collect();
     image::RgbaImage::from_raw(WIDTH, HEIGHT, bytes)

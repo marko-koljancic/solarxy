@@ -90,7 +90,9 @@ pub fn sibling(image: &Path, kind: AovKind) -> PathBuf {
 /// Reads the first three of every four floats: the albedo the kernel merged.
 #[must_use]
 pub fn albedo_from_auxiliary(aux: &[f32]) -> Vec<f32> {
-    aux.chunks_exact(4)
+    aux.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| [p[0], p[1], p[2]])
         .collect()
 }
@@ -101,7 +103,9 @@ pub fn albedo_from_auxiliary(aux: &[f32]) -> Vec<f32> {
 /// sentinel the packing defines rather than a direction anything faced.
 #[must_use]
 pub fn normal_from_auxiliary(aux: &[f32]) -> Vec<f32> {
-    aux.chunks_exact(4)
+    aux.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| solarxy_renderer::pathtrace::unpack_aov_normal(p[3]))
         .collect()
 }
@@ -113,7 +117,9 @@ pub fn normal_from_auxiliary(aux: &[f32]) -> Vec<f32> {
 #[must_use]
 pub fn rgb_from_rgba(pixels: &[f32]) -> Vec<f32> {
     pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| [p[0], p[1], p[2]])
         .collect()
 }
@@ -125,7 +131,9 @@ pub fn rgb_from_rgba(pixels: &[f32]) -> Vec<f32> {
 #[must_use]
 pub fn floats_of(bytes: &[u8]) -> Vec<f32> {
     bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect()
 }
@@ -194,7 +202,7 @@ mod tests {
         );
         let normals = normal_from_auxiliary(&aux);
         assert_eq!(normals.len(), 6);
-        for n in normals.chunks_exact(3) {
+        for n in normals.as_chunks::<3>().0 {
             let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
             assert!((length - 1.0).abs() < 1e-4, "not a direction: {n:?}");
         }

@@ -264,10 +264,7 @@ fn run_one(
     let mut image = vec![0u8; (spec.width as usize) * (spec.height as usize) * 4];
     let row = spec.width as usize * 4;
 
-    loop {
-        let Some(tile) = job.current() else {
-            break;
-        };
+    while let Some(tile) = job.current() {
         h.renderer
             .resize_targets(&h.device, tile.render.width, tile.render.height);
         let step = {

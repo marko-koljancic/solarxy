@@ -81,7 +81,7 @@ impl ModelView<'_> {
         let mut max = [f32::MIN; 3];
         let mut seen = false;
         for mesh in &self.meshes {
-            for xyz in mesh.positions.chunks_exact(3) {
+            for xyz in mesh.positions.as_chunks::<3>().0 {
                 seen = true;
                 for axis in 0..3 {
                     min[axis] = min[axis].min(xyz[axis]);
@@ -141,6 +141,8 @@ impl Axis {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact bounds taken from the input vertices
+
     use super::*;
 
     fn cube() -> Vec<f32> {

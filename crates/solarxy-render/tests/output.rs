@@ -368,7 +368,7 @@ fn two_tile_budgets_render_the_same_image() {
         );
         let mut differing = 0usize;
         let mut worst = 0u8;
-        for (x, y) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+        for (x, y) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0) {
             let delta = x
                 .iter()
                 .zip(y)
@@ -428,7 +428,7 @@ fn the_normal_pass_holds_directions() {
     let bytes = std::fs::read(dir.join("shot.normal.exr")).expect("the normal pass");
     let image = solarxy_formats::hdr::decode_exr_bytes(&bytes).expect("it decodes as EXR");
     assert_eq!((image.width, image.height), (64, 48));
-    for n in image.pixels.chunks_exact(3) {
+    for n in image.pixels.as_chunks::<3>().0 {
         let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
         assert!(
             (length - 1.0).abs() < 1e-3,

@@ -10,7 +10,7 @@ pub fn compute_bounds(meshes: &[AnalyzerMesh]) -> Option<BoundsSummary> {
     let mut has_any = false;
 
     for mesh in meshes {
-        for chunk in mesh.positions.chunks_exact(3) {
+        for chunk in mesh.positions.as_chunks::<3>().0 {
             has_any = true;
             for i in 0..3 {
                 min[i] = min[i].min(chunk[i]);

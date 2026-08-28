@@ -106,7 +106,7 @@ fn byte_of(v: f32) -> u8 {
 pub fn albedo_rgba8(aux_bytes: &[u8]) -> Vec<u8> {
     let rgb = solarxy_render::albedo_from_auxiliary(&solarxy_render::floats_of(aux_bytes));
     let mut rgba = Vec::with_capacity(rgb.len() / 3 * 16);
-    for p in rgb.chunks_exact(3) {
+    for p in rgb.as_chunks::<3>().0 {
         for v in [p[0], p[1], p[2], 1.0f32] {
             rgba.extend_from_slice(&v.to_le_bytes());
         }
@@ -123,7 +123,7 @@ pub fn albedo_rgba8(aux_bytes: &[u8]) -> Vec<u8> {
 pub fn normal_rgba8(aux_bytes: &[u8]) -> Vec<u8> {
     let n = solarxy_render::normal_from_auxiliary(&solarxy_render::floats_of(aux_bytes));
     let mut out = Vec::with_capacity(n.len() / 3 * 4);
-    for p in n.chunks_exact(3) {
+    for p in n.as_chunks::<3>().0 {
         for v in [p[0], p[1], p[2]] {
             out.push(byte_of(v * 0.5 + 0.5));
         }
@@ -257,7 +257,12 @@ mod tests {
         let shown = normal_rgba8(&aux);
 
         let unpacked = solarxy_render::normal_from_auxiliary(&solarxy_render::floats_of(&aux));
-        for (pixel, n) in shown.chunks_exact(4).zip(unpacked.chunks_exact(3)) {
+        for (pixel, n) in shown
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(unpacked.as_chunks::<3>().0)
+        {
             for lane in 0..3 {
                 let expected = byte_of(n[lane] * 0.5 + 0.5);
                 assert_eq!(pixel[lane], expected);
@@ -275,7 +280,7 @@ mod tests {
             .flat_map(|v| v.to_le_bytes())
             .collect();
         let shown = depth_rgba8(&depth);
-        let greys: Vec<u8> = shown.chunks_exact(4).map(|p| p[0]).collect();
+        let greys: Vec<u8> = shown.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
         assert_eq!(greys[0], 255, "the nearest surface is not the brightest");
         assert_eq!(greys[1], byte_of(DEPTH_FAR), "the farthest is not floored");
         assert_eq!(greys[2], 0, "a miss is not black");
@@ -283,7 +288,7 @@ mod tests {
             greys[3] > greys[1] && greys[3] < greys[0],
             "the middle did not land between the ends: {greys:?}"
         );
-        for p in shown.chunks_exact(4) {
+        for p in shown.as_chunks::<4>().0 {
             assert_eq!(p[0], p[1]);
             assert_eq!(p[1], p[2]);
             assert_eq!(p[3], 255);
@@ -299,12 +304,19 @@ mod tests {
             .flat_map(|v| v.to_le_bytes())
             .collect();
         let shown = depth_rgba8(&all_miss);
-        assert!(shown.chunks_exact(4).all(|p| p[0] == 0), "{shown:?}");
+        assert!(
+            shown.as_chunks::<4>().0.iter().all(|p| p[0] == 0),
+            "{shown:?}"
+        );
 
         let flat: Vec<u8> = [3.0f32, 3.0].iter().flat_map(|v| v.to_le_bytes()).collect();
         let shown = depth_rgba8(&flat);
         assert!(
-            shown.chunks_exact(4).all(|p| p[0] == byte_of(DEPTH_FLAT)),
+            shown
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[0] == byte_of(DEPTH_FLAT)),
             "{shown:?}"
         );
     }

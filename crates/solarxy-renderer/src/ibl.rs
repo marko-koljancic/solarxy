@@ -211,9 +211,9 @@ impl IblState {
         let irradiance_texture = generate_irradiance_sky(device, queue, top, bottom);
         let prefiltered_texture = generate_prefiltered_sky(device, queue, top, bottom);
         let irradiance_average = [
-            (top[0] + bottom[0]) * 0.5,
-            (top[1] + bottom[1]) * 0.5,
-            (top[2] + bottom[2]) * 0.5,
+            f32::midpoint(top[0], bottom[0]),
+            f32::midpoint(top[1], bottom[1]),
+            f32::midpoint(top[2], bottom[2]),
         ];
 
         Self::from_parts(
@@ -520,7 +520,9 @@ impl PreparedHdri {
             let len = read_u32(take(4)?) as usize;
             let data = take(len.checked_mul(12).ok_or_else(bad)?)?;
             let face = data
-                .chunks_exact(12)
+                .as_chunks::<12>()
+                .0
+                .iter()
                 .map(|px| {
                     [
                         read_f32(&px[0..4]),
@@ -538,7 +540,12 @@ impl PreparedHdri {
             .and_then(|n| n.checked_mul(3))
             .ok_or_else(bad)?;
         let data = take(sample_count.checked_mul(4).ok_or_else(bad)?)?;
-        let pixels = data.chunks_exact(4).map(read_f32).collect();
+        let pixels = data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| read_f32(b))
+            .collect();
 
         let dist_width = read_u32(take(4)?);
         let dist_height = read_u32(take(4)?);
@@ -546,12 +553,16 @@ impl PreparedHdri {
         let rows = dist_height as usize;
         let cells = (dist_width as usize).checked_mul(rows).ok_or_else(bad)?;
         let marginal: Vec<f32> = take(rows.checked_mul(4).ok_or_else(bad)?)?
-            .chunks_exact(4)
-            .map(read_f32)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| read_f32(b))
             .collect();
         let conditional: Vec<f32> = take(cells.checked_mul(4).ok_or_else(bad)?)?
-            .chunks_exact(4)
-            .map(read_f32)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| read_f32(b))
             .collect();
         let distribution = EnvDistribution::from_parts(
             dist_width,

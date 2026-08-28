@@ -441,17 +441,17 @@ mod tests {
     fn the_dashboard_obeys_the_shipped_colour_rules() {
         for name in ThemeSet::bundled().names() {
             for caps in harness::lower_tiers() {
-                let buffer = drawn(caps, &name, WIDTH, HEIGHT);
+                let buffer = drawn(caps, name, WIDTH, HEIGHT);
                 let where_ = format!("{name} at {caps:?}");
                 // The resolved slots, not the file's: at these tiers the theme
                 // is deliberately ignored, so the hues a cell is allowed to
                 // carry are the ones resolution produced.
                 let slots = ThemeSet::bundled()
-                    .slots_for(&name)
+                    .slots_for(name)
                     .expect("a bundled theme");
                 harness::assert_only_terminal_ink_or_palette_hues(
                     &buffer,
-                    &Theme::resolve(caps, &name, &slots).slots,
+                    &Theme::resolve(caps, name, &slots).slots,
                     &where_,
                 );
                 harness::assert_body_text_is_terminal_ink(&buffer, &where_);

@@ -148,7 +148,7 @@ impl State {
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
         if needs_swizzle {
-            for chunk in pixels.chunks_exact_mut(4) {
+            for chunk in pixels.as_chunks_mut::<4>().0 {
                 chunk.swap(0, 2);
             }
         }

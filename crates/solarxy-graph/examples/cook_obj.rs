@@ -170,7 +170,7 @@ fn to_obj(set: &GeometrySet) -> String {
                 let _ = writeln!(out, "vn {} {} {}", n[0], n[1], n[2]);
             }
         }
-        for tri in mesh.indices.chunks_exact(3) {
+        for tri in mesh.indices.as_chunks::<3>().0 {
             let (a, b, c) = (
                 vertex_base + tri[0],
                 vertex_base + tri[1],

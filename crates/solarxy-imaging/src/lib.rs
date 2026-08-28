@@ -53,7 +53,7 @@ fn check_dims(width: u32, height: u32) -> Result<(), ImagingError> {
 /// Per-pixel map over RGB, alpha untouched.
 fn map_rgb(src: &RawImageData, mut f: impl FnMut(u8) -> u8) -> RawImageData {
     let mut px = src.pixels.clone();
-    for chunk in px.chunks_exact_mut(4) {
+    for chunk in px.as_chunks_mut::<4>().0 {
         chunk[0] = f(chunk[0]);
         chunk[1] = f(chunk[1]);
         chunk[2] = f(chunk[2]);
@@ -113,7 +113,7 @@ pub fn hue_saturation(
     lightness: f32,
 ) -> RawImageData {
     let mut px = src.pixels.clone();
-    for chunk in px.chunks_exact_mut(4) {
+    for chunk in px.as_chunks_mut::<4>().0 {
         let (h, s, l) = rgb_to_hsl(
             f32::from(chunk[0]) / 255.0,
             f32::from(chunk[1]) / 255.0,
@@ -877,7 +877,7 @@ mod tests {
         // y=0 sits in the horizontal mortar band (row_v < 0.1).
         assert_eq!(&img.pixels[0..4], &[204, 204, 204, 255]);
         assert!(
-            img.pixels.chunks_exact(4).any(|c| c == [153, 51, 26, 255]),
+            img.pixels.as_chunks::<4>().0.contains(&[153, 51, 26, 255]),
             "brick texels present"
         );
         assert!(brick(0, 4, brick_c, mortar_c, 4, 8, 0.1, 0.5).is_err());
@@ -890,7 +890,9 @@ mod tests {
         let out = mix(&img, &black, BlendMode::Multiply, 1.0);
         assert!(
             out.pixels
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .all(|c| c[0] == 0 && c[1] == 0 && c[2] == 0)
         );
     }
@@ -925,7 +927,7 @@ mod tests {
     fn blur_spreads_energy() {
         let mut px = vec![0u8; 8 * 8 * 4];
         // One white pixel in the middle, opaque alpha everywhere.
-        for c in px.chunks_exact_mut(4) {
+        for c in px.as_chunks_mut::<4>().0 {
             c[3] = 255;
         }
         let center = ((4 * 8 + 4) * 4) as usize;

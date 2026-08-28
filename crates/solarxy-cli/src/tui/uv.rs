@@ -64,7 +64,7 @@ impl Coverage {
                 let base = index as usize * 2;
                 Some((*mesh.texcoords.get(base)?, *mesh.texcoords.get(base + 1)?))
             };
-            for triangle in mesh.indices.chunks_exact(3) {
+            for triangle in mesh.indices.as_chunks::<3>().0 {
                 let (Some(a), Some(b), Some(c)) =
                     (uv(triangle[0]), uv(triangle[1]), uv(triangle[2]))
                 else {
@@ -219,6 +219,8 @@ fn edge(ax: f32, ay: f32, bx: f32, by: f32, px: f32, py: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact zeros and ones from texel counting
+
     use super::super::geometry::MeshView;
     use super::*;
 
@@ -330,7 +332,9 @@ mod tests {
         let (uv, indices) = quad(0.0, 0.5);
         let forward = Coverage::rasterise(&view(&uv, &indices)).occupancy();
         let reversed: Vec<u32> = indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|t| [t[0], t[2], t[1]])
             .collect();
         let backward = Coverage::rasterise(&view(&uv, &reversed)).occupancy();
