@@ -998,13 +998,17 @@ fn a_transmissive_blocker_tints_the_shadow_it_casts() {
         &MaterialTextures::default(),
     );
     // Red and almost entirely transmissive, so what reaches the floor beneath it
-    // is both dimmed and stained.
+    // is both dimmed and stained. Thin, stated rather than inherited from the
+    // default: it is the field that decides whether the shadow walk will admit
+    // a straight connection at all, and this test is the thin case, the one
+    // that connection is correct about.
     let glass = TracedMaterial::from_raw(
         &RawMaterialData {
             base_color_factor: [0.9, 0.1, 0.1, 1.0],
             roughness_factor: 0.05,
             metallic_factor: 0.0,
             transmission: 1.0,
+            thickness: 0.0,
             ..Default::default()
         },
         &MaterialTextures::default(),
@@ -1184,5 +1188,506 @@ fn a_transmissive_blocker_tints_the_shadow_it_casts() {
         red_ratio > green_ratio * 2.0,
         "the shadow of red glass has to be red: kept {red_ratio:.3} of the red \
          and {green_ratio:.3} of the green"
+    );
+}
+
+/// Renders the tinted-blocker scene with the sheet's `thickness` set as given,
+/// and returns the mean colour under the sheet and beside it.
+///
+/// Everything except that one field is held fixed, which is the whole point:
+/// `thickness` is the field the material response branches on to tell a thin
+/// pane from a refractive solid, and the rule under test is that the shadow
+/// walk reads the same field the same way.
+fn sheet_shadow_means(gpu: &common::Gpu, thickness: f32) -> ([f64; 3], [f64; 3]) {
+    use solarxy_core::geometry::RawMaterialData;
+    use solarxy_core::preferences::ProjectionMode;
+    use solarxy_renderer::camera::{Camera, CameraUniform};
+    use solarxy_renderer::pathtrace::arena::INSTANCE_CAST_SHADOW;
+    use solarxy_renderer::pathtrace::{
+        EnvParams, PathEstimator, PathKernel, PathUniforms, ReadbackPoll, TraceParams, TraceTarget,
+    };
+
+    const WIDTH: u32 = 64;
+    const HEIGHT: u32 = 64;
+    const SPP: u32 = 256;
+
+    let (plane_pos, plane_idx) = solarxy_bvh::corpus::coplanar_grid(4, 1.0);
+    let bvh = Bvh::build_triangles(&plane_pos, &plane_idx);
+
+    let floor = TracedMaterial::from_raw(
+        &RawMaterialData {
+            base_color_factor: [0.8, 0.8, 0.8, 1.0],
+            roughness_factor: 1.0,
+            metallic_factor: 0.0,
+            ..Default::default()
+        },
+        &MaterialTextures::default(),
+    );
+    // White rather than red here: the question is how much light arrives, not
+    // what colour it is, and a tint would only make the comparison harder to
+    // read. `thickness` is the variable.
+    let glass = TracedMaterial::from_raw(
+        &RawMaterialData {
+            base_color_factor: [1.0, 1.0, 1.0, 1.0],
+            roughness_factor: 0.05,
+            metallic_factor: 0.0,
+            transmission: 1.0,
+            ior: 1.5,
+            thickness,
+            ..Default::default()
+        },
+        &MaterialTextures::default(),
+    );
+
+    let flat = cgmath::Matrix4::from_angle_x(cgmath::Deg(-90.0));
+    let floor_world = flat;
+    let sheet_world = cgmath::Matrix4::from_translation(cgmath::Vector3::new(-1.0, 1.0, 0.0))
+        * flat
+        * cgmath::Matrix4::from_scale(0.5);
+    let placements = [
+        ArenaPlacement {
+            mesh: 0,
+            world: floor_world.into(),
+            inv_world: floor_world
+                .invert()
+                .expect("the floor placement inverts")
+                .into(),
+            material_base: 0,
+            flags: INSTANCE_VISIBLE | INSTANCE_CAST_SHADOW,
+        },
+        ArenaPlacement {
+            mesh: 0,
+            world: sheet_world.into(),
+            inv_world: sheet_world
+                .invert()
+                .expect("the sheet placement inverts")
+                .into(),
+            material_base: 1,
+            flags: INSTANCE_VISIBLE | INSTANCE_CAST_SHADOW,
+        },
+    ];
+    let boxes = [
+        solarxy_core::aabb::AABB {
+            min: cgmath::Point3::new(-2.0, -0.01, -2.0),
+            max: cgmath::Point3::new(2.0, 0.01, 2.0),
+        },
+        solarxy_core::aabb::AABB {
+            min: cgmath::Point3::new(-2.0, 0.99, -1.0),
+            max: cgmath::Point3::new(0.0, 1.01, 1.0),
+        },
+    ];
+    let tlas = Bvh::build_tlas(&boxes);
+    let mesh = ArenaMesh {
+        bvh: &bvh,
+        positions: &plane_pos,
+        indices: &plane_idx,
+        normals: None,
+        uv0: None,
+    };
+
+    let mut sun = base_light(LightKind::Directional);
+    sun.direction = [0.0, -1.0, 0.0];
+    sun.intensity = 3.0;
+
+    let arena = TraceArena::build(&tlas, &[mesh], &placements)
+        .with_materials(vec![floor, glass])
+        .with_lights(TracedLight::pool(&[sun]));
+    let scene = TraceScene::upload(&gpu.device, &gpu.queue, &gpu.pathtrace, &arena);
+    let atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
+
+    let camera = Camera {
+        eye: cgmath::Point3::new(0.0, 6.0, 0.001),
+        target: cgmath::Point3::new(0.0, 0.0, 0.0),
+        up: cgmath::Vector3::unit_y(),
+        aspect: 1.0,
+        fovy: 30.0,
+        znear: 0.1,
+        zfar: 100.0,
+        projection: ProjectionMode::Perspective,
+        ortho_scale: 1.0,
+    };
+    let mut camera_uniform = CameraUniform::new();
+    camera_uniform.update_view_proj(&camera);
+    let camera_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Refractive Solid Camera"),
+        size: std::mem::size_of::<CameraUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    gpu.queue
+        .write_buffer(&camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
+
+    let target = TraceTarget::new(&gpu.device, &gpu.pathtrace, WIDTH, HEIGHT);
+    let uniforms = PathUniforms::new(&gpu.device, &camera_buffer);
+    let kernel = PathKernel::new(&gpu.device, &gpu.pathtrace, &uniforms);
+    let environment = EnvParams::constant([0.0; 3], [0.0; 3]);
+    uniforms.write(
+        &gpu.queue,
+        &TraceParams {
+            tile_offset: [0, 0],
+            tile_size: [WIDTH, HEIGHT],
+            resolution: [WIDTH, HEIGHT],
+            bounces: 4,
+            transmissive_bounces: 4,
+            samples: SPP,
+            seed: 0x9E37_79B9,
+            light_count: scene.light_count(),
+            aperture_radius: 0.0,
+            focus_distance: 0.0,
+            aperture_blades: 0,
+            ..TraceParams::default()
+        },
+        &environment,
+    );
+
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Refractive Solid Encoder"),
+        });
+    kernel.encode(
+        &mut encoder,
+        PathEstimator::Mis,
+        &scene,
+        &atlas,
+        &target,
+        &uniforms,
+        [WIDTH, HEIGHT],
+    );
+    let mut readback = target.encode_readback(&gpu.device, &mut encoder);
+    gpu.queue.submit(Some(encoder.finish()));
+    let pixels = loop {
+        match readback.poll(&gpu.device) {
+            ReadbackPoll::Ready(values) => break values,
+            ReadbackPoll::Pending => std::thread::sleep(std::time::Duration::from_millis(1)),
+            ReadbackPoll::Failed => panic!("refractive solid readback failed"),
+        }
+    };
+
+    let mean = |x0: u32, x1: u32| {
+        let mut sum = [0.0f64; 3];
+        let mut n = 0.0f64;
+        for y in HEIGHT / 4..HEIGHT * 3 / 4 {
+            for x in x0..x1 {
+                let i = ((y * WIDTH + x) * 4) as usize;
+                for c in 0..3 {
+                    sum[c] += f64::from(pixels[i + c]);
+                }
+                n += 1.0;
+            }
+        }
+        [sum[0] / n, sum[1] / n, sum[2] / n]
+    };
+    (mean(4, WIDTH / 4), mean(WIDTH * 3 / 4, WIDTH - 4))
+}
+
+/// A refractive solid casts a shadow; a thin pane does not.
+///
+/// Next-event estimation connects a shading point to a light along a straight
+/// line, and treats a transmissive surface in the way as a tinted filter. That
+/// is right for a thin pane, whose parallel faces preserve the ray's direction
+/// so the straight segment is the real path. It is wrong for a refractive
+/// solid, where light reaching the far side arrives along a bent path and there
+/// is generally no straight path at all: the connection is not approximate, it
+/// describes a different phenomenon.
+///
+/// The two cases are separated by `thickness`, the same field the material
+/// response branches on, so one rule decides both walks and they cannot
+/// disagree about what a surface is. This renders one scene twice, changing
+/// only that field, which is the sharpest available form of that claim.
+#[test]
+fn a_refractive_solid_casts_a_shadow_where_a_thin_pane_does_not() {
+    let Some(gpu) = common::gpu_or_skip() else {
+        return;
+    };
+
+    let (thin_shadowed, thin_lit) = sheet_shadow_means(&gpu, 0.0);
+    let (solid_shadowed, solid_lit) = sheet_shadow_means(&gpu, 0.5);
+
+    println!("thin  pane: under {thin_shadowed:.4?}, beside {thin_lit:.4?}");
+    println!("solid ball: under {solid_shadowed:.4?}, beside {solid_lit:.4?}");
+
+    assert!(
+        thin_lit[0] > 0.05 && solid_lit[0] > 0.05,
+        "the lit half has to be lit in both renders for the comparison to mean \
+         anything: thin {:.4}, solid {:.4}",
+        thin_lit[0],
+        solid_lit[0]
+    );
+    // The floor beside the sheet is not under it, so nothing about this rule
+    // should touch it. If it moved, the change reached further than the shadow
+    // walk and that is a finding rather than a pass.
+    let lit_drift = (solid_lit[0] - thin_lit[0]).abs() / thin_lit[0];
+    assert!(
+        lit_drift < 0.02,
+        "the unobstructed half must not move when only the blocker's thickness \
+         changes: drifted {:.1} percent",
+        lit_drift * 100.0
+    );
+    assert!(
+        thin_shadowed[0] > 0.0,
+        "a thin transmissive pane must still let light through: it is the case \
+         the straight-line connection is correct about"
+    );
+    let kept = solid_shadowed[0] / thin_shadowed[0];
+    println!("the solid keeps {kept:.4} of the light the thin pane let through");
+    assert!(
+        solid_shadowed[0] < thin_shadowed[0] * 0.25,
+        "a refractive solid must not admit the straight connection a thin pane \
+         admits: it let through {kept:.4} of what the pane did, where the rule \
+         is that it should admit almost none of it"
+    );
+}
+
+/// The three estimators agree about a floor lit through a refractive solid.
+///
+/// This is the criterion the refusal rule owes, and it is the honest form of
+/// "the connection stopped lying": it is not asserted from a picture. A
+/// connection-only estimator and a scattering-only estimator are two techniques
+/// for the same integral, so they must converge to the same image. While the
+/// shadow walk admitted a straight line through a refractive solid, they could
+/// not: the connection technique reported a floor lit as though the ball were
+/// absent, and the scattering technique reported the bent transport that is
+/// actually there.
+///
+/// The tolerance here is looser than the unobstructed and blended comparisons,
+/// and the reason is stated rather than hidden. The floor beneath the ball is
+/// reached only along refracted paths, so the scatter-only estimator carries
+/// the whole variance of that transport for the same sample budget, which is
+/// the very thing this release documents as converging slowly.
+#[test]
+fn the_estimators_agree_under_a_refractive_solid() {
+    use solarxy_core::geometry::RawMaterialData;
+    use solarxy_core::preferences::ProjectionMode;
+    use solarxy_renderer::camera::{Camera, CameraUniform};
+    use solarxy_renderer::pathtrace::arena::INSTANCE_CAST_SHADOW;
+    use solarxy_renderer::pathtrace::{
+        EnvParams, PathEstimator, PathKernel, PathUniforms, ReadbackPoll, TraceParams, TraceTarget,
+    };
+
+    const WIDTH: u32 = 96;
+    const HEIGHT: u32 = 96;
+    const SPP: u32 = 2048;
+
+    let Some(gpu) = common::gpu_or_skip() else {
+        return;
+    };
+
+    // A glass ball resting above a floor, with a broad panel overhead. The
+    // subject is the floor beneath the ball, which is the only place the two
+    // techniques ever disagreed.
+    let (sphere_pos, sphere_idx) = solarxy_bvh::corpus::sphere(64, 32);
+    let sphere_bvh = Bvh::build_triangles(&sphere_pos, &sphere_idx);
+    let (floor_pos, floor_idx) = solarxy_bvh::corpus::coplanar_grid(4, 1.0);
+    let floor_bvh = Bvh::build_triangles(&floor_pos, &floor_idx);
+
+    let floor_mat = TracedMaterial::from_raw(
+        &RawMaterialData {
+            base_color_factor: [0.8, 0.8, 0.8, 1.0],
+            roughness_factor: 1.0,
+            metallic_factor: 0.0,
+            ..Default::default()
+        },
+        &MaterialTextures::default(),
+    );
+    // A solid: `thickness` is what makes it one, and it is the field both walks
+    // read to decide whether a straight connection through it exists.
+    let glass = TracedMaterial::from_raw(
+        &RawMaterialData {
+            base_color_factor: [1.0, 1.0, 1.0, 1.0],
+            roughness_factor: 0.05,
+            metallic_factor: 0.0,
+            transmission: 1.0,
+            ior: 1.5,
+            thickness: 0.8,
+            ..Default::default()
+        },
+        &MaterialTextures::default(),
+    );
+
+    let ball_world = cgmath::Matrix4::from_translation(cgmath::Vector3::new(0.0, 0.9, 0.0))
+        * cgmath::Matrix4::from_scale(0.7);
+    let floor_world =
+        cgmath::Matrix4::from_angle_x(cgmath::Deg(-90.0)) * cgmath::Matrix4::from_scale(3.0);
+    let placements = [
+        ArenaPlacement {
+            mesh: 0,
+            world: ball_world.into(),
+            inv_world: ball_world.invert().expect("the ball inverts").into(),
+            material_base: 1,
+            flags: INSTANCE_VISIBLE | INSTANCE_CAST_SHADOW,
+        },
+        ArenaPlacement {
+            mesh: 1,
+            world: floor_world.into(),
+            inv_world: floor_world.invert().expect("the floor inverts").into(),
+            material_base: 0,
+            flags: INSTANCE_VISIBLE | INSTANCE_CAST_SHADOW,
+        },
+    ];
+    let boxes = [
+        solarxy_core::aabb::AABB {
+            min: cgmath::Point3::new(-0.8, 0.1, -0.8),
+            max: cgmath::Point3::new(0.8, 1.7, 0.8),
+        },
+        solarxy_core::aabb::AABB {
+            min: cgmath::Point3::new(-3.5, -0.01, -3.5),
+            max: cgmath::Point3::new(3.5, 0.01, 3.5),
+        },
+    ];
+    let tlas = Bvh::build_tlas(&boxes);
+    let meshes = [
+        ArenaMesh {
+            bvh: &sphere_bvh,
+            positions: &sphere_pos,
+            indices: &sphere_idx,
+            normals: None,
+            uv0: None,
+        },
+        ArenaMesh {
+            bvh: &floor_bvh,
+            positions: &floor_pos,
+            indices: &floor_idx,
+            normals: None,
+            uv0: None,
+        },
+    ];
+
+    let mut panel = base_light(LightKind::RectArea);
+    panel.position = [0.0, 3.5, 0.0];
+    panel.area_extent = [4.0, 4.0];
+    panel.intensity = 6.0;
+
+    let arena = TraceArena::build(&tlas, &meshes, &placements)
+        .with_materials(vec![floor_mat, glass])
+        .with_lights(TracedLight::pool(&[panel]));
+    let scene = TraceScene::upload(&gpu.device, &gpu.queue, &gpu.pathtrace, &arena);
+    let atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
+
+    // Looking down at the floor past the ball, so the region the two techniques
+    // disagreed about fills the frame.
+    let camera = Camera {
+        eye: cgmath::Point3::new(0.0, 2.6, 2.6),
+        target: cgmath::Point3::new(0.0, 0.0, 0.0),
+        up: cgmath::Vector3::unit_y(),
+        #[allow(clippy::cast_precision_loss)]
+        aspect: WIDTH as f32 / HEIGHT as f32,
+        fovy: 45.0,
+        znear: 0.1,
+        zfar: 100.0,
+        projection: ProjectionMode::Perspective,
+        ortho_scale: 1.0,
+    };
+    let mut camera_uniform = CameraUniform::new();
+    camera_uniform.update_view_proj(&camera);
+    let camera_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Refractive Estimator Camera"),
+        size: std::mem::size_of::<CameraUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    gpu.queue
+        .write_buffer(&camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
+
+    let target = TraceTarget::new(&gpu.device, &gpu.pathtrace, WIDTH, HEIGHT);
+    let uniforms = PathUniforms::new(&gpu.device, &camera_buffer);
+    let kernel = PathKernel::new(&gpu.device, &gpu.pathtrace, &uniforms);
+
+    let environment = EnvParams::constant([0.12, 0.14, 0.18], [0.04, 0.04, 0.05]);
+    let params = TraceParams {
+        tile_offset: [0, 0],
+        tile_size: [WIDTH, HEIGHT],
+        resolution: [WIDTH, HEIGHT],
+        bounces: 6,
+        // Two crossings per traversal of the ball, so a starved budget would
+        // measure the budget rather than the estimator.
+        transmissive_bounces: 6,
+        samples: SPP,
+        seed: 0x9E37_79B9,
+        light_count: scene.light_count(),
+        aperture_radius: 0.0,
+        focus_distance: 0.0,
+        aperture_blades: 0,
+        ..TraceParams::default()
+    };
+
+    let mut means = Vec::new();
+    for estimator in PathEstimator::ALL {
+        uniforms.write(&gpu.queue, &params, &environment);
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Refractive Estimator Encoder"),
+            });
+        kernel.encode(
+            &mut encoder,
+            estimator,
+            &scene,
+            &atlas,
+            &target,
+            &uniforms,
+            [WIDTH, HEIGHT],
+        );
+        let mut readback = target.encode_readback(&gpu.device, &mut encoder);
+        gpu.queue.submit(Some(encoder.finish()));
+
+        let pixels = loop {
+            match readback.poll(&gpu.device) {
+                ReadbackPoll::Ready(values) => break values,
+                ReadbackPoll::Pending => {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                ReadbackPoll::Failed => panic!("refractive estimator readback failed"),
+            }
+        };
+        let mut total = 0.0f64;
+        for px in pixels.as_chunks::<4>().0 {
+            total += f64::from(px[0]) + f64::from(px[1]) + f64::from(px[2]);
+            assert!(
+                px[0].is_finite() && px[1].is_finite() && px[2].is_finite(),
+                "{estimator:?} produced a pixel that is not a number"
+            );
+        }
+        let mean = total / f64::from(WIDTH * HEIGHT * 3);
+        println!("{estimator:?}: mean radiance under the solid {mean:.6}");
+        means.push(mean);
+    }
+
+    // The scattering technique never consulted the shadow walk, so its number
+    // is the one thing here the rule cannot have moved. It is the reference.
+    let mis = means[0];
+    let scatter = means[1];
+    let next_event = means[2];
+
+    let weighted_error = (mis - scatter).abs() / scatter;
+    println!(
+        "weighted against scattering: {:.3}%",
+        weighted_error * 100.0
+    );
+    assert!(
+        weighted_error < 0.01,
+        "the weighted estimator converged to {mis:.6} where the scattering \
+         estimator, which never consulted the shadow walk and is therefore \
+         unmoved by this rule, gives {scatter:.6}: a difference of {:.2}%. \
+         These are the two techniques that can find bent transport at all, and \
+         they have to tell one story about a floor lit through a solid.",
+        weighted_error * 100.0
+    );
+
+    // Next-event estimation alone cannot find this transport, and after the
+    // rule it correctly stops pretending to. It may fall short of the truth;
+    // what it must never do is exceed it, because that is the shape of the
+    // defect being fixed: a straight connection through a solid invents light
+    // that no path delivers.
+    println!(
+        "connection-only against scattering: {:.3}%",
+        (next_event - scatter) / scatter * 100.0
+    );
+    assert!(
+        next_event <= scatter * 1.01,
+        "the connection-only estimator gives {next_event:.6} against the \
+         scattering estimator's {scatter:.6}. Exceeding it means a straight \
+         line through a refractive solid is still delivering light that no \
+         actual path delivers, which is the defect this rule exists to remove."
     );
 }

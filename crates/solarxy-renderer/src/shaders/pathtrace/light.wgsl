@@ -437,7 +437,32 @@ fn shadow_attenuation(
         // What fraction of the ray gets through. Transmission is the physical
         // route; a blend-mode surface's opacity is the authored one, and a
         // surface may have either.
-        let transmission = (1.0 - sample.metallic) * m.transmission;
+        //
+        // A refractive solid takes neither. This walk is a straight segment
+        // from a shading point to a light, and a solid does not admit one:
+        // light reaching the far side arrives along a bent path, and there is
+        // generally no straight path at all. Refusing costs nothing and
+        // removes a false answer, leaving that transport to the scattering
+        // technique, which can find it. A thin surface is untouched, because
+        // its parallel faces preserve direction and the straight segment is
+        // the real path there.
+        //
+        // Decided on `thickness`, the same field `surf.thin_film` reads, so
+        // this walk and the scatter walk cannot disagree about what a surface
+        // is. The kernel has no notion of slab against ball, so a thick flat
+        // pane loses its connection too, though physically it admits one with
+        // a lateral offset. That is the price of one field deciding both, and
+        // it is the price the material response already pays.
+        //
+        // Zeroing the transmission rather than the survival below is
+        // deliberate: coverage is a separate route. A blend-mode surface is
+        // partly not there at all, and where it is not there the segment is
+        // straight and the connection is real, which is exactly how the
+        // scatter walk reads it. It also gates the entering tint for free,
+        // and correctly: what passes a solid passes through a hole in its
+        // coverage rather than through glass, so it is not stained.
+        let solid = m.thickness != 0.0;
+        let transmission = select((1.0 - sample.metallic) * m.transmission, 0.0, solid);
         var opacity = 1.0;
         if material_alpha_mode(m) == MAT_ALPHA_BLEND {
             opacity = sample.base_color.a;
@@ -461,6 +486,12 @@ fn shadow_attenuation(
         } else {
             // And attenuate by the medium on the way out, which is the only
             // point at which the distance through it is known.
+            //
+            // Not gated on the rule above, which is deliberate rather than an
+            // oversight. That rule withdraws a claim about direction; this
+            // describes a segment the ray genuinely crossed. It is reachable
+            // for a solid only through that solid's coverage, and absorption
+            // applies to whatever crosses the interior however it got in.
             color *= transmission_attenuation(hit.t, m.attenuation_color, m.attenuation_distance);
         }
         if dot(color, color) <= 0.0 {
