@@ -47,7 +47,11 @@ impl State {
             });
     }
 
-    pub fn handle_dropped_file(&mut self, path: std::path::PathBuf) {
+    /// The one router for opening a file of any supported kind: HDRI,
+    /// scene, or model. The Open dialogs, a drag and drop, the startup
+    /// argument, and Recent Files all land here, so extension routing
+    /// exists exactly once.
+    pub fn open_file(&mut self, path: std::path::PathBuf) {
         if let Some(ext) = path.extension().and_then(|e| e.to_str())
             && (ext.eq_ignore_ascii_case("hdr") || ext.eq_ignore_ascii_case("exr"))
         {
@@ -102,8 +106,8 @@ impl State {
     /// One Open for both kinds of file. The first filter therefore lists
     /// scenes and models together, because a user who picks Open knows what
     /// they have rather than which of two dialogs the application wants.
-    /// `handle_dropped_file` routes on the extension, so this and a drag and
-    /// drop reach the same place.
+    /// `open_file` routes on the extension, so this and a drag and drop
+    /// reach the same place.
     pub fn open_model_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter(
@@ -115,7 +119,7 @@ impl State {
             .add_filter("All Files", &["*"])
             .pick_file()
         {
-            self.handle_dropped_file(path);
+            self.open_file(path);
         }
     }
 
@@ -202,6 +206,15 @@ impl State {
 
         self.apply_scene_view(&view);
         self.restore_scene_environment(&environment);
+
+        // After every failure return, so a scene that did not open leaves
+        // no entry. Canonicalized to the form the model loader records, so
+        // deduplication works across both kinds in the one list.
+        let recent = path.canonicalize().map_or_else(
+            |_| path.display().to_string(),
+            |p| p.to_string_lossy().to_string(),
+        );
+        solarxy_core::preferences::add_recent_file(&mut self.preferences, &recent);
 
         self.window.set_title(&format!("Solarxy - {filename}"));
         if warnings > 0 {
@@ -354,7 +367,7 @@ impl State {
             .add_filter("All Files", &["*"])
             .pick_file()
         {
-            self.handle_dropped_file(path);
+            self.open_file(path);
         }
     }
 

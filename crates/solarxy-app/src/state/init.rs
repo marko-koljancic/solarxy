@@ -241,7 +241,7 @@ impl State {
         // a supported file look unsupported; a second extension check here
         // is how the three would drift apart again.
         if let Some(path) = model_path {
-            state.handle_dropped_file(std::path::PathBuf::from(path));
+            state.open_file(std::path::PathBuf::from(path));
         }
 
         Ok(state)

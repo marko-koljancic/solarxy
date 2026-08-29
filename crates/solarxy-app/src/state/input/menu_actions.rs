@@ -23,7 +23,9 @@ impl State {
             self.save_preferences();
         }
         if let Some(path) = actions.open_recent {
-            self.spawn_load(path);
+            // Through the router, not the model loader: the one list holds
+            // scenes and models, and the routing on extension exists once.
+            self.open_file(std::path::PathBuf::from(path));
         }
         if actions.open_config_file
             && let Some(path) = solarxy_core::preferences::config_path()
