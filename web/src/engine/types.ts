@@ -773,7 +773,13 @@ export type HostEvent =
       done: boolean;
     }
   | { type: "renderNotice"; message: string }
-  | { type: "paneSamples"; pane: number; samples: number; target: number };
+  | { type: "paneSamples"; pane: number; samples: number; target: number }
+  | {
+      type: "gpuFault";
+      kind: "validation" | "outOfMemory" | "internal";
+      message: string;
+      count: number;
+    };
 
 /** What one render backend can do, pinned to the Rust `BackendCaps`
  * constants. `progressive` is what drives a sample counter: repeated

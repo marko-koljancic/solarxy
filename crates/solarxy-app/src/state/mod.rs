@@ -202,6 +202,9 @@ pub struct State {
     pub(super) quit_requested: bool,
     pub(super) last_frame_time: Instant,
     pub(super) dt: f32,
+    /// The uncaptured-error queue the shared device hook fills; drained
+    /// once per frame in `update` into the console log and a toast.
+    pub(super) gpu_faults: solarxy_renderer::faults::GpuFaults,
     pub(super) _backend_info: String,
     pub(super) preferences: Preferences,
     pub window: Arc<Window>,

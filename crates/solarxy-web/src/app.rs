@@ -213,6 +213,16 @@ enum HostEvent {
         samples: u32,
         target: u32,
     },
+    /// The device reported an uncaptured graphics fault. The frontend
+    /// writes the full message to `console.error`, which the crash
+    /// reporter attaches to its next report as context, and toasts a
+    /// short pointer at it. `count` collapses identical consecutive
+    /// errors, since a fault in a per-frame path fires at frame rate.
+    GpuFault {
+        kind: &'static str,
+        message: String,
+        count: u32,
+    },
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq)]
@@ -365,6 +375,9 @@ pub struct SolarxyApp {
     camera_editing: [bool; 4],
     engine: Engine,
     host_events: Vec<HostEvent>,
+    /// The uncaptured-error queue the shared device hook fills; drained
+    /// into `host_events` when the frontend takes them each frame.
+    gpu_faults: solarxy_renderer::faults::GpuFaults,
     last_pane_rects: Vec<RectDto>,
     /// Device pixel ratio: JS pointer coordinates arrive in CSS px and are
     /// scaled into physical canvas px for pane hit-testing and picking.
@@ -791,6 +804,12 @@ impl SolarxyApp {
             .await
             .map_err(|e| JsError::new(&format!("request_device: {e}")))?;
 
+        // Before anything uses the device. The browser's own default for
+        // an uncaptured error is a console line nobody reads; this routes
+        // it through the host event stream so the frontend can toast it
+        // and the crash reporter can attach it.
+        let gpu_faults = solarxy_renderer::faults::install(&device);
+
         // Chrome exposes only non-sRGB surface formats; render into an
         // sRGB view of the surface texture so the tone-mapped composite
         // output is gamma-encoded correctly.
@@ -928,6 +947,7 @@ impl SolarxyApp {
             camera_editing: [false; 4],
             engine,
             host_events: Vec::new(),
+            gpu_faults,
             player_mode: false,
             last_pane_rects: Vec::new(),
             dpr: dpr as f32,
@@ -2833,6 +2853,20 @@ impl SolarxyApp {
 
     /// Drains queued host events (pane-rect changes, async results).
     pub fn take_host_events(&mut self) -> Result<JsValue, JsError> {
+        // Uncaptured GPU faults ride the same per-frame drain as every
+        // other async happening.
+        for fault in self.gpu_faults.drain() {
+            use solarxy_renderer::faults::GpuFaultKind;
+            self.host_events.push(HostEvent::GpuFault {
+                kind: match fault.kind {
+                    GpuFaultKind::Validation => "validation",
+                    GpuFaultKind::OutOfMemory => "outOfMemory",
+                    GpuFaultKind::Internal => "internal",
+                },
+                message: fault.message,
+                count: fault.count,
+            });
+        }
         let events = std::mem::take(&mut self.host_events);
         to_js(&events)
     }

@@ -1156,6 +1156,21 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "renderNotice") pushToast(ev.message, "warn");
     else if (ev.type === "paneSamples")
       useViewState.getState().setPaneSamples(ev.pane, ev.samples, ev.target);
+    else if (ev.type === "gpuFault") {
+      // The full message goes to console.error, which the crash reporter
+      // captures as context for its next report; the toast is the short
+      // pointer, and it does not promise the picture is right afterwards.
+      console.error(
+        `GPU fault (${ev.kind}${ev.count > 1 ? `, repeated ${ev.count} times` : ""}): ${ev.message}`,
+      );
+      const what =
+        ev.kind === "outOfMemory"
+          ? "The GPU ran out of memory; the view may be incomplete. Details in the browser console."
+          : ev.kind === "internal"
+            ? "Graphics driver error; the view may be wrong. Details in the browser console."
+            : "Graphics validation error; the view may be wrong. Details in the browser console.";
+      pushToast(ev.count > 1 ? `${what} (repeated ${ev.count} times)` : what, "error");
+    }
   }
   // The gizmo's live delta. Polled here rather than pushed from `pointerMove`,
   // which stays void so the drag keeps costing zero boundary crossings; the

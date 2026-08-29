@@ -61,6 +61,11 @@ impl State {
             })
             .await?;
 
+        // Before anything uses the device: without a handler, wgpu's
+        // default for an uncaptured error is a panic, so the process died
+        // on any validation error with nothing a user could read.
+        let gpu_faults = solarxy_renderer::faults::install(&device);
+
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
@@ -224,6 +229,7 @@ impl State {
             quit_requested: false,
             last_frame_time: Instant::now(),
             dt: 0.0,
+            gpu_faults,
             _backend_info: backend_info,
             preferences,
             window,

@@ -63,6 +63,7 @@ pub mod composite;
 pub mod env_dist;
 pub mod environment;
 pub mod error;
+pub mod faults;
 pub mod frame;
 pub mod geometry;
 pub mod helpers;

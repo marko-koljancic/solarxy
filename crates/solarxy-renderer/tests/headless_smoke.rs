@@ -338,6 +338,70 @@ fn preference_setters_write_without_validation_errors() {
     );
 }
 
+/// The shared uncaptured-error hook: a provoked validation error is
+/// recorded rather than fatal, identical repeats collapse into one record,
+/// and an error inside a scope stays with its scope.
+///
+/// Without the hook this test could not exist: wgpu's default handler for
+/// an uncaptured error panics, which is exactly what the desktop shipped
+/// until the hook was installed.
+#[test]
+fn the_uncaptured_error_hook_records_collapses_and_respects_scopes() {
+    use solarxy_renderer::faults::{self, GpuFaultKind};
+
+    let Some((device, queue, _config)) = try_get_device() else {
+        return;
+    };
+
+    let sink = faults::install(&device);
+
+    // A buffer with no COPY_DST, written anyway: the class that shipped.
+    // Twice, so the collapse is observable.
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("uncaptured probe"),
+        size: 16,
+        usage: wgpu::BufferUsages::UNIFORM,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buffer, 0, &[0u8; 16]);
+    queue.write_buffer(&buffer, 0, &[0u8; 16]);
+    let _ = device.poll(wgpu::PollType::Wait {
+        submission_index: None,
+        timeout: None,
+    });
+
+    let drained = sink.drain();
+    assert_eq!(
+        drained.len(),
+        1,
+        "identical consecutive errors must collapse into one record: {drained:?}"
+    );
+    assert_eq!(drained[0].kind, GpuFaultKind::Validation);
+    assert_eq!(
+        drained[0].count, 2,
+        "the record must count what it collapsed"
+    );
+    assert!(
+        !drained[0].message.is_empty(),
+        "the full message is the only thing a bug report can be written from"
+    );
+    assert!(sink.drain().is_empty(), "a drain must actually take");
+
+    // An error inside a scope is the scope's, not the hook's: the probe
+    // and the smoke suite push scopes deliberately and must keep them.
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    queue.write_buffer(&buffer, 0, &[0u8; 16]);
+    let scoped = pollster::block_on(device.pop_error_scope());
+    assert!(
+        scoped.is_some(),
+        "the scope should have captured the provoked error"
+    );
+    assert!(
+        sink.drain().is_empty(),
+        "a scoped error must not also reach the uncaptured hook"
+    );
+}
+
 /// The colour-grading slots, rendered rather than reasoned about.
 ///
 /// Three things are asserted, and the third is the one worth having:

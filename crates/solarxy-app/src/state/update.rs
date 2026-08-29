@@ -505,6 +505,32 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        // Uncaptured GPU faults recorded since the last frame. The hook
+        // already logged each full message on the `solarxy::gpu` target,
+        // which the console captures; the toast is the short pointer, and
+        // its wording does not promise the picture is right afterwards.
+        for fault in self.gpu_faults.drain() {
+            use solarxy_renderer::faults::GpuFaultKind;
+            let what = match fault.kind {
+                GpuFaultKind::Validation => {
+                    "Graphics validation error; the view may be wrong. Details in the Console."
+                }
+                GpuFaultKind::OutOfMemory => {
+                    "The GPU ran out of memory; the view may be incomplete. Details in the Console."
+                }
+                GpuFaultKind::Internal => {
+                    "Graphics driver error; the view may be wrong. Details in the Console."
+                }
+            };
+            if fault.count > 1 {
+                self.gui.set_toast(
+                    &format!("{what} (repeated {} times)", fault.count),
+                    ToastSeverity::Error,
+                );
+            } else {
+                self.gui.set_toast(what, ToastSeverity::Error);
+            }
+        }
         self.follow_look_through_cameras();
         let hdri_poll = self.pending_hdri.as_ref().map(|p| p.receiver.try_recv());
         match hdri_poll {
