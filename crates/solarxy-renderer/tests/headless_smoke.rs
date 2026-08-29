@@ -271,6 +271,73 @@ fn a_frame_with_labels_submits_without_validation_errors() {
     );
 }
 
+/// Drives the host-facing preference setters inside a validation error
+/// scope, so a buffer created without the usage its setter's write needs
+/// fails a Rust test instead of a user's session.
+///
+/// The class this pins: `queue.write_buffer` against a buffer created
+/// without `COPY_DST` is rejected at validation time, the buffer keeps its
+/// creation contents, and the only symptom is a console line -- or, on the
+/// desktop, a panic from wgpu's default uncaptured-error handler. The
+/// selection tint's colour buffer shipped exactly that way: every browser
+/// boot logged the error and the tint stayed at its hard-coded creation
+/// colour whatever the preference said. Setters whose only caller is one
+/// shell are the exposed ones, which is why this exercises the setters
+/// generally rather than naming that buffer.
+#[test]
+fn preference_setters_write_without_validation_errors() {
+    use solarxy_renderer::frame::{Renderer, RendererInit, SelectionStyle};
+    use solarxy_renderer::labels::LabelStyle;
+
+    let Some((device, queue, config)) = try_get_device() else {
+        return;
+    };
+
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+
+    let init = RendererInit {
+        msaa_sample_count: 4,
+        gradient_top: [0.1, 0.1, 0.12, 1.0],
+        gradient_bottom: [0.02, 0.02, 0.03, 1.0],
+        sky_top: [0.4, 0.5, 0.7],
+        sky_bottom: [0.2, 0.2, 0.25],
+        wireframe_color: [1.0, 1.0, 1.0, 1.0],
+        wireframe_line_width: 1.0,
+        bloom_enabled: false,
+        ssao_enabled: false,
+        tone_mode: solarxy_core::preferences::ToneMode::AcesFilmic,
+        exposure: 1.0,
+        ibl_mode: solarxy_core::preferences::IblMode::Full,
+        uv_checker_png: include_bytes!("../../../res/textures/uv-checker_1k.png"),
+    };
+    let mut renderer = Renderer::new(&device, &queue, &config, &init).expect("headless renderer");
+
+    // Every style, because the buffer writes happen regardless of which
+    // style is active.
+    for style in [
+        SelectionStyle::Outline,
+        SelectionStyle::Tint,
+        SelectionStyle::None,
+    ] {
+        renderer.set_selection_highlight(&queue, style, [0.9, 0.4, 0.1, 1.0], 3.0);
+    }
+    renderer.write_label_style(&queue, &LabelStyle::new_default());
+    renderer.write_label_dpr(&queue, 2.0);
+
+    let _ = device.poll(wgpu::PollType::Wait {
+        submission_index: None,
+        timeout: None,
+    });
+    let error = pollster::block_on(device.pop_error_scope());
+    assert!(
+        error.is_none(),
+        "a host-facing setter raised a wgpu validation error: {error:?}\n\
+         The usual cause is a buffer created without COPY_DST and then \
+         written with queue.write_buffer: the write is rejected and the \
+         buffer silently keeps its creation contents."
+    );
+}
+
 /// The colour-grading slots, rendered rather than reasoned about.
 ///
 /// Three things are asserted, and the third is the one worth having:

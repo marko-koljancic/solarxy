@@ -792,7 +792,7 @@ impl Renderer {
             let selection_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Selection Tint Color"),
                 contents: bytemuck::cast_slice(&selection_color),
-                usage: wgpu::BufferUsages::UNIFORM,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
             let selection_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Selection Tint BG"),
