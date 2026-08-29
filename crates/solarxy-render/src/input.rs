@@ -87,7 +87,7 @@ pub fn load(
         .iter()
         .any(|e| e.eq_ignore_ascii_case(&ext))
     {
-        synthesize_model_document(&mut engine, path, &ext, bytes)?;
+        synthesize_model_document(&mut engine, path, &ext, bytes, &mut warnings)?;
     } else {
         return Err(RenderError::InputUnsupported {
             path: path.to_path_buf(),
@@ -103,17 +103,27 @@ pub fn load(
 /// A geometry container with an import inside it, displayed. That is the
 /// smallest thing that is a real document rather than a special case, which is
 /// what lets it enter the identical render path.
+///
+/// `warnings` carries what staging the model's companions had to say. It joins
+/// the channel the scene-file branch already fills, so a missing texture
+/// reaches the reader through `tracing` and the JSON report by the one route
+/// rather than a second one invented here.
 fn synthesize_model_document(
     engine: &mut Engine,
     path: &Path,
     ext: &str,
     bytes: Vec<u8>,
+    warnings: &mut Vec<String>,
 ) -> Result<(), RenderError> {
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("model")
         .to_string();
+    // Before the primary, so a required companion that cannot be read fails
+    // as an input problem naming the file rather than later, inside a cook
+    // job, as a parse failure naming something else.
+    crate::companions::stage(engine, path, ext, &bytes, warnings)?;
     let asset = engine.stage_asset(name, String::new(), bytes);
 
     let invalid = |message: String| RenderError::InputInvalid {

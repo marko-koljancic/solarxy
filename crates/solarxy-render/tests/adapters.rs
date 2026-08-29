@@ -126,3 +126,65 @@ fn a_missing_input_is_its_own_failure() {
     };
     assert!(matches!(err, solarxy_render::RenderError::InputMissing(_)));
 }
+
+/// The whole of the companion defect, on a real multi-file model that has been
+/// in the repository the entire time.
+///
+/// `res/models/frog/` is an OBJ whose `mtllib` names a material library whose
+/// `map_Kd` names a texture beside it. Before companions were staged, this
+/// rendered as untextured clay from the command line and correctly textured in
+/// the browser, from the same file: the browser's picker stages every companion
+/// and the terminal staged one file.
+///
+/// The assertion is on what reached the asset table rather than on pixels,
+/// because that is the thing that was missing and it needs no device. The
+/// texture is asserted as well as the library, since staging the library alone
+/// still renders untextured: OBJ maps are decoded at parse time through the
+/// same resolver.
+#[test]
+fn a_multi_file_obj_stages_the_library_and_the_texture_it_names() {
+    let model = repo_root().join("res/models/frog/ooz3d-export-model-20260329-181053.obj");
+    assert!(model.exists(), "the fixture model is missing: {model:?}");
+
+    let loaded =
+        input::load(&model, None, &mut solarxy_render::Silent).expect("a model file loads");
+
+    let names: Vec<String> = loaded
+        .engine
+        .asset_manifest()
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect();
+
+    assert!(
+        names.iter().any(|n| n.ends_with(".mtl")),
+        "the material library was not staged: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n == "diffuse.png"),
+        "the texture the library names was not staged, so the render is clay: {names:?}"
+    );
+    assert!(
+        loaded.warnings.is_empty(),
+        "every companion is present beside the model: {:?}",
+        loaded.warnings
+    );
+    assert!(
+        !loaded.engine.display_geometries().is_empty(),
+        "the model still has to render"
+    );
+}
+
+/// A self-contained model stages exactly one asset, so the staging step is
+/// visibly a no-op for the formats that need nothing.
+#[test]
+fn a_single_file_model_stages_exactly_one_asset() {
+    let model = repo_root().join("res/models/armadillo.obj");
+    let loaded =
+        input::load(&model, None, &mut solarxy_render::Silent).expect("a model file loads");
+    assert_eq!(
+        loaded.engine.asset_manifest().len(),
+        1,
+        "an OBJ with no mtllib names no companions"
+    );
+}
