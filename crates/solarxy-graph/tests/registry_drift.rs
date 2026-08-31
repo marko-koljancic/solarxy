@@ -45,11 +45,45 @@ fn registry_json_matches_disk() {
     assert_eq!(
         on_disk.trim(),
         generated.trim(),
-        "schemas/registry.json is stale. The published node reference is generated from this, \
-         so it now describes a different application. Regenerate BOTH:\n\n  \
+        "schemas/registry.json is stale, so the palette and parameter panel it drives now \
+         describe a different application. Regenerate BOTH committed copies:\n\n  \
          cargo run -p solarxy-graph --example gen_registry -- json > schemas/registry.json\n  \
          cargo run -p solarxy-graph --example gen_registry -- markdown > \
-         ../solarxy.wiki/Node-Reference.md\n"
+         schemas/node-reference.md\n\n\
+         `node_reference_matches_disk` guards the second one, so a forgotten markdown \
+         regeneration fails there rather than relying on anyone's memory.\n"
+    );
+}
+
+/// The artefact users actually read is the wiki's `Node-Reference.md`, which
+/// lives in a sibling repository that CI cannot see. The committed copy at
+/// `schemas/node-reference.md` exists to move this assertion into the
+/// repository where the generator and the tests are: it is the guard, not a
+/// second reference, so do not delete it as redundant. Publication stays
+/// manual and unchanged: after this check passes, a maintainer copies the
+/// file to the wiki's `Node-Reference.md` on `develop` and merges to
+/// `master`. When the documentation site lands, the committed copy becomes
+/// the site's input and the wiki page a stub; this shape makes that a
+/// deletion rather than a rewrite.
+///
+/// Compared as text for the same reason as the JSON guard above: the property
+/// wanted is that the checked-in file is exactly what the generator emits.
+#[test]
+fn node_reference_matches_disk() {
+    let generated = solarxy_graph::reference::render_markdown(&snapshot())
+        .expect("every node documents itself; every_node_type_is_documented names offenders");
+    let path = workspace_root().join("schemas/node-reference.md");
+    let on_disk = std::fs::read_to_string(&path).expect("schemas/node-reference.md must exist");
+
+    assert_eq!(
+        on_disk.trim(),
+        generated.trim(),
+        "schemas/node-reference.md is stale, so the next wiki publication would describe a \
+         different application. Regenerate:\n\n  \
+         cargo run -p solarxy-graph --example gen_registry -- markdown > \
+         schemas/node-reference.md\n\n\
+         Then publish by copying that file to the wiki's Node-Reference.md on develop and \
+         merging to master.\n"
     );
 }
 

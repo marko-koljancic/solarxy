@@ -54,6 +54,7 @@ pub mod naming;
 pub mod nodes;
 pub mod params;
 pub mod previews;
+pub mod reference;
 pub mod refs;
 pub mod registry;
 pub mod review;
