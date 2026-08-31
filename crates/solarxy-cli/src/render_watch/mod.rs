@@ -830,6 +830,11 @@ impl WatchApp {
     }
 }
 
+/// The closed pass dropdown's width. Explicit so the control cannot size
+/// itself to whichever label is selected: every pass name fits, and the
+/// strip holds still across selection and engine discovery.
+const PASS_SELECTOR_WIDTH: f32 = 96.0;
+
 /// The overlay strip: the pass selector, the way back to the fit, the zoom,
 /// and the caveat a float preview carries.
 fn chrome_ui(
@@ -848,25 +853,33 @@ fn chrome_ui(
         .show_separator_line(false)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // The selector: the beauty always exists; under raster no
-                // other pass could, so none is shown; under tracing an
-                // unrequested pass is disabled naming the flag that would
-                // have produced it, in the label rather than behind a hover.
-                if selector.beauty_only() {
-                    let _ = ui.selectable_label(true, PassKind::Beauty.label());
-                } else {
-                    for kind in PassKind::ALL {
-                        if selector.available(kind) {
-                            let chosen = selector.selected() == kind;
-                            if ui.selectable_label(chosen, kind.label()).clicked() {
-                                selector.choose(kind);
+                // The selector: one dropdown of fixed width, whatever is
+                // selected and whatever the run turns out to offer, so the
+                // strip's geometry never moves under a click or under the
+                // engine becoming known mid-run. The popup lists the beauty
+                // alone under raster (no other pass could exist), and under
+                // tracing an unrequested pass is a disabled row naming the
+                // flag that would have produced it, in the label rather
+                // than behind a hover. Selection lands the same frame as
+                // the click, which `paint` relies on.
+                egui::ComboBox::from_id_salt("watch pass")
+                    .selected_text(selector.selected().label())
+                    .width(PASS_SELECTOR_WIDTH)
+                    .show_ui(ui, |ui| {
+                        for kind in PassKind::ALL {
+                            if selector.available(kind) {
+                                let chosen = selector.selected() == kind;
+                                if ui.selectable_label(chosen, kind.label()).clicked() {
+                                    selector.choose(kind);
+                                }
+                            } else if !selector.beauty_only()
+                                && let Some(aov) = kind.aov()
+                            {
+                                let text = format!("{} (--aov {})", kind.label(), aov.as_str());
+                                ui.add_enabled(false, egui::Button::selectable(false, text));
                             }
-                        } else if let Some(aov) = kind.aov() {
-                            let text = format!("{} (--aov {})", kind.label(), aov.as_str());
-                            ui.add_enabled(false, egui::Button::selectable(false, text));
                         }
-                    }
-                }
+                    });
                 ui.separator();
                 if ui.button("Fit (F)").clicked() {
                     *fit = true;
