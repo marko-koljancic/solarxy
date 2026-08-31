@@ -162,7 +162,10 @@ fn exec_gui(model_path: Option<&str>) -> ExitCode {
             eprintln!("Failed to launch solarxy GUI: {e}");
             eprintln!();
             eprintln!("The Solarxy GUI is distributed separately from the CLI:");
-            eprintln!("  Linux:   flatpak install flathub dev.koljam.solarxy");
+            // Returns to `flatpak install flathub dev.koljam.solarxy` once
+            // the Flathub submission is accepted; until then that command
+            // fails on every machine it is offered to.
+            eprintln!("  Linux:   AppImage from the releases page below");
             eprintln!("  macOS:   brew install --cask koljam/solarxy/solarxy");
             eprintln!("  Windows: winget install Koljam.Solarxy");
             eprintln!();

@@ -158,6 +158,30 @@
         </p>
       </description>
     </release>
+    <release version="0.6.0" date="2026-05-22">
+      <description>
+        <p>
+          A review and annotation system arrives: enter review mode, drop
+          categorised markers on the model itself, reply, resolve and
+          re-anchor, all saved in a sidecar file the whole team can read.
+          Panels become dockable with persistent layouts, a Material
+          Inspector introspects textures and PBR values, overdraw and
+          ambient-occlusion preview join the inspection modes, and batch
+          validation gains adapters for continuous-integration pipelines.
+        </p>
+      </description>
+    </release>
+    <release version="0.5.0" date="2026-04-27">
+      <description>
+        <p>
+          Solarxy splits into two binaries, the GUI viewer and a terminal
+          companion, each with native install channels per platform.
+          Preferences move from the terminal into a tabbed in-app dialog,
+          and a complete interface surface lands: menu bar, console, toast
+          notifications, an update modal and a keyboard-shortcuts overlay.
+        </p>
+      </description>
+    </release>
     <release version="0.5.0-rc.7" date="2026-04-17">
       <description>
         <p>
