@@ -4645,6 +4645,24 @@ impl SolarxyApp {
             let cam = self.view.cameras[pane].as_ref()?;
             (cam.camera.eye, cam.camera.target)
         };
+        // A press and release with no movement commits nothing. The frontend
+        // treats a returned batch as proof the press belonged to a camera
+        // gesture and skips the click ladder, so an unconditional commit made
+        // every click on a locked look-through pane unpickable and pushed an
+        // undo step that changed nothing. Compared against what is on the
+        // node now, not a pose cached at press time, so a follow that ran
+        // mid-gesture cannot make an unchanged pose look changed; the
+        // comparison space is the guard's to explain.
+        if let Ok(graph) = self.engine.document().graph(GraphContext::Root)
+            && let Some(data) = graph.node(node)
+            && crate::camera_commit::pose_unchanged(
+                &data.params,
+                [eye.x, eye.y, eye.z],
+                [target.x, target.y, target.z],
+            )
+        {
+            return None;
+        }
         let cmds = [
             Command::BeginTransaction {
                 label: "Frame Camera".to_string(),

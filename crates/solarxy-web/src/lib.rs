@@ -37,6 +37,11 @@ mod app;
 // desktop shell needs them too, and a module in a crate named for the web was
 // never going to be where it reached for them.
 
+// The no-movement guard on a locked look-through camera commit. Both targets,
+// unlike the host that calls it, so native CI runs its tests; it cannot move
+// to `solarxy-host`, which has no `solarxy-graph` dependency by design.
+mod camera_commit;
+
 // The traversal parity probe: the browser half of the check that the WGSL
 // traversal agrees with its CPU twin. Feature-gated, because the shipped
 // artifact has no reason to carry a diagnostic.
