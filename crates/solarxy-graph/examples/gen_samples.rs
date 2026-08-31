@@ -788,12 +788,9 @@ fn procedural_lookdev() -> Builder {
     let map = b.add(m, "tex_ref", [0.0, -120.0]);
     b.set(m, map, "texture_path", ParamValue::NodeRef(Some(tex)));
     let surface = b.add(m, "principled", [0.0, 20.0]);
-    b.set(
-        m,
-        surface,
-        "base_color",
-        ParamValue::Color([0.72, 0.44, 0.30, 1.0]),
-    );
+    // No base_color here on purpose: the map below is connected, and a
+    // mapped channel takes no factor (the node doc and the dimmed swatch
+    // both say so). The note beside the node teaches the same rule.
     b.set(m, surface, "roughness", ParamValue::Float(0.55));
     b.set(m, surface, "metallic", ParamValue::Float(0.15));
     b.set(
@@ -803,6 +800,15 @@ fn procedural_lookdev() -> Builder {
         ParamValue::Text("fired clay".into()),
     );
     b.connect(m, (map, "image"), (surface, "base_color_map"));
+    b.note(
+        m,
+        [220.0, -120.0],
+        [380.0, 150.0],
+        "The base colour is left at its default on purpose. With a map \
+         connected the channel takes no factor: the map alone drives it, \
+         and the panel dims the swatch to say so. To tint a mapped \
+         surface, tint in the texture network, where the map is authored.",
+    );
     b.display(m, surface);
 
     // --- geometry ---------------------------------------------------
