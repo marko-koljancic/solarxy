@@ -2,41 +2,27 @@
 //!
 //! # Two inputs, one document
 //!
-//! A scene file already is a document. A model file is turned into the smallest
-//! document that renders it: a geometry container holding one import node,
-//! flagged as what to display. Both then leave here as an `Engine` that has
-//! cooked, and everything downstream is written once.
+//! A scene file already is a document. A model file is turned into the
+//! smallest document that renders it, through
+//! [`solarxy_graph::model_document`], which the desktop's still render calls
+//! too: one synthesis in the product, so the two shells answer a bare model
+//! identically by construction. What this adapter owns is the filesystem
+//! half the engine crate must not have: reading the file, collecting the
+//! companions it names beside itself (`solarxy_formats::companions`), and
+//! mapping every failure onto the command's error taxonomy.
 //!
-//! The alternative was a second render path for bare models, which is two sets
-//! of bugs, two answers to every question about lighting and framing, and two
-//! places to fix anything found in either.
+//! # Quiescence
 //!
-//! # Quiescence is not one cook
-//!
-//! `cook` is resumable and budget-bounded, and it queues asynchronous work
-//! rather than doing it: an import parses in a job, and the node downstream of
-//! it cannot cook until that job comes back. A single pass therefore leaves an
-//! imported model absent, silently, and the engine's own sample-scene tests do
-//! not catch it because every bundled sample is fully parametric.
-//!
-//! So the loop below alternates cooking with draining jobs, and stops only when
-//! a pass produces neither. Natively the jobs resolve synchronously, which is
-//! what makes this a loop rather than an event system.
+//! The cook loop lives beside the synthesis in `solarxy_graph`, for the same
+//! sharing reason; the wrapper here reports each pass to the progress sink
+//! and wires the interrupt flag through.
 
 use std::path::Path;
 
-use solarxy_graph::document::{GraphContext, NodeId};
-use solarxy_graph::engine::{Command, Engine, EngineEvent};
-use solarxy_graph::params::{ParamSource, ParamValue};
+use solarxy_graph::engine::Engine;
+use solarxy_graph::model_document::{self, QuiescenceError};
 
 use crate::error::RenderError;
-
-/// The most passes the cook loop will make before calling it stuck.
-///
-/// Generous: a deep chain of imports resolves one job layer per pass, and the
-/// cost of a wasted pass is nothing. It exists so a cyclic wedge fails with a
-/// message rather than hanging a build agent forever.
-const MAX_COOK_PASSES: usize = 256;
 
 /// A loaded, cooked document plus what loading it had to say.
 pub struct Loaded {
@@ -75,19 +61,39 @@ pub fn load(
     })?;
     let mut warnings = Vec::new();
 
+    let invalid = |message: String| RenderError::InputInvalid {
+        path: path.to_path_buf(),
+        message,
+    };
+
     if ext == "slxy" {
         let loaded = engine
             .load_slxy(&bytes)
-            .map_err(|e| RenderError::InputInvalid {
-                path: path.to_path_buf(),
-                message: e.to_string(),
-            })?;
+            .map_err(|e| invalid(e.to_string()))?;
         warnings.extend(loaded.warnings);
     } else if solarxy_core::SUPPORTED_EXTENSIONS
         .iter()
         .any(|e| e.eq_ignore_ascii_case(&ext))
     {
-        synthesize_model_document(&mut engine, path, &ext, bytes, &mut warnings)?;
+        // Companions before the primary, so a required companion that cannot
+        // be read fails as an input problem naming the file rather than
+        // later, inside a cook job, as a parse failure naming something
+        // else. Their warnings join the channel the scene-file branch
+        // already fills, so a missing texture reaches the reader through
+        // `tracing` and the JSON report by the one route.
+        let companions = solarxy_formats::companions::collect(path, &ext, &bytes)
+            .map_err(|e| invalid(e.to_string()))?;
+        warnings.extend(companions.warnings);
+        for asset in companions.assets {
+            engine.stage_asset(asset.name, String::new(), asset.bytes);
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("model")
+            .to_string();
+        model_document::synthesize_model_document(&mut engine, &name, &ext, bytes)
+            .map_err(|e| invalid(e.to_string()))?;
     } else {
         return Err(RenderError::InputUnsupported {
             path: path.to_path_buf(),
@@ -98,169 +104,28 @@ pub fn load(
     Ok(Loaded { engine, warnings })
 }
 
-/// Builds the one-node document a bare model renders through.
+/// Cooks to quiescence, reporting each pass to the sink.
 ///
-/// A geometry container with an import inside it, displayed. That is the
-/// smallest thing that is a real document rather than a special case, which is
-/// what lets it enter the identical render path.
-///
-/// `warnings` carries what staging the model's companions had to say. It joins
-/// the channel the scene-file branch already fills, so a missing texture
-/// reaches the reader through `tracing` and the JSON report by the one route
-/// rather than a second one invented here.
-fn synthesize_model_document(
-    engine: &mut Engine,
-    path: &Path,
-    ext: &str,
-    bytes: Vec<u8>,
-    warnings: &mut Vec<String>,
-) -> Result<(), RenderError> {
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("model")
-        .to_string();
-    // Before the primary, so a required companion that cannot be read fails
-    // as an input problem naming the file rather than later, inside a cook
-    // job, as a parse failure naming something else.
-    crate::companions::stage(engine, path, ext, &bytes, warnings)?;
-    let asset = engine.stage_asset(name, String::new(), bytes);
-
-    let invalid = |message: String| RenderError::InputInvalid {
-        path: path.to_path_buf(),
-        message,
-    };
-
-    let geo = added_node(
-        &engine
-            .apply(Command::AddNode {
-                ctx: GraphContext::Root,
-                node_type: "geo".to_string(),
-                position: [0.0, 0.0],
-            })
-            .map_err(|e| invalid(e.to_string()))?,
-    )
-    .ok_or_else(|| invalid("the geometry container was not created".into()))?;
-
-    let inner = GraphContext::Subflow(geo);
-    let import = added_node(
-        &engine
-            .apply(Command::AddNode {
-                ctx: inner,
-                node_type: import_type_for(ext)
-                    .ok_or_else(|| invalid(format!("nothing imports a .{ext}")))?
-                    .to_string(),
-                position: [0.0, 0.0],
-            })
-            .map_err(|e| invalid(e.to_string()))?,
-    )
-    .ok_or_else(|| invalid("the import node was not created".into()))?;
-
-    engine
-        .apply(Command::SetParam {
-            ctx: inner,
-            node: import,
-            key: "file".to_string(),
-            value: ParamSource::Literal(ParamValue::Asset(asset)),
-        })
-        .map_err(|e| invalid(e.to_string()))?;
-    engine
-        .apply(Command::SetActiveOutput {
-            ctx: inner,
-            node: Some(import),
-        })
-        .map_err(|e| invalid(e.to_string()))?;
-
-    Ok(())
-}
-
-/// Which import node reads a given extension.
-///
-/// One node type per format rather than one that sniffs, which is the registry's
-/// own arrangement: each declares the options its format actually has. So the
-/// adapter picks, and a format the registry gains an importer for needs a line
-/// here before the command can open it.
-fn import_type_for(ext: &str) -> Option<&'static str> {
-    match ext {
-        "obj" => Some("import_obj"),
-        "gltf" | "glb" => Some("import_gltf"),
-        "stl" => Some("import_stl"),
-        "ply" => Some("import_ply"),
-        _ => None,
-    }
-}
-
-/// The id of the node an `AddNode` batch reports as added.
-fn added_node(batch: &solarxy_graph::engine::EventBatch) -> Option<NodeId> {
-    batch.events.iter().find_map(|e| match e {
-        EngineEvent::NodeAdded { node, .. } => Some(node.id),
-        _ => None,
-    })
-}
-
-/// Cooks, drains jobs, and repeats until a pass does neither.
+/// The loop itself is [`model_document::cook_to_quiescence`]; this wrapper
+/// owns the progress reporting and the interrupt flag, and maps the outcome
+/// onto the command's taxonomy.
 ///
 /// # Errors
-/// A node reporting a cook error, or the loop failing to settle.
+/// A node reporting a cook error, cancellation, or the loop failing to
+/// settle.
 pub fn cook_to_quiescence(
     engine: &mut Engine,
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
     sink: &mut dyn crate::RenderSink,
 ) -> Result<(), RenderError> {
-    let stopped = || cancel.is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed));
-    let mut failures: Vec<String> = Vec::new();
-    for pass in 0..MAX_COOK_PASSES {
-        sink.report(&crate::RenderProgress::Cooking {
-            pass: u32::try_from(pass).unwrap_or(u32::MAX).saturating_add(1),
-            passes: u32::try_from(MAX_COOK_PASSES).unwrap_or(u32::MAX),
-        });
-        if stopped() {
-            return Err(RenderError::Cancelled);
-        }
-        // The engine's own cancellation hook, which its documentation offers a
-        // native caller for exactly this. A long cook stops between nodes
-        // rather than at the end of it.
-        let events = engine.cook(&mut || !stopped());
-        collect_failures(&events, &mut failures);
-
-        // Natively there is no worker: a job is resolved on this thread and
-        // handed straight back, which is what the engine's own documentation
-        // says the native path is for.
-        let jobs = engine.take_jobs();
-        let resolved = !jobs.is_empty();
-        for (ctx, id, request) in jobs {
-            let result = engine.resolve_job(&request);
-            let events = engine.submit_job_result(ctx, id, result);
-            collect_failures(&events, &mut failures);
-        }
-
-        if !failures.is_empty() {
-            return Err(RenderError::Cook(failures.join("; ")));
-        }
-        if events.is_empty() && !resolved {
-            return Ok(());
-        }
-    }
-    Err(RenderError::Cook(format!(
-        "the scene was still changing after {MAX_COOK_PASSES} cook passes"
-    )))
-}
-
-/// Pulls cook errors out of an event batch.
-///
-/// The engine reports a failed node as a status rather than as an error return,
-/// because a shell wants to keep running and badge the node. A render does not:
-/// there is nobody to see the badge, and the image would be of a scene that did
-/// not build.
-fn collect_failures(events: &[EngineEvent], into: &mut Vec<String>) {
-    use solarxy_graph::cook::state::CookStatus;
-    for event in events {
-        if let EngineEvent::CookStatus {
-            node,
-            status: CookStatus::Error { message },
-        } = event
-        {
-            into.push(format!("node {}: {message}", node.0));
-        }
-    }
+    let mut stopped = || cancel.is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed));
+    let mut sink = sink;
+    model_document::cook_to_quiescence(engine, &mut stopped, &mut |pass, passes| {
+        sink.report(&crate::RenderProgress::Cooking { pass, passes });
+    })
+    .map_err(|e| match e {
+        QuiescenceError::Cancelled => RenderError::Cancelled,
+        QuiescenceError::Cook(message) => RenderError::Cook(message),
+        unsettled @ QuiescenceError::Unsettled { .. } => RenderError::Cook(unsettled.to_string()),
+    })
 }

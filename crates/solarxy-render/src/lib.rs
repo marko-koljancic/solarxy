@@ -29,7 +29,6 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-mod companions;
 pub mod error;
 pub mod files;
 pub mod input;
