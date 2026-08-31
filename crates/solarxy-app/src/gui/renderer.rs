@@ -506,6 +506,7 @@ impl EguiRenderer {
         // through the synthesized document. `model_info` is set exactly when
         // a file-loaded model is open.
         let still_renderable = self.scene_open || self.model_info.is_some();
+        let review_available = model.is_some();
         let shortcuts_modal = &mut self.shortcuts_modal;
         let material_inspector = &mut self.material_inspector;
         let node_tree_state = &mut self.node_tree;
@@ -544,6 +545,10 @@ impl EguiRenderer {
                     recent_files,
                     pt_hdri_available,
                     pt_customs,
+                    // Review anchors against the file-loaded model, so its
+                    // availability is the model's presence, not has_model
+                    // (which a scene also satisfies).
+                    review_available,
                     review.active,
                     review.markers_hidden,
                     review.dirty,

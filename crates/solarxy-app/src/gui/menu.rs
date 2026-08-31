@@ -29,6 +29,7 @@ pub(super) fn draw_menu_bar(
     recent_files: &[String],
     hdri_available: bool,
     customs: &[CustomBackground],
+    review_available: bool,
     review_active: bool,
     review_markers_hidden: bool,
     review_dirty: bool,
@@ -44,6 +45,7 @@ pub(super) fn draw_menu_bar(
             draw_review_menu(
                 ui,
                 actions,
+                review_available,
                 review_active,
                 review_markers_hidden,
                 review_dirty,
@@ -63,6 +65,7 @@ pub(super) fn draw_menu_bar(
 fn draw_review_menu(
     ui: &mut egui::Ui,
     actions: &mut MenuActions,
+    review_available: bool,
     review_active: bool,
     review_markers_hidden: bool,
     review_dirty: bool,
@@ -76,17 +79,29 @@ fn draw_review_menu(
         "Review".into()
     };
     ui.menu_button(label, |ui| {
+        // Both viewport affordances are honest about the open document: the
+        // desktop's review anchors against a file-loaded model, so a scene
+        // (or nothing) disables them rather than discarding clicks. The mode
+        // toggle stays enabled while active, so it can always be turned off.
         if ui
-            .selectable_label(review_active, "Review Mode")
+            .add_enabled(
+                review_available || review_active,
+                egui::Button::selectable(review_active, "Review Mode"),
+            )
             .on_hover_text("Shift+R")
+            .on_disabled_hover_text("Review needs an open model file")
             .clicked()
         {
             actions.toggle_review_mode = true;
             ui.close();
         }
         if ui
-            .selectable_label(!review_markers_hidden, "Show Markers")
+            .add_enabled(
+                review_available,
+                egui::Button::selectable(!review_markers_hidden, "Show Markers"),
+            )
             .on_hover_text("Show review markers in the viewport")
+            .on_disabled_hover_text("Review needs an open model file")
             .clicked()
         {
             actions.toggle_review_markers = true;

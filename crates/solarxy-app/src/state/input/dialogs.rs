@@ -378,6 +378,11 @@ impl State {
             self.save_review_sidecar();
         }
         self.review.clear_for_new_model();
+        // The mode itself turns off too. `clear_for_new_model` deliberately
+        // preserves it so a model-to-model swap keeps review armed, but this
+        // path ends with no model open (File > Close, or a scene opening),
+        // where an armed mode would discard every click in silence.
+        self.review.active = false;
         self.scene = None;
         self.reset_env_for_empty_scene();
         // The pane cameras deliberately survive. Closing a model leaves a
