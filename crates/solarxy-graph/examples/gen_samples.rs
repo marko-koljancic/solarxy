@@ -1374,7 +1374,7 @@ fn cornell_box() -> Builder {
     let mut b = Builder::new();
     b.note(
         ROOT,
-        [-460.0, -220.0],
+        [40.0, -220.0],
         [400.0, 190.0],
         "The Cornell box: the standard test of global illumination. Press \
          Render on the render node for the traced still. The viewport \
@@ -1597,7 +1597,7 @@ fn cornell_box() -> Builder {
 
     b.note(
         ROOT,
-        [340.0, 40.0],
+        [340.0, 140.0],
         [380.0, 170.0],
         "An area light rather than a glowing box, because it is the light \
          kind the tracer both hits and importance-samples: that is what \
@@ -1608,7 +1608,7 @@ fn cornell_box() -> Builder {
          every photon in the picture came off that panel.",
     );
 
-    let camera = b.add(ROOT, "camera", [340.0, 250.0]);
+    let camera = b.add(ROOT, "camera", [340.0, 40.0]);
     b.rename(ROOT, camera, "shot");
     // Close enough to the open front that the walls fill the frame. That is
     // not a composition preference: it is what keeps the background out of
@@ -1626,7 +1626,7 @@ fn cornell_box() -> Builder {
     b.set(ROOT, camera, "f_stop", ParamValue::Float(1.4));
     b.set(ROOT, camera, "focus_distance", ParamValue::Float(1.86));
 
-    let render = b.add(ROOT, "render", [560.0, 250.0]);
+    let render = b.add(ROOT, "render", [560.0, 40.0]);
     b.set(
         ROOT,
         render,
