@@ -609,3 +609,79 @@ fn the_existing_modes_still_parse() {
         "the render command is not in the help"
     );
 }
+
+/// The terminal theme flags belong to the reader's terminal, not to one
+/// surface, so they parse on either side of the render subcommand and are
+/// listed in the help the README calls authoritative for it.
+#[test]
+fn the_theme_flags_work_after_the_render_subcommand() {
+    let bin = binary();
+    if !bin.exists() {
+        return;
+    }
+
+    // The listing after the subcommand prints the same listing as before it,
+    // and exits without rendering anything.
+    let after = Command::new(&bin)
+        .args(["render", "--list-tui-themes"])
+        .output()
+        .expect("the binary runs");
+    let before = Command::new(&bin)
+        .arg("--list-tui-themes")
+        .output()
+        .expect("the binary runs");
+    assert_eq!(code(&after), 0, "the listing after the subcommand failed");
+    assert_eq!(
+        after.stdout, before.stdout,
+        "the two listing forms print different listings"
+    );
+    assert!(
+        !after.stdout.is_empty(),
+        "the listing printed nothing at all"
+    );
+
+    // Both helps list both flags.
+    for help_args in [&["--help"][..], &["render", "--help"][..]] {
+        let out = Command::new(&bin)
+            .args(help_args)
+            .output()
+            .expect("the binary runs");
+        let help = String::from_utf8_lossy(&out.stdout);
+        for flag in ["--tui-theme", "--list-tui-themes"] {
+            assert!(help.contains(flag), "{flag} missing from {help_args:?}");
+        }
+    }
+
+    // A theme named after the subcommand parses: the run gets far enough to
+    // find the input missing (exit 2), where a rejected flag would have been
+    // a usage error before anything was read.
+    for theme_position in [
+        &[
+            "--tui-theme",
+            "solarxy",
+            "render",
+            "no-such-file.obj",
+            "-o",
+            "out.png",
+        ][..],
+        &[
+            "render",
+            "no-such-file.obj",
+            "-o",
+            "out.png",
+            "--tui-theme",
+            "solarxy",
+        ][..],
+    ] {
+        let out = Command::new(&bin)
+            .args(theme_position)
+            .current_dir(repo_root())
+            .output()
+            .expect("the binary runs");
+        assert_eq!(
+            code(&out),
+            2,
+            "the flag order {theme_position:?} did not reach the input load"
+        );
+    }
+}

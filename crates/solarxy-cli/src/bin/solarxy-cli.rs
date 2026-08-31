@@ -29,6 +29,22 @@ fn main() -> anyhow::Result<ExitCode> {
         )
         .init();
 
+    // The theme listing is an action that prints and exits, like help, and it
+    // must win over a missing required argument the same way help does:
+    // `render --list-tui-themes` would otherwise be a usage error before any
+    // check of the parsed flag could run. clap has no such action for user
+    // flags, so the raw arguments are scanned before the parse; the flag's
+    // declaration on `Args` remains what lists it in both helps. The scan
+    // stops at `--`, past which the word is a value rather than a flag.
+    if std::env::args()
+        .skip(1)
+        .take_while(|a| a != "--")
+        .any(|a| a == "--list-tui-themes")
+    {
+        solarxy_cli::tui::theme::print_listing();
+        return Ok(ExitCode::SUCCESS);
+    }
+
     // Parsed rather than `parse()`, because clap exits 2 on a usage error and
     // this command's taxonomy spends 2 on an input that could not be loaded.
     // One is a mistake in the command line and the other is a mistake in the
@@ -56,9 +72,9 @@ fn main() -> anyhow::Result<ExitCode> {
     // A subcommand owns the run when one is given. The flat modes below are the
     // shipped surface and keep working untouched.
     if let Some(solarxy_cli::parser::Command::Render(render)) = args.command {
-        // The terminal theme is a top-level flag because it belongs to the
-        // reader's terminal rather than to one surface, and the dashboard is
-        // the second surface to want it.
+        // The terminal theme is a global flag on the top-level arguments
+        // because it belongs to the reader's terminal rather than to one
+        // surface, and the dashboard is the second surface to want it.
         return Ok(run_render(&render, args.tui_theme.as_deref()));
     }
 
@@ -74,11 +90,6 @@ fn main() -> anyhow::Result<ExitCode> {
         println!("Repository   {repository}");
         println!("License      {license}");
         println!("Contact      https://koljam.com");
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    if args.list_tui_themes {
-        solarxy_cli::tui::theme::print_listing();
         return Ok(ExitCode::SUCCESS);
     }
 

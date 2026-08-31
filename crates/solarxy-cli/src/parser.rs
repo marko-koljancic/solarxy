@@ -78,11 +78,13 @@ pub struct Args {
     #[clap(
         long = "tui-theme",
         value_name = "NAME",
+        global = true,
         help = "Terminal theme for the analyze surface and the render dashboard; applies at 256-colour and truecolor terminals"
     )]
     pub tui_theme: Option<String>,
     #[clap(
         long = "list-tui-themes",
+        global = true,
         help = "List the terminal themes this build can find, with a swatch of each"
     )]
     pub list_tui_themes: bool,
