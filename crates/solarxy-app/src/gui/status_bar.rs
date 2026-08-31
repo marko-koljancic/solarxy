@@ -102,10 +102,16 @@ pub(super) fn draw(ctx: &egui::Context, data: &StatusBarData, theme: Theme) -> S
                         ui.separator();
                     }
                     if width >= COLLAPSE_PERF {
-                        label(
-                            ui,
-                            &format!("{:.1} ms \u{00b7} {} fps", data.avg_ms, data.fps),
-                            theme.muted,
+                        // Monospaced deliberately, at Small's size: these
+                        // digits change every frame, and in a proportional
+                        // face the segment's width would breathe with them.
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{:.1} ms \u{00b7} {} fps",
+                                data.avg_ms, data.fps
+                            ))
+                            .font(egui::FontId::new(10.0, egui::FontFamily::Monospace))
+                            .color(theme.muted),
                         );
                         ui.separator();
                     }

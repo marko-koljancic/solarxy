@@ -142,9 +142,10 @@ exists.
 Which artifact carries which family:
 
 - **Lilex** (Copyright 2019 The Lilex Project Authors, https://github.com/mishamyrt/Lilex;
-  SIL Open Font License 1.1). The desktop interface typeface, compiled into the `solarxy`
-  binary from `res/Lilex/static/Lilex-Medium.ttf`, beside which `res/Lilex/OFL.txt` carries
-  the same grant in the source tree. The renderer's committed glyph atlas,
+  SIL Open Font License 1.1). The desktop monospace typeface, fronting the code-and-numbers
+  surfaces (the console, numeric readouts, shortcut keys and file paths), compiled into the
+  `solarxy` binary from `res/Lilex/static/Lilex-Medium.ttf`, beside which `res/Lilex/OFL.txt`
+  carries the same grant in the source tree. The renderer's committed glyph atlas,
   `crates/solarxy-renderer/src/shaders/label_atlas.r8`, is a signed-distance bitmap baked
   from the same face by `examples/gen_glyph_atlas.rs`: it is treated as a derivative of the
   Font Software and travels under the same license recorded here. Lilex declares no
@@ -156,17 +157,21 @@ Which artifact carries which family:
   its license text below records), **Noto Emoji** (Copyright 2013 Google LLC; SIL Open Font
   License 1.1) and **emoji-icon-font** (Copyright 2014 John Slegers; MIT). The interface
   toolkit's default faces, compiled into the desktop binary, and into the command-line
-  binary when it is built with the `watch` feature. They stay enabled deliberately: Lilex
-  sits first in the chain and these supply the symbol and emoji coverage the interface
-  leans on, the review category glyphs among it, so disabling them would trade four notices
-  for missing glyphs. The decision is recorded beside the dependency that would undo it, on
+  binary when it is built with the `watch` feature. They stay enabled deliberately: Inter
+  and Lilex sit first in their families and these supply the symbol and emoji coverage the
+  interface leans on, the review category glyphs among it, so disabling them would trade
+  four notices for missing glyphs. The decision is recorded beside the dependency that would undo it, on
   the `egui` line of `crates/solarxy-app/Cargo.toml`.
 
 - **Inter** (Copyright 2016 The Inter Project Authors, https://github.com/rsms/inter; SIL
   Open Font License 1.1) and **IBM Plex Mono** (Copyright 2017 IBM Corp.; SIL Open Font
-  License 1.1). The web application's interface and monospace faces, bundled into the build
-  as web-font subsets. IBM declares the Reserved Font Name "Plex"; Solarxy renames nothing
-  and presents the family under its own name, so the clause constrains nothing.
+  License 1.1). Inter is the interface typeface of both shells: the web application bundles
+  it into the build as web-font subsets, and the desktop compiles the static Medium weight
+  from the Inter 4.1 release into the `solarxy` binary from `res/Inter/Inter-Medium.ttf`,
+  beside which `res/Inter/OFL.txt` carries the same grant in the source tree. IBM Plex Mono
+  is the web application's monospace face, bundled as web-font subsets. IBM declares the
+  Reserved Font Name "Plex"; Solarxy renames nothing and presents the family under its own
+  name, so the clause constrains nothing.
 
 - **Space Grotesk** (Copyright 2020 The Space Grotesk Project Authors,
   https://github.com/floriankarsten/space-grotesk), **Space Mono** (Copyright 2016 The
