@@ -437,6 +437,106 @@ fn a_flat_field_assembles_without_a_seam() {
     }
 }
 
+/// The seam test again, with the screen-space post the apron exists for.
+///
+/// The flat-field test above runs post-free, so its plan carries an apron
+/// of zero and it proves only the unaproned path; the whole harness runs
+/// bloom off, so before this test nothing anywhere composited a tiled
+/// still with a screen-space effect enabled. Bloom pulls from
+/// neighbouring pixels, and a tile that blurred only what it owns halos
+/// differently at its edge than the assembled picture's interior does,
+/// which is exactly the seam the apron pays for. Remove the apron and
+/// this fails; the post-free test would not notice.
+///
+/// The threshold is dropped to zero because the gradient sits below the
+/// shipped one: a bloom that contributed nothing would make this pass
+/// with the apron gone, which is the vacuous form of the test.
+#[test]
+fn a_bloomed_flat_field_assembles_without_a_seam() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    h.renderer.post.bloom_enabled = true;
+    h.renderer
+        .post
+        .set_strengths(solarxy_core::view_config::PostStrengths {
+            bloom_strength: 1.5,
+            bloom_threshold: 0.0,
+            ssao_strength: 0.0,
+        });
+    let mut backend = RasterBackend::new(std::sync::Arc::clone(&h.renderer.layouts));
+
+    let mut post_spec = spec(StillEngine::Raster, 1, APRONED_BUDGET);
+    post_spec.screen_space_post = true;
+    let mut job = StillRenderJob::new(post_spec);
+    let columns: Vec<u32> = job
+        .plan()
+        .tiles
+        .iter()
+        .map(|t| t.image.x)
+        .filter(|x| *x > 0)
+        .collect();
+    let rows: Vec<u32> = job
+        .plan()
+        .tiles
+        .iter()
+        .map(|t| t.image.y)
+        .filter(|y| *y > 0)
+        .collect();
+    assert!(
+        !rows.is_empty() && !columns.is_empty(),
+        "the plan has no interior boundary, so this tests nothing"
+    );
+    assert!(
+        job.plan()
+            .tiles
+            .iter()
+            .any(|t| t.render.width > t.image.width),
+        "no tile renders more than it keeps, so the apron is not in play"
+    );
+    let image = run(&mut h, &mut job, &mut backend);
+
+    let at = |x: usize, y: usize| ((y * W as usize) + x) * 4;
+    let step = |a: usize, b: usize| {
+        (0..3)
+            .map(|c| f64::from(i32::from(image[a + c]) - i32::from(image[b + c])).abs())
+            .sum::<f64>()
+            / 3.0
+    };
+    let row_step = |y: u32| {
+        (0..W as usize)
+            .map(|x| step(at(x, y as usize - 1), at(x, y as usize)))
+            .sum::<f64>()
+            / f64::from(W)
+    };
+    let column_step = |x: u32| {
+        (0..H as usize)
+            .map(|y| step(at(x as usize - 1, y), at(x as usize, y)))
+            .sum::<f64>()
+            / f64::from(H)
+    };
+
+    let ordinary_rows: f64 = (1..H)
+        .filter(|y| !rows.contains(y))
+        .map(row_step)
+        .sum::<f64>()
+        / f64::from(H - 1 - rows.len() as u32);
+    for y in &rows {
+        let seam = row_step(*y);
+        eprintln!("bloomed horizontal seam at y={y}: {seam:.3} against {ordinary_rows:.3}");
+        assert!(
+            seam <= ordinary_rows + 1.0,
+            "the step across the tile boundary at y={y} is {seam:.3}, against \
+             {ordinary_rows:.3} between ordinary rows"
+        );
+    }
+    for x in &columns {
+        let seam = column_step(*x);
+        eprintln!("bloomed vertical seam at x={x}: {seam:.3}");
+        assert!(seam <= 1.0, "a vertical seam at x={x} of {seam:.3}");
+    }
+}
+
 #[test]
 fn the_shipped_budget_leaves_a_four_megapixel_still_in_whole_tiles() {
     // Not a GPU test: the arithmetic that decides how a real still is cut,

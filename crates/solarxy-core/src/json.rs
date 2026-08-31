@@ -614,4 +614,64 @@ mod tests {
             "a texture field reached the JSON report without a schema_version bump"
         );
     }
+
+    /// The issue entry and its kind strings, pinned the way the mesh and
+    /// texture entries are.
+    ///
+    /// The exhaustive match in [`JsonIssue::from`] only forces a NEW kind to
+    /// choose a wire string; a renamed string still compiles and changes the
+    /// published format silently, which is the expensive kind of change
+    /// because build systems match on these. Every kind runs through the
+    /// real serialization here, so either movement fails this test and takes
+    /// a deliberate `schema_version` bump with it.
+    #[test]
+    fn the_issue_entry_and_its_kind_strings_are_pinned() {
+        let mut report = empty_report();
+        report.validation = ValidationReport {
+            issues: IssueKind::ALL
+                .iter()
+                .map(|kind| make_issue(Severity::Warning, IssueScope::Model, *kind))
+                .collect(),
+        };
+        let parsed: serde_json::Value =
+            serde_json::from_str(&report_to_json(&report).unwrap()).unwrap();
+        let issues = parsed["validation"]["issues"]
+            .as_array()
+            .expect("issues is a JSON array");
+
+        let kinds: Vec<&str> = issues
+            .iter()
+            .map(|i| i["kind"].as_str().expect("kind is a string"))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "NormalMismatch",
+                "FlippedNormals",
+                "UvMismatch",
+                "MissingUvs",
+                "NonTriangulated",
+                "EmptyIndices",
+                "InvalidMaterialRef",
+                "DegenerateTriangles",
+                "MissingTexture",
+                "NonManifoldEdge",
+                "TriangleBudgetExceeded",
+            ],
+            "an issue kind's wire string moved without a schema_version bump"
+        );
+
+        let mut keys: Vec<&str> = issues[0]
+            .as_object()
+            .expect("an issue is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["kind", "message", "scope", "scope_index", "severity"],
+            "an issue field reached the JSON report without a schema_version bump"
+        );
+    }
 }

@@ -126,6 +126,42 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## three.js (the rect-area light reference tables)
+
+A test oracle rather than shipped code: `crates/solarxy-renderer/tests/fixtures/ltc_reference.txt`
+samples the published linearly-transformed-cosine tables of Heitz, Dupuy, Hill and Neubelt
+(2016) as three.js distributes them, and the fit test holds Solarxy's own bake to that
+reference's quality. The sampled data travels with the source tree only; no artifact carries
+it, and Solarxy's shipped table is its own fit, not the reference (the reasoning is recorded
+on the bake example). The sample is still a portion of an MIT-licensed work, so its notice is
+reproduced here.
+
+Source: https://github.com/mrdoob/three.js (examples/jsm/lights/RectAreaLightTexturesLib.js)
+
+```
+The MIT License
+
+Copyright (c) 2010-2026 three.js authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ## Bundled typefaces
 
 Everything above this section is code Solarxy ports; what follows is font software Solarxy
@@ -474,6 +510,10 @@ find the paper it came from.
 
 - **The MurmurHash3 finalizer**, by Austin Appleby, released into the public domain. Used to
   scramble per-dimension seeds rather than as a hash. Same file as above.
+
+- **Correlated multi-jittered sampling.** Andrew Kensler, "Correlated Multi-Jittered
+  Sampling" (Pixar technical memo 13-01, 2013). The stratification the two generators above
+  seed and scramble. Same file as above.
 
 Two sources the reference credits are deliberately **absent** from this list, because the
 code that would have required them was not ported: the Sobol sequence and its blue-noise
