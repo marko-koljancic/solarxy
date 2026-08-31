@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { hasMissing, missingSidecars, referencedSidecars } from "./sidecars";
+import { hasMissing, mergeRefs, missingSidecars, mtlTextures, referencedSidecars } from "./sidecars";
 
 const enc = new TextEncoder();
 
@@ -87,5 +87,49 @@ describe("missingSidecars", () => {
   it("matches case-sensitively, exactly as the resolver does", () => {
     const missing = missingSidecars(refs, ["flighthelmet.bin"]);
     expect(missing.required).toEqual(["FlightHelmet.bin"]);
+  });
+});
+
+describe("mtlTextures", () => {
+  it("collects every map directive and the bump aliases, last token wins", () => {
+    const mtl = enc.encode(
+      [
+        "newmtl skin",
+        "Kd 1 1 1",
+        "map_Kd -o 1 1 1 diffuse.png",
+        "map_Bump -bm 0.2 normal.png",
+        "bump bumpy.png",
+        "disp displace.png",
+        "decal sticker.png",
+        "illum 2",
+      ].join("\n"),
+    );
+    expect(mtlTextures(mtl)).toEqual([
+      "diffuse.png",
+      "normal.png",
+      "bumpy.png",
+      "displace.png",
+      "sticker.png",
+    ]);
+  });
+
+  it("percent-decodes, basenames subpaths, and dedupes", () => {
+    const mtl = enc.encode("map_Kd tex%20dir/my%20map.png\nmap_Ks tex%20dir/my%20map.png\n");
+    expect(mtlTextures(mtl)).toEqual(["my map.png"]);
+  });
+
+  it("names nothing for an mtl with no maps", () => {
+    expect(mtlTextures(enc.encode("newmtl plain\nKd 0.5 0.5 0.5\n"))).toEqual([]);
+  });
+});
+
+describe("mergeRefs", () => {
+  it("joins and dedupes both lanes", () => {
+    const merged = mergeRefs(
+      { required: ["a.bin"], optional: ["m.mtl", "t.png"] },
+      { required: ["a.bin"], optional: ["t.png", "u.png"] },
+    );
+    expect(merged.required).toEqual(["a.bin"]);
+    expect(merged.optional).toEqual(["m.mtl", "t.png", "u.png"]);
   });
 });

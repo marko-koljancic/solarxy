@@ -7,7 +7,13 @@
 // import action (the widget's setParam or the drop flow's node creation).
 
 import { useRef } from "react";
-import { completeModelImport, dispatch, stagedManifestNames, stageFile } from "../engine/session";
+import {
+  completeModelImport,
+  dispatch,
+  refsWithMtlTextures,
+  stagedManifestNames,
+  stageFile,
+} from "../engine/session";
 import { hasMissing, missingSidecars } from "../engine/sidecars";
 import { useUi } from "../store/ui";
 import { Modal } from "./Modal";
@@ -38,7 +44,12 @@ export function MissingSidecarsModal() {
 
   const onAddFiles = async (files: File[]) => {
     for (const file of files) await stageFile(file);
-    const missing = missingSidecars(prompt.missing, stagedManifestNames());
+    // A material library added HERE names textures the parse will also
+    // want, so the wanted set widens before the re-diff: adding the .mtl
+    // alone keeps the dialog open asking for its maps rather than
+    // completing into a silently untextured import.
+    const wanted = await refsWithMtlTextures(prompt.missing, files);
+    const missing = missingSidecars(wanted, stagedManifestNames());
     if (hasMissing(missing)) {
       useUi.getState().setSidecarPrompt({ ...prompt, missing });
     } else {

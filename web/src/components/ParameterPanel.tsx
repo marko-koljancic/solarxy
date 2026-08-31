@@ -14,6 +14,7 @@ import {
   flyToIssue,
   getClient,
   previewParam,
+  refsWithMtlTextures,
   stagedManifestNames,
   stageFile,
 } from "../engine/session";
@@ -21,7 +22,6 @@ import { saveExportToFile } from "../persistence/opfs";
 import { pushToast } from "../store/toasts";
 import { hasMissing, missingSidecars, referencedSidecars } from "../engine/sidecars";
 import { useUi } from "../store/ui";
-import { DIRECTORY_PICKER } from "./directoryPicker";
 import type {
   GraphContext,
   NodeMirror,
@@ -491,7 +491,6 @@ function NodePathField({ ctx, node, spec, label }: FieldProps & { label: ReactNo
 function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode }) {
   const [pending, setPending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const folderRef = useRef<HTMLInputElement>(null);
   const current = String(paramValue(node, spec) ?? "");
 
   // Multi-file staging: a multi-file model (gltf + bin + textures) selects
@@ -513,7 +512,8 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
         if (file === primary) primaryHash = hash;
       }
       if (!primaryHash) return;
-      const refs = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+      const shallow = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+      const refs = await refsWithMtlTextures(shallow, files);
       const missing = missingSidecars(refs, stagedManifestNames());
       if (hasMissing(missing)) {
         useUi.getState().setSidecarPrompt({
@@ -554,15 +554,6 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
         >
           {pending ? "Staging…" : current ? "Change" : "Select File"}
         </button>
-        <button
-          type="button"
-          className="param-asset-btn"
-          disabled={pending}
-          title="Import a whole model folder (gltf + bin + textures)"
-          onClick={() => folderRef.current?.click()}
-        >
-          Folder…
-        </button>
         <span className="param-asset-name" title={current}>
           {display}
         </span>
@@ -577,14 +568,6 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
           multiple
           style={{ display: "none" }}
           onChange={onInputChange}
-        />
-        <input
-          ref={folderRef}
-          type="file"
-          multiple
-          style={{ display: "none" }}
-          onChange={onInputChange}
-          {...DIRECTORY_PICKER}
         />
       </div>
     </div>

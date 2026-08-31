@@ -27,7 +27,15 @@ import { SolarxyClient } from "./client";
 import { useRenderJob } from "../store/renderJob";
 import { useAttrPinStats } from "./attrPins";
 import { applyMarkerPositions, hideAllMarkers } from "./markers";
-import { hasMissing, missingSidecars, referencedSidecars } from "./sidecars";
+import {
+  basename,
+  hasMissing,
+  mergeRefs,
+  missingSidecars,
+  mtlTextures,
+  referencedSidecars,
+  type SidecarRefs,
+} from "./sidecars";
 import { ctxKey } from "./types";
 import type {
   AttrVizState,
@@ -1071,6 +1079,25 @@ export function stagedManifestNames(): string[] {
     .map((a) => a.name);
 }
 
+/** Widens a reference set with the textures of any material library in
+ * `files` that the set names: an OBJ names its `.mtl`, and the `.mtl`
+ * names textures the parse will also try to resolve, so a drop of
+ * `model.obj` plus its library must still prompt for the maps. Only
+ * libraries present in `files` can be read (the browser cannot open a
+ * sibling by itself); one already staged in an earlier import is not
+ * re-readable here, and its textures were prompted for when it arrived. */
+export async function refsWithMtlTextures(refs: SidecarRefs, files: File[]): Promise<SidecarRefs> {
+  const named = new Set([...refs.required, ...refs.optional]);
+  let out = refs;
+  for (const file of files) {
+    const name = basename(file.name);
+    if (!name.toLowerCase().endsWith(".mtl") || !named.has(name)) continue;
+    const textures = mtlTextures(new Uint8Array(await file.arrayBuffer()));
+    out = mergeRefs(out, { required: [], optional: textures });
+  }
+  return out;
+}
+
 /** Stages dropped files and creates the matching import node referencing the
  * primary model. Companion files (mtl/bin/textures) are staged too and
  * resolved by name at parse time, so a multi-file `.gltf` just works. When
@@ -1091,7 +1118,8 @@ export async function importDroppedFiles(files: File[]): Promise<void> {
   const primary = files[primaryIdx];
   const staged = await Promise.all(files.map(stageFile));
 
-  const refs = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+  const shallow = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+  const refs = await refsWithMtlTextures(shallow, files);
   const missing = missingSidecars(refs, stagedManifestNames());
   if (hasMissing(missing)) {
     useUi.getState().setSidecarPrompt({
