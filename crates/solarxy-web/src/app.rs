@@ -93,8 +93,26 @@ fn web_epoch_ms() -> f64 {
     js_sys::Date::now()
 }
 
+/// The console policy, in one place: a clean boot of a shipped build is
+/// SILENT, so the first message a user ever sees in the console means
+/// something. Informational output therefore lives behind the off-by-default
+/// `diagnostics` feature, gated at the call site as well, so a shipped
+/// artifact carries neither the call nor its strings. Failures are the
+/// opposite case: they go through [`error`], which is always present and
+/// writes to `console.error`, where the crash reporter's interception sees
+/// them. A panic stays legible through `console_error_panic_hook`, which is
+/// untouched by any of this.
+#[cfg(feature = "diagnostics")]
 fn log(msg: &str) {
     web_sys::console::log_1(&JsValue::from_str(msg));
+}
+
+/// A failure, reported. Always compiled in: the `diagnostics` gate covers
+/// chatter, never problems, so nothing can accidentally silence one. Writes
+/// through `console.error` so the crash reporter's last-error capture
+/// (`web/src/telemetry.ts`) can attach it to a report.
+fn error(msg: &str) {
+    web_sys::console::error_1(&JsValue::from_str(msg));
 }
 
 /// Placeholder scene bounds before anything cooks (frames the grid).
@@ -916,6 +934,7 @@ impl SolarxyApp {
         // `submit_parsed_model`), rather than parsing inline.
         engine.set_async_jobs(true);
 
+        #[cfg(feature = "diagnostics")]
         log(&format!(
             "solarxy-web: booted ({width}x{height}, {} node types, full renderer)",
             engine.registry().len()
@@ -1057,7 +1076,7 @@ impl SolarxyApp {
             // channel the renderer's other omissions use and reaches the
             // user as a toast.
             for e in self.raster.take_errors() {
-                log(&format!("scene delta apply failed: {e}"));
+                error(&format!("scene delta apply failed: {e}"));
                 self.host_events.push(HostEvent::RenderNotice {
                     message: e.to_string(),
                 });
@@ -4203,7 +4222,7 @@ impl SolarxyApp {
                 self.uv_scene
                     .apply(&self.device, &self.queue, &self.renderer.layouts, &delta)
             {
-                log(&format!("uv preview upload failed: {e}"));
+                error(&format!("uv preview upload failed: {e}"));
             }
         }
     }

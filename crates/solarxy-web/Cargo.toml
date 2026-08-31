@@ -20,6 +20,12 @@ crate-type = ["cdylib", "rlib"]
 # harness, which is the only thing that drives it:
 #   bash crates/solarxy-web/build-wasm.sh crates/solarxy-web/smoke/pkg --features pt-probe
 pt-probe = ["dep:solarxy-bvh"]
+# Informational console output (the boot banner), off by default so a clean
+# boot of a shipped build is silent and carries none of the strings. Failure
+# reporting is deliberately NOT behind this; see the console policy on the
+# logging helpers in src/app.rs. Enable for a development build with:
+#   bash crates/solarxy-web/build-wasm.sh web/src/wasm/pkg --dev --features diagnostics
+diagnostics = []
 
 [dependencies]
 # Native-safe: these compile on every target, so `cargo build --workspace`
