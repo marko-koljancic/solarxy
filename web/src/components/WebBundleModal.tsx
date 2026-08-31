@@ -113,7 +113,9 @@ export function WebBundleModal({ onClose }: { onClose: () => void }) {
       <p className="modal-note">
         The bundle must be served over HTTP. Opening its index.html straight from disk will
         not work, because browsers refuse to load an ES module or fetch wasm from a file
-        address. The included README says so too.
+        address. The quickest local check, from inside the unzipped folder:{" "}
+        <code>python3 -m http.server 8000</code>, then open localhost:8000. The included
+        README says so too.
       </p>
 
       <div className="modal-actions">
