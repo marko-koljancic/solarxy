@@ -502,7 +502,10 @@ impl EguiRenderer {
         let preferences_modal = &mut self.preferences_modal;
         let screenshot_modal = &mut self.screenshot_modal;
         let still_modal = &mut self.still_modal;
-        let scene_open = self.scene_open;
+        // The still renders either root: an open scene, or an open model
+        // through the synthesized document. `model_info` is set exactly when
+        // a file-loaded model is open.
+        let still_renderable = self.scene_open || self.model_info.is_some();
         let shortcuts_modal = &mut self.shortcuts_modal;
         let material_inspector = &mut self.material_inspector;
         let node_tree_state = &mut self.node_tree;
@@ -537,7 +540,7 @@ impl EguiRenderer {
                     &mut actions,
                     &mut menu_vis,
                     has_model,
-                    scene_open,
+                    still_renderable,
                     recent_files,
                     pt_hdri_available,
                     pt_customs,

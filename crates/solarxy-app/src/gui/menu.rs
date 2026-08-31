@@ -25,7 +25,7 @@ pub(super) fn draw_menu_bar(
     actions: &mut MenuActions,
     vis: &mut MenuBarVisibility,
     has_model: bool,
-    scene_open: bool,
+    still_renderable: bool,
     recent_files: &[String],
     hdri_available: bool,
     customs: &[CustomBackground],
@@ -38,7 +38,7 @@ pub(super) fn draw_menu_bar(
         egui::MenuBar::new().ui(ui, |ui| {
             draw_file_menu(ui, actions, has_model, recent_files);
             draw_edit_menu(ui, actions);
-            draw_render_menu(ui, snap, actions, scene_open, hdri_available, customs);
+            draw_render_menu(ui, snap, actions, still_renderable, hdri_available, customs);
             // Review is a viewport mode — it belongs between Render and
             // View, not stranded out past Help.
             draw_review_menu(
@@ -252,16 +252,17 @@ fn draw_render_menu(
     ui: &mut egui::Ui,
     snap: &mut GuiSnapshot,
     actions: &mut MenuActions,
-    scene_open: bool,
+    still_renderable: bool,
     hdri_available: bool,
     customs: &[CustomBackground],
 ) {
     ui.menu_button("Render", |ui| {
-        // The still renders the scene the engine cooked, through the
-        // render node's authority, so it needs a scene to be open.
+        // The still renders either root through the render node's
+        // authority: a scene the engine cooked, or an open model through
+        // the same synthesized document the terminal renders.
         if ui
-            .add_enabled(scene_open, egui::Button::new("Render Still\u{2026}"))
-            .on_disabled_hover_text("Open a scene to render a still")
+            .add_enabled(still_renderable, egui::Button::new("Render Still\u{2026}"))
+            .on_disabled_hover_text("Open a scene or a model to render a still")
             .clicked()
         {
             actions.render_still = true;

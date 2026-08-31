@@ -49,6 +49,7 @@ pub mod engine;
 mod error;
 pub mod expr;
 pub mod migration;
+pub mod model_document;
 pub mod naming;
 pub mod nodes;
 pub mod params;

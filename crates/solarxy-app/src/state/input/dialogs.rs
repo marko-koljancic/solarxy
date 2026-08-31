@@ -40,7 +40,7 @@ impl State {
     /// Drop every cooked object through the ordinary delta path, so the
     /// removal is applied at the same commit point as everything else rather
     /// than reaching into the renderer's state from a dialog handler.
-    fn clear_scene_objects(&mut self) {
+    pub(crate) fn clear_scene_objects(&mut self) {
         self.pending_scene_deltas
             .push(solarxy_core::scene::SceneDelta {
                 ops: vec![solarxy_core::scene::SceneOp::Clear],
