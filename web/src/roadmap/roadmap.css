@@ -277,7 +277,7 @@
   line-height: 1.5;
 }
 
-/* ---- shipped: timeline + release list ---- */
+/* ---- shipped: the release timeline ---- */
 
 .timeline {
   position: relative;
@@ -352,60 +352,16 @@
 }
 
 .tl-body {
-  font-size: 0.92rem;
+  font-size: var(--fs-body);
   color: var(--ink-secondary);
-  line-height: 1.55;
-  max-width: 74ch;
+  line-height: var(--lh-body);
+  max-width: 66ch;
   margin-top: 0.5rem;
   display: none;
 }
 
 .tl-item.open .tl-body {
   display: block;
-}
-
-.releases-panel {
-  position: sticky;
-  top: calc(var(--nav-h) + 1rem);
-}
-
-.rel-item {
-  padding: 0.7rem 0;
-  border-bottom: 1px solid var(--hairline-soft);
-}
-
-.rel-item:last-child {
-  border-bottom: none;
-}
-
-.rel-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-}
-
-.rel-v {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 0.9rem;
-}
-
-.rel-st {
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.2rem 0.45rem;
-  border-radius: var(--r);
-  border: 1px solid var(--accent-ink);
-  color: var(--accent-ink);
-}
-
-.rel-item p {
-  font-size: 0.83rem;
-  color: var(--ink-secondary);
-  line-height: 1.45;
 }
 
 /* ---- changelog accordion ---- */

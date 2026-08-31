@@ -29,7 +29,6 @@ import {
   PROGRAM,
   PROGRAM_STATS,
   RELEASE_PLAN,
-  RELEASES,
   SECTIONS,
   SHORTLIST,
   STATS,
@@ -51,7 +50,6 @@ mount("archLayers", render.archLayers(ARCH_LAYERS));
 mount("contractStrip", render.contractStrip(CONTRACTS));
 mount("commitGrid", render.commitmentsGrid(COMMITMENTS));
 mount("timeline", render.timelineList(TIMELINE));
-mount("releases", render.releaseList(RELEASES));
 mount("changelogOut", render.changelogList(CHANGELOG));
 mount("releasePlan", render.releaseLadder(RELEASE_PLAN));
 mount("programStats", render.statsBand(PROGRAM_STATS));

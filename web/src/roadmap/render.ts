@@ -16,7 +16,6 @@ import type {
   Persona,
   ProgramEntry,
   ReleasePlanEntry,
-  ReleaseSummary,
   Section,
   ShortlistItem,
   Stat,
@@ -79,17 +78,6 @@ export function timelineList(entries: TimelineEntry[]): string {
         <span class="date">${t.date}</span><span class="h">${t.h}</span><span class="toggle">+</span>
       </button>
       <div class="tl-body">${t.body}</div>
-    </div>`,
-    )
-    .join("");
-}
-
-export function releaseList(releases: ReleaseSummary[]): string {
-  return releases
-    .map(
-      (r) => `<div class="rel-item">
-      <div class="rel-head"><span class="rel-v">${r.v}</span><span class="rel-st">${r.st}</span></div>
-      <p>${r.p}</p>
     </div>`,
     )
     .join("");
