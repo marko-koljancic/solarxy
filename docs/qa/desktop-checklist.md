@@ -20,7 +20,7 @@ cargo run --release -- --model res/models/xyzrgb_dragon.obj
 ## 1. Model loading
 
 - [ ] `xyzrgb_dragon.obj` loads, auto-frames, and orbits smoothly.
-- [ ] `res/models/frog/ooz3d-export-model-*.obj` loads **with its texture** (OBJ + MTL + `map_Kd`). The frog is skin-textured, not white and not untextured.
+- [ ] `res/models/knot/knot.obj` loads **with its texture** (OBJ + MTL + `map_Kd`). The knot is banded in colour with dark speckles, not white and not untextured.
 - [ ] An STL loads (`crates/solarxy-formats/tests/fixtures/triangle.stl` or any STL).
 - [ ] A PLY loads.
 - [ ] A glTF/GLB loads (`crates/solarxy-formats/tests/fixtures/textured.glb`) **with its texture**.
@@ -96,7 +96,7 @@ The automated regression gate. The harness lives in `solarxy-host`, not in
 `solarxy-renderer`: it drives the shared pane path, which is what puts the
 extracted orchestration under the gate rather than beside it.
 
-The script captures both models in one go, into `<out>/dragon` and `<out>/frog`:
+The script captures both models in one go, into `<out>/dragon` and `<out>/knot`:
 
 ```bash
 bash scripts/capture_goldens.sh .goldens/<name>
@@ -108,7 +108,7 @@ Then compare each against a baseline captured the same way:
 cargo run --release -p solarxy-host --example golden -- \
     compare .goldens/<baseline>/dragon .goldens/<name>/dragon --tolerance 0
 cargo run --release -p solarxy-host --example golden -- \
-    compare .goldens/<baseline>/frog .goldens/<name>/frog --tolerance 0
+    compare .goldens/<baseline>/knot .goldens/<name>/knot --tolerance 0
 ```
 
 To capture one model on its own, which is what the script does twice:
@@ -120,8 +120,8 @@ cargo run --release -p solarxy-host --example golden -- \
 
 # TEXTURED coverage -- do not skip this one, see the note below
 cargo run --release -p solarxy-host --example golden -- \
-    capture --model "res/models/frog/ooz3d-export-model-20260329-181053.obj" \
-    --out .goldens/<name>/frog
+    capture --model res/models/knot/knot.obj \
+    --out .goldens/<name>/knot
 ```
 
 **Capture the baseline from a clean tree before you start**, not from an older
@@ -133,7 +133,7 @@ same tree proves the same thing and needs no second checkout.
 so it exercises no material and no texture: it is structurally blind to the
 albedo-texture path, the `base_color_factor` path, and texture filtering. Between
 Phase 8 and Phase 15 the dragon captures were pixel-identical in all five modes
-while the frog captures differed on 55k pixels -- the dragon simply could not see
+while the textured captures differed on 55k pixels -- the dragon simply could not see
 the change. A textured baseline is what makes the gate meaningful.
 
 **A clean diff is not automatically a pass.** Ask what the change *should* have

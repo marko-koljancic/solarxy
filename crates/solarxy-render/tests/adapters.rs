@@ -127,14 +127,14 @@ fn a_missing_input_is_its_own_failure() {
     assert!(matches!(err, solarxy_render::RenderError::InputMissing(_)));
 }
 
-/// The whole of the companion defect, on a real multi-file model that has been
-/// in the repository the entire time.
+/// The whole of the companion defect, on a real multi-file model from the
+/// repository's sample set.
 ///
-/// `res/models/frog/` is an OBJ whose `mtllib` names a material library whose
-/// `map_Kd` names a texture beside it. Before companions were staged, this
-/// rendered as untextured clay from the command line and correctly textured in
-/// the browser, from the same file: the browser's picker stages every companion
-/// and the terminal staged one file.
+/// `res/models/knot/` is an OBJ whose `mtllib` names a material library whose
+/// `map_Kd` names a texture beside it. Before companions were staged, such a
+/// model rendered as untextured clay from the command line and correctly
+/// textured in the browser, from the same file: the browser's picker stages
+/// every companion and the terminal staged one file.
 ///
 /// The assertion is on what reached the asset table rather than on pixels,
 /// because that is the thing that was missing and it needs no device. The
@@ -143,7 +143,7 @@ fn a_missing_input_is_its_own_failure() {
 /// same resolver.
 #[test]
 fn a_multi_file_obj_stages_the_library_and_the_texture_it_names() {
-    let model = repo_root().join("res/models/frog/ooz3d-export-model-20260329-181053.obj");
+    let model = repo_root().join("res/models/knot/knot.obj");
     assert!(model.exists(), "the fixture model is missing: {model:?}");
 
     let loaded =
