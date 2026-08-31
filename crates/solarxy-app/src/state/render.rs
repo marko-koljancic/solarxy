@@ -354,14 +354,13 @@ impl State {
                 label: Some("UI Encoder"),
             });
 
-        let divider = match (self.compute_divider_rect(), self.compute_divider_hit_rect()) {
-            (Some(visible), Some(hit)) => Some(crate::gui::DividerInfo {
-                visible,
+        let divider = self
+            .compute_divider_hit_rect()
+            .map(|hit| crate::gui::DividerInfo {
                 hit,
                 layout: self.view.display.layout,
-            }),
-            _ => None,
-        };
+            });
+        let pane_gaps = self.compute_gap_rects();
 
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
@@ -561,6 +560,7 @@ impl State {
             screen,
             frame_ms,
             divider,
+            &pane_gaps,
             active_pane_rect,
             &review_panes,
             &recent_files,

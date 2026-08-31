@@ -109,19 +109,30 @@ impl State {
         )
     }
 
-    pub(super) fn compute_divider_rect(&self) -> Option<egui::Rect> {
-        let (origin, size, ppp) = self.divider_inputs();
-        let r = panes::divider_rect(
+    /// The gap strips between panes, for painting. Every layout's strips,
+    /// not only the draggable one: the quad and three-left-big gaps have
+    /// no ratio behind them and were the ones nothing painted.
+    ///
+    /// Computed in the same physical-pixel space the rendered panes use,
+    /// then divided into egui's logical points, so the paint covers
+    /// exactly the strips the pane math reserved.
+    pub(super) fn compute_gap_rects(&self) -> Vec<egui::Rect> {
+        let ppp = self.window.scale_factor() as f32;
+        let (base_w, base_h) = self.viewport_base_size_px();
+        panes::gap_rects(
             self.view.display.layout,
             self.view.display.split_ratio,
-            origin,
-            size,
-            2.0 / ppp,
-        )?;
-        Some(egui::Rect::from_min_size(
-            egui::pos2(r.x, r.y),
-            egui::vec2(r.width, r.height),
-        ))
+            self.viewport_origin_px(),
+            (base_w as f32, base_h as f32),
+        )
+        .into_iter()
+        .map(|r| {
+            egui::Rect::from_min_size(
+                egui::pos2(r.x / ppp, r.y / ppp),
+                egui::vec2(r.width / ppp, r.height / ppp),
+            )
+        })
+        .collect()
     }
 
     pub(super) fn compute_divider_hit_rect(&self) -> Option<egui::Rect> {

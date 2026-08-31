@@ -428,6 +428,7 @@ impl EguiRenderer {
         screen: ScreenDescriptor,
         frame_ms: f32,
         divider: Option<DividerInfo>,
+        pane_gaps: &[egui::Rect],
         active_pane_rect: Option<egui::Rect>,
         review_panes: &[super::ReviewPaneOverlay],
         recent_files: &[String],
@@ -748,9 +749,16 @@ impl EguiRenderer {
             if let Some(id) = hud_result.dismissed_toast_id {
                 dismissed_toast_id = Some(id);
             }
-            if let Some(div) = divider {
+            // Every inter-pane gap strip, painted in the theme's border
+            // colour; without this the composite's black clear shows
+            // through wherever a layout has no draggable divider.
+            if !pane_gaps.is_empty() {
                 let painter = ctx.layer_painter(egui::LayerId::background());
-                painter.rect_filled(div.visible, 0.0, theme.border);
+                for gap in pane_gaps {
+                    painter.rect_filled(*gap, 0.0, theme.border);
+                }
+            }
+            if let Some(div) = divider {
                 let resp = egui::Area::new(egui::Id::new("solarxy_divider_drag"))
                     .fixed_pos(div.hit.min)
                     .order(egui::Order::Foreground)

@@ -36,12 +36,11 @@ pub(crate) struct MenuActions {
     pub show_all_meshes: bool,
 }
 
-/// Bundle the visible divider rect, its wider hit zone, and the current
-/// layout in one parameter — keeps `EguiRenderer::render_ui` argument count
-/// stable when adding the draggable-divider plumbing.
+/// The draggable divider's hit zone and the current layout in one
+/// parameter. Painting is not here: every gap strip (this one included)
+/// is painted from `pane_gaps`, and this bundle only carries the drag.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DividerInfo {
-    pub visible: egui::Rect,
     pub hit: egui::Rect,
     pub layout: ViewLayout,
 }
