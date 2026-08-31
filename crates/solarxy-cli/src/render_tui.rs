@@ -74,6 +74,18 @@ const ARRANGEMENT: &str =
 /// keeps the processor.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(250);
 
+/// How the run ended, in the words the held frame states.
+///
+/// Carried into the hold by the caller rather than derived from the progress
+/// stream, because the stream's failure names only the stage that failed: the
+/// reason lives in the error the render returned, and only the caller holds
+/// that.
+pub enum Ending {
+    Rendered,
+    Failed(String),
+    Cancelled,
+}
+
 /// The surface: an arrangement over one render.
 pub struct Dashboard {
     view: RenderView,
@@ -82,6 +94,8 @@ pub struct Dashboard {
     glyphs: Glyphs,
     caps: Capabilities,
     quit: bool,
+    /// Present once the render has returned and the frame is being held.
+    ending: Option<Ending>,
 }
 
 impl Dashboard {
@@ -95,6 +109,7 @@ impl Dashboard {
             glyphs: caps.glyphs(),
             caps,
             quit: false,
+            ending: None,
         }
     }
 
@@ -135,7 +150,7 @@ impl Surface for Dashboard {
         }
 
         frame.render_widget(
-            Line::from(footer(&self.view, &self.theme)),
+            Line::from(footer(&self.view, &self.theme, self.ending.as_ref())),
             Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),
         );
     }
@@ -153,15 +168,58 @@ impl Surface for Dashboard {
     }
 }
 
-/// The one row along the bottom: the key that stops it, and how it ended.
-fn footer(view: &RenderView, theme: &Theme) -> Vec<Span<'static>> {
-    let mut spans = vec![
+/// The one row along the bottom.
+///
+/// While the render runs: the key that stops it, and the stage's last word.
+/// While the frame is held: the key that dismisses it and how the run ended,
+/// with the output path on success, because that line is the reason the frame
+/// is held at all.
+fn footer(view: &RenderView, theme: &Theme, ending: Option<&Ending>) -> Vec<Span<'static>> {
+    let key = |label: &'static str| {
         Span::styled(
-            " q",
+            label,
             Style::default()
                 .fg(theme.slots.accent)
                 .add_modifier(Modifier::BOLD),
-        ),
+        )
+    };
+    if let Some(ending) = ending {
+        let mut spans = vec![
+            key(" q"),
+            Span::styled("  dismiss", Style::default().fg(theme.slots.ink_dim)),
+        ];
+        match ending {
+            Ending::Rendered => {
+                spans.push(Span::styled(
+                    "   rendered ",
+                    Style::default().fg(theme.slots.success),
+                ));
+                spans.push(Span::styled(
+                    view.request.output.clone(),
+                    Style::default().fg(theme.slots.ink),
+                ));
+            }
+            Ending::Failed(reason) => {
+                spans.push(Span::styled(
+                    "   failed: ",
+                    Style::default().fg(theme.slots.error),
+                ));
+                // The first line only: the full error is printed onto the
+                // restored terminal after dismissal, where it can be copied.
+                spans.push(Span::styled(
+                    reason.lines().next().unwrap_or_default().to_owned(),
+                    Style::default().fg(theme.slots.ink),
+                ));
+            }
+            Ending::Cancelled => spans.push(Span::styled(
+                "   cancelled",
+                Style::default().fg(theme.slots.warning),
+            )),
+        }
+        return spans;
+    }
+    let mut spans = vec![
+        key(" q"),
         Span::styled("  cancel", Style::default().fg(theme.slots.ink_dim)),
     ];
     match view.stage {
@@ -214,6 +272,47 @@ impl DashboardSink {
                 .checked_sub(REDRAW_INTERVAL)
                 .unwrap_or_else(Instant::now),
         })
+    }
+
+    /// Hold the completion state until the reader dismisses it.
+    ///
+    /// Called after the render returns, whichever way it returned. Without it
+    /// the final frame is torn down microseconds after it is painted, and
+    /// nothing about a finished render survives on screen or in scrollback.
+    /// The dismiss key is stated in the footer; a fresh interrupt dismisses
+    /// too, the same escape the window's hold honours.
+    ///
+    /// This never runs on a piped invocation: the dashboard only exists when
+    /// standard error is a terminal, which [`unavailable`] decides, and no
+    /// second gate is added here that could disagree with it.
+    pub fn hold(&mut self, ending: Ending) {
+        self.dashboard.ending = Some(ending);
+        // The interrupt or quit key that ended the render was answered by
+        // ending it. The hold listens for the next one, so the flag starts
+        // cleared: a cancelled run shows its completion state like any other
+        // rather than flashing past it.
+        self.cancel.store(false, Ordering::Relaxed);
+        let _ = self.session.draw(&mut self.dashboard);
+        loop {
+            if self.cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            match self.session.poll(Duration::from_millis(50)) {
+                Ok(Some(Input::Key(key)))
+                    if matches!(key.code, KeyCode::Char('q' | 'Q') | KeyCode::Esc) =>
+                {
+                    return;
+                }
+                // A resize deserves a repaint; a tick and an ignored event do
+                // not, since nothing in the held frame changes on its own.
+                Ok(Some(Input::Resize(..))) => {
+                    let _ = self.session.draw(&mut self.dashboard);
+                }
+                Ok(Some(_)) | Ok(None) => {}
+                // A terminal that cannot be read cannot be held.
+                Err(_) => return,
+            }
+        }
     }
 
     /// Read the keyboard and repaint, at most as often as the throttle allows.
@@ -510,5 +609,44 @@ mod tests {
             "the key did not reach the render"
         );
         assert!(dashboard.quit);
+    }
+
+    /// The held frame states how the run ended, the way out, and on success
+    /// the output path, because a static bar at one hundred percent cannot
+    /// tell success from a failure that happened at the end.
+    #[test]
+    fn the_held_frame_states_the_outcome_and_the_way_out() {
+        let set = ThemeSet::bundled();
+        let slots = set.slots_for(DEFAULT_THEME).expect("the default");
+        let caps = harness::every_pair()[7];
+        let cases: [(Ending, Vec<&str>, Vec<&str>); 3] = [
+            (
+                Ending::Rendered,
+                vec!["dismiss", "rendered", "render.png"],
+                vec![],
+            ),
+            (
+                Ending::Failed("the device fell off\nand the detail follows".into()),
+                vec!["dismiss", "failed", "the device fell off"],
+                // The full error prints onto the restored terminal after
+                // dismissal; the footer carries only the first line.
+                vec!["and the detail follows"],
+            ),
+            (Ending::Cancelled, vec!["dismiss", "cancelled"], vec![]),
+        ];
+        for (ending, wants, spurns) in cases {
+            let mut dashboard =
+                Dashboard::new(request(), Theme::resolve(caps, DEFAULT_THEME, &slots), caps);
+            dashboard.ending = Some(ending);
+            let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).expect("terminal");
+            terminal.draw(|frame| dashboard.draw(frame)).expect("draw");
+            let text = screen(&terminal.backend().buffer().clone(), WIDTH, HEIGHT);
+            for want in wants {
+                assert!(text.contains(want), "missing {want}:\n{text}");
+            }
+            for spurn in spurns {
+                assert!(!text.contains(spurn), "{spurn} leaked into the footer");
+            }
+        }
     }
 }

@@ -438,14 +438,34 @@ impl Sinks {
 
     /// Hold whatever a surface wants held after the render has ended.
     ///
-    /// The window keeps the finished picture until it is dismissed, because
-    /// the frame a person waited for is the one that would otherwise vanish at
-    /// the moment it arrived. Nothing else here holds anything.
-    fn linger(&mut self) {
+    /// The window keeps the finished picture and the dashboard keeps its
+    /// completion state, each until dismissed, because the frame a person
+    /// waited for is the one that would otherwise vanish at the moment it
+    /// arrived. `error` is what the run returned, if it failed: the dashboard
+    /// states the reason on its held frame, which the progress stream cannot
+    /// carry because it names only the stage.
+    ///
+    /// The returned note, if any, is for the restored terminal: the caller
+    /// prints it after this composite is dropped, because a surface here may
+    /// still hold the screen it would land on.
+    fn linger(&mut self, error: Option<&solarxy_render::RenderError>) -> Option<String> {
+        #[cfg(not(feature = "tui"))]
+        let _ = error;
         #[cfg(feature = "watch")]
-        if let Some(watch) = self.watch.as_mut() {
-            watch.hold();
+        let note = self.watch.as_mut().and_then(|watch| watch.hold());
+        #[cfg(not(feature = "watch"))]
+        let note = None;
+        #[cfg(feature = "tui")]
+        if let Some(dashboard) = self.dashboard.as_mut() {
+            use solarxy_cli::render_tui::Ending;
+            let ending = match error {
+                None => Ending::Rendered,
+                Some(solarxy_render::RenderError::Cancelled) => Ending::Cancelled,
+                Some(e) => Ending::Failed(e.to_string()),
+            };
+            dashboard.hold(ending);
         }
+        note
     }
 }
 
@@ -606,7 +626,11 @@ fn run_render(args: &solarxy_cli::parser::RenderArgs, theme: Option<&str>) -> Ex
     // Standard error, and one line: the sink a build system reads. It rewrites
     // in place on a terminal and writes once per step anywhere else, which is
     // the difference between a live readout and a log worth reading later.
-    // Absent only when the dashboard holds the screen it would write to.
+    // Absent only when the dashboard holds the screen it would write to. That
+    // suppression stays right now that the dashboard holds after the end: its
+    // held frame states the outcome and the output path, and the log line
+    // after the restore repeats the path, so nothing the plain line would
+    // have said is lost.
     #[cfg(feature = "tui")]
     let plain_wanted = sinks.dashboard.is_none();
     #[cfg(not(feature = "tui"))]
@@ -622,15 +646,18 @@ fn run_render(args: &solarxy_cli::parser::RenderArgs, theme: Option<&str>) -> Ex
     }
 
     let rendered = solarxy_render::run_render(&args.input, &opts, &mut sinks);
-    // The window holds the finished picture until it is dismissed. Before the
-    // terminal goes back, because the dashboard is still the thing on screen
-    // and a report printed over it would be printed onto a surface that is
-    // still being painted.
-    sinks.linger();
+    // The window holds the finished picture and the dashboard its completion
+    // state, each until dismissed. Before the terminal goes back, because the
+    // dashboard is still the thing on screen and a report printed over it
+    // would be printed onto a surface that is still being painted.
+    let note = sinks.linger(rendered.as_ref().err());
     // The terminal goes back before anything else writes to it, so a warning or
     // a report lands on the reader's own screen rather than on one being torn
     // down underneath it.
     drop(sinks);
+    if let Some(note) = note {
+        eprintln!("{note}");
+    }
 
     match rendered {
         Ok(outcome) => {

@@ -945,9 +945,24 @@ impl WatchSink {
     /// Called after the render returns. Without it the last thing a person sees
     /// is the window vanishing at the moment the image was complete, which is
     /// the one frame they were waiting for.
-    pub fn hold(&mut self) {
-        if self.app.window.is_none() || self.app.dismissed {
-            return;
+    ///
+    /// Returns a line for the reader when there was nothing to hold: a window
+    /// only opens once a preview arrives, so a render that ended before its
+    /// first tile never had one, and flashing nothing says nothing. A window
+    /// opened after the fact was considered and rejected, because this window
+    /// draws passes and has no text surface to state a failure on; the error
+    /// itself follows on standard error either way. The note is returned
+    /// rather than printed here, because a dashboard may still be holding the
+    /// screen it would land on.
+    pub fn hold(&mut self) -> Option<String> {
+        if self.app.window.is_none() {
+            return Some(
+                "no render window opened: the render ended before its first preview arrived"
+                    .to_owned(),
+            );
+        }
+        if self.app.dismissed {
+            return None;
         }
         // An interrupt ends the hold too. Without that the only way out is the
         // window, and a person who reaches for the keyboard they started the
@@ -956,6 +971,7 @@ impl WatchSink {
             self.pump(std::time::Duration::from_millis(50));
             self.app.paint();
         }
+        None
     }
 }
 
