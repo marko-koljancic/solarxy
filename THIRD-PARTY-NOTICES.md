@@ -10,7 +10,8 @@ own license rather than an attribution, and it is here because it has to travel 
 After it comes the third-party work Solarxy **ports code from**, whose licenses require the
 notice to be carried with every distribution. After that come the typefaces Solarxy **bundles
 as data**, whose licenses ask the same of their own texts, and which are a different kind of
-thing again because a font is rendered with rather than built from.
+thing again because a font is rendered with rather than built from. The sample content
+Solarxy bundles the same way is credited after them.
 
 It is still not a list of dependencies. Solarxy's Cargo and npm dependencies are declared in
 `Cargo.lock` and `web/package-lock.json` and carry their own terms; what is recorded below is
@@ -432,6 +433,20 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
+
+## Bundled sample content
+
+One texture ships inside the artifacts as data the program renders with, on the same
+principle as the typefaces. The sample models in the source tree do not ship in any
+artifact; their provenance and terms are recorded beside them, in
+`res/models/PROVENANCE.md` and `res/textures/PROVENANCE.md`.
+
+### UV checker map
+
+The UV-checker texture (`uv-checker_1k.png`) embedded in the desktop application and the
+render command, and bundled with the web application, was generated with **UV Checker Map
+Maker** by Jorge Valle (https://uvchecker.byvalle.com/). The tool is free to use with an
+optional donation and publishes no formal license text; this credit records the source.
 
 ## Published algorithms Solarxy implements
 
