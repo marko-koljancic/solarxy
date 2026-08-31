@@ -119,7 +119,6 @@ pub fn cook_to_quiescence(
     sink: &mut dyn crate::RenderSink,
 ) -> Result<(), RenderError> {
     let mut stopped = || cancel.is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed));
-    let mut sink = sink;
     model_document::cook_to_quiescence(engine, &mut stopped, &mut |pass, passes| {
         sink.report(&crate::RenderProgress::Cooking { pass, passes });
     })
