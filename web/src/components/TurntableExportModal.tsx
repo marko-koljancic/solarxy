@@ -145,11 +145,21 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
       title="Export Turntable"
       onClose={onClose}
       className="modal-wide"
-      bodyLayout="column"
       // While an export runs, Esc CANCELS the run (the dialog's own
       // listener below) and the backdrop is inert.
       closeOnEsc={false}
       closeOnBackdrop={!busy}
+      footer={
+        <div className="modal-actions">
+          <span className="prefs-unit">{status}</span>
+          <button className="btn" onClick={busy ? () => (cancelRef.current = true) : onClose}>
+            {busy ? "Cancel" : "Close"}
+          </button>
+          <button className="btn primary" disabled={busy} onClick={run}>
+            {busy ? "Exporting..." : "Export"}
+          </button>
+        </div>
+      }
     >
         <Section title="Output">
         <Row
@@ -239,15 +249,6 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
             <div className="turntable-progress-bar" style={{ width: `${Math.round(progress * 100)}%` }} />
           </div>
         )}
-        <div className="modal-actions">
-          <span className="prefs-unit">{status}</span>
-          <button className="btn" onClick={busy ? () => (cancelRef.current = true) : onClose}>
-            {busy ? "Cancel" : "Close"}
-          </button>
-          <button className="btn primary" disabled={busy} onClick={run}>
-            {busy ? "Exporting..." : "Export"}
-          </button>
-        </div>
     </Modal>
   );
 }

@@ -51,7 +51,22 @@ export function WebBundleModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal id="web-bundle" title="Export web bundle" onClose={onClose} minWidth={420}>
+    <Modal
+      id="web-bundle"
+      title="Export web bundle"
+      onClose={onClose}
+      minWidth={420}
+      footer={
+        <div className="modal-actions">
+          <button className="btn" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" onClick={() => void exportBundle()} disabled={busy}>
+            {busy ? "Building..." : "Export"}
+          </button>
+        </div>
+      }
+    >
       <p className="modal-note">
         Writes a zip containing your scene and the Solarxy engine. Unzip it onto any static
         host and the scene runs there, with no install and no account. It carries the engine
@@ -118,14 +133,6 @@ export function WebBundleModal({ onClose }: { onClose: () => void }) {
         README says so too.
       </p>
 
-      <div className="modal-actions">
-        <button className="btn" onClick={onClose} disabled={busy}>
-          Cancel
-        </button>
-        <button className="btn btn-primary" onClick={() => void exportBundle()} disabled={busy}>
-          {busy ? "Building..." : "Export"}
-        </button>
-      </div>
     </Modal>
   );
 }

@@ -46,7 +46,19 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
   // No Esc close historically (the modal predates the shared shell's Esc
   // handling); backdrop and Done still dismiss.
   return (
-    <Modal id="environment" title="Environment" onClose={onClose} closeOnEsc={false}>
+    <Modal
+      id="environment"
+      title="Environment"
+      onClose={onClose}
+      closeOnEsc={false}
+      footer={
+        <div className="modal-actions">
+          <button className="btn primary" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      }
+    >
         <Row
           label="HDRI"
           doc="The high-dynamic-range image that lights the scene. It supplies both the ambient light and the reflections, so loading one changes the look of every material at once. Embedded in the scene file, so it travels with it."
@@ -116,11 +128,6 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
         <p className="env-hint">
           Show the HDRI as a pane background via the pane toolbar's background select (Sky).
         </p>
-        <div className="modal-actions">
-          <button className="btn primary" onClick={onClose}>
-            Done
-          </button>
-        </div>
         <input
           ref={fileRef}
           type="file"

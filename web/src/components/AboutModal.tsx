@@ -56,7 +56,19 @@ export function aboutSourceUrl(version = __APP_VERSION__): string {
 
 export function AboutModal({ onClose }: { onClose: () => void }) {
   return (
-    <Modal id="about" title="Solarxy Web" onClose={onClose}>
+    <Modal
+      id="about"
+      title="Solarxy Web"
+      onClose={onClose}
+      footer={
+        <div className="about-footer">
+          <span className="about-copyright">{aboutCopyrightLine()}</span>
+          <button className="btn primary" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      }
+    >
       <p>
         A WebGPU node-based parametric modeler. Build geometry with a typed
         node graph, drive any number with an expression, run a short program
@@ -103,12 +115,6 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
           Third-party notices
         </a>
       </p>
-      <p className="about-copyright">{aboutCopyrightLine()}</p>
-      <div className="modal-actions">
-        <button className="btn primary" onClick={onClose}>
-          Done
-        </button>
-      </div>
     </Modal>
   );
 }

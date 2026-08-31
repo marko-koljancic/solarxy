@@ -13,6 +13,7 @@ export function Modal({
   title,
   onClose,
   children,
+  footer,
   className,
   closeOnEsc = true,
   closeOnBackdrop = true,
@@ -28,20 +29,27 @@ export function Modal({
    * (RecoveryPrompt): no Esc, no backdrop close, no X. */
   onClose?: () => void;
   children: ReactNode;
+  /** The dialog's action band, rendered by the shell as a SIBLING of the
+   * scrolling body, so it stays visible at any size the resize grip
+   * allows. Any dialog with actions and content that can outgrow the box
+   * belongs here; actions left inside `children` scroll away with the
+   * prose, which is how the About dialog lost its Done button. */
+  footer?: ReactNode;
   /** Extra classes on the modal box (`modal-wide`, `modal-prefs`, ...). */
   className?: string;
   closeOnEsc?: boolean;
   closeOnBackdrop?: boolean;
   resizable?: boolean;
-  /** `"column"` makes the body a flex column, so a dialog with a fixed
-   * height can give one child `flex: 1` and pin a footer to the bottom.
+  /** `"column"` makes the body a flex column, for a dialog whose body is
+   * itself a growing child (a preview, an editor) rather than scrolling
+   * prose.
    *
-   * Opt-in rather than the default because the body is a plain block for
-   * good reason: ordinary prose dialogs size to their content. But a dialog
-   * that sets its own `height` and expects `flex: 1` to work inside gets an
-   * inert declaration and a footer stranded mid-box, which is exactly what
-   * happened to Preferences, Screenshot and Turntable when they migrated
-   * onto this shell. */
+   * Footer pinning is NOT this prop's job any more: pass `footer` for
+   * that. The dialogs with bespoke column bodies and their own footer rows
+   * (Preferences, Screenshot, Still Render, Snippet Editor) predate the
+   * slot, pin correctly through this layout, and can move onto `footer`
+   * when next touched. Opt-in rather than the default because ordinary
+   * prose dialogs size to their content as a plain block. */
   bodyLayout?: "block" | "column";
   minWidth?: number;
   minHeight?: number;
@@ -101,6 +109,7 @@ export function Modal({
         <div className={`modal-body${bodyLayout === "column" ? " modal-body-column" : ""}`}>
           {children}
         </div>
+        {footer && <div className="modal-footer">{footer}</div>}
         {resizable && <div className="modal-resize" {...resizeProps} aria-hidden />}
       </div>
     </div>

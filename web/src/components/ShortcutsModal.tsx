@@ -39,7 +39,19 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
   const notes = KEYMAP.filter((b) => b.note);
 
   return (
-    <Modal id="shortcuts" title="Keyboard Shortcuts" onClose={onClose} className="modal-wide">
+    <Modal
+      id="shortcuts"
+      title="Keyboard Shortcuts"
+      onClose={onClose}
+      className="modal-wide"
+      footer={
+        <div className="modal-actions">
+          <button className="btn primary" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      }
+    >
         <div className="shortcuts-grid">
           {groups.map(({ group, bindings }) => (
             <div key={group} className="shortcut-group">
@@ -59,11 +71,6 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         )}
-        <div className="modal-actions">
-          <button className="btn primary" onClick={onClose}>
-            Done
-          </button>
-        </div>
     </Modal>
   );
 }

@@ -1713,16 +1713,35 @@ body.precision-drag-active {
   padding: 0 0.6rem;
 }
 
-/* Opt-in (Modal's `bodyLayout="column"`): dialogs with a fixed height that
- * pin a footer to the bottom. Without it a child's `flex: 1` is inert inside
- * the plain block above, and the footer floats wherever the content ends.
- * `overflow: visible` because in this mode the scrolling child owns its own
- * overflow; keeping `auto` here would nest two scroll containers. */
+/* Opt-in (Modal's `bodyLayout="column"`): dialogs whose body is itself a
+ * growing child (a preview, an editor). Without it a child's `flex: 1` is
+ * inert inside the plain block above. `overflow: visible` because in this
+ * mode the growing child owns its own overflow; keeping `auto` here would
+ * nest two scroll containers. Footer pinning is the `footer` slot's job. */
 .modal-body-column {
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: visible;
+}
+
+/* The shell-owned footer band (Modal's `footer` prop): a sibling of the
+ * scrolling body, so a dialog's actions cannot scroll out of reach at any
+ * size the grip allows. Bordered so a pinned footer reads as pinned rather
+ * than as content that happens to be last. */
+.modal-footer {
+  flex: 0 0 auto;
+  padding-top: 1rem;
+  margin-top: 1rem;
+  border-top: 1px solid var(--border-primary);
+}
+
+/* The About footer: the copyright and the action in one band. */
+.about-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
 }
 
 .modal-resize {

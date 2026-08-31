@@ -50,7 +50,34 @@ export function MissingSidecarsModal() {
   const optional = prompt.missing.optional;
 
   return (
-    <Modal title="Missing companion files" onClose={close}>
+    <Modal
+      title="Missing companion files"
+      onClose={close}
+      footer={
+        <div className="modal-actions">
+          <button className="btn" onClick={close}>
+            Cancel
+          </button>
+          <button className="btn" onClick={complete}>
+            Import Anyway
+          </button>
+          <button className="btn primary" onClick={() => inputRef.current?.click()}>
+            Add Files…
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              if (files.length > 0) void onAddFiles(files);
+              e.target.value = "";
+            }}
+          />
+        </div>
+      }
+    >
         <p className="sidecar-intro">
           <strong>{prompt.primaryName}</strong> references files that were not imported. The
           browser can only read files you select, so add them below. Tip: dragging the
@@ -79,28 +106,6 @@ export function MissingSidecarsModal() {
             </ul>
           </div>
         )}
-        <div className="modal-actions">
-          <button className="btn" onClick={close}>
-            Cancel
-          </button>
-          <button className="btn" onClick={complete}>
-            Import Anyway
-          </button>
-          <button className="btn primary" onClick={() => inputRef.current?.click()}>
-            Add Files…
-          </button>
-          <input
-            ref={inputRef}
-            type="file"
-            multiple
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              if (files.length > 0) void onAddFiles(files);
-              e.target.value = "";
-            }}
-          />
-        </div>
     </Modal>
   );
 }
