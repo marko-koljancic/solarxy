@@ -22,7 +22,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use solarxy_graph::builtin_registry;
+use solarxy_graph::document::ContextKind;
 use solarxy_graph::engine::RegistrySnapshot;
+use solarxy_graph::engine::snapshot::{ShowIfPredSnapshot, ShowIfSnapshot};
+use solarxy_graph::registry::NodeRole;
 
 fn main() {
     let mode = std::env::args()
@@ -93,6 +96,8 @@ fn render_markdown(snap: &RegistrySnapshot) -> Result<String, Vec<String>> {
     out.push_str("← [Home](Home)\n\n# Node Reference\n\n");
     out.push_str(
         "Every node type in Solarxy Web, with its ports, parameters and defaults.\n\n\
+         Every node also carries a `name` and a `description` parameter. They are common to \
+         all types, so the per-node tables below do not repeat them.\n\n\
          **This page is generated** from the node registry itself \
          (`cargo run -p solarxy-graph --example gen_registry -- markdown`), so it cannot drift \
          from the application. Do not edit it by hand: change the node's descriptor in \
@@ -140,20 +145,45 @@ fn render_node(out: &mut String, node: &solarxy_graph::engine::snapshot::NodeTyp
         .contexts
         .iter()
         .map(|k| match k {
-            solarxy_graph::document::ContextKind::Obj => "scene",
-            solarxy_graph::document::ContextKind::Geo => "inside a geo",
-            solarxy_graph::document::ContextKind::Mat => "inside a material network",
-            solarxy_graph::document::ContextKind::Tex => "inside a texture network",
+            ContextKind::Obj => "scene",
+            ContextKind::Geo => "inside a geo",
+            ContextKind::Mat => "inside a material network",
+            ContextKind::Tex => "inside a texture network",
         })
         .collect();
+    // A container's silhouette phrase would restate the sentence below it.
+    let silhouette = match role_words(node.role) {
+        Some(words) if node.opens.is_none() => format!(" · {words} silhouette"),
+        _ => String::new(),
+    };
     let _ = writeln!(
         out,
-        "`{}` · v{} · {} · placed {}\n",
+        "`{}` · v{} · {} · placed {}{}\n",
         node.type_id,
         node.version,
         node.category_label,
-        context_names.join(" or ")
+        context_names.join(" or "),
+        silhouette
     );
+    if let Some(kind) = node.opens {
+        let network = match kind {
+            ContextKind::Obj => "scene",
+            ContextKind::Geo => "geo",
+            ContextKind::Mat => "material",
+            ContextKind::Tex => "texture",
+        };
+        let _ = writeln!(
+            out,
+            "*A container: diving in opens its {network} network.*\n"
+        );
+    }
+    if !node.search_aliases.is_empty() {
+        let _ = writeln!(
+            out,
+            "Palette search also matches: {}.\n",
+            node.search_aliases.join(", ")
+        );
+    }
     let _ = writeln!(out, "{}\n", node.doc.trim());
 
     if !node.inputs.is_empty() || !node.outputs.is_empty() {
@@ -163,8 +193,17 @@ fn render_node(out: &mut String, node: &solarxy_graph::engine::snapshot::NodeTyp
             if p.variadic {
                 notes.push("accepts many".to_string());
             }
+            if p.min > 0 {
+                notes.push(format!("needs at least {}", p.min));
+            }
             if p.required {
                 notes.push("required".to_string());
+            }
+            // `is_default` names the port a wire dropped on the node body
+            // lands on; on a single-input node that is the only candidate,
+            // so the mark is rendered only where there is a choice.
+            if p.is_default && node.inputs.len() > 1 {
+                notes.push("the default input".to_string());
             }
             if !p.doc.trim().is_empty() {
                 notes.push(p.doc.trim().to_string());
@@ -178,14 +217,27 @@ fn render_node(out: &mut String, node: &solarxy_graph::engine::snapshot::NodeTyp
             );
         }
         for p in &node.outputs {
-            let notes = p.doc.trim();
-            let _ = writeln!(out, "| `{}` | out | {:?} | {} |", p.key, p.data_type, notes);
+            let mut notes = Vec::new();
+            if p.is_default && node.outputs.len() > 1 {
+                notes.push("the default output".to_string());
+            }
+            if !p.doc.trim().is_empty() {
+                notes.push(p.doc.trim().to_string());
+            }
+            let _ = writeln!(
+                out,
+                "| `{}` | out | {:?} | {} |",
+                p.key,
+                p.data_type,
+                notes.join("; ")
+            );
         }
         out.push('\n');
     }
 
     // The implicit `general` group (name / description) is on every node and
-    // carries no information; listing it 33 times would be noise.
+    // carries no information; the preamble states it once, and listing it
+    // once per node type would be noise.
     let params: Vec<_> = node
         .params
         .iter()
@@ -207,12 +259,18 @@ fn render_node(out: &mut String, node: &solarxy_graph::engine::snapshot::NodeTyp
                 _ => String::new(),
             };
             let mut notes = Vec::new();
+            if let Some(subgroup) = &p.subgroup {
+                notes.push(format!("under \"{subgroup}\""));
+            }
             let unit = format!("{:?}", p.unit);
             if unit != "None" {
                 notes.push(unit.to_lowercase());
             }
             if let Some(port) = &p.driven_by_port {
                 notes.push(format!("overridden when `{port}` is connected"));
+            }
+            if let Some(condition) = show_if_prose(&p.show_if) {
+                notes.push(condition);
             }
             if !p.doc.trim().is_empty() {
                 notes.push(p.doc.trim().to_string());
@@ -240,6 +298,54 @@ fn render_node(out: &mut String, node: &solarxy_graph::engine::snapshot::NodeTyp
         }
     };
     let _ = writeln!(out, "*Bypassed: {bypass}.*\n");
+}
+
+/// The silhouette family, in reader's words; `None` for the standard body,
+/// which is the default and carries no information worth a table's width.
+fn role_words(role: NodeRole) -> Option<&'static str> {
+    match role {
+        NodeRole::Standard => None,
+        NodeRole::Container => Some("container"),
+        NodeRole::Gather => Some("gather"),
+        NodeRole::Branch => Some("branch"),
+        NodeRole::Terminal => Some("terminal"),
+        NodeRole::Analyzer => Some("analyzer"),
+        NodeRole::ImageSource => Some("image source"),
+        NodeRole::Light => Some("light"),
+        NodeRole::Camera => Some("camera"),
+        NodeRole::Text => Some("text"),
+        NodeRole::Note => Some("note"),
+    }
+}
+
+/// A param's visibility conditions as prose ("shown only while `mode` is
+/// `inline`"), or `None` when it is always visible. The predicate is a data
+/// structure the parameter panel evaluates; published verbatim it would
+/// document the engine's encoding rather than what the reader sees.
+fn show_if_prose(clauses: &[ShowIfSnapshot]) -> Option<String> {
+    if clauses.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = clauses
+        .iter()
+        .map(|clause| match &clause.pred {
+            ShowIfPredSnapshot::Truthy => format!("`{}` is on", clause.param),
+            ShowIfPredSnapshot::Eq { value } => {
+                format!("`{}` is `{}`", clause.param, compact_json(value))
+            }
+            ShowIfPredSnapshot::Neq { value } => {
+                format!("`{}` is not `{}`", clause.param, compact_json(value))
+            }
+            ShowIfPredSnapshot::In { values } => {
+                let rendered: Vec<String> = values
+                    .iter()
+                    .map(|v| format!("`{}`", compact_json(v)))
+                    .collect();
+                format!("`{}` is one of {}", clause.param, rendered.join(", "))
+            }
+        })
+        .collect();
+    Some(format!("shown only while {}", parts.join(" and ")))
 }
 
 /// A parameter default, rendered for a table cell (no newlines, no quotes around
