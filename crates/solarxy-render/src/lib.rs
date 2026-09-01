@@ -1423,3 +1423,99 @@ mod tests {
         assert_eq!(out.seed, 1234);
     }
 }
+
+/// The render node's size limits and the still job's are the same numbers.
+///
+/// They are two copies: the node declares a hard range on its width and height,
+/// and [`StillSpec`] clamps to [`solarxy_host::still::MAX_STILL_EDGE`]. Nothing
+/// tied them together, and they cannot be tied by construction, because the
+/// engine does not depend on the host and must not. This crate depends on both,
+/// so it is the first place the two are visible at once and the only place the
+/// comparison can be made at all.
+///
+/// What it prevents is a size preset that is offered and then refused. A node
+/// that let somebody choose eight thousand pixels while the job silently
+/// clamped to four would render a picture at a size nobody asked for, and the
+/// dialog would have said the size it did not get.
+#[cfg(test)]
+mod size_limits {
+    use solarxy_host::still::MAX_STILL_EDGE;
+
+    /// The node's own hard range on an edge.
+    fn node_edge_range(key: &str) -> (f64, f64) {
+        let engine = solarxy_graph::Engine::new().expect("builtin registry");
+        let desc = engine
+            .registry()
+            .get("render")
+            .expect("the render node is registered");
+        desc.param(key)
+            .and_then(|p| p.range)
+            .unwrap_or_else(|| panic!("{key} declares a hard range"))
+            .hard
+    }
+
+    #[test]
+    fn the_node_offers_exactly_the_sizes_the_job_will_render() {
+        for key in ["width", "height"] {
+            let (min, max) = node_edge_range(key);
+            assert!(
+                (max - f64::from(MAX_STILL_EDGE)).abs() < f64::EPSILON,
+                "the render node offers {key} up to {max} while the still job \
+                 clamps to {MAX_STILL_EDGE}, so a size in between is offered \
+                 and then quietly changed"
+            );
+            // The floor matters for the same reason and is the same number on
+            // both sides today.
+            assert!(
+                min >= 16.0,
+                "the node's {key} floor of {min} is under the job's, so a small \
+                 render would be silently enlarged"
+            );
+        }
+    }
+
+    /// And every named size fits inside it.
+    ///
+    /// Derived from the registry rather than restated, so a preset added later
+    /// is checked without this test being touched. The engine's own suite
+    /// checks each preset against the node's declared range; this checks the
+    /// same presets against what the renderer will actually accept, which is
+    /// the number the criterion is really about.
+    #[test]
+    fn every_named_size_is_one_the_job_will_render() {
+        use solarxy_graph::registry::param_spec::ParamType;
+
+        let engine = solarxy_graph::Engine::new().expect("builtin registry");
+        let desc = engine
+            .registry()
+            .get("render")
+            .expect("the render node is registered");
+        let spec = desc
+            .param("resolution_preset")
+            .expect("the render node declares an output size preset");
+        let ParamType::Enum { variants } = &spec.ty else {
+            panic!("the output size preset stopped being an enum");
+        };
+
+        let mut checked = 0;
+        for variant in variants {
+            let Some((w, h)) = solarxy_graph::nodes::resolution_preset_size(&variant.key) else {
+                continue;
+            };
+            checked += 1;
+            assert!(
+                w <= MAX_STILL_EDGE && h <= MAX_STILL_EDGE,
+                "the preset {:?} is {w} by {h}, which the still job would clamp \
+                 to {MAX_STILL_EDGE}: offer a size the renderer accepts rather \
+                 than one it refuses",
+                variant.key
+            );
+            assert!(
+                w >= 16 && h >= 16,
+                "the preset {:?} is smaller than the job's floor",
+                variant.key
+            );
+        }
+        assert!(checked > 0, "no preset resolved to a size to check");
+    }
+}

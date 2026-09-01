@@ -55,6 +55,8 @@ struct Authored {
     denoise: Option<bool>,
     denoise_strength: Option<f64>,
     denoise_until_samples: Option<i64>,
+    resolution_preset: Option<&'static str>,
+    orientation: Option<&'static str>,
 }
 
 /// A scene lit mostly by bounce, with the render node authored from `a`.
@@ -250,6 +252,24 @@ fn scene_with(a: Authored) -> Vec<u8> {
             render,
             "denoise_until_samples",
             ParamValue::Int(until),
+        );
+    }
+    if let Some(preset) = a.resolution_preset {
+        set(
+            &mut engine,
+            root,
+            render,
+            "resolution_preset",
+            ParamValue::Enum(preset.into()),
+        );
+    }
+    if let Some(orientation) = a.orientation {
+        set(
+            &mut engine,
+            root,
+            render,
+            "orientation",
+            ParamValue::Enum(orientation.into()),
         );
     }
 
@@ -607,5 +627,100 @@ fn the_denoise_threshold_decides_whether_the_filter_ran() {
     assert_eq!(
         never_stopped, filtered,
         "a threshold well above the sample count stopped the filter anyway"
+    );
+}
+
+/// A PNG's own idea of its size, read out of the header.
+///
+/// The first chunk of a PNG is always IHDR and always starts with the two
+/// dimensions, big endian, so this needs no decoder and takes no dependency to
+/// ask the file rather than the renderer how large it is. Asking the renderer
+/// would be asking the thing under test.
+fn png_size(bytes: &[u8]) -> (u32, u32) {
+    assert!(bytes.len() > 24, "too short to be a PNG");
+    assert_eq!(&bytes[12..16], b"IHDR", "not a PNG, or not IHDR first");
+    let at = |o: usize| u32::from_be_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+    (at(16), at(20))
+}
+
+/// Renders at whatever size the node resolves to, and returns the file's size.
+///
+/// No size flags, deliberately: those override the node, so a test that passed
+/// them would be checking the flags. Rasterized, because size resolution has
+/// nothing to do with which engine draws and one pass a tile is a great deal
+/// faster than a converging one.
+fn rendered_size(dir: &std::path::Path, name: &str, a: Authored) -> Option<(u32, u32)> {
+    let scene_path = dir.join(format!("{name}.slxy"));
+    std::fs::write(&scene_path, scene_with(a)).expect("write the scene");
+    let out = dir.join(format!("{name}.png"));
+    let opts = RenderOptions {
+        output: Some(Output::File(out.clone())),
+        engine: Some(RenderEngine::Raster),
+        ..RenderOptions::default()
+    };
+    match solarxy_render::run_render(&scene_path, &opts, &mut solarxy_render::Silent) {
+        Ok(_) => Some(png_size(&std::fs::read(&out).expect("the image"))),
+        Err(RenderError::NoAdapter) => {
+            eprintln!("skipping: no GPU adapter");
+            None
+        }
+        Err(e) => panic!("render failed: {e}"),
+    }
+}
+
+/// A named size sets the size, and orientation turns it, all the way to a file.
+///
+/// The engine's own suite checks that a preset resolves to the right pair. This
+/// checks that the pair survives everything between the node and the written
+/// image, which is the difference between a preset that sets the size and one
+/// that only describes it. A preset that merely described would leave every
+/// render at the node's authored width and height and pass every test upstream
+/// of this one.
+#[test]
+fn a_named_output_size_reaches_the_written_file() {
+    let dir = scratch("output-size");
+
+    // Nothing chosen: the node's own width and height, which this scene leaves
+    // at their defaults. The control for the two below.
+    let Some(custom) = rendered_size(&dir, "custom", Authored::default()) else {
+        return;
+    };
+    assert_eq!(custom, (1920, 1080), "the node's own default size");
+
+    let Some(square) = rendered_size(
+        &dir,
+        "square",
+        Authored {
+            resolution_preset: Some("square"),
+            ..Authored::default()
+        },
+    ) else {
+        return;
+    };
+    assert_eq!(
+        square,
+        (1080, 1080),
+        "choosing a named size did not change what was rendered, so the preset \
+         describes a size rather than setting one"
+    );
+
+    // High definition turned on its side is the story and reel size, which is
+    // the whole reason the list is stated wide edge first rather than carrying
+    // a second entry for every vertical delivery.
+    let Some(story) = rendered_size(
+        &dir,
+        "story",
+        Authored {
+            resolution_preset: Some("hd"),
+            orientation: Some("portrait"),
+            ..Authored::default()
+        },
+    ) else {
+        return;
+    };
+    assert_eq!(
+        story,
+        (1080, 1920),
+        "portrait did not turn the preset on its way to the file"
     );
 }
