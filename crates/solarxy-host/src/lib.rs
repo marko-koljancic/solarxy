@@ -82,6 +82,7 @@ pub mod gizmo;
 pub mod headless;
 pub mod lighting;
 pub mod pane;
+pub mod passes;
 pub mod raster;
 pub mod still;
 pub mod view;
@@ -93,6 +94,7 @@ pub use pane::{
     encode_pane_passes, render_3d_passes, render_overdraw_pane, setup_pane_lighting,
     write_inspection_block, write_pane_uniforms, write_wireframe_params,
 };
+pub use passes::{AovKind, PassKind, PassSelector};
 pub use raster::RasterBackend;
 pub use still::{StillCtx, StillRenderJob, StillSpec, StillStep};
 pub use view::HostViewState;

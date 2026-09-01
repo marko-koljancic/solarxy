@@ -20,39 +20,13 @@ use solarxy_core::geometry::RawImageHdr;
 
 use crate::RenderError;
 
-/// An auxiliary pass a render can write beside the image.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AovKind {
-    /// The surface colour, before any light reached it.
-    Albedo,
-    /// The world-space surface normal.
-    Normal,
-    /// How far away the surface is, along the camera's axis.
-    Depth,
-}
-
-impl AovKind {
-    /// The word that names it, on the command line and in the file name.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Albedo => "albedo",
-            Self::Normal => "normal",
-            Self::Depth => "depth",
-        }
-    }
-
-    /// Whether this pass is read out of the accumulated auxiliary target
-    /// rather than out of its own.
-    ///
-    /// Albedo and normal share one store, so asking for either fetches both.
-    /// Depth is its own dispatch, because a depth is not a quantity whose mean
-    /// is the answer.
-    #[must_use]
-    pub fn from_auxiliary(self) -> bool {
-        matches!(self, Self::Albedo | Self::Normal)
-    }
-}
+/// The pass vocabulary and the readers for the planes it names.
+///
+/// Defined in the shared crate rather than here, because a browser has to name
+/// the same passes and read the same planes, and this crate does not build for
+/// the web. Re-exported so a caller that only ever writes files keeps reaching
+/// for them where the writing lives.
+pub use solarxy_host::passes::{AovKind, albedo_from_auxiliary, floats_of, normal_from_auxiliary};
 
 /// Which space a float beauty is written in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -87,29 +61,6 @@ pub fn sibling(image: &Path, kind: AovKind) -> PathBuf {
     image.with_file_name(format!("{stem}.{}.exr", kind.as_str()))
 }
 
-/// Reads the first three of every four floats: the albedo the kernel merged.
-#[must_use]
-pub fn albedo_from_auxiliary(aux: &[f32]) -> Vec<f32> {
-    aux.as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|p| [p[0], p[1], p[2]])
-        .collect()
-}
-
-/// Reads the fourth of every four floats and unpacks the world normal from it.
-///
-/// A pixel that never described a surface decodes to `+Z`, which is the
-/// sentinel the packing defines rather than a direction anything faced.
-#[must_use]
-pub fn normal_from_auxiliary(aux: &[f32]) -> Vec<f32> {
-    aux.as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|p| solarxy_renderer::pathtrace::unpack_aov_normal(p[3]))
-        .collect()
-}
-
 /// Drops the alpha lane of an RGBA float readback.
 ///
 /// A still has its background already in it, so the lane is a constant one
@@ -121,20 +72,6 @@ pub fn rgb_from_rgba(pixels: &[f32]) -> Vec<f32> {
         .0
         .iter()
         .flat_map(|p| [p[0], p[1], p[2]])
-        .collect()
-}
-
-/// Reinterprets a float plane's bytes.
-///
-/// The still job hands every float plane back as its bytes so a tile is one
-/// shape whatever it holds; this is the other end of that.
-#[must_use]
-pub fn floats_of(bytes: &[u8]) -> Vec<f32> {
-    bytes
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect()
 }
 

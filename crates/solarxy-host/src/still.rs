@@ -56,6 +56,21 @@ use solarxy_renderer::frame::Renderer;
 /// the screenshot path has been capped at since the web app shipped.
 pub const TILE_BUDGET_PIXELS: u32 = 4 * 1024 * 1024;
 
+/// The tile budget a surface showing the picture asks for.
+///
+/// An edge of 256 pixels, so an ordinary still comes in tens of tiles rather
+/// than one and a reader watching it sees it arrive. Named here rather than
+/// chosen at each call site, because it is one judgement about how often a
+/// person wants to see something new and it should be made once.
+///
+/// What it costs is one target resize and one readback per extra tile. What it
+/// buys is the whole value of a surface that shows the picture, and the output
+/// is unchanged either way.
+///
+/// It sits beside [`TILE_BUDGET_PIXELS`] rather than in the headless crate,
+/// where only a native caller could see it.
+pub const PREVIEW_TILE_BUDGET: u32 = 256 * 256;
+
 /// The margin a tile renders and discards when a screen-space post pass is on.
 ///
 /// A hundred and twenty-eight pixels, which is comfortably wider than the bloom

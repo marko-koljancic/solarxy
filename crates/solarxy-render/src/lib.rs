@@ -65,6 +65,11 @@ pub use error::RenderError;
 // pass must read the planes exactly the way the file writer reads them, or
 // the window and the sibling file would disagree about one buffer.
 pub use files::{AovKind, ExrSpace, albedo_from_auxiliary, floats_of, normal_from_auxiliary};
+/// The pass selector and the display mappings, re-exported for the same reason
+/// as `float_to_rgba8` above: they live in the shared crate so the browser can
+/// reach them, and a shell that already depends on this one should not have to
+/// take a second dependency to name a pass.
+pub use solarxy_host::passes::{PassKind, PassSelector, albedo_rgba8, depth_rgba8, normal_rgba8};
 pub use report::{RENDER_REPORT_SCHEMA_VERSION, RenderReport};
 
 /// How far along a render is.
@@ -232,15 +237,9 @@ pub struct RenderOptions {
 
 /// The tile budget a surface showing the picture asks for.
 ///
-/// An edge of 256 pixels, so an ordinary still comes in tens of tiles rather
-/// than one and a reader watching it sees it arrive. Named here rather than
-/// chosen at each call site, because it is one judgement about how often a
-/// person wants to see something new and it should be made once.
-///
-/// What it costs is one target resize and one readback per extra tile. What it
-/// buys is the whole value of a surface that shows the picture, and the output
-/// is unchanged either way.
-pub const PREVIEW_TILE_BUDGET: u32 = 256 * 256;
+/// Defined beside the job's own budget in the shared crate, so a surface that
+/// cannot reach this one can still ask for it.
+pub use solarxy_host::still::PREVIEW_TILE_BUDGET;
 
 /// The picture so far, as tiles land.
 ///
@@ -314,7 +313,7 @@ impl RenderSink for Silent {
 /// take effect should not have to start a GPU to find out. That is not a
 /// detail: it is the difference between a mistyped command exiting one
 /// immediately and exiting four on a machine with no adapter.
-fn caps_of(engine: RenderEngine) -> solarxy_renderer::backend::BackendCaps {
+pub fn caps_of(engine: RenderEngine) -> solarxy_renderer::backend::BackendCaps {
     match engine {
         RenderEngine::Raster => RasterBackend::CAPS,
         RenderEngine::PathTraced => PathBackend::CAPS,

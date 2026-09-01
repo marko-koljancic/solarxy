@@ -30,7 +30,6 @@
 //! still, and after the render finishes the hold loop pumps on its own clock
 //! and the window is as responsive as any other.
 
-mod passes;
 mod view;
 
 use std::sync::Arc;
@@ -44,7 +43,7 @@ use winit::keyboard::{Key, NamedKey};
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 use winit::window::{Window, WindowId};
 
-use passes::{PassKind, PassSelector};
+use solarxy_render::{PassKind, PassSelector};
 use view::{Rect, ViewTransform};
 
 /// The longest edge the window opens at.
@@ -124,15 +123,15 @@ fn frame_for(pass: PassKind, latest: &Latest) -> Frame {
     let (rgba, float) = match pass {
         PassKind::Beauty => beauty_rgba8(latest),
         PassKind::Albedo => match latest.aux.as_ref() {
-            Some(aux) => (passes::albedo_rgba8(aux), false),
+            Some(aux) => (solarxy_render::albedo_rgba8(aux), false),
             None => beauty_rgba8(latest),
         },
         PassKind::Normal => match latest.aux.as_ref() {
-            Some(aux) => (passes::normal_rgba8(aux), false),
+            Some(aux) => (solarxy_render::normal_rgba8(aux), false),
             None => beauty_rgba8(latest),
         },
         PassKind::Depth => match latest.depth.as_ref() {
-            Some(depth) => (passes::depth_rgba8(depth), false),
+            Some(depth) => (solarxy_render::depth_rgba8(depth), false),
             None => beauty_rgba8(latest),
         },
     };
@@ -997,7 +996,12 @@ impl RenderSink for WatchSink {
     }
 
     fn preview(&mut self, image: &Preview<'_>) {
-        self.app.selector.saw_engine(image.engine);
+        // The selector asks whether the render writes passes, not which engine
+        // drew it, so the engine is resolved to a capability here: the rule
+        // lives in a crate that cannot see the engine enum at all.
+        self.app
+            .selector
+            .saw_capability(solarxy_render::caps_of(image.engine).writes_aovs);
         let latest = Latest::from_preview(image);
         if self.app.window.is_none() {
             self.app.wanted = Some(window_size(latest.width, latest.height));
