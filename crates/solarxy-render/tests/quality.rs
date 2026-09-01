@@ -1,4 +1,4 @@
-//! The sampling controls authored on a render node have to reach the image.
+//! The render controls authored on a render node have to reach the image.
 //!
 //! A sibling of the aperture test beside this, written for the same reason and
 //! against the same failure. That one exists because a camera's aperture
@@ -8,12 +8,18 @@
 //! the kernel-level cases all passed an aperture of zero, which is the value
 //! the broken path produced anyway.
 //!
-//! An exact sample count, an indirect clamp and a seed are three more values
-//! threaded that same distance, so each one gets an assertion that fails if the
-//! wiring is removed rather than one that holds because the default happened to
-//! arrive. The clamp's is the strongest of the three and the most worth having:
-//! it checks that the image gets darker, which is the documented cost of
-//! clamping, rather than only that something changed.
+//! An exact sample count, an indirect clamp, a seed, and the denoiser's
+//! strength and stopping point are threaded that same distance, so each gets an
+//! assertion that fails when the wiring is removed rather than one that holds
+//! because the default happened to arrive. Two are worth singling out. The
+//! clamp's checks that the image gets *darker*, which is the documented cost of
+//! clamping, rather than only that something changed. The denoiser's compares
+//! two filtered renders rather than a filtered one against an unfiltered one,
+//! because turning the filter on has always worked: what had no caller anywhere
+//! in the workspace was the setter that steers it.
+//!
+//! Every assertion here was checked by deleting the wiring and watching it
+//! fail. One did not, at first, and was rewritten; its own comment says so.
 //!
 //! Needs a real adapter and skips loudly without one, like every other GPU test
 //! here.
@@ -46,6 +52,9 @@ struct Authored {
     samples: Option<i64>,
     firefly_clamp: Option<f64>,
     seed: Option<i64>,
+    denoise: Option<bool>,
+    denoise_strength: Option<f64>,
+    denoise_until_samples: Option<i64>,
 }
 
 /// A scene lit mostly by bounce, with the render node authored from `a`.
@@ -215,6 +224,33 @@ fn scene_with(a: Authored) -> Vec<u8> {
     }
     if let Some(seed) = a.seed {
         set(&mut engine, root, render, "seed", ParamValue::Int(seed));
+    }
+    if let Some(denoise) = a.denoise {
+        set(
+            &mut engine,
+            root,
+            render,
+            "denoise",
+            ParamValue::Bool(denoise),
+        );
+    }
+    if let Some(strength) = a.denoise_strength {
+        set(
+            &mut engine,
+            root,
+            render,
+            "denoise_strength",
+            ParamValue::Float(strength),
+        );
+    }
+    if let Some(until) = a.denoise_until_samples {
+        set(
+            &mut engine,
+            root,
+            render,
+            "denoise_until_samples",
+            ParamValue::Int(until),
+        );
     }
 
     for _ in 0..8 {
@@ -452,5 +488,124 @@ fn an_exact_count_on_the_node_is_used_and_matches_the_flag() {
         authored, flagged,
         "nine samples authored on the node rendered a different image from \
          nine on the flag, so the exact count is not the count being used"
+    );
+}
+
+/// The denoiser's strength authored on the node changes the picture.
+///
+/// The setter these reach had no callers anywhere in the workspace before this
+/// release, so every render on every surface ran the filter at its measured
+/// defaults whatever anyone asked for. That is the state this asserts is over,
+/// and it is why the comparison is against a second filtered render rather than
+/// against an unfiltered one: turning the filter on has always worked, and a
+/// test that only checked that would have passed throughout.
+#[test]
+fn the_denoise_strength_authored_on_the_node_changes_the_picture() {
+    let dir = scratch("strength");
+    let base = Authored {
+        samples: Some(16),
+        seed: Some(11),
+        denoise: Some(true),
+        ..Authored::default()
+    };
+    let Some((gentle, _)) = render(
+        &dir,
+        "gentle",
+        Authored {
+            denoise_strength: Some(0.25),
+            ..base
+        },
+    ) else {
+        return;
+    };
+    let Some((heavy, _)) = render(
+        &dir,
+        "heavy",
+        Authored {
+            denoise_strength: Some(4.0),
+            ..base
+        },
+    ) else {
+        return;
+    };
+    assert_ne!(
+        gentle, heavy,
+        "a filter at quarter strength produced the same image as one at four \
+         times, so the strength authored on the node is not reaching the filter"
+    );
+}
+
+/// A threshold below the sample count stops the filter, and above it does not.
+///
+/// The pair is what makes this a test of the threshold rather than of the
+/// toggle. Stopping after one sample on a sixteen-sample render has to land on
+/// the unfiltered image, and stopping after a thousand has to land on the
+/// filtered one, so a threshold read as "always" or "never" fails one of them
+/// whichever way it is wrong.
+#[test]
+fn the_denoise_threshold_decides_whether_the_filter_ran() {
+    let dir = scratch("threshold");
+    let base = Authored {
+        samples: Some(16),
+        seed: Some(11),
+        ..Authored::default()
+    };
+    let Some((unfiltered, _)) = render(
+        &dir,
+        "off",
+        Authored {
+            denoise: Some(false),
+            ..base
+        },
+    ) else {
+        return;
+    };
+    let Some((filtered, _)) = render(
+        &dir,
+        "on",
+        Authored {
+            denoise: Some(true),
+            ..base
+        },
+    ) else {
+        return;
+    };
+    assert_ne!(
+        unfiltered, filtered,
+        "the filter changed nothing, so neither comparison below means \
+         anything"
+    );
+
+    let Some((stopped, _)) = render(
+        &dir,
+        "stopped",
+        Authored {
+            denoise: Some(true),
+            denoise_until_samples: Some(1),
+            ..base
+        },
+    ) else {
+        return;
+    };
+    assert_eq!(
+        stopped, unfiltered,
+        "a filter told to stop after one sample still filtered a sixteen \
+         sample render"
+    );
+
+    let Some((never_stopped, _)) = render(
+        &dir,
+        "never-stopped",
+        Authored {
+            denoise: Some(true),
+            denoise_until_samples: Some(1000),
+            ..base
+        },
+    ) else {
+        return;
+    };
+    assert_eq!(
+        never_stopped, filtered,
+        "a threshold well above the sample count stopped the filter anyway"
     );
 }

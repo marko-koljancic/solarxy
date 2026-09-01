@@ -91,6 +91,15 @@ pub struct TraceSettings {
     /// interactive preview (the per-pane traced display mode) turns it on,
     /// because a one-sample frame is unusable without it.
     pub denoise: bool,
+    /// The accumulated sample count past which the filter stops. Zero never
+    /// stops, which is the behaviour that existed before the control did.
+    ///
+    /// A still that starts noisy and converges does not need at the end the
+    /// filtering it needed at the start, and a converged image still being
+    /// filtered is losing detail for grain that is no longer there. Read
+    /// through [`TraceSettings::filtering_at`] rather than directly, so the
+    /// converging and converged paths cannot come to disagree about it.
+    pub denoise_until_samples: u32,
     /// The accumulator's size as a fraction of the pane's, `(0, 1]`.
     ///
     /// One for a still, which must land every pixel it was asked for. The
@@ -114,8 +123,23 @@ impl Default for TraceSettings {
             focus_distance: 0.0,
             aperture_blades: 0,
             denoise: false,
+            denoise_until_samples: 0,
             resolution_scale: 1.0,
         }
+    }
+}
+
+impl TraceSettings {
+    /// Whether the filter runs over an accumulation of `samples`.
+    ///
+    /// One rule, read by both the converging arm and the converged one, so a
+    /// render that crosses its threshold part way through behaves the same as
+    /// one that starts past it. Written here rather than at the two call sites
+    /// because those two drifting apart is precisely the defect this shape
+    /// exists to prevent: they are forty lines apart and look identical.
+    #[must_use]
+    pub fn filtering_at(&self, samples: u32) -> bool {
+        self.denoise && (self.denoise_until_samples == 0 || samples <= self.denoise_until_samples)
     }
 }
 
@@ -124,10 +148,12 @@ impl Default for TraceSettings {
 ///
 /// Sixteen, which is well above anything a surface returns under an authored
 /// environment of unit brightness and well below what a near-specular scatter
-/// onto a small bright source charges. It is not authored: a control whose
-/// effect is "how much energy would you like removed from the parts of the
-/// image you cannot predict" is not one a person can reason about, and the
-/// render node carries no parameter for it.
+/// onto a small bright source charges.
+///
+/// The render node's default, and the value it carried before the node had a
+/// parameter for it, so exposing the control changed no existing picture. Zero
+/// there means no clamping at all, which is the kernel's own reading of the
+/// value rather than a convention the node invented.
 pub const DEFAULT_FIREFLY_CLAMP: f32 = 16.0;
 
 /// One pane's accumulation.
@@ -342,10 +368,16 @@ impl PathBackend {
 
     /// How the filter is steered, when [`TraceSettings::denoise`] turns it on.
     ///
-    /// Separate from [`TraceSettings`] because it is not authored: the render
-    /// node carries a toggle and not three sigmas, and a control whose effect
-    /// is "how much detail would you like removed" is not one a person can
-    /// reason about.
+    /// Separate from [`TraceSettings`] because the filter is configured apart
+    /// from the walk: these four reach the filter's own per-level uniforms and
+    /// nothing in the kernel that traces a ray.
+    ///
+    /// They are authored, as of the render node's third version, behind an
+    /// advanced heading and under a strength that multiplies the colour
+    /// tolerance. Until then this had no callers anywhere in the workspace, so
+    /// every render on every surface ran at the defaults below whatever anyone
+    /// wanted, and the four measured values were unreachable from the surface
+    /// that renders.
     pub fn set_denoise_settings(&mut self, settings: DenoiseSettings) {
         self.denoiser.set_settings(settings);
     }
@@ -638,7 +670,7 @@ impl RenderBackend for PathBackend {
             // still cost nothing to keep on screen. The filter re-runs, because
             // its output is scratch rather than a cached image and it is off by
             // default on exactly the renders that reach this branch.
-            let source = if settings.denoise {
+            let source = if settings.filtering_at(pane.samples) {
                 denoiser.encode(
                     ctx.device,
                     ctx.queue,
@@ -707,7 +739,7 @@ impl RenderBackend for PathBackend {
         // chain runs on the filtered image the way it runs on the raw one.
         // Filtering after tone mapping would smooth a display-referred picture
         // and put the grain back the moment the exposure moved.
-        let source = if settings.denoise {
+        let source = if settings.filtering_at(pane.samples) {
             denoiser.encode(
                 ctx.device,
                 ctx.queue,
@@ -830,6 +862,55 @@ mod tests {
         // finishing chain would multiply by, so a host must not reach for it,
         // and this is the only thing that says so.
         assert!(!caps.writes_occlusion);
+    }
+
+    /// The filter's gate, including the sentinel that has to be spelled out.
+    ///
+    /// Both the converging arm and the converged one read this, forty lines
+    /// apart and looking identical, which is why the rule is here rather than
+    /// written twice. A render that crosses its threshold part way through has
+    /// to behave the same as one that starts past it.
+    ///
+    /// This is also what says a render with the filter off pays nothing: the
+    /// only thing that allocates the filter's scratch or dispatches it is the
+    /// call this gates, so a false here is not a cheaper filter but no filter.
+    #[test]
+    fn the_filter_stops_where_it_was_told_to() {
+        let off = TraceSettings {
+            denoise: false,
+            ..TraceSettings::default()
+        };
+        assert!(
+            !off.filtering_at(1),
+            "off is off however few samples there are"
+        );
+        assert!(!off.filtering_at(10_000));
+
+        // Zero is not "stop immediately". It is the behaviour that existed
+        // before the control did, and the parameter says so rather than
+        // leaving a reader to guess.
+        let always = TraceSettings {
+            denoise: true,
+            denoise_until_samples: 0,
+            ..TraceSettings::default()
+        };
+        assert!(always.filtering_at(1));
+        assert!(always.filtering_at(100_000));
+
+        let until = TraceSettings {
+            denoise: true,
+            denoise_until_samples: 64,
+            ..TraceSettings::default()
+        };
+        assert!(until.filtering_at(1));
+        assert!(until.filtering_at(63));
+        assert!(
+            until.filtering_at(64),
+            "the threshold is the last count still filtered, not the first \
+             one dropped"
+        );
+        assert!(!until.filtering_at(65));
+        assert!(!until.filtering_at(1024));
     }
 
     #[test]

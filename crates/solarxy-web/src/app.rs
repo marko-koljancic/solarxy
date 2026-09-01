@@ -53,6 +53,7 @@ use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::backend::{FrameCtx, FrameOutcome, PaneContent, RenderBackend, UvSource};
 use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
+use solarxy_renderer::pathtrace::denoise::DenoiseSettings;
 use solarxy_renderer::capture::CaptureTarget;
 use solarxy_renderer::frame::{Renderer, RendererInit};
 use solarxy_renderer::geometry::build_normals_geometry;
@@ -1868,6 +1869,7 @@ impl SolarxyApp {
         if let Some(t) = self.tracer.as_mut() {
             let current = t.settings();
             t.set_settings(crate::trace_settings::trace_settings_for(&opts, current));
+            t.set_denoise_settings(crate::trace_settings::denoise_settings_for(&opts));
             t.invalidate();
         }
         // After the settings, which reset the lens to the pinhole default.
@@ -3903,6 +3905,15 @@ impl SolarxyApp {
         // last would otherwise win.
         if let Some(t) = self.tracer.as_mut() {
             t.set_settings(preview_trace_settings(self.preview_denoise));
+            // The filter's steering, for the same reason and it is newly load
+            // bearing: a still authored from a render node now writes these
+            // four, so without this a preview would inherit whatever the last
+            // still asked for. The preview keeps the measured defaults, which
+            // is what it ran at when nothing called this setter at all. The
+            // two denoise settings are deliberately separate: one is a
+            // delivered frame's, the other a preview's, and they want
+            // different answers.
+            t.set_denoise_settings(DenoiseSettings::default());
         }
         // A pane bound to a camera previews through that camera's lens; a
         // free view is a pinhole. Asserted per encode like the settings above

@@ -25,6 +25,7 @@ use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::{CompositeLook, resolve_look};
 use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
+use solarxy_renderer::pathtrace::denoise::DenoiseSettings;
 use solarxy_renderer::scene::BackgroundModeExt;
 
 use super::State;
@@ -269,6 +270,7 @@ impl State {
             self.light_traced_still_camera(&shot_camera);
             if let Some(t) = self.tracer.as_mut() {
                 t.set_settings(trace_settings_for(&settings));
+                t.set_denoise_settings(denoise_settings_for(&settings));
                 // After the settings, which reset the lens to the pinhole
                 // default: a free shot is a pinhole and a shot through a
                 // camera is whatever that camera's aperture says.
@@ -635,10 +637,11 @@ fn trace_settings_for(settings: &RenderSettings) -> TraceSettings {
         firefly_clamp,
         seed,
         denoise,
-        // The denoiser's own tuning travels by its own setter rather than on
-        // here, because the filter is configured separately from the walk.
+        denoise_until_samples,
+        // The four that steer the filter travel by their own setter rather
+        // than on here, because the filter is configured apart from the walk.
+        // See `denoise_settings_for` below.
         denoise_strength: _,
-        denoise_until_samples: _,
         denoise_sigma_color: _,
         denoise_normal_power: _,
         denoise_sigma_albedo: _,
@@ -662,9 +665,25 @@ fn trace_settings_for(settings: &RenderSettings) -> TraceSettings {
         firefly_clamp,
         seed,
         denoise,
+        denoise_until_samples,
         // The lens is set immediately after this, by `set_lens`. Everything
         // else keeps the tracer's own default.
         ..TraceSettings::default()
+    }
+}
+
+/// How the render node asks for the filter to be steered.
+///
+/// Strength multiplies the colour tolerance rather than being a fifth
+/// independent number, because that tolerance is the value that most changes
+/// the outcome: expressing it any other way would leave the advanced heading
+/// holding a value the everyday control could contradict.
+fn denoise_settings_for(settings: &RenderSettings) -> DenoiseSettings {
+    DenoiseSettings {
+        sigma_color: settings.denoise_sigma_color * settings.denoise_strength,
+        normal_power: settings.denoise_normal_power,
+        sigma_albedo: settings.denoise_sigma_albedo,
+        level_falloff: settings.denoise_level_falloff,
     }
 }
 
@@ -746,6 +765,53 @@ mod tests {
         // This shell's own pacing rather than the node's: eight samples to a
         // submission, native having no frame to pace against.
         assert_eq!(t.chunk, 8);
+    }
+
+    /// The four steering values reach the filter, and strength multiplies the
+    /// one it is documented to multiply.
+    ///
+    /// Deliberately distinct values, so a field wired to its neighbour fails
+    /// rather than passing on a coincidence.
+    #[test]
+    fn the_steering_values_reach_the_filter() {
+        let mut s = RenderSettings::defaults();
+        s.denoise_sigma_color = 2.0;
+        s.denoise_normal_power = 33.0;
+        s.denoise_sigma_albedo = 0.5;
+        s.denoise_level_falloff = 3.0;
+        s.denoise_strength = 1.5;
+
+        let d = denoise_settings_for(&s);
+        assert!(
+            (d.sigma_color - 3.0).abs() < f32::EPSILON,
+            "strength multiplies the colour tolerance: 2.0 at 1.5 is 3.0"
+        );
+        assert!((d.normal_power - 33.0).abs() < f32::EPSILON);
+        assert!((d.sigma_albedo - 0.5).abs() < f32::EPSILON);
+        assert!((d.level_falloff - 3.0).abs() < f32::EPSILON);
+    }
+
+    /// At the default strength the filter runs at exactly its measured values.
+    ///
+    /// The multiplier is what makes this worth asserting: a strength that
+    /// defaulted to anything but one would silently retune every existing
+    /// render the moment the control shipped.
+    #[test]
+    fn the_defaults_are_the_measured_values_untouched() {
+        let d = denoise_settings_for(&RenderSettings::defaults());
+        assert_eq!(d, DenoiseSettings::default());
+    }
+
+    /// The threshold reaches the walk's settings, where the gate reads it.
+    #[test]
+    fn the_denoise_threshold_reaches_the_tracer() {
+        let mut s = RenderSettings::defaults();
+        s.denoise = true;
+        s.denoise_until_samples = 40;
+        let t = trace_settings_for(&s);
+        assert_eq!(t.denoise_until_samples, 40);
+        assert!(t.filtering_at(40));
+        assert!(!t.filtering_at(41));
     }
 
     /// A render shorter than a chunk submits the render, not the chunk.
