@@ -801,17 +801,14 @@ fn still_spec(settings: &RenderSettings, output: &Output, opts: &RenderOptions) 
 }
 
 /// What a document with no render node renders at.
+///
+/// The node type's own descriptor defaults, read through the engine rather than
+/// restated here. This was a hand-written literal until the render node's third
+/// version, kept in step with the desktop's copy by a test comparing fields one
+/// at a time; a field added to the settings and forgotten in one of them would
+/// have rendered differently depending on which surface you asked from.
 fn default_settings() -> RenderSettings {
-    RenderSettings {
-        camera: None,
-        width: 1920,
-        height: 1080,
-        engine: RenderEngine::Raster,
-        samples: 64,
-        bounces: 6,
-        transmissive_bounces: 4,
-        denoise: false,
-    }
+    RenderSettings::defaults()
 }
 
 /// The camera the settings name, if the cooked scene carries it.

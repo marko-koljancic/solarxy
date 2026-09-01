@@ -814,7 +814,7 @@ It exports at whatever resolution the chain cooked at, which is the working reso
 
 ### Render <a id="render"></a>
 
-`render` · v2 · Export · placed scene · terminal silhouette
+`render` · v3 · Export · placed scene · terminal silhouette
 
 Palette search also matches: render, rop, output, capture, screenshot.
 
@@ -822,33 +822,106 @@ Holds a render setup: which camera to shoot through, at what resolution, with wh
 
 It lives at the object level beside the cameras and lights it refers to, and it is how a shot stops being something you re-find by orbiting. Point it at a `camera` node and the same framing comes back every session; keep several around, one per shot, each named for what it captures.
 
-Up to 8192 pixels an edge. Anything larger than a browser draws in one pass is rendered in tiles and assembled, so the size you ask for is the size you get -- what changes with resolution is how long it takes, not whether it works.
+Output size is either a named delivery size or your own two numbers, and an orientation turns a preset without retyping it. Up to 8192 pixels an edge. Anything larger than a browser draws in one pass is rendered in tiles and assembled, so the size you ask for is the size you get -- what changes with resolution is how long it takes, not whether it works.
+
+The tabs are the decisions rather than the fields: Render is the shot, Quality is how long you are willing to wait and what the tracer is allowed to do while it waits, Denoise is what happens to the grain that is left, and Output is what leaves besides the picture. Everything under Quality and Denoise is path traced only; a rasterized still draws each pixel once.
 
 Depth of field belongs to the camera, not here: aperture, focus distance and blade count live on the `camera` node this points at, so the same lens applies wherever that camera is used.
 
 | Parameter | Type | Default | Range | Notes |
 |---|---|---|---|---|
 | `camera_path` | nodePath | `null` |  | Which camera to render through, picked by path from the cameras in the scene -- a reference, not a wire. Left unset the render comes from the current viewport view, wherever you last orbited it to, which is convenient but not repeatable. Point it at a camera to pin the shot down. |
-| `width` | int | `1920` | 16 to 8192 | Output width in pixels. Together with Height it also fixes the aspect ratio the camera frames at, so changing it changes the composition, not just the file size. |
-| `height` | int | `1080` | 16 to 8192 | Output height in pixels. Large renders are drawn in tiles, each inside the four-megapixel budget a browser reliably survives, and assembled afterwards -- so the size you ask for is the size you get, however long it takes. |
+| `resolution_preset` | enum (custom / hd / uhd_4k / uhd_8k / dci_2k / dci_4k / square / social_5x4 / a4_300 / a3_300 / letter_300) | `custom` |  | The output size, chosen by name. Custom is the default and reveals Width and Height for a size that is not on the list.
+
+Choosing a preset sets the size rather than describing it. Width and Height together fix the aspect the camera frames at, so a preset changes the composition, not just the file size.
+
+Every entry states its pixel size, and the print entries state the density that size assumes, so nothing here depends on a dots-per-inch setting the renderer would ignore. Sizes are listed wide edge first; Orientation turns them. |
+| `orientation` | enum (landscape / portrait) | `landscape` |  | shown only while `resolution_preset` is not `custom`; Which way round the chosen size is: Landscape puts the wide edge across, Portrait puts it up.
+
+It turns the size, and the camera frames to whatever aspect that gives it, so switching orientation reframes what is in view rather than only rotating the file.
+
+The vertical delivery sizes come from here rather than from entries of their own, which is what keeps the list short: HD in Portrait is 1080 x 1920, the story and reel size, and A4 in Portrait is 2480 x 3508. |
+| `width` | int | `1920` | 16 to 8192 | shown only while `resolution_preset` is `custom`; Output width in pixels. Together with Height it also fixes the aspect ratio the camera frames at, so changing it changes the composition, not just the file size.
+
+Read only when Output Size is Custom, and hidden otherwise, since a preset states its own size in its name. |
+| `height` | int | `1080` | 16 to 8192 | shown only while `resolution_preset` is `custom`; Output height in pixels. Large renders are drawn in tiles, each inside the four-megapixel budget a browser reliably survives, and assembled afterwards -- so the size you ask for is the size you get, however long it takes.
+
+Read only when Output Size is Custom, and hidden otherwise. |
 | `engine` | enum (raster / traced) | `raster` |  | Which renderer draws the still. Rasterized is the viewport's own renderer: fast, and its shadows, ambient occlusion and reflections are approximations. Path traced follows light through the scene instead, so shadows, bounced colour and soft reflections come out of the same calculation rather than being added on top -- and it takes as long as it takes.
 
 A traced still shows what the tracer integrates: the environment where a ray leaves the scene, and no grid, gizmo or overlay. It is a photograph of the scene rather than a screenshot of the viewport. |
-| `quality` | enum (draft / good / high / reference) | `good` |  | How many samples each pixel averages, and so how much grain is left. Four times the samples is half the noise, not a quarter, which is why the steps are wide: Draft to Good is a visible improvement and Draft to Reference is sixty-four times the wait.
+| `render` | action | `false` |  | Renders the still and opens a dialog showing it arrive, tile by tile, with a running count and a cancel. Nothing is written until you save from there.
+
+The viewport is left where it is. The shot comes from the camera above, not from what you happen to be looking at, so pressing this never moves your view. |
+| `quality` | enum (draft / good / high / reference / custom) | `good` |  | How many samples each pixel averages, and so how much grain is left. Four times the samples is half the noise, not a quarter, which is why the steps are wide: Draft to Good is a visible improvement and Draft to Reference is sixty-four times the wait.
+
+Exact count reveals a Samples field for a scene that is not where the presets are. The wide steps are worth keeping for everything else: most shots want one of four answers, not a number to pick.
 
 Path traced only. A rasterized still draws each pixel once. |
+| `samples` | int | `64` | 1 to 8192 | shown only while `quality` is `custom`; The exact number of samples each pixel averages. Read only when Quality is Exact count, and hidden otherwise, since the named presets carry their own counts.
+
+Reach for it when a preset is not where your scene is: a shot that is clean at ninety would otherwise mean either shipping the grain at sixty-four or waiting four times as long for two hundred and fifty-six.
+
+Path traced only. |
 | `bounces` | int | `6` | 1 to 32 | How many times light may scatter before a path is given up on. Higher opens up interiors and deep folds, where most of the light arrives after several bounces; an exterior on a bright day is usually finished by four.
 
 Path traced only. |
 | `transmissive_bounces` | int | `4` | 0 to 32 | How many of the bounces above may additionally pass through transmissive surfaces. Counted separately so a pane of glass does not spend a whole path's budget getting through it: a window is two surfaces, a tumbler is four, and running out ends the path rather than turning the glass opaque.
 
 Path traced only. |
+| `firefly_clamp` | float | `16.0` | 0 to 1000 | A ceiling on how much light one sample may contribute after it has bounced. A rare path that finds a bright source through a mirror or a tight caustic comes back hundreds of times the average, and a single one of those leaves a lone bright pixel that thousands of ordinary samples cannot average away.
+
+What it costs is energy. Clamping discards the part above the ceiling rather than redistributing it, so the image gets darker exactly where the clamp acts, and a scene lit mostly through those rare paths gets darker overall. Lower it to suppress more of them, raise it to let brighter contributions through, and set it to zero to turn the clamp off and keep every last one.
+
+Path traced only. |
+| `seed` | int | `2654435769` | 0 to 4294967295 | What the sampling sequence is drawn from. The same seed gives the same image for the same scene, size and sample count on the same device, which is what makes a comparison between two settings a comparison rather than two different grain patterns.
+
+The promise stops at the surface that rendered it. The browser and the command line accumulate in different chunk sizes, each for a reason sound on its own surface, and floating-point addition is not invariant to the grouping, so the same seed does not give the same bytes across them.
+
+Changing it changes the grain and not the answer: two seeds at a high sample count converge to the same image.
+
+Path traced only. |
 | `denoise` | bool | `false` |  | Smooths the remaining grain, steered by what each pixel's surface looks like so material boundaries survive.
 
-Off by default, and that is the right default for a finished still: at a high sample count there is little grain left to remove and a filter can only take detail away. Turn it on for a Draft, where the grain is the thing standing between you and seeing the shot. |
-| `render` | action | `false` |  | Renders the still and opens a dialog showing it arrive, tile by tile, with a running count and a cancel. Nothing is written until you save from there.
+Off by default, and that is the right default for a finished still: at a high sample count there is little grain left to remove and a filter can only take detail away. Turn it on for a Draft, where the grain is the thing standing between you and seeing the shot.
 
-The viewport is left where it is. The shot comes from the camera above, not from what you happen to be looking at, so pressing this never moves your view. |
+This is the still's own setting. The viewport's traced preview keeps a separate one, in preferences, because a preview and a delivered frame want different answers. |
+| `denoise_strength` | float | `1.0` | 0 to 4 | shown only while `denoise` is on; How hard the filter works, as a multiple of the colour tolerance it was measured at. One is that measured setting.
+
+Below one the image keeps more grain and more detail, and material boundaries stay crisp. Above one it is smoother and softer, and fine texture starts to go with the noise. It steers the value that most changes the outcome rather than being a fifth independent number, so Colour Tolerance under Advanced remains the thing this multiplies. |
+| `denoise_until_samples` | int | `0` | 0 to 8192 | shown only while `denoise` is on; The sample count past which the filter stops. Zero means it never stops.
+
+A still that starts noisy and converges does not need at the end the filtering it needed at the start, and a converged image still being smoothed is losing detail for grain that is no longer there. Set this where your scene stops looking noisy and the filter steps out of the way after it.
+
+The filter already relaxes on its own as a render converges, because its colour tolerance is divided by the square root of the sample count. This sharpens a behaviour that exists rather than introducing one. |
+| `denoise_sigma_color` | float | `1.2` | 0.01 to 10 | under "Advanced"; shown only while `denoise` is on; How different in brightness two neighbouring pixels may be and still be averaged together. Larger reaches across those differences and removes more noise; smaller keeps detail and leaves more grain.
+
+The default is measured rather than chosen: it came from an error sweep against a reference, scored both for error and for how much of a material step survived. Strength above multiplies this value.
+
+Divided by the square root of the sample count inside the filter, so it tightens on its own as a render converges. |
+| `denoise_normal_power` | float | `128.0` | 1 to 1024 | under "Advanced"; shown only while `denoise` is on; How closely two pixels' surface directions must agree before they are averaged together. The default corresponds to about ten degrees.
+
+Higher keeps creases and curvature crisp and filters less across them; lower lets the filter reach around a curve, which is smoother and takes the edge off a bevel. This is the value that stops geometry melting. |
+| `denoise_sigma_albedo` | float | `0.08` | 0.001 to 1 | under "Advanced"; shown only while `denoise` is on; How different two pixels' base colours may be before the filter treats them as different materials. Smaller keeps the boundary between two materials sharp; larger lets one bleed into the next.
+
+Much tighter than the colour tolerance on purpose: base colour is noise-free where brightness is not, so it is the most reliable thing the filter has to steer by. |
+| `denoise_level_falloff` | float | `2.0` | 1 to 8 | under "Advanced"; shown only while `denoise` is on; How much the tolerances tighten at each coarser pass. The filter runs at five scales and each one divides its tolerances by this number.
+
+Higher makes the coarse passes conservative, keeping large-scale detail and removing less of the broad blotching; lower lets them reach further and flattens wide areas. |
+| `transparent_background` | bool | `false` |  | Renders with nothing behind the subject. The environment still lights the scene exactly as it did, but it is not photographed into the frame, and what comes out carries a matte: opaque where the camera found a surface, clear where it found sky, and fractional along every silhouette.
+
+That is what makes a render an element rather than a picture. The alternative is rendering against a colour and keying it by hand, which fails the moment the subject is glossy, because the background is in its reflections. |
+| `aov_albedo` | bool | `false` |  | Writes the base colour each pixel saw as a file beside the image: surface colour before any lighting, which is what a compositor re-grades or relights against.
+
+Producing a pass and displaying one are separate choices. This asks for the file; which pass the render window shows is chosen there, while it converges.
+
+Path traced only. A rasterized still writes no auxiliary passes. |
+| `aov_normal` | bool | `false` |  | Writes the surface direction each pixel saw as a file beside the image, encoded as colour. It is what a compositor relights with, and it is also what the denoiser steers by, so it is the pass to look at when a denoised result has lost an edge it should have kept.
+
+Path traced only. |
+| `aov_depth` | bool | `false` |  | Writes how far away each pixel is as a file beside the image. It is what depth of field, fog and atmospheric grading are built from in a compositor, and what tells you whether the shot has the depth separation you thought it had.
+
+Path traced only. |
 
 *Bypassed: cannot be bypassed.*
 

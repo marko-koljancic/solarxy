@@ -2781,9 +2781,17 @@ impl Engine {
     /// since its second version and neither reached any render, because the
     /// host that read the node did not know to look for them.
     ///
-    /// Every field goes through [`Self::resolved_param`], so an expression on
-    /// the resolution evaluates and a document saved before the second version
-    /// answers with the current defaults rather than with zeroes.
+    /// The whole node resolves in one pass through the registry's own
+    /// chokepoint, so an expression on the resolution evaluates, every value is
+    /// conformed and hard-clamped, and a document saved before a later version
+    /// answers with the current defaults rather than with zeroes. The hard
+    /// ranges are what keep a resolution that evaluated to nothing rendering a
+    /// small picture rather than an empty one.
+    ///
+    /// The settings are then read by [`crate::nodes::render_settings_from`],
+    /// which is also what [`crate::nodes::RenderSettings::defaults`] runs over
+    /// the descriptor: one reader, so a field added to the settings reaches a
+    /// real node and the no-render-node fallback together.
     ///
     /// # Errors
     /// The node not existing, not being a `render` node, or a param failing to
@@ -2794,53 +2802,32 @@ impl Engine {
         ctx: GraphContext,
         node: NodeId,
     ) -> Result<crate::nodes::RenderSettings, String> {
-        use crate::nodes::{DEFAULT_QUALITY, RenderEngine, RenderSettings, quality_samples};
-
         let graph = self.doc.graph(ctx).map_err(|e| e.to_string())?;
         let data = graph.node(node).ok_or_else(|| "no such node".to_string())?;
         if data.type_id != "render" {
             return Err(format!("node is a {} rather than a render", data.type_id));
         }
+        let desc = self
+            .registry
+            .get(&data.type_id)
+            .ok_or_else(|| "unknown node type".to_string())?;
 
-        let int = |key: &str, floor: u32| -> Result<u32, String> {
-            match self.resolved_param(ctx, node, key)? {
-                ParamValue::Int(v) => Ok(u32::try_from(v).unwrap_or(floor).max(floor)),
-                _ => Ok(floor),
-            }
-        };
-        let text = |key: &str| -> Result<String, String> {
-            match self.resolved_param(ctx, node, key)? {
-                ParamValue::Enum(v) | ParamValue::Text(v) => Ok(v),
-                _ => Ok(String::new()),
-            }
-        };
-
-        let quality = text("quality")?;
-        Ok(RenderSettings {
-            camera: match self.resolved_param(ctx, node, "camera_path")? {
-                ParamValue::NodeRef(id) => id,
-                _ => None,
-            },
-            // The floors are the node's own hard minimum, so a resolution
-            // arriving as an expression that evaluated to nothing renders a
-            // small picture rather than an empty one.
-            width: int("width", 16)?,
-            height: int("height", 16)?,
-            engine: if text("engine")? == "traced" {
-                RenderEngine::PathTraced
-            } else {
-                RenderEngine::Raster
-            },
-            samples: quality_samples(&quality)
-                .or_else(|| quality_samples(DEFAULT_QUALITY))
-                .unwrap_or(64),
-            bounces: int("bounces", 1)?,
-            transmissive_bounces: int("transmissive_bounces", 0)?,
-            denoise: matches!(
-                self.resolved_param(ctx, node, "denoise")?,
-                ParamValue::Bool(true)
-            ),
-        })
+        let params = crate::previews::effective_params(&self.previews, node, &data.params);
+        let refs = crate::refs::DocRefs::new(
+            &self.doc,
+            &self.registry,
+            &self.previews,
+            ctx,
+            node,
+            crate::expr::SceneTime::default(),
+        );
+        let eval = crate::expr::EvalCtx::new(crate::expr::SceneTime::default()).with_refs(&refs);
+        // One context for the whole node rather than one per key. The node
+        // carries no geometry input, so there is nothing a geometry capability
+        // would answer here.
+        let resolved = crate::registry::resolve::resolve_params_with(&params, &desc.params, &eval)
+            .map_err(|e| e.to_string())?;
+        Ok(crate::nodes::render_settings_from(&resolved))
     }
 
     pub fn resolved_param(

@@ -8237,11 +8237,28 @@ fn a_render_node_saved_before_the_still_opens_with_the_new_defaults() {
         if n.type_id == "render" {
             n.type_version = 1;
             for key in [
+                // What v2 added.
                 "engine",
                 "quality",
                 "bounces",
                 "transmissive_bounces",
                 "denoise",
+                // What v3 added.
+                "resolution_preset",
+                "orientation",
+                "samples",
+                "firefly_clamp",
+                "seed",
+                "denoise_strength",
+                "denoise_until_samples",
+                "denoise_sigma_color",
+                "denoise_normal_power",
+                "denoise_sigma_albedo",
+                "denoise_level_falloff",
+                "transparent_background",
+                "aov_albedo",
+                "aov_normal",
+                "aov_depth",
             ] {
                 n.params.remove(key);
             }
@@ -8267,7 +8284,7 @@ fn a_render_node_saved_before_the_still_opens_with_the_new_defaults() {
         .nodes()
         .find(|n| n.type_id == "render")
         .expect("the render node survived the round trip");
-    assert_eq!(n.type_version, 2, "reopening stamps the current version");
+    assert_eq!(n.type_version, 3, "reopening stamps the current version");
     let id = n.id;
 
     let value = |key: &str| {
@@ -8287,18 +8304,54 @@ fn a_render_node_saved_before_the_still_opens_with_the_new_defaults() {
     // Off, which is the still's default: a converged render has little grain
     // left and a filter can only take detail away.
     assert_eq!(value("denoise"), ParamValue::Bool(false));
+
+    // Everything v3 added, the same way. The size preset is the one that would
+    // change this document's picture if it landed wrong: any default but custom
+    // would resize a shot that carries an explicit width.
+    assert_eq!(
+        value("resolution_preset"),
+        ParamValue::Enum("custom".to_string())
+    );
+    assert_eq!(
+        value("orientation"),
+        ParamValue::Enum("landscape".to_string())
+    );
+    assert_eq!(value("samples"), ParamValue::Int(64));
+    assert_eq!(value("firefly_clamp"), ParamValue::Float(16.0));
+    // The tracer's own constant, not a substituted zero: a seed of zero is a
+    // different sampling sequence, so the picture would move.
+    assert_eq!(value("seed"), ParamValue::Int(2_654_435_769));
+    assert_eq!(value("denoise_strength"), ParamValue::Float(1.0));
+    assert_eq!(value("denoise_until_samples"), ParamValue::Int(0));
+    // The measured steering values, which is what keeps an existing render
+    // unchanged by a control that did not exist when it was authored.
+    assert_eq!(value("denoise_sigma_color"), ParamValue::Float(1.2));
+    assert_eq!(value("denoise_normal_power"), ParamValue::Float(128.0));
+    assert_eq!(value("denoise_sigma_albedo"), ParamValue::Float(0.08));
+    assert_eq!(value("denoise_level_falloff"), ParamValue::Float(2.0));
+    assert_eq!(value("transparent_background"), ParamValue::Bool(false));
+    assert_eq!(value("aov_albedo"), ParamValue::Bool(false));
+    assert_eq!(value("aov_normal"), ParamValue::Bool(false));
+    assert_eq!(value("aov_depth"), ParamValue::Bool(false));
 }
 
-/// Every quality preset the `render` node declares has a sample count.
+/// Every quality preset the `render` node declares has a sample count, and the
+/// one that does not has the field it takes its count from instead.
 ///
 /// The case list is derived from the registry rather than written out, so a
 /// preset added to the node without a count fails the build instead of quietly
 /// rendering at the fallback. That is the failure this guards: the table lived
 /// in the frontend until this release, where nothing could compare it against
 /// the node at all.
+///
+/// The exact-count preset is the single exemption, and it is not a hole: it is
+/// exempt only while the `samples` param exists and is revealed by exactly this
+/// preset, which is checked below. A preset with neither a count nor a field
+/// would render at the fallback and say nothing, which is what the exemption
+/// has to keep impossible.
 #[test]
 fn every_quality_preset_the_render_node_declares_has_a_sample_count() {
-    use crate::registry::param_spec::ParamType;
+    use crate::registry::param_spec::{ParamType, Pred};
 
     let e = engine();
     let desc = e
@@ -8314,6 +8367,9 @@ fn every_quality_preset_the_render_node_declares_has_a_sample_count() {
     assert!(!variants.is_empty(), "a preset list with no presets");
 
     for variant in variants {
+        if variant.key == crate::nodes::CUSTOM_QUALITY {
+            continue;
+        }
         assert!(
             crate::nodes::quality_samples(&variant.key).is_some(),
             "the quality preset {:?} has no sample count; add one beside the enum \
@@ -8328,6 +8384,40 @@ fn every_quality_preset_the_render_node_declares_has_a_sample_count() {
             .iter()
             .any(|v| v.key == crate::nodes::DEFAULT_QUALITY),
         "the default quality preset is not among the ones the node declares"
+    );
+    assert!(
+        crate::nodes::quality_samples(crate::nodes::DEFAULT_QUALITY).is_some(),
+        "the fallback preset has no count of its own, so an unknown preset \
+         would resolve to nothing"
+    );
+
+    // What buys the exemption above.
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.key == crate::nodes::CUSTOM_QUALITY),
+        "the exact-count preset is not declared, so the exemption above is \
+         excusing a preset that does not exist"
+    );
+    assert!(
+        crate::nodes::quality_samples(crate::nodes::CUSTOM_QUALITY).is_none(),
+        "the exact-count preset gained a table entry, which would silently \
+         override the count somebody typed"
+    );
+    let samples = desc
+        .param("samples")
+        .expect("the exact-count preset has a sample count to read");
+    assert_eq!(
+        samples.show_if.len(),
+        1,
+        "the sample count is revealed by exactly one condition"
+    );
+    assert_eq!(samples.show_if[0].param, "quality");
+    assert_eq!(
+        samples.show_if[0].pred,
+        Pred::Eq(ParamValue::Enum(crate::nodes::CUSTOM_QUALITY.to_string())),
+        "the sample count is revealed by a preset other than the exact one, so \
+         it is either unreachable or offered when it is not read"
     );
 }
 
@@ -8371,6 +8461,21 @@ fn a_render_node_saved_before_its_second_version_resolves_to_the_current_default
                     "bounces",
                     "transmissive_bounces",
                     "denoise",
+                    "resolution_preset",
+                    "orientation",
+                    "samples",
+                    "firefly_clamp",
+                    "seed",
+                    "denoise_strength",
+                    "denoise_until_samples",
+                    "denoise_sigma_color",
+                    "denoise_normal_power",
+                    "denoise_sigma_albedo",
+                    "denoise_level_falloff",
+                    "transparent_background",
+                    "aov_albedo",
+                    "aov_normal",
+                    "aov_depth",
                 ] {
                     stored.params.remove(key);
                 }
@@ -8406,4 +8511,308 @@ fn a_render_node_saved_before_its_second_version_resolves_to_the_current_default
     assert_eq!(settings.width, 1920);
     assert_eq!(settings.height, 1080);
     assert_eq!(settings.camera, None);
+    // Field by field above for the values worth naming a reason for, and then
+    // whole. Comparing the struct is what makes this test cover a field added
+    // to the settings after it was written, which is the failure a list of
+    // named assertions cannot catch.
+    assert_eq!(
+        settings,
+        crate::nodes::RenderSettings::defaults(),
+        "an aged document resolves to something other than the node type's own \
+         defaults"
+    );
+}
+
+/// The no-render-node defaults are the node type's own, and are not zeroes.
+///
+/// `RenderSettings::defaults` resolves the descriptor through the registry's
+/// chokepoint and answers with the type's zero value if that ever fails, which
+/// is the right thing to do in a reader that cannot return an error and the
+/// wrong thing to ship unnoticed: a size of nothing, no samples and a bounce
+/// budget of zero is not a degraded picture but no picture. Both graphical
+/// shells and the headless command render at these when a scene has no render
+/// node.
+#[test]
+fn the_no_render_node_defaults_are_the_node_types_own() {
+    let d = crate::nodes::RenderSettings::defaults();
+
+    assert_eq!((d.width, d.height), (1920, 1080));
+    assert_eq!(d.engine, crate::nodes::RenderEngine::Raster);
+    assert_eq!((d.samples, d.bounces, d.transmissive_bounces), (64, 6, 4));
+    assert!(!d.denoise);
+    assert!(d.camera.is_none());
+    // The tracer's own constant rather than a substituted zero, which is a
+    // different sampling sequence and so a different picture.
+    assert_eq!(d.seed, 2_654_435_769);
+    assert!((d.firefly_clamp - 16.0).abs() < f32::EPSILON);
+    assert!((d.denoise_strength - 1.0).abs() < f32::EPSILON);
+    assert_eq!(d.denoise_until_samples, 0, "zero means never stop");
+    // The measured steering values.
+    assert!((d.denoise_sigma_color - 1.2).abs() < 1e-6);
+    assert!((d.denoise_normal_power - 128.0).abs() < 1e-3);
+    assert!((d.denoise_sigma_albedo - 0.08).abs() < 1e-6);
+    assert!((d.denoise_level_falloff - 2.0).abs() < f32::EPSILON);
+    // Nothing this release added is on by default. Exposing a control is not
+    // licence to change what it was set to, and a render that started writing
+    // three extra files would be a behaviour change nobody asked for.
+    assert!(!d.transparent_background);
+    assert!(!d.aov_albedo);
+    assert!(!d.aov_normal);
+    assert!(!d.aov_depth);
+}
+
+/// Every output-size preset the node offers resolves to a size the node itself
+/// would accept.
+///
+/// The case list comes from the registry and the bounds come from the node's
+/// own width and height ranges, so neither side is restated here: a preset
+/// added above the clamp fails the build rather than being offered and then
+/// refused, and raising or lowering the clamp re-checks every preset for free.
+#[test]
+fn every_output_size_preset_resolves_inside_the_nodes_own_edge_range() {
+    use crate::registry::param_spec::ParamType;
+
+    let e = engine();
+    let desc = e
+        .registry
+        .get("render")
+        .expect("the render node is registered");
+    let spec = desc
+        .param("resolution_preset")
+        .expect("the render node declares an output size preset");
+    let ParamType::Enum { variants } = &spec.ty else {
+        panic!("the output size preset stopped being an enum");
+    };
+
+    let edge_range = |key: &str| {
+        desc.param(key)
+            .and_then(|p| p.range)
+            .unwrap_or_else(|| panic!("{key} declares a hard range"))
+            .hard
+    };
+    let (min_w, max_w) = edge_range("width");
+    let (min_h, max_h) = edge_range("height");
+
+    let mut resolved = 0;
+    for variant in variants {
+        let Some((w, h)) = crate::nodes::resolution_preset_size(&variant.key) else {
+            assert_eq!(
+                variant.key,
+                crate::nodes::DEFAULT_RESOLUTION_PRESET,
+                "the output size preset {:?} resolves to no size; add one beside \
+                 the enum that declares it",
+                variant.key
+            );
+            continue;
+        };
+        resolved += 1;
+        assert!(
+            f64::from(w) >= min_w && f64::from(w) <= max_w,
+            "the preset {:?} is {w} wide, outside the {min_w}..{max_w} the node accepts",
+            variant.key
+        );
+        assert!(
+            f64::from(h) >= min_h && f64::from(h) <= max_h,
+            "the preset {:?} is {h} tall, outside the {min_h}..{max_h} the node accepts",
+            variant.key
+        );
+        // Stated wide edge first, because orientation is one rule applied to
+        // every entry rather than a property each one carries. An entry stated
+        // the other way round would come out landscape when it asked for
+        // portrait.
+        assert!(
+            w >= h,
+            "the preset {:?} is stated {w} by {h}, taller than it is wide; \
+             state it wide edge first and let Portrait turn it",
+            variant.key
+        );
+    }
+    assert!(resolved > 0, "a preset list with nothing but Custom in it");
+
+    // Custom has to be among them, or the default names a preset the node does
+    // not offer and every document opens on a missing entry.
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.key == crate::nodes::DEFAULT_RESOLUTION_PRESET),
+        "the default output size preset is not among the ones the node declares"
+    );
+    assert_eq!(
+        spec.default,
+        ParamValue::Enum(crate::nodes::DEFAULT_RESOLUTION_PRESET.to_string()),
+        "the output size preset defaults to something other than custom, which \
+         would resize every document that carries an explicit width and height"
+    );
+}
+
+/// Choosing a preset sets the size, and orientation turns it.
+///
+/// The pair that would otherwise only be checked by eye: a preset that merely
+/// described a size, or an orientation that did nothing, would both leave every
+/// other test passing.
+#[test]
+fn an_output_size_preset_sets_the_size_and_orientation_turns_it() {
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+    // An authored size that no preset matches, so anything below that reads
+    // through to it is visible rather than coincidentally right.
+    for (key, value) in [("width", 640), ("height", 480)] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node,
+            key: key.to_string(),
+            value: ParamSource::Literal(ParamValue::Int(value)),
+        })
+        .unwrap();
+    }
+    let set_enum = |e: &mut Engine, key: &str, value: &str| {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node,
+            key: key.to_string(),
+            value: ParamSource::Literal(ParamValue::Enum(value.to_string())),
+        })
+        .unwrap();
+    };
+    let size = |e: &Engine| {
+        let s = e
+            .render_settings(GraphContext::Root, node)
+            .expect("the render node resolves");
+        (s.width, s.height)
+    };
+
+    assert_eq!(size(&e), (640, 480), "custom renders what was authored");
+
+    set_enum(&mut e, "resolution_preset", "uhd_4k");
+    assert_eq!(
+        size(&e),
+        (3840, 2160),
+        "the preset describes a size without setting one"
+    );
+
+    set_enum(&mut e, "orientation", "portrait");
+    assert_eq!(size(&e), (2160, 3840), "portrait did not turn the preset");
+
+    // The vertical delivery sizes come from here rather than from entries of
+    // their own, which is the whole reason the list is stated wide edge first.
+    set_enum(&mut e, "resolution_preset", "hd");
+    assert_eq!(size(&e), (1080, 1920), "the story and reel size");
+
+    // Square is the one entry orientation cannot move.
+    set_enum(&mut e, "resolution_preset", "square");
+    assert_eq!(size(&e), (1080, 1080));
+
+    // And going back to custom returns the authored numbers untouched: a preset
+    // resolves, it does not overwrite.
+    set_enum(&mut e, "resolution_preset", "custom");
+    assert_eq!(
+        size(&e),
+        (640, 480),
+        "the authored size did not survive a trip through a preset"
+    );
+}
+
+/// An exact sample count is read only when it is the one being used.
+#[test]
+fn the_exact_sample_count_is_read_only_for_its_own_preset() {
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node,
+        key: "samples".to_string(),
+        value: ParamSource::Literal(ParamValue::Int(90)),
+    })
+    .unwrap();
+    let samples = |e: &Engine| {
+        e.render_settings(GraphContext::Root, node)
+            .expect("the render node resolves")
+            .samples
+    };
+
+    // The named presets still answer with their own counts, and a stored exact
+    // count sitting behind them changes nothing.
+    assert_eq!(samples(&e), 64, "the Good preset, not the stored 90");
+    for (preset, expected) in [
+        ("draft", 16),
+        ("good", 64),
+        ("high", 256),
+        ("reference", 1024),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node,
+            key: "quality".to_string(),
+            value: ParamSource::Literal(ParamValue::Enum(preset.to_string())),
+        })
+        .unwrap();
+        assert_eq!(
+            samples(&e),
+            expected,
+            "the {preset} preset stopped resolving to the count it always has"
+        );
+    }
+
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node,
+        key: "quality".to_string(),
+        value: ParamSource::Literal(ParamValue::Enum(crate::nodes::CUSTOM_QUALITY.to_string())),
+    })
+    .unwrap();
+    assert_eq!(samples(&e), 90, "the exact count is not being read");
+}
+
+/// A document carrying an explicit size keeps it, and keeps rendering at it.
+///
+/// The output-size preset defaults to custom for exactly this reason rather
+/// than for taste: every document written before the preset list existed holds
+/// a width and a height, and any other default would open one with a preset
+/// selected that may not match them, quietly reframing a finished shot.
+#[test]
+fn a_render_node_saved_with_an_explicit_size_still_renders_at_it() {
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+    for (key, value) in [("width", 1280), ("height", 720)] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node,
+            key: key.to_string(),
+            value: ParamSource::Literal(ParamValue::Int(value)),
+        })
+        .unwrap();
+    }
+
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    for stored in &mut scene.graph.nodes {
+        if stored.type_id == "render" {
+            stored.type_version = 2;
+            stored.params.remove("resolution_preset");
+            stored.params.remove("orientation");
+        }
+    }
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(warnings.is_empty(), "must not warn: {warnings:?}");
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+
+    let settings = reopened
+        .render_settings(GraphContext::Root, node)
+        .expect("the reopened render node resolves");
+    assert_eq!(
+        (settings.width, settings.height),
+        (1280, 720),
+        "a preset the document never chose has overridden the authored size"
+    );
 }

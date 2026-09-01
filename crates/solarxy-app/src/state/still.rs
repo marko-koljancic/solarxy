@@ -606,20 +606,15 @@ fn resolve_still_settings(
     }
 }
 
-/// What a document with no render node renders at. The values are the
-/// node type's own defaults, so the two answers agree; asserted against
-/// the headless command's copy by `defaults_match_the_headless_command`.
+/// What a document with no render node renders at.
+///
+/// The node type's own defaults, read from its descriptor rather than
+/// restated, so the desktop and the headless command answer with one set
+/// of values by construction. Both carried a hand-written literal until
+/// the render node's third version, kept in step only by a test comparing
+/// fields one at a time.
 fn default_still_settings() -> RenderSettings {
-    RenderSettings {
-        camera: None,
-        width: 1920,
-        height: 1080,
-        engine: RenderEngine::Raster,
-        samples: 64,
-        bounces: 6,
-        transmissive_bounces: 4,
-        denoise: false,
-    }
+    RenderSettings::defaults()
 }
 
 /// Suggested still file name, `still_<YYYYMMDD-HHMMSS>.png`, matching
