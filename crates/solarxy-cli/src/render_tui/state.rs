@@ -125,6 +125,11 @@ pub struct RenderView {
     pub tile: u32,
     pub sample: u32,
     pub tile_samples: u32,
+    /// How far along the whole picture is, in pixel-samples weighted by area.
+    /// Reported by the job, which is the only thing that knows how big each
+    /// tile is.
+    pub drawn: u64,
+    pub total: u64,
     pub elapsed: Duration,
     /// Samples a second, most recent last.
     pub throughput: Vec<u64>,
@@ -154,6 +159,8 @@ impl RenderView {
             tile: 0,
             sample: 0,
             tile_samples: 0,
+            drawn: 0,
+            total: 0,
             elapsed: Duration::ZERO,
             throughput: Vec::new(),
             picture: None,
@@ -187,6 +194,8 @@ impl RenderView {
                 sample,
                 samples,
                 elapsed_ms,
+                drawn,
+                total,
             } => {
                 self.tile = tile;
                 self.tiles = tiles;
@@ -194,6 +203,8 @@ impl RenderView {
                 self.rows = rows;
                 self.sample = sample;
                 self.tile_samples = samples;
+                self.drawn = drawn;
+                self.total = total;
                 self.elapsed = Duration::from_millis(elapsed_ms);
                 self.take_rate(now);
             }
@@ -222,27 +233,29 @@ impl RenderView {
     }
 
     /// The fraction of the whole render that is drawn, from zero to one.
+    ///
+    /// Area-weighted, from what the job reported. The sample counts above are
+    /// still what the throughput sparkline is measured in, because that reading
+    /// is about the machine's rate rather than about the picture's progress.
     pub fn fraction(&self) -> f64 {
-        let total = self.samples_total();
-        if total == 0 {
+        if self.total == 0 {
             return 0.0;
         }
-        self.samples_drawn() as f64 / total as f64
+        self.drawn as f64 / self.total as f64
     }
 
-    /// How much longer, from the rate so far, or nothing while there is not
-    /// enough to say.
+    /// How much longer, or nothing while there is not enough to say.
     ///
-    /// Whole-run average rather than recent rate: tiles are the same size and
-    /// the same cost, so the average is the better predictor and does not
-    /// lurch when one tile happens to be sky.
+    /// The arithmetic lives in the shared crate, beside the job that owns the
+    /// progress it reads, so the terminal and the browser cannot answer the
+    /// same question differently.
     pub fn remaining(&self) -> Option<Duration> {
-        let done = self.fraction();
-        if done <= 0.0 || done >= 1.0 || self.elapsed.is_zero() {
-            return None;
-        }
-        let total = self.elapsed.as_secs_f64() / done;
-        Duration::try_from_secs_f64(total - self.elapsed.as_secs_f64()).ok()
+        solarxy_render::estimate_remaining_ms(
+            self.drawn,
+            self.total,
+            self.elapsed.as_millis() as u64,
+        )
+        .map(Duration::from_millis)
     }
 
     /// The current tile's own progress, for the cell being drawn.
@@ -273,9 +286,13 @@ impl RenderView {
     }
 }
 
-/// Seconds, at a width a reader can compare down a column.
+/// A span, spelled the way every Solarxy surface spells one.
+///
+/// Delegates rather than formatting here, so the terminal and the browser show
+/// the same render as the same number. It also stops a long render reading as
+/// "4230.5s", which is a figure nobody converts in their head.
 pub fn seconds(span: Duration) -> String {
-    format!("{:.1}s", span.as_secs_f64())
+    solarxy_render::format_duration_ms(span.as_millis() as u64)
 }
 
 #[cfg(test)]
@@ -283,6 +300,9 @@ mod tests {
     use super::*;
 
     fn sampling(tile: u32, sample: u32, elapsed_ms: u64) -> RenderProgress {
+        // Equal tiles of unit area, which is what the job reports for a plan
+        // whose tiles all come out the same size. The weighting only diverges
+        // from a sample count when they do not.
         RenderProgress::Sampling {
             tile,
             tiles: 4,
@@ -291,6 +311,8 @@ mod tests {
             sample,
             samples: 64,
             elapsed_ms,
+            drawn: u64::from(tile) * 64 + u64::from(sample),
+            total: 4 * 64,
         }
     }
 

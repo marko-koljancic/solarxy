@@ -217,6 +217,15 @@ enum HostEvent {
         sample: u32,
         samples: u32,
         done: bool,
+        /// How long the render has taken, and how much longer it will take.
+        ///
+        /// `remaining_ms` is absent while there is not enough to say, which is
+        /// the first chunks of a render and the moment after the last one. A
+        /// confident wrong number is worse than an honest blank, so the shape
+        /// says so rather than sending a zero the dialog would have to guess
+        /// about.
+        elapsed_ms: f64,
+        remaining_ms: Option<f64>,
     },
     /// The renderer left something out of the scene it just ingested.
     ///
@@ -500,6 +509,10 @@ pub struct SolarxyApp {
     /// The picture so far, waiting for the frontend to take it. Separate from
     /// the tiles because a preview is painted and never saved.
     still_previews: std::collections::VecDeque<solarxy_host::still::StillPreview>,
+    /// When the running still began, on the page's own timer. The elapsed a
+    /// reader sees is measured from here rather than from the first tile, so it
+    /// includes the setup a person also waited through.
+    still_started_ms: f64,
     /// The floating-point image being assembled, when the running still is a
     /// float one. `None` for the ordinary eight-bit still, which is assembled
     /// on a canvas the browser owns and never needs a copy here.
@@ -996,6 +1009,7 @@ impl SolarxyApp {
             traced_env_dirty: true,
             still_tiles: std::collections::VecDeque::new(),
             still_previews: std::collections::VecDeque::new(),
+            still_started_ms: 0.0,
             still_float: None,
             // On, matching the shipped behaviour, until a preference push
             // says otherwise; boot pushes one before the first traced frame.
@@ -1818,6 +1832,11 @@ impl SolarxyApp {
         if self.still.is_some() {
             return Err(JsError::new("a still render is already running"));
         }
+        // Started before the tracer is snapshotted and the camera is built,
+        // because a person pressing Render is already waiting through those and
+        // an elapsed that began at the first tile would be a number that
+        // disagreed with the clock on their wall.
+        self.still_started_ms = web_now();
         let readback = solarxy_host::still::readback_for(format, space);
         // Resolved here rather than accepted from the caller, and re-resolved
         // rather than carried over from the dialog's read: what runs is what
@@ -2156,12 +2175,29 @@ impl SolarxyApp {
         let progress = job.progress();
         let done =
             matches!(step, StillStep::Done | StillStep::Failed) || progress.tile >= progress.tiles;
+        let elapsed_ms = (web_now() - self.still_started_ms).max(0.0);
+        // The same estimator the terminal reads, over the same area-weighted
+        // counts, so the two surfaces cannot answer this differently. Nothing
+        // is reported once the sampling is over: the job is still assembling,
+        // and a zero would say it was finished.
+        let remaining_ms = if done {
+            None
+        } else {
+            solarxy_host::still::estimate_remaining_ms(
+                progress.drawn,
+                progress.total,
+                elapsed_ms as u64,
+            )
+            .map(|ms| ms as f64)
+        };
         self.host_events.push(HostEvent::RenderProgress {
             tile: progress.tile,
             tiles: progress.tiles,
             sample: progress.sample,
             samples: progress.samples,
             done,
+            elapsed_ms,
+            remaining_ms,
         });
         if done {
             self.still = None;

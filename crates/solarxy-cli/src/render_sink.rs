@@ -165,6 +165,8 @@ mod tests {
             sample,
             samples: 64,
             elapsed_ms: 1500,
+            drawn: u64::from(tile) * 64 + u64::from(sample),
+            total: 4 * 64,
         }
     }
 

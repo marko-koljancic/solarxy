@@ -25,6 +25,7 @@ import type {
 } from "../engine/types";
 import { pushToast } from "../store/toasts";
 import { useRenderJob } from "../store/renderJob";
+import { formatDurationMs } from "../render/duration";
 import { Modal } from "./Modal";
 import { Row, Section } from "./DialogRow";
 import { Select } from "./Select";
@@ -317,9 +318,16 @@ export function StillRenderModal({
           </div>
           <div className="prefs-unit" role="status" aria-live="polite">
             {busy
-              ? `Tile ${Math.min(job.tile + 1, job.tiles)} of ${job.tiles}, sample ${job.sample} of ${job.samples}`
+              ? `Tile ${Math.min(job.tile + 1, job.tiles)} of ${job.tiles}, sample ${job.sample} of ${job.samples} · ${formatDurationMs(job.elapsedMs)} elapsed${
+                  // Nothing rather than a guess while the estimate has no rate
+                  // to work from, and nothing once sampling is over, when the
+                  // job is still assembling and a zero would read as finished.
+                  job.remainingMs === null
+                    ? ""
+                    : `, ${formatDurationMs(job.remainingMs)} left`
+                }`
               : finished
-                ? `Done: ${job.tiles} tiles`
+                ? `Done: ${job.tiles} tiles in ${formatDurationMs(job.elapsedMs)}`
                 : "Cancelled"}
           </div>
         </>

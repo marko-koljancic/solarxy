@@ -35,6 +35,10 @@ pub(crate) struct StillRenderModal {
     denoise: bool,
     /// `(tile, tiles, sample, samples)`, from the job each pump.
     progress: (u32, u32, u32, u32),
+    /// How long the render has taken so far.
+    elapsed_ms: u64,
+    /// How much longer, or nothing while there is not enough to say.
+    remaining_ms: Option<u64>,
     /// The finished picture at full resolution, kept until save or close.
     image: Option<RgbaImage>,
     /// A fresh preview-sized frame from the state layer, uploaded on the
@@ -69,6 +73,8 @@ impl StillRenderModal {
         self.samples = samples;
         self.denoise = denoise;
         self.progress = (0, 0, 0, samples);
+        self.elapsed_ms = 0;
+        self.remaining_ms = None;
         self.image = None;
         self.pending_preview = None;
         self.preview = None;
@@ -79,6 +85,15 @@ impl StillRenderModal {
 
     pub fn set_progress(&mut self, tile: u32, tiles: u32, sample: u32, samples: u32) {
         self.progress = (tile, tiles, sample, samples);
+    }
+
+    /// How long the render has taken, and how much longer it will take.
+    ///
+    /// Both computed by the shared job rather than here, so this shell reads
+    /// the same answer the browser dialog and the terminal dashboard read.
+    pub fn set_timing(&mut self, elapsed_ms: u64, remaining_ms: Option<u64>) {
+        self.elapsed_ms = elapsed_ms;
+        self.remaining_ms = remaining_ms;
     }
 
     pub fn set_preview(&mut self, preview: RgbaImage) {
@@ -208,7 +223,7 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
                     (tile as f32 + sample as f32 / samples.max(1) as f32) / tiles as f32
                 };
                 ui.add(egui::ProgressBar::new(pct.clamp(0.0, 1.0)).desired_width(360.0));
-                let status = if samples > 1 {
+                let counts = if samples > 1 {
                     format!(
                         "Tile {} of {tiles}, sample {sample} of {samples}",
                         (tile + 1).min(tiles.max(1))
@@ -216,13 +231,33 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
                 } else {
                     format!("Tile {} of {tiles}", (tile + 1).min(tiles.max(1)))
                 };
-                ui.label(egui::RichText::new(status).small().color(theme.fg));
+                // Nothing rather than a guess while the estimate has no rate to
+                // work from, which is the first chunks of any render.
+                let timing = match modal.remaining_ms {
+                    Some(left) => format!(
+                        "{} elapsed, {} left",
+                        solarxy_host::still::format_duration_ms(modal.elapsed_ms),
+                        solarxy_host::still::format_duration_ms(left)
+                    ),
+                    None => format!(
+                        "{} elapsed",
+                        solarxy_host::still::format_duration_ms(modal.elapsed_ms)
+                    ),
+                };
+                ui.label(
+                    egui::RichText::new(format!("{counts} · {timing}"))
+                        .small()
+                        .color(theme.fg),
+                );
             }
             StillPhase::Finished => {
                 ui.label(
-                    egui::RichText::new(format!("Done: {tiles} tiles"))
-                        .small()
-                        .color(theme.fg),
+                    egui::RichText::new(format!(
+                        "Done: {tiles} tiles in {}",
+                        solarxy_host::still::format_duration_ms(modal.elapsed_ms)
+                    ))
+                    .small()
+                    .color(theme.fg),
                 );
                 ui.label(
                     egui::RichText::new(&modal.filename)

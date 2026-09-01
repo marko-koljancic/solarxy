@@ -19,6 +19,10 @@ export interface RenderJobState {
   /** The image being assembled, so a preview knows how big its canvas is. */
   width: number;
   height: number;
+  /** How long the render has taken. */
+  elapsedMs: number;
+  /** How much longer, or null while there is not enough to say. */
+  remainingMs: number | null;
   start: (width: number, height: number) => void;
   progress: (p: {
     tile: number;
@@ -26,6 +30,8 @@ export interface RenderJobState {
     sample: number;
     samples: number;
     done: boolean;
+    elapsedMs: number;
+    remainingMs: number | null;
   }) => void;
   stop: () => void;
 }
@@ -38,9 +44,21 @@ export const useRenderJob = create<RenderJobState>((set) => ({
   samples: 0,
   width: 0,
   height: 0,
+  elapsedMs: 0,
+  remainingMs: null,
   start: (width, height) =>
-    set({ busy: true, tile: 0, tiles: 0, sample: 0, samples: 0, width, height }),
-  progress: ({ tile, tiles, sample, samples, done }) =>
-    set({ tile, tiles, sample, samples, busy: !done }),
+    set({
+      busy: true,
+      tile: 0,
+      tiles: 0,
+      sample: 0,
+      samples: 0,
+      width,
+      height,
+      elapsedMs: 0,
+      remainingMs: null,
+    }),
+  progress: ({ tile, tiles, sample, samples, done, elapsedMs, remainingMs }) =>
+    set({ tile, tiles, sample, samples, busy: !done, elapsedMs, remainingMs }),
   stop: () => set({ busy: false }),
 }));

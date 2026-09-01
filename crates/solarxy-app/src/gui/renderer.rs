@@ -1018,6 +1018,12 @@ impl EguiRenderer {
         self.still_modal.set_progress(tile, tiles, sample, samples);
     }
 
+    /// Hand the modal the render's elapsed and remaining, both computed by the
+    /// shared job so this shell agrees with the other two.
+    pub fn set_still_timing(&mut self, elapsed_ms: u64, remaining_ms: Option<u64>) {
+        self.still_modal.set_timing(elapsed_ms, remaining_ms);
+    }
+
     /// Hand the modal a fresh preview-sized frame of the assembling image.
     pub fn set_still_preview(&mut self, preview: image::RgbaImage) {
         self.still_modal.set_preview(preview);

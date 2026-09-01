@@ -541,6 +541,63 @@ pub struct StillProgress {
     pub tiles: u32,
     pub sample: u32,
     pub samples: u32,
+    /// Pixel-samples drawn, and how many there are in the whole picture.
+    ///
+    /// **Weighted by area, which is the reason these are here rather than
+    /// derived from the four counts above.** Tiles are not the same size: the
+    /// plan fills row by row and the right-hand column and bottom row are
+    /// whatever is left over, so counting tiles equally makes an estimate run
+    /// long exactly at the end of a render, where a person is most likely to be
+    /// reading it. The job owns the tile plan and is therefore the only thing
+    /// that can weight them; nothing downstream of it can.
+    ///
+    /// Integers rather than a fraction because the progress events they ride on
+    /// are compared for equality, and because the division is the estimator's
+    /// business rather than the reporter's.
+    pub drawn: u64,
+    pub total: u64,
+}
+
+/// How much longer, from the rate so far, or nothing while there is not enough
+/// to say.
+///
+/// Whole-run average rather than a recent rate: every tile of a given size
+/// costs the same, so the average is the better predictor and does not lurch
+/// when one tile happens to be sky. What the average got wrong before was not
+/// its shape but its input, which counted a small edge tile as a whole one.
+///
+/// Takes a clock reading rather than reading one, which is what keeps it
+/// testable and keeps it compiling for the browser.
+#[must_use]
+pub fn estimate_remaining_ms(drawn: u64, total: u64, elapsed_ms: u64) -> Option<u64> {
+    if drawn == 0 || total == 0 || drawn >= total || elapsed_ms == 0 {
+        return None;
+    }
+    // In milliseconds throughout: the largest render this job will accept is
+    // about seven times ten to the tenth pixel-samples, which multiplied by any
+    // plausible elapsed still fits, and the alternative is a float division
+    // whose rounding a reader would see flicker in the last digit.
+    let total_ms = (u128::from(elapsed_ms) * u128::from(total)) / u128::from(drawn);
+    u64::try_from(total_ms.saturating_sub(u128::from(elapsed_ms))).ok()
+}
+
+/// A span as a person reads one.
+///
+/// One spelling for every surface that shows a time, which is the whole point:
+/// the same render should not be "252.0s" in one window and "4m 12s" in
+/// another. Seconds with a tenth below a minute, because that is the range
+/// where a tenth means something; whole seconds above it, because past a minute
+/// nobody is reading the fraction.
+#[must_use]
+pub fn format_duration_ms(ms: u64) -> String {
+    let secs = ms / 1000;
+    if secs < 60 {
+        return format!("{:.1}s", ms as f64 / 1000.0);
+    }
+    if secs < 3600 {
+        return format!("{}m {:02}s", secs / 60, secs % 60);
+    }
+    format!("{}h {:02}m", secs / 3600, (secs % 3600) / 60)
 }
 
 /// What one [`StillRenderJob::advance`] did.
@@ -661,11 +718,35 @@ impl StillRenderJob {
 
     #[must_use]
     pub fn progress(&self) -> StillProgress {
+        let samples = u64::from(self.target_samples());
+        // The area a tile owns rather than the area it renders: the apron is
+        // drawn and thrown away, and counting it would make a render with one
+        // look further along than the same render without.
+        let total: u64 = self
+            .plan
+            .tiles
+            .iter()
+            .map(|t| t.image.area() * samples)
+            .sum();
+        let done: u64 = self
+            .plan
+            .tiles
+            .iter()
+            .take(self.tile)
+            .map(|t| t.image.area() * samples)
+            .sum();
+        let current = self
+            .plan
+            .tiles
+            .get(self.tile)
+            .map_or(0, |t| t.image.area() * u64::from(self.samples_done));
         StillProgress {
             tile: u32::try_from(self.tile).unwrap_or(u32::MAX),
             tiles: u32::try_from(self.plan.len()).unwrap_or(u32::MAX),
             sample: self.samples_done,
             samples: self.target_samples(),
+            drawn: done + current,
+            total,
         }
     }
 
@@ -1371,6 +1452,64 @@ mod tests {
         // drawn once, and reporting 256 would leave a progress bar at one part
         // in 256 forever.
         assert_eq!(job.progress().samples, 1);
+    }
+
+    #[test]
+    /// An estimate appears only when there is something to estimate from, and
+    /// says nothing rather than something wrong.
+    #[test]
+    fn an_estimate_waits_until_it_has_a_rate() {
+        assert_eq!(estimate_remaining_ms(0, 100, 1000), None, "nothing drawn");
+        assert_eq!(estimate_remaining_ms(50, 100, 0), None, "no time reported");
+        assert_eq!(estimate_remaining_ms(100, 100, 1000), None, "finished");
+        assert_eq!(estimate_remaining_ms(150, 100, 1000), None, "past the end");
+        assert_eq!(estimate_remaining_ms(50, 0, 1000), None, "nothing to draw");
+
+        // A quarter drawn in one second has three seconds left.
+        assert_eq!(estimate_remaining_ms(25, 100, 1000), Some(3000));
+        // Half drawn in ten seconds has ten left.
+        assert_eq!(estimate_remaining_ms(1, 2, 10_000), Some(10_000));
+    }
+
+    /// The estimate is weighted by area, so a render whose last tiles are
+    /// smaller does not report time it will not take.
+    ///
+    /// The arithmetic is the same either way for equal tiles; what this pins is
+    /// that the weights are pixel-samples rather than tile counts, which is the
+    /// difference at exactly the moment a person is watching the end.
+    #[test]
+    fn the_estimate_weights_a_tile_by_its_area() {
+        // Three tiles: two whole ones and a narrow remainder. Counting tiles
+        // equally would call this two thirds done; by area it is more.
+        let big = 100 * 100u64;
+        let small = 20 * 100u64;
+        let total = big * 2 + small;
+        let drawn = big * 2;
+        let by_area = estimate_remaining_ms(drawn, total, 2000).expect("an estimate");
+
+        // Two of three tiles in two seconds reads as one more second.
+        let by_tile_count = estimate_remaining_ms(2, 3, 2000).expect("an estimate");
+        assert!(
+            by_area < by_tile_count,
+            "an area-weighted estimate should be shorter than a tile-counted one \
+             when the tile left over is the small one: {by_area}ms vs {by_tile_count}ms"
+        );
+        // Two hundred of twenty-two thousand pixel-samples remain, at ten
+        // thousand a second.
+        assert_eq!(by_area, 200);
+    }
+
+    /// One spelling of a span, whatever surface shows it.
+    #[test]
+    fn a_span_reads_the_same_way_everywhere() {
+        assert_eq!(format_duration_ms(0), "0.0s");
+        assert_eq!(format_duration_ms(1500), "1.5s");
+        assert_eq!(format_duration_ms(59_900), "59.9s");
+        assert_eq!(format_duration_ms(60_000), "1m 00s");
+        assert_eq!(format_duration_ms(252_000), "4m 12s");
+        assert_eq!(format_duration_ms(3_599_000), "59m 59s");
+        assert_eq!(format_duration_ms(3_600_000), "1h 00m");
+        assert_eq!(format_duration_ms(3_840_000), "1h 04m");
     }
 
     #[test]

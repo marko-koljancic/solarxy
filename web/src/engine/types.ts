@@ -771,6 +771,12 @@ export type HostEvent =
       sample: number;
       samples: number;
       done: boolean;
+      /** How long the render has taken, in milliseconds. */
+      elapsedMs: number;
+      /** How much longer, or null while there is not enough to say: the first
+       * chunks have no rate to extrapolate from, and after the last one the job
+       * is still assembling. A confident wrong number is worse than a blank. */
+      remainingMs: number | null;
     }
   | { type: "renderNotice"; message: string }
   | { type: "paneSamples"; pane: number; samples: number; target: number }

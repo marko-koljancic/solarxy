@@ -419,6 +419,11 @@ impl State {
             progress.sample,
             progress.samples,
         );
+        let elapsed_ms = still.started.elapsed().as_millis() as u64;
+        self.gui.set_still_timing(
+            elapsed_ms,
+            solarxy_host::still::estimate_remaining_ms(progress.drawn, progress.total, elapsed_ms),
+        );
     }
 
     /// Hand the finished picture to the modal and release the frame.
@@ -429,6 +434,11 @@ impl State {
         if done.synthesized_scene {
             self.clear_scene_objects();
         }
+        // The final elapsed, set here rather than left at whatever the last
+        // pump reported: the reading a person keeps looking at after a render
+        // ends should be how long it actually took.
+        self.gui
+            .set_still_timing(done.started.elapsed().as_millis() as u64, None);
         let spec = done.job.spec();
         let Some(image) = image::RgbaImage::from_raw(spec.width, spec.height, done.image) else {
             self.gui.fail_still();

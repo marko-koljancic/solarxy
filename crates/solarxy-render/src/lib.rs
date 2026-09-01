@@ -70,6 +70,10 @@ pub use files::{AovKind, ExrSpace, albedo_from_auxiliary, floats_of, normal_from
 /// reach them, and a shell that already depends on this one should not have to
 /// take a second dependency to name a pass.
 pub use solarxy_host::passes::{PassKind, PassSelector, albedo_rgba8, depth_rgba8, normal_rgba8};
+/// The remaining-time estimate and the one spelling of a span, re-exported for
+/// the same reason: every surface that shows a render's progress reads them, so
+/// there is one answer to how long is left and one way of writing it down.
+pub use solarxy_host::still::{estimate_remaining_ms, format_duration_ms};
 pub use report::{RENDER_REPORT_SCHEMA_VERSION, RenderReport};
 
 /// How far along a render is.
@@ -118,6 +122,16 @@ pub enum RenderProgress {
         sample: u32,
         samples: u32,
         elapsed_ms: u64,
+        /// How far along the whole picture is, in pixel-samples, weighted by
+        /// the area each tile owns.
+        ///
+        /// Carried rather than derived from the counts above, because only the
+        /// job knows how big each tile is: the plan's last column and bottom
+        /// row are whatever is left over, and a reader that treated every tile
+        /// as equal would report an estimate that runs long at the end. A sink
+        /// decides nothing about how far along a render is; it is told.
+        drawn: u64,
+        total: u64,
     },
     /// Encoding and writing the result.
     Writing {
@@ -1081,6 +1095,8 @@ fn drive(
             sample: p.sample,
             samples: p.samples,
             elapsed_ms: started.elapsed().as_millis() as u64,
+            drawn: p.drawn,
+            total: p.total,
         });
         host.renderer
             .resize_targets(device, tile.render.width, tile.render.height);
