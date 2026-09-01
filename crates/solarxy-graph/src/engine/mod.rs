@@ -2788,8 +2788,8 @@ impl Engine {
     /// ranges are what keep a resolution that evaluated to nothing rendering a
     /// small picture rather than an empty one.
     ///
-    /// The settings are then read by [`crate::nodes::render_settings_from`],
-    /// which is also what [`crate::nodes::RenderSettings::defaults`] runs over
+    /// The settings are then read by `render_settings_from`, which is also
+    /// what [`crate::nodes::RenderSettings::defaults`] runs over
     /// the descriptor: one reader, so a field added to the settings reaches a
     /// real node and the no-render-node fallback together.
     ///
