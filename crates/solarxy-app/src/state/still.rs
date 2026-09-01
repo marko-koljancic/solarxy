@@ -267,19 +267,8 @@ impl State {
             self.sync_traced_environment();
             let shot_camera = camera.camera;
             self.light_traced_still_camera(&shot_camera);
-            let samples = settings.samples.max(1);
             if let Some(t) = self.tracer.as_mut() {
-                t.set_settings(TraceSettings {
-                    samples,
-                    // The browser paces at one sample per animation frame;
-                    // native has no frame to pace against, so a larger
-                    // chunk is the same work in fewer submissions.
-                    chunk: 8.min(samples),
-                    bounces: settings.bounces,
-                    transmissive_bounces: settings.transmissive_bounces,
-                    denoise: settings.denoise,
-                    ..TraceSettings::default()
-                });
+                t.set_settings(trace_settings_for(&settings));
                 // After the settings, which reset the lens to the pinhole
                 // default: a free shot is a pinhole and a shot through a
                 // camera is whatever that camera's aperture says.
@@ -617,6 +606,68 @@ fn default_still_settings() -> RenderSettings {
     RenderSettings::defaults()
 }
 
+/// The tracer configured the way the render node asks for.
+///
+/// Destructured exhaustively on purpose, and that is the point of the
+/// function rather than a style choice: a value added to `RenderSettings`
+/// stops this compiling until this shell says what happens to it. The
+/// alternative is what the camera's aperture did earlier in this release,
+/// where a value resolved correctly out of the document and then reached no
+/// renderer at all, and every test passed because they all used an aperture
+/// of zero. A test cannot catch that on its own; it can only catch a value
+/// wired to the wrong place.
+///
+/// The three shells cannot share this. `solarxy-host` is where shared host
+/// behaviour goes and it deliberately has no `solarxy-graph` dependency,
+/// while the engine must not see the renderer, so the boundary forbids a
+/// common home in both directions.
+fn trace_settings_for(settings: &RenderSettings) -> TraceSettings {
+    let RenderSettings {
+        // The shot itself: read by the still spec and the job's camera, not
+        // by the tracer.
+        camera: _,
+        width: _,
+        height: _,
+        engine: _,
+        samples,
+        bounces,
+        transmissive_bounces,
+        firefly_clamp,
+        seed,
+        denoise,
+        // The denoiser's own tuning travels by its own setter rather than on
+        // here, because the filter is configured separately from the walk.
+        denoise_strength: _,
+        denoise_until_samples: _,
+        denoise_sigma_color: _,
+        denoise_normal_power: _,
+        denoise_sigma_albedo: _,
+        denoise_level_falloff: _,
+        // The film back and what leaves beside the picture: the still spec's
+        // business, not the tracer's.
+        transparent_background: _,
+        aov_albedo: _,
+        aov_normal: _,
+        aov_depth: _,
+    } = *settings;
+    let samples = samples.max(1);
+    TraceSettings {
+        samples,
+        // The browser paces at one sample per animation frame; native has no
+        // frame to pace against, so a larger chunk is the same work in fewer
+        // submissions.
+        chunk: 8.min(samples),
+        bounces,
+        transmissive_bounces,
+        firefly_clamp,
+        seed,
+        denoise,
+        // The lens is set immediately after this, by `set_lens`. Everything
+        // else keeps the tracer's own default.
+        ..TraceSettings::default()
+    }
+}
+
 /// Suggested still file name, `still_<YYYYMMDD-HHMMSS>.png`, matching
 /// the screenshot's stamp format.
 fn still_filename() -> String {
@@ -668,6 +719,51 @@ mod tests {
     use solarxy_host::still::TileRect;
 
     use super::*;
+
+    /// Every value the render node authors for the walk reaches the tracer.
+    ///
+    /// The values are deliberately nothing like the defaults. A test written
+    /// with the defaults passes with the assignment deleted, which is exactly
+    /// how the camera's aperture reached no renderer for a whole release
+    /// while every test stayed green.
+    #[test]
+    fn every_authored_value_reaches_the_tracer() {
+        let mut s = RenderSettings::defaults();
+        s.samples = 91;
+        s.bounces = 13;
+        s.transmissive_bounces = 7;
+        s.firefly_clamp = 3.5;
+        s.seed = 4242;
+        s.denoise = true;
+
+        let t = trace_settings_for(&s);
+        assert_eq!(t.samples, 91);
+        assert_eq!(t.bounces, 13);
+        assert_eq!(t.transmissive_bounces, 7);
+        assert!((t.firefly_clamp - 3.5).abs() < f32::EPSILON);
+        assert_eq!(t.seed, 4242);
+        assert!(t.denoise);
+        // This shell's own pacing rather than the node's: eight samples to a
+        // submission, native having no frame to pace against.
+        assert_eq!(t.chunk, 8);
+    }
+
+    /// A render shorter than a chunk submits the render, not the chunk.
+    #[test]
+    fn the_chunk_never_outruns_the_render() {
+        let mut s = RenderSettings::defaults();
+        s.samples = 3;
+        assert_eq!(trace_settings_for(&s).chunk, 3);
+
+        s.samples = 0;
+        let t = trace_settings_for(&s);
+        assert_eq!(
+            (t.samples, t.chunk),
+            (1, 1),
+            "a render of no samples still draws one, rather than looping on a \
+             chunk of zero"
+        );
+    }
 
     #[test]
     fn a_tile_lands_at_its_own_rect() {

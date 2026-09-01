@@ -42,6 +42,11 @@ mod app;
 // to `solarxy-host`, which has no `solarxy-graph` dependency by design.
 mod camera_commit;
 
+// What a still asks the tracer for, from what the render node says. Both
+// targets for the same reason as above, and it cannot move to `solarxy-host`
+// for the same reason either.
+mod trace_settings;
+
 // The traversal parity probe: the browser half of the check that the WGSL
 // traversal agrees with its CPU twin. Feature-gated, because the shipped
 // artifact has no reason to carry a diagnostic.

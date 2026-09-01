@@ -56,7 +56,7 @@ use solarxy_host::raster::RasterBackend;
 use solarxy_host::still::{StillCtx, StillEngine, StillRenderJob, StillSpec, StillStep};
 use solarxy_renderer::backend::RenderBackend;
 use solarxy_renderer::camera_state::CameraState;
-use solarxy_renderer::pathtrace::backend::PathBackend;
+use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
 use solarxy_renderer::pathtrace::environment::TraceEnvironment;
 
 pub use error::RenderError;
@@ -411,6 +411,14 @@ impl RenderOptions {
         if let Some(v) = self.engine {
             settings.engine = v;
         }
+        // The seed reached the backend directly until the render node carried
+        // one, which made it the only render setting a document could not
+        // state. It overrides here now, like every other flag, so a script that
+        // pins a seed still pins it and a document that names one is finally
+        // read.
+        if let Some(v) = self.seed {
+            settings.seed = v;
+        }
         settings
     }
 }
@@ -499,7 +507,7 @@ fn run(
         BackgroundMode::GRADIENT
     };
     let background = background_mode.resolve(&[]);
-    let mut backend = build_backend(&device, &queue, &host, &settings, opts.seed, environment);
+    let mut backend = build_backend(&device, &queue, &host, &settings, environment);
     // The ingest is where a traced render builds its ray hierarchy, and for a
     // large model that is the longest step before any pixel is drawn. Reported
     // before it rather than after, because a sink saying nothing for a minute is
@@ -811,6 +819,64 @@ fn default_settings() -> RenderSettings {
     RenderSettings::defaults()
 }
 
+/// The tracer configured the way the render node asks for.
+///
+/// Destructured exhaustively on purpose, and that is what the function is for
+/// rather than a style choice: a value added to `RenderSettings` stops this
+/// compiling until this surface says what happens to it. Earlier in this
+/// release the camera's aperture resolved correctly out of a document and then
+/// reached no renderer, and every test passed because they all used an aperture
+/// of zero. A test can catch a value wired to the wrong field; only the
+/// compiler catches one wired nowhere.
+///
+/// The three surfaces cannot share this. `solarxy-host` is where shared host
+/// behaviour goes and it deliberately has no `solarxy-graph` dependency, while
+/// the engine must not see the renderer, so the boundary refuses a common home
+/// in both directions.
+fn trace_settings_for(settings: &RenderSettings) -> TraceSettings {
+    let RenderSettings {
+        // The shot itself, read by the still spec and the job's camera.
+        camera: _,
+        width: _,
+        height: _,
+        engine: _,
+        samples,
+        bounces,
+        transmissive_bounces,
+        firefly_clamp,
+        seed,
+        denoise,
+        // The filter is configured by its own setter rather than on here.
+        denoise_strength: _,
+        denoise_until_samples: _,
+        denoise_sigma_color: _,
+        denoise_normal_power: _,
+        denoise_sigma_albedo: _,
+        denoise_level_falloff: _,
+        // The film back and what is written beside the picture: the still
+        // spec's business and the encoder's, not the tracer's.
+        transparent_background: _,
+        aov_albedo: _,
+        aov_normal: _,
+        aov_depth: _,
+    } = *settings;
+    let samples = samples.max(1);
+    TraceSettings {
+        samples,
+        bounces,
+        transmissive_bounces,
+        firefly_clamp,
+        seed,
+        denoise,
+        // The job takes its chunk from the backend by design: a browser paces
+        // one sample per frame to stay responsive and a terminal has no frame
+        // to pace against.
+        chunk: 8.min(samples),
+        // The lens is installed separately, from the camera the shot names.
+        ..TraceSettings::default()
+    }
+}
+
 /// The camera the settings name, if the cooked scene carries it.
 fn named_camera(
     scene: &RasterBackend,
@@ -1064,7 +1130,6 @@ fn build_backend(
     queue: &wgpu::Queue,
     host: &HeadlessHost,
     settings: &RenderSettings,
-    seed: Option<u32>,
     environment: EnvironmentRequest,
 ) -> Box<dyn RenderBackend> {
     match settings.engine {
@@ -1074,16 +1139,7 @@ fn build_backend(
         RenderEngine::Raster => Box::new(RasterBackend::new(Arc::clone(&host.renderer.layouts))),
         RenderEngine::PathTraced => {
             let mut t = PathBackend::new(device, queue);
-            let mut trace = t.settings();
-            trace.samples = settings.samples;
-            trace.bounces = settings.bounces;
-            trace.transmissive_bounces = settings.transmissive_bounces;
-            trace.denoise = settings.denoise;
-            trace.chunk = 8.min(settings.samples.max(1));
-            if let Some(seed) = seed {
-                trace.seed = seed;
-            }
-            t.set_settings(trace);
+            t.set_settings(trace_settings_for(settings));
             // The traced scene cache drops the environment op by design, on
             // the reasoning that a host already holds the decoded and
             // convolved image and should build from that rather than keep a
@@ -1193,4 +1249,111 @@ fn build_camera(
         .map(|d| solarxy_renderer::composite::resolve_look(Some(&d.look), &PaneLook::default()))
         .unwrap_or_default();
     (camera, look)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every value the render node authors for the walk reaches the tracer.
+    ///
+    /// The values are deliberately nothing like the defaults. A test written
+    /// with the defaults passes with the assignment deleted, which is exactly
+    /// how the camera's aperture reached no renderer for a whole release while
+    /// every test stayed green.
+    #[test]
+    fn every_authored_value_reaches_the_tracer() {
+        let mut s = RenderSettings::defaults();
+        s.samples = 91;
+        s.bounces = 13;
+        s.transmissive_bounces = 7;
+        s.firefly_clamp = 3.5;
+        s.seed = 4242;
+        s.denoise = true;
+
+        let t = trace_settings_for(&s);
+        assert_eq!(t.samples, 91);
+        assert_eq!(t.bounces, 13);
+        assert_eq!(t.transmissive_bounces, 7);
+        assert!((t.firefly_clamp - 3.5).abs() < f32::EPSILON);
+        assert_eq!(t.seed, 4242);
+        assert!(t.denoise);
+        assert_eq!(t.chunk, 8, "a terminal has no frame to pace against");
+    }
+
+    /// A render shorter than a chunk submits the render, not the chunk.
+    #[test]
+    fn the_chunk_never_outruns_the_render() {
+        let mut s = RenderSettings::defaults();
+        s.samples = 3;
+        assert_eq!(trace_settings_for(&s).chunk, 3);
+
+        s.samples = 0;
+        let t = trace_settings_for(&s);
+        assert_eq!(
+            (t.samples, t.chunk),
+            (1, 1),
+            "a render of no samples still draws one, rather than looping on a \
+             chunk of zero"
+        );
+    }
+
+    /// The document supplies the seed when no flag does.
+    ///
+    /// The seed used to bypass the settings entirely and reach the backend on
+    /// its own, which made it the only render setting a document could state
+    /// and not be read for. This is the half of the precedence that regressed
+    /// when it moved.
+    #[test]
+    fn the_node_supplies_the_seed_when_no_flag_does() {
+        let mut settings = RenderSettings::defaults();
+        settings.seed = 1234;
+        let opts = RenderOptions::default();
+        assert_eq!(opts.seed, None, "the flag is what this test is without");
+        assert_eq!(opts.apply_to(settings).seed, 1234);
+    }
+
+    /// And a flag still overrides it, which is the other half.
+    ///
+    /// A flag that could not override the document would be useless in a build
+    /// system, which is the rule every other override on here follows.
+    #[test]
+    fn a_seed_flag_overrides_the_node() {
+        let mut settings = RenderSettings::defaults();
+        settings.seed = 1234;
+        let opts = RenderOptions {
+            seed: Some(99),
+            ..RenderOptions::default()
+        };
+        assert_eq!(opts.apply_to(settings).seed, 99);
+    }
+
+    /// An exact sample count and a clamp survive the flags that do not name
+    /// them.
+    ///
+    /// `apply_to` overwrites field by field, so a value with no flag beside it
+    /// has to come through untouched rather than being reset to a default on
+    /// the way past.
+    #[test]
+    fn values_with_no_flag_of_their_own_survive_the_overrides() {
+        let mut settings = RenderSettings::defaults();
+        settings.samples = 90;
+        settings.firefly_clamp = 2.5;
+        settings.seed = 1234;
+
+        // A run that overrides something else entirely.
+        let opts = RenderOptions {
+            width: Some(640),
+            ..RenderOptions::default()
+        };
+        let out = opts.apply_to(settings);
+        assert_eq!(out.width, 640);
+        assert_eq!(out.samples, 90, "the exact count did not survive");
+        assert!(
+            (out.firefly_clamp - 2.5).abs() < f32::EPSILON,
+            "the clamp did not survive; it has no flag, so nothing else would \
+             have restored it"
+        );
+        assert_eq!(out.seed, 1234);
+    }
 }

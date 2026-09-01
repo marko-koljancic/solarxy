@@ -1866,18 +1866,8 @@ impl SolarxyApp {
             self.traced_env_dirty = true;
         }
         if let Some(t) = self.tracer.as_mut() {
-            let mut settings = t.settings();
-            settings.samples = opts.samples.max(1);
-            // One sample per animation frame. The pacing that keeps the page
-            // responsive, and the bound on how large any one dispatch is.
-            settings.chunk = 1;
-            settings.denoise = opts.denoise;
-            // Authored since the node reached its second version and read by
-            // nothing until the resolver existed: the frontend's request had
-            // no field for either, so lowering them changed no picture.
-            settings.bounces = opts.bounces;
-            settings.transmissive_bounces = opts.transmissive_bounces;
-            t.set_settings(settings);
+            let current = t.settings();
+            t.set_settings(crate::trace_settings::trace_settings_for(&opts, current));
             t.invalidate();
         }
         // After the settings, which reset the lens to the pinhole default.
