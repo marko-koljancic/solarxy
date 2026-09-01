@@ -805,6 +805,12 @@ fn still_spec(settings: &RenderSettings, output: &Output, opts: &RenderOptions) 
         // the same copy.
         aux: opts.aovs.iter().any(|k| k.from_auxiliary()),
         depth: opts.aovs.contains(&AovKind::Depth),
+        // No mid-tile previews. A sink here is fed a whole picture when a tile
+        // lands, and a surface that wants to watch one arrive asks for smaller
+        // tiles instead; paying for a composite and a readback four times a
+        // second in a render nobody is watching would be a tax on every
+        // scripted run.
+        preview_interval_ms: 0,
     }
 }
 
@@ -1092,11 +1098,18 @@ fn drive(
                 look: view.look,
                 format: view.format,
                 scene_present: view.scene_present,
+                // The clock this crate already started for its progress
+                // stream, so the preview's throttle and the elapsed a reader
+                // sees are measured against one reading.
+                now_ms: started.elapsed().as_millis() as u64,
             };
             job.advance(&mut ctx, *backend)
         };
         match step {
-            StillStep::Working => {}
+            // Unreachable: this crate asks for no previews, because its reader
+            // is fed when a tile lands and an ordinary headless render has
+            // nobody watching it converge.
+            StillStep::Working | StillStep::Preview => {}
             StillStep::Tile => {
                 while let Some(t) = job.take_tile() {
                     blit(&mut out.color, spec.width, t.rect, &t.pixels, color_bpp);

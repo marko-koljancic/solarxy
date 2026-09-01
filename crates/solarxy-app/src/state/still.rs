@@ -18,7 +18,7 @@ use solarxy_core::preferences::BackgroundMode;
 use solarxy_core::view_config::{PaneDisplaySettings, PaneLook};
 use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_graph::nodes::{RenderEngine, RenderSettings};
-use solarxy_host::still::{StillEngine, StillSpec, StillStep, StillTile, TILE_BUDGET_PIXELS};
+use solarxy_host::still::{StillEngine, StillSpec, StillStep, StillTile, TILE_BUDGET_PIXELS, TileRect};
 use solarxy_host::{StillCtx, StillRenderJob};
 use solarxy_renderer::backend::RenderBackend;
 use solarxy_renderer::camera_state::CameraState;
@@ -50,6 +50,10 @@ pub(crate) struct StillState {
     /// Whether the job ingested a synthesized model document into the
     /// session's scene objects, which the teardown then clears.
     pub synthesized_scene: bool,
+    /// When the render began, which is the shell's own clock: the job takes a
+    /// reading rather than reading one, because it also compiles for the
+    /// browser where there is no `Instant`.
+    pub started: std::time::Instant,
 }
 
 impl State {
@@ -292,6 +296,11 @@ impl State {
             readback: solarxy_host::still::StillReadback::Display8,
             aux: false,
             depth: false,
+            // The modal is watching, so the job publishes what it has on the
+            // shared interval rather than only when a tile lands. Without it a
+            // still that fits in one tile shows a blank frame for its whole
+            // duration.
+            preview_interval_ms: solarxy_host::still::PREVIEW_INTERVAL_MS,
         };
         let job = StillRenderJob::new(spec);
         let spec = job.spec();
@@ -313,6 +322,7 @@ impl State {
             engine: engine_kind,
             image,
             synthesized_scene,
+            started: std::time::Instant::now(),
         });
     }
 
@@ -355,6 +365,7 @@ impl State {
                 look: still.look,
                 format,
                 scene_present: true,
+                now_ms: still.started.elapsed().as_millis() as u64,
             };
             match still.engine {
                 StillEngine::Raster => still.job.advance(&mut ctx, &mut self.raster),
@@ -374,6 +385,16 @@ impl State {
                 }
                 self.gui
                     .set_still_preview(preview_of(&still.image, spec.width, spec.height));
+            }
+            // The tile so far, into the same buffer at the same place. The
+            // finished tile overwrites it when it lands, so the modal shows one
+            // picture that only ever improves.
+            StillStep::Preview => {
+                if let Some(p) = still.job.take_preview() {
+                    blit_rect(&mut still.image, spec.width, p.rect, &p.pixels);
+                    self.gui
+                        .set_still_preview(preview_of(&still.image, spec.width, spec.height));
+                }
             }
             StillStep::Done => {
                 self.finish_still();
@@ -701,12 +722,21 @@ fn still_filename() -> String {
 
 /// Copy one cropped tile into its place in the assembled picture.
 fn blit_tile(image: &mut [u8], image_width: u32, tile: &StillTile) {
+    blit_rect(image, image_width, tile.rect, &tile.pixels);
+}
+
+/// Copies one rectangle of eight-bit pixels into the assembled picture.
+///
+/// Takes the rect and the bytes rather than a tile, because a mid-render
+/// preview covers the same rectangle in the same format and there is no reason
+/// for it to travel a second path to the same buffer.
+fn blit_rect(image: &mut [u8], image_width: u32, rect: TileRect, pixels: &[u8]) {
     let row = image_width as usize * 4;
-    let tile_row = tile.rect.width as usize * 4;
-    for y in 0..tile.rect.height as usize {
-        let dst = (tile.rect.y as usize + y) * row + tile.rect.x as usize * 4;
+    let tile_row = rect.width as usize * 4;
+    for y in 0..rect.height as usize {
+        let dst = (rect.y as usize + y) * row + rect.x as usize * 4;
         let src = y * tile_row;
-        image[dst..dst + tile_row].copy_from_slice(&tile.pixels[src..src + tile_row]);
+        image[dst..dst + tile_row].copy_from_slice(&pixels[src..src + tile_row]);
     }
 }
 

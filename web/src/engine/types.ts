@@ -796,11 +796,16 @@ export interface BackendCapsSet {
   traced: BackendCaps;
 }
 
-/** One finished tile of a still render, as it crosses the boundary.
+/** One rectangle of a still render, as it crosses the boundary.
  *
  * Tiles cross one at a time and the frontend assembles them, which is what
  * keeps a 67-megapixel image out of the wasm heap and gives the modal its
- * live preview for free. */
+ * live preview for free.
+ *
+ * The picture-so-far crosses in this same shape, from `takeStillPreview`, so
+ * the modal paints both through one call. The difference is what they mean
+ * rather than what they carry: a tile is the render's output and a preview is
+ * an unfinished look at one, which is why only tiles reach the saved file. */
 export interface StillTileDto {
   x: number;
   y: number;

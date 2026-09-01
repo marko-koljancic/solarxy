@@ -233,6 +233,14 @@ pub struct StillSpec {
     pub aux: bool,
     /// Whether to run a depth pass per tile and read it back.
     pub depth: bool,
+    /// How often to publish the picture so far, in milliseconds. Zero never
+    /// does.
+    ///
+    /// Opt-in, because a preview is only worth its composite and its readback
+    /// to a caller that shows one. A surface with a window passes
+    /// [`PREVIEW_INTERVAL_MS`]; the headless command passes zero and pays
+    /// nothing, since its own reader is fed when a tile lands.
+    pub preview_interval_ms: u64,
 }
 
 impl Default for StillSpec {
@@ -247,6 +255,7 @@ impl Default for StillSpec {
             readback: StillReadback::Display8,
             aux: false,
             depth: false,
+            preview_interval_ms: 0,
         }
     }
 }
@@ -392,6 +401,34 @@ pub struct StillTile {
 const AUX_BYTES_PER_PIXEL: usize = 16;
 /// One `f32`, which is what a depth is.
 const DEPTH_BYTES_PER_PIXEL: usize = 4;
+/// Four bytes, which is what a preview always is.
+const PREVIEW_BYTES_PER_PIXEL: usize = 4;
+
+/// How often the job publishes the picture it has so far.
+///
+/// A quarter of a second, which is the same interval the command line's
+/// dashboard already samples its throughput at, so the two readings a person
+/// watches move at one rhythm rather than two.
+///
+/// Wall clock rather than a chunk count, and that is the whole point: a chunk
+/// costs milliseconds in a simple scene and seconds in a heavy one, so a fixed
+/// chunk interval would publish constantly in one and almost never in the
+/// other. This is a statement about how often a person wants to see something
+/// new, which is a property of the person and not of the scene.
+pub const PREVIEW_INTERVAL_MS: u64 = 250;
+
+/// The picture so far, for a surface that shows a render while it runs.
+///
+/// Always four bytes a pixel, whatever the render's own format is: a preview is
+/// looked at rather than composited, and reading sixteen bytes to show four
+/// would make the mechanism cost more the more precise the render.
+///
+/// The rect is the tile's own, apron already cut off, so a caller paints it
+/// exactly where it paints a finished [`StillTile`] and needs no second path.
+pub struct StillPreview {
+    pub rect: TileRect,
+    pub pixels: Vec<u8>,
+}
 
 /// One plane's readback: in flight, then landed.
 ///
@@ -513,6 +550,14 @@ pub enum StillStep {
     Working,
     /// A tile finished; take it with [`StillRenderJob::take_tile`].
     Tile,
+    /// The picture so far is ready; take it with
+    /// [`StillRenderJob::take_preview`].
+    ///
+    /// Its own case rather than an overload of [`StillStep::Tile`], because the
+    /// two mean different things to a caller that saves: a tile is the render's
+    /// output and a preview is a look at it, and a shell that assembled a
+    /// preview into the file it writes would be writing an unfinished picture.
+    Preview,
     /// Every tile is done and taken.
     Done,
     /// A readback failed. The job is over and the picture is incomplete.
@@ -538,6 +583,15 @@ pub struct StillCtx<'a> {
     /// The format the capture target is allocated in, which is the surface's.
     pub format: wgpu::TextureFormat,
     pub scene_present: bool,
+    /// A monotonic reading in milliseconds, for the preview's throttle.
+    ///
+    /// Supplied by the caller rather than read here, because this crate
+    /// compiles for the browser and there is no clock in it: the desktop reads
+    /// an `Instant`, the browser reads the page's own timer, and the headless
+    /// command reads the one it already started for its progress stream. On the
+    /// bundle rather than an argument, so a caller that forgets it does not
+    /// compile.
+    pub now_ms: u64,
 }
 
 /// A still render in progress.
@@ -553,6 +607,18 @@ pub struct StillRenderJob {
     ready: VecDeque<StillTile>,
     target: Option<CaptureTarget>,
     finished: bool,
+    /// The preview's own readback, with its own lifetime.
+    ///
+    /// Deliberately not the `pending` slot above. That one gates sampling: the
+    /// tile it belongs to is finished and the next cannot start until its buffer
+    /// is back. A preview that borrowed it would halve the sample rate in order
+    /// to show progress, which is the opposite of what it is for.
+    preview: Option<PendingPlane>,
+    preview_target: Option<CaptureTarget>,
+    preview_ready: Option<StillPreview>,
+    /// When the last preview was armed, so the throttle is a stated interval
+    /// rather than however often the caller happens to advance.
+    preview_armed_ms: Option<u64>,
 }
 
 impl StillRenderJob {
@@ -576,6 +642,10 @@ impl StillRenderJob {
             ready: VecDeque::new(),
             target: None,
             finished: false,
+            preview: None,
+            preview_target: None,
+            preview_ready: None,
+            preview_armed_ms: None,
         }
     }
 
@@ -602,6 +672,14 @@ impl StillRenderJob {
     /// A finished tile, if one is waiting.
     pub fn take_tile(&mut self) -> Option<StillTile> {
         self.ready.pop_front()
+    }
+
+    /// The picture so far, if one has landed since it was last taken.
+    ///
+    /// Safe to call after any [`StillRenderJob::advance`]; [`StillStep::Preview`]
+    /// is the hint that there is something here rather than a precondition.
+    pub fn take_preview(&mut self) -> Option<StillPreview> {
+        self.preview_ready.take()
     }
 
     /// The tile currently being rendered, for a caller that wants to show where
@@ -644,6 +722,13 @@ impl StillRenderJob {
         if self.finished {
             return StillStep::Done;
         }
+        // Polled before anything else and on every call, so a preview that
+        // landed while the sampling carried on is picked up promptly and its
+        // buffer is freed. A failure here is not the render's failure: the
+        // picture is unaffected, so the slot is simply dropped and the next
+        // interval tries again.
+        let preview_landed = self.collect_preview(ctx.device);
+
         // A readback in flight is the only thing that matters: the tile it
         // belongs to is done being rendered and the next one cannot start until
         // its buffer is back.
@@ -656,6 +741,12 @@ impl StillRenderJob {
                 // would report itself already converged and render the previous
                 // tile again.
                 backend.invalidate();
+            }
+            // A preview never displaces the step that says a tile arrived or
+            // that the job ended: those decide what a caller saves, and this
+            // only decides what it shows.
+            if step == StillStep::Working && preview_landed {
+                return StillStep::Preview;
             }
             return step;
         }
@@ -680,12 +771,77 @@ impl StillRenderJob {
         match outcome {
             FrameOutcome::Converging { samples, .. } => {
                 self.samples_done = samples;
+                // Only a tile that is still converging has anything to preview,
+                // which is also what keeps a rasterized still from paying for
+                // the mechanism: it completes on its first encode and never
+                // reaches here, so it arms nothing and allocates nothing.
+                if self.wants_preview(ctx.now_ms) {
+                    self.arm_preview(ctx, backend, tile);
+                }
+                if preview_landed {
+                    return StillStep::Preview;
+                }
                 StillStep::Working
             }
             FrameOutcome::Complete => {
                 self.samples_done = self.target_samples();
                 self.arm_readback(ctx, backend, tile, &target);
+                if preview_landed {
+                    return StillStep::Preview;
+                }
                 StillStep::Working
+            }
+        }
+    }
+
+    /// Whether the interval has passed and no preview is already in flight.
+    ///
+    /// One outstanding at a time: a second would queue behind the first without
+    /// making the picture any fresher, and would hold a second tile-sized buffer
+    /// mapped while it waited.
+    ///
+    /// The first is armed immediately rather than after one interval, which is
+    /// deliberate: the complaint this answers is that a render shows nothing at
+    /// the start, and waiting a quarter of a second before even asking would
+    /// reintroduce a smaller version of it.
+    fn wants_preview(&self, now_ms: u64) -> bool {
+        let interval = self.spec.preview_interval_ms;
+        if interval == 0 || self.preview.is_some() {
+            return false;
+        }
+        self.preview_armed_ms
+            .is_none_or(|then| now_ms.saturating_sub(then) >= interval)
+    }
+
+    /// Polls the preview slot. `true` when one landed on this call.
+    fn collect_preview(&mut self, device: &wgpu::Device) -> bool {
+        let Some(plane) = self.preview.as_mut() else {
+            return false;
+        };
+        match plane.poll(device) {
+            PlaneStep::Pending => false,
+            PlaneStep::Failed => {
+                // The render is unaffected: this buffer held a copy of a
+                // picture that is still in the target. Drop it and let the next
+                // interval try again rather than ending the job.
+                self.preview = None;
+                false
+            }
+            PlaneStep::Ready => {
+                let Some(plane) = self.preview.take() else {
+                    return false;
+                };
+                let Some(bytes) = plane.bytes else {
+                    return false;
+                };
+                let Some(tile) = self.plan.tiles.get(self.tile).copied() else {
+                    return false;
+                };
+                self.preview_ready = Some(StillPreview {
+                    rect: tile.image,
+                    pixels: crop(&bytes, tile, PREVIEW_BYTES_PER_PIXEL),
+                });
+                true
             }
         }
     }
@@ -714,6 +870,97 @@ impl StillRenderJob {
             width: t.width,
             height: t.height,
         }
+    }
+
+    /// Allocates or reuses the tile-sized eight-bit preview target.
+    ///
+    /// Its own target rather than the capture one, for a reason the
+    /// scene-referred mode makes plain: that mode never composites, so its
+    /// capture target is never written and there would be nothing to preview
+    /// from. One target in the surface's own format gives every mode the same
+    /// path and the cheapest readback there is.
+    fn preview_target(&mut self, ctx: &StillCtx<'_>, tile: Tile) -> CaptureTarget {
+        let fits = self
+            .preview_target
+            .as_ref()
+            .is_some_and(|t| t.width == tile.render.width && t.height == tile.render.height);
+        if !fits {
+            self.preview_target = Some(CaptureTarget::new(
+                ctx.device,
+                ctx.format,
+                tile.render.width,
+                tile.render.height,
+            ));
+        }
+        let t = self.preview_target.as_ref().expect("just allocated");
+        CaptureTarget {
+            texture: t.texture.clone(),
+            view: t.view.clone(),
+            rect: t.rect,
+            width: t.width,
+            height: t.height,
+        }
+    }
+
+    /// Composites what has accumulated so far and copies it out.
+    ///
+    /// The running mean is already in the shared target: the traced backend
+    /// resolves into it on every encode rather than only at completion, so
+    /// nothing has to be computed for a preview to exist and this only fetches
+    /// it. What it adds is one composite pass, four times a second, which is
+    /// what turns a scene-referred or floating-point render into something a
+    /// screen can show.
+    ///
+    /// A scene-referred render is previewed through the display chain, which is
+    /// the one place a preview and its finished tile differ: the file stays
+    /// scene-referred and untouched, and a screen cannot show scene-referred
+    /// light at all.
+    fn arm_preview(&mut self, ctx: &mut StillCtx<'_>, backend: &mut dyn RenderBackend, tile: Tile) {
+        let target = self.preview_target(ctx, tile);
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Still Preview Encoder"),
+            });
+        let bloom = ctx.renderer.post.bloom_enabled && ctx.scene_present;
+        let ssao =
+            ctx.renderer.post.ssao_enabled && ctx.scene_present && backend.caps().writes_occlusion;
+        ctx.renderer.post.composite.write_params(
+            ctx.queue,
+            bloom,
+            ssao,
+            &ctx.look,
+            &ctx.renderer.post.luts,
+            InspectionMode::Shaded,
+        );
+        let r = target.rect;
+        ctx.renderer.post.composite.render(
+            &mut encoder,
+            &ctx.renderer.pipelines,
+            &target.view,
+            ssao,
+            &ctx.renderer.post.ssao,
+            Some([r.x, r.y, r.width, r.height]),
+            true,
+            // Never the float pipeline: a preview is eight bits by definition.
+            None,
+        );
+        let capture = solarxy_renderer::capture::encode_capture(
+            ctx.device,
+            &mut encoder,
+            &target.texture,
+            (0, 0, target.width, target.height),
+        );
+        // Submitted before the buffer is mapped, for the same reason the tile's
+        // readback is: a copy into a mapped buffer is rejected.
+        ctx.queue.submit(std::iter::once(encoder.finish()));
+        let (buffer, padded) = capture;
+        self.preview = Some(PendingPlane::arm(
+            PendingCapture::arm(buffer, padded, target.width, target.height),
+            ctx.format,
+            false,
+        ));
+        self.preview_armed_ms = Some(ctx.now_ms);
     }
 
     fn encode_tile(
@@ -953,6 +1200,13 @@ impl StillRenderJob {
             aux: planes.aux.map(|a| crop(&a, tile, AUX_BYTES_PER_PIXEL)),
             depth: planes.depth.map(|d| crop(&d, tile, DEPTH_BYTES_PER_PIXEL)),
         });
+        // Anything the preview slot holds describes the tile that just
+        // finished, at fewer samples than the tile now in hand. Painting it
+        // afterwards would undo the picture, and a preview still in flight
+        // would land against the next tile's rect. Both are dropped here, which
+        // also frees the buffer.
+        self.preview = None;
+        self.preview_ready = None;
         self.tile += 1;
         self.samples_done = 0;
         if self.tile >= self.plan.len() {

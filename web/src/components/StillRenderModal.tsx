@@ -16,7 +16,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getClient } from "../engine/session";
-import type { GraphContext, RenderSettings, StillFormat, StillSpace } from "../engine/types";
+import type {
+  GraphContext,
+  RenderSettings,
+  StillFormat,
+  StillSpace,
+  StillTileDto,
+} from "../engine/types";
 import { pushToast } from "../store/toasts";
 import { useRenderJob } from "../store/renderJob";
 import { Modal } from "./Modal";
@@ -95,25 +101,35 @@ export function StillRenderModal({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [busy, onClose]);
 
-  // Drain finished tiles into the canvas. Polled on an animation frame rather
-  // than pushed, because the tiles are bytes and the store is the wrong place
-  // for 67 megapixels of them.
+  // Drain finished tiles and the picture so far into the canvas. Polled on an
+  // animation frame rather than pushed, because the tiles are bytes and the
+  // store is the wrong place for 67 megapixels of them.
   useEffect(() => {
     if (!started) return undefined;
     let raf = 0;
+    const paint = (ctx: CanvasRenderingContext2D, t: StillTileDto) => {
+      // Copied into a fresh buffer rather than viewed: the bytes come from
+      // the wasm heap, and a view into it is invalidated by the next
+      // allocation the module makes, which is every frame.
+      const bytes = new Uint8ClampedArray(t.width * t.height * 4);
+      bytes.set(t.pixels);
+      ctx.putImageData(new ImageData(bytes, t.width, t.height), t.x, t.y);
+    };
     const pump = () => {
       const ctx = canvasRef.current?.getContext("2d");
       if (ctx) {
+        // Previews first, tiles second, so that within one frame a finished
+        // tile always lands on top of the unfinished look at the same
+        // rectangle rather than under it.
+        for (;;) {
+          const preview = getClient().takeStillPreview();
+          if (!preview) break;
+          paint(ctx, preview);
+        }
         for (;;) {
           const tile = getClient().takeStillTile();
           if (!tile) break;
-          // Copied into a fresh buffer rather than viewed: the bytes come from
-          // the wasm heap, and a view into it is invalidated by the next
-          // allocation the module makes, which is every frame.
-          const bytes = new Uint8ClampedArray(tile.width * tile.height * 4);
-          bytes.set(tile.pixels);
-          const data = new ImageData(bytes, tile.width, tile.height);
-          ctx.putImageData(data, tile.x, tile.y);
+          paint(ctx, tile);
         }
       }
       raf = requestAnimationFrame(pump);

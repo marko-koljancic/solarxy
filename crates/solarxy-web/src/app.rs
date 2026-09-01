@@ -497,6 +497,9 @@ pub struct SolarxyApp {
     traced_env_dirty: bool,
     /// Finished tiles waiting for the frontend to take them.
     still_tiles: std::collections::VecDeque<solarxy_host::still::StillTile>,
+    /// The picture so far, waiting for the frontend to take it. Separate from
+    /// the tiles because a preview is painted and never saved.
+    still_previews: std::collections::VecDeque<solarxy_host::still::StillPreview>,
     /// The floating-point image being assembled, when the running still is a
     /// float one. `None` for the ordinary eight-bit still, which is assembled
     /// on a canvas the browser owns and never needs a copy here.
@@ -992,6 +995,7 @@ impl SolarxyApp {
             tracer: None,
             traced_env_dirty: true,
             still_tiles: std::collections::VecDeque::new(),
+            still_previews: std::collections::VecDeque::new(),
             still_float: None,
             // On, matching the shipped behaviour, until a preference push
             // says otherwise; boot pushes one before the first traced frame.
@@ -1945,6 +1949,7 @@ impl SolarxyApp {
         self.prepare_still_look(opts.camera);
 
         self.still_tiles.clear();
+        self.still_previews.clear();
         self.still = Some(StillRenderJob::new(spec));
         Ok(())
     }
@@ -1956,6 +1961,10 @@ impl SolarxyApp {
         self.still = None;
         self.still_camera = None;
         self.still_tiles.clear();
+        // Any outstanding preview goes with the job that armed it, which frees
+        // its buffer; anything already queued is a look at a render nobody
+        // asked to keep.
+        self.still_previews.clear();
         // Dropped with the job: a cancelled render has a half-filled image and
         // nothing should be able to save it, quite apart from the tens of
         // megabytes it would otherwise sit on until the next render.
@@ -1996,6 +2005,33 @@ impl SolarxyApp {
         set(
             "pixels",
             &JsValue::from(js_sys::Uint8Array::from(rgba8.as_ref())),
+        );
+        obj.into()
+    }
+
+    /// The picture so far as `{ x, y, width, height, pixels }` (RGBA8), or
+    /// `undefined` when none is waiting.
+    ///
+    /// The same shape a finished tile crosses in, so the modal paints both
+    /// through one path and needs no second branch. It is deliberately *not*
+    /// placed into the float image being assembled: a preview is an unfinished
+    /// look at a tile, and the file must only ever contain tiles that finished.
+    #[wasm_bindgen(js_name = takeStillPreview)]
+    pub fn take_still_preview(&mut self) -> JsValue {
+        let Some(preview) = self.still_previews.pop_front() else {
+            return JsValue::UNDEFINED;
+        };
+        let obj = js_sys::Object::new();
+        let set = |k: &str, v: &JsValue| {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), v);
+        };
+        set("x", &JsValue::from_f64(f64::from(preview.rect.x)));
+        set("y", &JsValue::from_f64(f64::from(preview.rect.y)));
+        set("width", &JsValue::from_f64(f64::from(preview.rect.width)));
+        set("height", &JsValue::from_f64(f64::from(preview.rect.height)));
+        set(
+            "pixels",
+            &JsValue::from(js_sys::Uint8Array::from(preview.pixels.as_slice())),
         );
         obj.into()
     }
@@ -2093,6 +2129,9 @@ impl SolarxyApp {
                 look,
                 format,
                 scene_present,
+                // The page's own timer, which is the only clock this shell has
+                // and the same one the cook budget is measured against.
+                now_ms: web_now() as u64,
             };
             match engine {
                 StillEngine::Raster => job.advance(&mut ctx, &mut self.raster),
@@ -2107,6 +2146,12 @@ impl SolarxyApp {
             while let Some(t) = job.take_tile() {
                 self.still_tiles.push_back(t);
             }
+        }
+        // Drained whichever step came back: the job clears anything it holds
+        // when the tile it described finishes, so what is here is always newer
+        // than the last thing painted and never survives the tile it belongs to.
+        if let Some(p) = job.take_preview() {
+            self.still_previews.push_back(p);
         }
         let progress = job.progress();
         let done =
@@ -3797,6 +3842,10 @@ impl SolarxyApp {
             // line is where a person gets them until it is answered.
             aux: false,
             depth: false,
+            // The dialog is watching. At the production tile budget a 1920 by
+            // 1080 render is a single tile, so without this nothing reaches the
+            // canvas until the whole image is finished.
+            preview_interval_ms: solarxy_host::still::PREVIEW_INTERVAL_MS,
         }
     }
 

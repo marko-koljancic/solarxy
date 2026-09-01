@@ -283,6 +283,7 @@ fn run_one(
                 look: CompositeLook::default(),
                 format,
                 scene_present: true,
+                now_ms: 0,
             };
             job.advance(&mut ctx, backend)
         };
@@ -290,7 +291,9 @@ fn run_one(
             // A shell is paced by its display and never spins here. This has
             // nothing pacing it, so it yields rather than polling a readback as
             // fast as the processor will let it.
-            StillStep::Working => std::thread::yield_now(),
+            // Unreachable: this driver asks for no previews. It renders to a
+            // file and to a stopwatch, and neither is watching.
+            StillStep::Working | StillStep::Preview => std::thread::yield_now(),
             StillStep::Tile => {
                 while let Some(t) = job.take_tile() {
                     for y in 0..t.rect.height as usize {
@@ -359,6 +362,7 @@ fn endurance(args: &[String]) -> anyhow::Result<()> {
         // copy per tile would measure a copy.
         aux: false,
         depth: false,
+        preview_interval_ms: 0,
     };
     let tiles = StillRenderJob::new(spec).plan().len();
     println!(
@@ -408,6 +412,7 @@ fn once(args: &[String]) -> anyhow::Result<()> {
         // copy per tile would measure a copy.
         aux: false,
         depth: false,
+        preview_interval_ms: 0,
     };
     let tiles = StillRenderJob::new(spec).plan().len();
     println!("STILL {width}x{height} at {samples} spp in {tiles} tiles");
@@ -531,6 +536,7 @@ fn probe_still(
         readback: solarxy_host::still::StillReadback::Display8,
         aux: false,
         depth: false,
+        preview_interval_ms: 0,
     };
     let tiles = StillRenderJob::new(spec).plan().len();
 

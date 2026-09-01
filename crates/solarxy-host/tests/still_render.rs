@@ -19,7 +19,8 @@ use common::{
 };
 use solarxy_core::preferences::BackgroundMode;
 use solarxy_host::still::{
-    StillEngine, StillRenderJob, StillSpec, StillStep, StillTile, TILE_BUDGET_PIXELS, TilePlan,
+    PREVIEW_INTERVAL_MS, StillEngine, StillPreview, StillRenderJob, StillSpec, StillStep,
+    StillTile, TILE_BUDGET_PIXELS, TilePlan,
 };
 use solarxy_host::{RasterBackend, StillCtx};
 use solarxy_core::AABB;
@@ -63,6 +64,7 @@ fn spec(engine: StillEngine, samples: u32, budget: u32) -> StillSpec {
         readback: solarxy_host::still::StillReadback::Display8,
         aux: false,
         depth: false,
+        preview_interval_ms: 0,
     }
 }
 
@@ -95,19 +97,21 @@ const JOB_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
 /// against the device it is waiting for.
 fn run(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBackend) -> Vec<u8> {
     let mut image = vec![0u8; (W * H * 4) as usize];
-    for tile in run_tiles(h, job, backend) {
+    for tile in run_tiles(h, job, backend).tiles {
         blit(&mut image, &tile);
     }
     image
 }
 
-/// The same drive, handing back the tiles themselves rather than the picture,
-/// for a test that is about what a tile carries.
-fn run_tiles(
-    h: &mut Harness,
-    job: &mut StillRenderJob,
-    backend: &mut dyn RenderBackend,
-) -> Vec<StillTile> {
+/// What driving a job to completion produced.
+struct Run {
+    tiles: Vec<StillTile>,
+    previews: Vec<StillPreview>,
+}
+
+/// The same drive, handing back what the job emitted rather than the picture,
+/// for a test that is about what a tile carries or how often the job publishes.
+fn run_tiles(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBackend) -> Run {
     let pds: PaneDisplaySettings = pane_settings();
     let display: DisplaySettings = display_settings();
     let background: ResolvedBackground = BackgroundMode::GRADIENT.resolve(&[]);
@@ -115,6 +119,7 @@ fn run_tiles(
     let format = h.format;
 
     let mut tiles = Vec::new();
+    let mut previews = Vec::new();
     let started = std::time::Instant::now();
     loop {
         assert!(
@@ -142,6 +147,7 @@ fn run_tiles(
                 look: CompositeLook::default(),
                 format,
                 scene_present: true,
+                now_ms: started.elapsed().as_millis() as u64,
             };
             job.advance(&mut ctx, backend)
         };
@@ -151,12 +157,13 @@ fn run_tiles(
             // in the first case and is the whole point in the second.
             StillStep::Working => std::thread::yield_now(),
             StillStep::Tile => tiles.extend(std::iter::from_fn(|| job.take_tile())),
+            StillStep::Preview => previews.extend(job.take_preview()),
             StillStep::Done => break,
             StillStep::Failed => panic!("a tile readback failed"),
         }
     }
     tiles.extend(std::iter::from_fn(|| job.take_tile()));
-    tiles
+    Run { tiles, previews }
 }
 
 fn blit(image: &mut [u8], tile: &StillTile) {
@@ -178,6 +185,25 @@ fn traced(h: &Harness, samples: u32) -> PathBackend {
         // pacing; the pacing is the shell's and is measured by the endurance
         // run.
         chunk: samples,
+        ..TraceSettings::default()
+    });
+    backend
+}
+
+/// The same tracer, paced in chunks the way a shell paces one.
+///
+/// The helper above draws a whole tile in one call, which is right for a test
+/// about tiling and wrong for one about publishing: a tile that completes on
+/// its first encode never converges, and a preview is only ever armed while a
+/// tile is converging. Both graphical shells pace in chunks for their own
+/// reasons, so this is the shape the mechanism actually runs in.
+fn traced_chunked(h: &Harness, samples: u32, chunk: u32) -> PathBackend {
+    let mut backend = PathBackend::new(&h.device, &h.queue);
+    backend.apply(&h.device, &h.queue, &sphere_delta());
+    backend.set_sky(SKY_UP, SKY_DOWN);
+    backend.set_settings(TraceSettings {
+        samples,
+        chunk,
         ..TraceSettings::default()
     });
     backend
@@ -271,6 +297,90 @@ fn a_tiled_traced_still_matches_the_same_image_rendered_in_one_pass() {
     );
 }
 
+/// A job asked to publish while it works does, and the picture it finally
+/// produces is byte-for-byte the one it produces when nobody is watching.
+///
+/// The second half is the one worth having. A preview that perturbed the render
+/// would be a defect rather than a trade, and the ways it could are all
+/// plausible: it composites into a target of its own, it submits its own
+/// encoder between the chunks, and it holds a second buffer mapped while the
+/// sampling carries on. None of that may reach the picture.
+#[test]
+fn publishing_the_picture_so_far_does_not_change_the_picture() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    // Enough samples that the job spends real time converging, so the interval
+    // has something to elapse against.
+    const SPP: u32 = 64;
+
+    // Paced, because an unpaced tile completes on its first encode and never
+    // converges, and a preview only exists while a tile is converging.
+    let mut backend = traced_chunked(&h, SPP, 1);
+    let mut quiet = StillRenderJob::new(spec(StillEngine::PathTraced, SPP, WHOLE));
+    let unwatched = run(&mut h, &mut quiet, &mut backend);
+
+    backend.invalidate();
+    let watched_spec = StillSpec {
+        preview_interval_ms: PREVIEW_INTERVAL_MS,
+        ..spec(StillEngine::PathTraced, SPP, WHOLE)
+    };
+    let mut watched = StillRenderJob::new(watched_spec);
+    let run = run_tiles(&mut h, &mut watched, &mut backend);
+
+    let mut assembled = vec![0u8; (W * H * 4) as usize];
+    for tile in &run.tiles {
+        blit(&mut assembled, tile);
+    }
+    assert_eq!(
+        unwatched, assembled,
+        "the picture changed when something watched it render"
+    );
+
+    assert!(
+        !run.previews.is_empty(),
+        "a job asked to publish every {PREVIEW_INTERVAL_MS}ms published nothing"
+    );
+    for p in &run.previews {
+        assert_eq!(
+            p.rect, run.tiles[0].rect,
+            "a preview covered a rect no tile owns"
+        );
+        assert_eq!(
+            p.pixels.len(),
+            (p.rect.width * p.rect.height * 4) as usize,
+            "a preview is not four bytes a pixel over its own rect"
+        );
+    }
+}
+
+/// A rasterized still pays nothing for the preview mechanism.
+///
+/// It completes on its first encode of every tile, so it never reaches the
+/// place a preview is armed. Asking for one anyway must therefore produce none,
+/// which is what makes the exemption structural rather than a flag somebody has
+/// to remember to clear.
+#[test]
+fn a_rasterized_still_publishes_nothing_between_tiles() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = raster(&h);
+    let asked = StillSpec {
+        preview_interval_ms: PREVIEW_INTERVAL_MS,
+        ..spec(StillEngine::Raster, 1, TEST_BUDGET)
+    };
+    let mut job = StillRenderJob::new(asked);
+    let run = run_tiles(&mut h, &mut job, &mut backend);
+
+    assert!(!run.tiles.is_empty(), "the raster job produced no tiles");
+    assert!(
+        run.previews.is_empty(),
+        "a rasterized still published {} previews; it has nothing to refine",
+        run.previews.len()
+    );
+}
+
 /// Every tile carries its auxiliary planes, cropped to the part it owns.
 ///
 /// The sizes are the assertion, and they are not a formality: the planes are
@@ -302,7 +412,7 @@ fn a_traced_tile_carries_the_passes_that_were_asked_for() {
             .any(|t| t.render.width > t.image.width),
         "the plan has no apron, so nothing here is cropped"
     );
-    let tiles = run_tiles(&mut h, &mut job, &mut backend);
+    let tiles = run_tiles(&mut h, &mut job, &mut backend).tiles;
 
     for tile in &tiles {
         let pixels = (tile.rect.width * tile.rect.height) as usize;
@@ -345,7 +455,7 @@ fn a_still_that_asked_for_no_passes_gets_none() {
     };
     let mut backend = traced(&h, 2);
     let mut job = StillRenderJob::new(spec(StillEngine::PathTraced, 2, WHOLE));
-    let tiles = run_tiles(&mut h, &mut job, &mut backend);
+    let tiles = run_tiles(&mut h, &mut job, &mut backend).tiles;
     assert!(!tiles.is_empty());
     for tile in &tiles {
         assert!(tile.aux.is_none(), "an auxiliary plane nobody asked for");

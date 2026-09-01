@@ -220,6 +220,15 @@ export class SolarxyClient {
     return (this.app.takeStillTile() ?? undefined) as StillTileDto | undefined;
   }
 
+  /** The picture so far, or undefined when none is waiting.
+   *
+   * The same shape a tile crosses in, so it paints through the same call. It is
+   * a look at a tile that has not finished: the finished tile overwrites it at
+   * the same coordinates, and it never reaches the file that is saved. */
+  takeStillPreview(): StillTileDto | undefined {
+    return (this.app.takeStillPreview() ?? undefined) as StillTileDto | undefined;
+  }
+
   /** Marks the picked node's scene object as selected (viewport tint). */
   setSceneSelection(node: NodeId | undefined): void {
     this.app.set_scene_selection(node);
