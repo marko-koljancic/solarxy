@@ -296,6 +296,10 @@ struct MarkerScreenDto {
 /// naming the node.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+// A mirror of the node's own parameters, and the node has four independent
+// switches. Grouping them into a sub-struct to satisfy the count would put a
+// shape on the boundary that the document does not have.
+#[allow(clippy::struct_excessive_bools)]
 struct RenderSettingsDto {
     width: u32,
     height: u32,
@@ -311,6 +315,16 @@ struct RenderSettingsDto {
     /// viewport is where someone happens to be looking, so the job builds its
     /// own camera from this and leaves every pane where it was.
     camera: Option<f64>,
+    /// The auxiliary passes the run writes beside the image.
+    ///
+    /// The production half of the pass model: what a render *makes*. Which of
+    /// them a window *shows* is a separate control that lives in the window,
+    /// because wanting to watch the normal pass to understand what the denoiser
+    /// is steering by is a different intention from wanting the albedo written
+    /// because a compositor asked for it.
+    aov_albedo: bool,
+    aov_normal: bool,
+    aov_depth: bool,
 }
 
 impl From<solarxy_graph::nodes::RenderSettings> for RenderSettingsDto {
@@ -329,6 +343,9 @@ impl From<solarxy_graph::nodes::RenderSettings> for RenderSettingsDto {
             denoise: s.denoise,
             #[allow(clippy::cast_precision_loss)]
             camera: s.camera.map(|n| n.0 as f64),
+            aov_albedo: s.aov_albedo,
+            aov_normal: s.aov_normal,
+            aov_depth: s.aov_depth,
         }
     }
 }
@@ -513,6 +530,22 @@ pub struct SolarxyApp {
     /// reader sees is measured from here rather than from the first tile, so it
     /// includes the setup a person also waited through.
     still_started_ms: f64,
+    /// The auxiliary planes being assembled, when any were asked for.
+    still_passes: Option<StillPasses>,
+    /// What the render was *asked* for, as albedo, normal, depth.
+    ///
+    /// Kept beside the planes because the spec's two flags cannot answer it:
+    /// albedo and normal share one store, so a spec that says `aux` does not
+    /// say which of the two a person wanted, and a selector offering a pass
+    /// nobody asked for would be offering something the file will not contain.
+    still_pass_request: [bool; 3],
+    /// Whether the engine drawing this still writes auxiliary passes at all.
+    ///
+    /// Capability rather than identity, resolved once when the render starts.
+    /// A window asks this rather than which backend is running, which is the
+    /// rule the backend contract states and the same one the terminal's
+    /// selector follows.
+    still_writes_aovs: bool,
     /// The floating-point image being assembled, when the running still is a
     /// float one. `None` for the ordinary eight-bit still, which is assembled
     /// on a canvas the browser owns and never needs a copy here.
@@ -599,10 +632,102 @@ const PREVIEW_TARGET_SAMPLES: u32 = 4096;
 /// which on wasm takes the whole tab rather than the operation.
 const MAX_FLOAT_STILL_PIXELS: u64 = 16_000_000;
 
+/// The most memory the auxiliary planes may take, for one render.
+///
+/// Stated in bytes rather than pixels because that is what the limit is about:
+/// the auxiliary store is sixteen bytes a pixel and the depth four, so twenty
+/// together, and a ceiling written as a pixel count would have to be rewritten
+/// the moment a fourth pass existed. At this budget a 4096 by 2304 still, which
+/// is the largest this release measures, fits with room over.
+///
+/// The planes are held whole rather than per tile because they have to be:
+/// the depth display normalizes over the range of the whole picture, so a plane
+/// mapped tile by tile would band at every seam.
+const MAX_PASS_PLANE_BYTES: u64 = 192 * 1024 * 1024;
+
 /// Pixels as megapixels, for a message a person reads.
 #[allow(clippy::cast_precision_loss)]
 fn megapixels(pixels: u64) -> f64 {
     pixels as f64 / 1_000_000.0
+}
+
+/// The auxiliary planes a still is keeping, when any were asked for.
+///
+/// Held as the bytes the job hands back rather than as typed floats, because
+/// that is what the shared display mappings read and what the extraction
+/// helpers read on the way to a file. One conversion, at the point that needs
+/// one, rather than a conversion on every tile.
+struct StillPasses {
+    width: u32,
+    height: u32,
+    /// `width * height * 16`: albedo in the first three lanes of every four,
+    /// the packed normal in the fourth. One store, because the kernel writes
+    /// one and asking for either pass fetches both.
+    aux: Option<Vec<u8>>,
+    /// `width * height * 4`.
+    depth: Option<Vec<u8>>,
+}
+
+impl StillPasses {
+    /// The planes this run will keep, or `None` when it asked for none.
+    fn new(spec: &solarxy_host::still::StillSpec) -> Option<Self> {
+        if !spec.aux && !spec.depth {
+            return None;
+        }
+        let pixels = (spec.width as usize) * (spec.height as usize);
+        Some(Self {
+            width: spec.width,
+            height: spec.height,
+            aux: spec.aux.then(|| vec![0u8; pixels * 16]),
+            depth: spec.depth.then(|| vec![0u8; pixels * 4]),
+        })
+    }
+
+    /// What the planes will cost, for the refusal that happens before the
+    /// render rather than during it.
+    fn cost(spec: &solarxy_host::still::StillSpec) -> u64 {
+        let pixels = u64::from(spec.width) * u64::from(spec.height);
+        let per_pixel = u64::from(spec.aux) * 16 + u64::from(spec.depth) * 4;
+        pixels * per_pixel
+    }
+
+    fn place(&mut self, tile: &solarxy_host::still::StillTile) {
+        if let (Some(dst), Some(src)) = (self.aux.as_mut(), tile.aux.as_ref()) {
+            place_plane(dst, self.width, self.height, tile.rect, src, 16);
+        }
+        if let (Some(dst), Some(src)) = (self.depth.as_mut(), tile.depth.as_ref()) {
+            place_plane(dst, self.width, self.height, tile.rect, src, 4);
+        }
+    }
+}
+
+/// Copies one tile's plane into its place in the whole one.
+///
+/// Row by row rather than pixel by pixel: a plane is contiguous within a row
+/// and the stride is the only thing that differs between the two.
+fn place_plane(
+    dst: &mut [u8],
+    width: u32,
+    height: u32,
+    rect: solarxy_host::still::TileRect,
+    src: &[u8],
+    bytes_per_pixel: usize,
+) {
+    let row_bytes = rect.width as usize * bytes_per_pixel;
+    for row in 0..rect.height {
+        let y = rect.y + row;
+        if y >= height || rect.x >= width {
+            continue;
+        }
+        let dst_at = (y as usize * width as usize + rect.x as usize) * bytes_per_pixel;
+        let src_at = row as usize * row_bytes;
+        if let (Some(slot), Some(bytes)) = (
+            dst.get_mut(dst_at..dst_at + row_bytes),
+            src.get(src_at..src_at + row_bytes),
+        ) {
+            slot.copy_from_slice(bytes);
+        }
+    }
 }
 
 /// Reinterprets a float plane's bytes.
@@ -1010,6 +1135,9 @@ impl SolarxyApp {
             still_tiles: std::collections::VecDeque::new(),
             still_previews: std::collections::VecDeque::new(),
             still_started_ms: 0.0,
+            still_passes: None,
+            still_pass_request: [false; 3],
+            still_writes_aovs: false,
             still_float: None,
             // On, matching the shipped behaviour, until a preference push
             // says otherwise; boot pushes one before the first traced frame.
@@ -1921,6 +2049,32 @@ impl SolarxyApp {
                 )));
             }
         }
+        // The same argument, for the same reason, about a different buffer: the
+        // auxiliary planes are held whole because the depth display normalizes
+        // over the whole picture's range, so they are allocated up front and a
+        // size that cannot hold them has to be refused before the work starts.
+        let plane_cost = StillPasses::cost(&spec);
+        if plane_cost > MAX_PASS_PLANE_BYTES {
+            let fits = MAX_PASS_PLANE_BYTES * u64::from(spec.width) * u64::from(spec.height)
+                / plane_cost.max(1);
+            return Err(JsError::new(&format!(
+                "the auxiliary passes for a still this size need {} MB and the browser keeps at \
+                 most {}; render about {:.1} megapixels or fewer with these passes, ask for fewer \
+                 of them, or take it from the command line, which writes the same passes with no \
+                 such limit",
+                plane_cost / (1024 * 1024),
+                MAX_PASS_PLANE_BYTES / (1024 * 1024),
+                megapixels(fits)
+            )));
+        }
+        self.still_passes = StillPasses::new(&spec);
+        self.still_pass_request = [opts.aov_albedo, opts.aov_normal, opts.aov_depth];
+        // Read from the constant rather than from a live backend, which is what
+        // lets a window know what a render can produce without a device.
+        self.still_writes_aovs = match engine {
+            StillEngine::PathTraced => PathBackend::CAPS.writes_aovs,
+            StillEngine::Raster => solarxy_host::RasterBackend::CAPS.writes_aovs,
+        };
         self.still_float = FloatStill::new(readback, spec.width, spec.height);
         // The job's own camera. Built from the named `camera` node when there
         // is one, and otherwise from the active pane's current view copied by
@@ -1984,6 +2138,11 @@ impl SolarxyApp {
         // its buffer; anything already queued is a look at a render nobody
         // asked to keep.
         self.still_previews.clear();
+        // Half-filled planes for the same reason the half-filled image goes:
+        // nothing should be able to save an unfinished pass, and they are the
+        // largest thing this render allocated.
+        self.still_passes = None;
+        self.still_pass_request = [false; 3];
         // Dropped with the job: a cancelled render has a half-filled image and
         // nothing should be able to save it, quite apart from the tens of
         // megabytes it would otherwise sit on until the next render.
@@ -2007,6 +2166,12 @@ impl SolarxyApp {
         // dialog as eight bits, which is the whole arrangement: the canvas
         // cannot show sixteen bytes a pixel, and the floats have no business
         // crossing the boundary except as the encoded file they end up in.
+        // The auxiliary planes land in their own stores, whole, because the
+        // depth display normalizes over the whole picture and a plane mapped
+        // tile by tile would band at every seam.
+        if let Some(p) = self.still_passes.as_mut() {
+            p.place(&tile);
+        }
         let rgba8 = if let Some(f) = self.still_float.as_mut() {
             f.place(tile.rect, &tile.pixels);
             std::borrow::Cow::Owned(solarxy_host::still::float_to_rgba8(&tile.pixels))
@@ -2053,6 +2218,117 @@ impl SolarxyApp {
             &JsValue::from(js_sys::Uint8Array::from(preview.pixels.as_slice())),
         );
         obj.into()
+    }
+
+    /// Which passes the running render produces, and whether its engine could
+    /// produce any at all.
+    ///
+    /// Two separate answers because a selector says two different things with
+    /// them. A pass the render did not ask for is offered and disabled, naming
+    /// what would produce it; a render whose engine writes none shows the
+    /// beauty alone, because there is no checkbox anywhere that would have
+    /// helped. The second is a capability rather than an identity, so the
+    /// window never asks which backend is running.
+    #[wasm_bindgen(js_name = stillPasses)]
+    pub fn still_passes(&self) -> Result<JsValue, JsError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        // Three passes and one capability. They are four answers to four
+        // questions, not a flag set with a shape worth extracting.
+        #[allow(clippy::struct_excessive_bools)]
+        struct PassesDto {
+            albedo: bool,
+            normal: bool,
+            depth: bool,
+            engine_writes_aovs: bool,
+        }
+        to_js(&PassesDto {
+            albedo: self.still_pass_request[0],
+            normal: self.still_pass_request[1],
+            depth: self.still_pass_request[2],
+            engine_writes_aovs: self.still_writes_aovs,
+        })
+    }
+
+    /// One pass as display pixels for the window, RGBA8 over the whole image.
+    ///
+    /// Mapped here rather than on the other side of the boundary, through the
+    /// same functions the terminal's watch window draws with, so the two
+    /// surfaces cannot come to look different. Computed on demand rather than
+    /// kept: a person looks at one pass at a time, and holding a display copy
+    /// of each beside the float planes would double what a render costs to
+    /// show something nobody is looking at.
+    ///
+    /// `undefined` when the render did not produce that pass, which is what a
+    /// selector should already have prevented.
+    #[wasm_bindgen(js_name = stillPassDisplay)]
+    pub fn still_pass_display(&self, pass: &str) -> JsValue {
+        let Some(p) = self.still_passes.as_ref() else {
+            return JsValue::UNDEFINED;
+        };
+        let bytes = match pass {
+            "albedo" => p
+                .aux
+                .as_ref()
+                .map(|a| solarxy_host::passes::albedo_rgba8(a)),
+            "normal" => p
+                .aux
+                .as_ref()
+                .map(|a| solarxy_host::passes::normal_rgba8(a)),
+            "depth" => p
+                .depth
+                .as_ref()
+                .map(|d| solarxy_host::passes::depth_rgba8(d)),
+            _ => None,
+        };
+        bytes.map_or(JsValue::UNDEFINED, |b| {
+            JsValue::from(js_sys::Uint8Array::from(b.as_slice()))
+        })
+    }
+
+    /// One pass as the file it is saved as.
+    ///
+    /// Always a floating-point image, whatever the beauty is: an eight-bit
+    /// albedo is a picture of an albedo and an eight-bit normal is useless, so
+    /// the command line writes every pass as float and this writes the same
+    /// bytes through the same encoders.
+    ///
+    /// # Errors
+    /// The pass not being one this render produced, or the encode failing.
+    #[wasm_bindgen(js_name = stillPassFile)]
+    pub fn still_pass_file(&self, pass: &str) -> Result<js_sys::Uint8Array, JsError> {
+        let Some(p) = self.still_passes.as_ref() else {
+            return Err(JsError::new("this render produced no auxiliary passes"));
+        };
+        let bytes = match pass {
+            "albedo" | "normal" => {
+                let aux = p
+                    .aux
+                    .as_ref()
+                    .ok_or_else(|| JsError::new("this render produced no auxiliary plane"))?;
+                let floats = solarxy_host::passes::floats_of(aux);
+                let plane = if pass == "albedo" {
+                    solarxy_host::passes::albedo_from_auxiliary(&floats)
+                } else {
+                    solarxy_host::passes::normal_from_auxiliary(&floats)
+                };
+                solarxy_formats::export::encode_exr_rgb_bytes(
+                    &solarxy_core::geometry::RawImageHdr::new(plane, p.width, p.height),
+                )
+                .map_err(|e| JsError::new(&format!("encoding the {pass} pass failed: {e}")))?
+            }
+            "depth" => {
+                let depth = p
+                    .depth
+                    .as_ref()
+                    .ok_or_else(|| JsError::new("this render produced no depth pass"))?;
+                let floats = solarxy_host::passes::floats_of(depth);
+                solarxy_formats::export::encode_exr_depth_bytes(&floats, p.width, p.height)
+                    .map_err(|e| JsError::new(&format!("encoding the depth pass failed: {e}")))?
+            }
+            other => return Err(JsError::new(&format!("{other} is not a pass"))),
+        };
+        Ok(js_sys::Uint8Array::from(bytes.as_slice()))
     }
 
     /// Encodes the finished floating-point still and hands back the file.
@@ -3873,11 +4149,12 @@ impl SolarxyApp {
             // readback decides what the tiles are and cannot be changed once
             // they are arriving.
             readback,
-            // No auxiliary passes: delivering several files out of one dialog
-            // is a design question rather than a wiring one, and the command
-            // line is where a person gets them until it is answered.
-            aux: false,
-            depth: false,
+            // Albedo and normal come out of one store, so either of them asks
+            // for the same copy. Derived exactly the way the headless command
+            // derives them, so a scene renders the same passes wherever it is
+            // opened.
+            aux: opts.aov_albedo || opts.aov_normal,
+            depth: opts.aov_depth,
             // The dialog is watching. At the production tile budget a 1920 by
             // 1080 render is a single tile, so without this nothing reaches the
             // canvas until the whole image is finished.

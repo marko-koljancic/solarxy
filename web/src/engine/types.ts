@@ -824,6 +824,28 @@ export interface StillTileDto {
   pixels: Uint8Array;
 }
 
+/** A pass a render window can show.
+ *
+ * The beauty is in the list because it is what a selector defaults to, and it
+ * is not an auxiliary pass: it is the picture, and every render has one. */
+export type StillPass = "beauty" | "albedo" | "normal" | "depth";
+
+/** What the running render produces, and what its engine could produce.
+ *
+ * Two answers rather than one, because a selector says different things with
+ * them: a pass nobody asked for is offered and disabled, naming the parameter
+ * that would produce it, while a render whose engine writes none shows the
+ * beauty alone, since no checkbox anywhere would have helped.
+ *
+ * `engineWritesAovs` is a capability, resolved from the backend's own constant.
+ * Nothing here asks which engine is running. */
+export interface StillPasses {
+  albedo: boolean;
+  normal: boolean;
+  depth: boolean;
+  engineWritesAovs: boolean;
+}
+
 /** What a still is saved as. Chosen before the render starts, because the
  * format decides what the tiles are and cannot change once they arrive. */
 export type StillFormat = "png" | "exr";
@@ -853,6 +875,14 @@ export interface RenderSettings {
   denoise: boolean;
   /** The `camera` node to shoot through, or null for the active pane's view. */
   camera: number | null;
+  /** The auxiliary passes the run writes beside the image.
+   *
+   * The production half of the pass model, and a property of the render node
+   * rather than of the window: what a render makes is authored in the document
+   * and what a window shows is chosen in the window. */
+  aovAlbedo: boolean;
+  aovNormal: boolean;
+  aovDepth: boolean;
 }
 
 /** The viewport tool. Rotate and Scale select, draw and

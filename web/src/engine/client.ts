@@ -39,6 +39,8 @@ import type {
   ScreenshotResult,
   RenderSettings,
   StillFormat,
+  StillPass,
+  StillPasses,
   StillSpace,
   StillTileDto,
   SaveExtra,
@@ -227,6 +229,23 @@ export class SolarxyClient {
    * the same coordinates, and it never reaches the file that is saved. */
   takeStillPreview(): StillTileDto | undefined {
     return (this.app.takeStillPreview() ?? undefined) as StillTileDto | undefined;
+  }
+
+  /** Which passes the running render produces, and whether its engine could
+   * produce any at all. */
+  stillPasses(): StillPasses {
+    return this.app.stillPasses() as StillPasses;
+  }
+
+  /** One pass as display pixels, RGBA8 over the whole image, mapped by the
+   * same functions the terminal's watch window draws with. */
+  stillPassDisplay(pass: StillPass): Uint8Array | undefined {
+    return (this.app.stillPassDisplay(pass) ?? undefined) as Uint8Array | undefined;
+  }
+
+  /** One pass as the floating-point file it is saved as. */
+  stillPassFile(pass: StillPass): Uint8Array {
+    return this.app.stillPassFile(pass) as Uint8Array;
   }
 
   /** Marks the picked node's scene object as selected (viewport tint). */

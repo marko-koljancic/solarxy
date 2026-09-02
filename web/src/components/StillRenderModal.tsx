@@ -20,12 +20,17 @@ import type {
   GraphContext,
   RenderSettings,
   StillFormat,
+  StillPass,
+  StillPasses,
   StillSpace,
   StillTileDto,
 } from "../engine/types";
 import { pushToast } from "../store/toasts";
+import { zipSync } from "fflate";
 import { useRenderJob } from "../store/renderJob";
+import { useViewState } from "../store/viewState";
 import { formatDurationMs } from "../render/duration";
+import { passAvailable, passOptions } from "../render/passes";
 import { Modal } from "./Modal";
 import { Row, Section } from "./DialogRow";
 import { Select } from "./Select";
@@ -70,8 +75,17 @@ export function StillRenderModal({
 }) {
   const job = useRenderJob();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // The picture itself, off screen. The visible canvas shows whichever pass is
+  // selected, so the beauty needs somewhere of its own to live: switching to
+  // the albedo and back has to replay what already arrived rather than lose it,
+  // and the passes are held on the Rust side while the beauty is only ever
+  // here. It is also what Save writes, so what is saved does not depend on what
+  // is being looked at.
+  const beautyRef = useRef<HTMLCanvasElement | null>(null);
   const [started, setStarted] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [pass, setPass] = useState<StillPass>("beauty");
+  const [passes, setPasses] = useState<StillPasses | undefined>(undefined);
   // The format is a property of the render rather than of the save, so it is
   // chosen here and locked once tiles start arriving.
   const [format, setFormat] = useState<StillFormat>("png");
@@ -117,27 +131,68 @@ export function StillRenderModal({
       ctx.putImageData(new ImageData(bytes, t.width, t.height), t.x, t.y);
     };
     const pump = () => {
-      const ctx = canvasRef.current?.getContext("2d");
-      if (ctx) {
+      const beauty = beautyRef.current?.getContext("2d");
+      const view = canvasRef.current?.getContext("2d");
+      // Painted into the visible canvas as well as the offscreen one, rather
+      // than blitting the whole picture every frame: a tile is a small
+      // rectangle and the whole picture is not.
+      const showing = pass === "beauty" ? view : null;
+      if (beauty) {
         // Previews first, tiles second, so that within one frame a finished
         // tile always lands on top of the unfinished look at the same
         // rectangle rather than under it.
         for (;;) {
           const preview = getClient().takeStillPreview();
           if (!preview) break;
-          paint(ctx, preview);
+          paint(beauty, preview);
+          if (showing) paint(showing, preview);
         }
+        let landed = false;
         for (;;) {
           const tile = getClient().takeStillTile();
           if (!tile) break;
-          paint(ctx, tile);
+          paint(beauty, tile);
+          if (showing) paint(showing, tile);
+          landed = true;
         }
+        // A pass only exists for tiles that finished, so it is worth remapping
+        // exactly when one has. A preview carries no passes and changes nothing
+        // here.
+        if (landed && pass !== "beauty" && view) showPass(view, pass);
       }
       raf = requestAnimationFrame(pump);
     };
     raf = requestAnimationFrame(pump);
     return () => cancelAnimationFrame(raf);
-  }, [started]);
+  }, [started, pass]);
+
+  // Draws one pass into the visible canvas, whole. Mapped on the Rust side by
+  // the same functions the terminal's watch window uses, so the two windows
+  // cannot come to show the same plane differently.
+  const showPass = (ctx: CanvasRenderingContext2D, which: StillPass) => {
+    const pixels = getClient().stillPassDisplay(which);
+    if (!pixels) return;
+    const { width, height } = request.settings;
+    const bytes = new Uint8ClampedArray(width * height * 4);
+    bytes.set(pixels);
+    ctx.putImageData(new ImageData(bytes, width, height), 0, 0);
+  };
+
+  // Switching is a replay of what already arrived, never a re-render.
+  useEffect(() => {
+    const view = canvasRef.current?.getContext("2d");
+    const beauty = beautyRef.current;
+    if (!view || !beauty) return;
+    if (pass === "beauty") {
+      view.clearRect(0, 0, beauty.width, beauty.height);
+      view.drawImage(beauty, 0, 0);
+    } else {
+      showPass(view, pass);
+    }
+    // `showPass` closes over the request's size, which does not change while a
+    // dialog is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pass, started]);
 
   // The job reports itself done through the store; the dialog notices and stops
   // calling itself busy.
@@ -148,6 +203,18 @@ export function StillRenderModal({
   const start = () => {
     setError(null);
     setFinished(false);
+    // Back to the beauty: the passes a previous run produced are gone, and a
+    // selector left pointing at one would be pointing at nothing.
+    setPass("beauty");
+    const { width, height } = request.settings;
+    // The offscreen picture, sized to this render. Recreated per run rather
+    // than resized, because a resize would leave the previous render's pixels
+    // in whatever part of it the new one does not cover.
+    const beauty = document.createElement("canvas");
+    beauty.width = width;
+    beauty.height = height;
+    beautyRef.current = beauty;
+    canvasRef.current?.getContext("2d")?.clearRect(0, 0, width, height);
     try {
       getClient().startStillRender(request.ctx, request.node, format, space);
     } catch (e) {
@@ -156,8 +223,9 @@ export function StillRenderModal({
       pushToast(message, "error");
       return;
     }
-    useRenderJob.getState().start(request.settings.width, request.settings.height);
+    useRenderJob.getState().start(width, height);
     setRenderedSpace(getClient().stillFloatSpace());
+    setPasses(getClient().stillPasses());
     setStarted(true);
   };
 
@@ -166,17 +234,56 @@ export function StillRenderModal({
     useRenderJob.getState().stop();
   };
 
+  // The offscreen picture rather than the visible canvas, so what is saved is
+  // the render rather than whichever pass happens to be on screen.
   const save = () => {
-    const canvas = canvasRef.current;
+    const canvas = beautyRef.current;
     if (!canvas) return;
     canvas.toBlob((blob) => {
       if (!blob) {
         pushToast("the image could not be encoded", "error");
         return;
       }
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      download(blob, `solarxy_still_${stamp}.png`);
+      download(blob, `${stem()}.png`);
     }, "image/png");
+  };
+
+  /// One name for a set of files, so a beauty and its passes sit together.
+  const stem = () =>
+    `solarxy_still_${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
+
+  /** Every pass this render produced, in one archive.
+   *
+   * One action rather than one dialog per file, which is the question that
+   * blocked auxiliary passes in the browser until now. The sibling naming is
+   * the command line's, unchanged, so a set of passes globs the same way
+   * wherever it came from, and the passes are floating point whatever the
+   * beauty is, for the reason the command line gives: an eight-bit normal is
+   * useless. */
+  const saveAll = async () => {
+    const produced = (["albedo", "normal", "depth"] as const).filter((p) =>
+      passAvailable(p, passes),
+    );
+    if (produced.length === 0) return;
+    const name = stem();
+    const files: Record<string, Uint8Array> = {};
+    try {
+      for (const p of produced) {
+        files[`${name}.${p}.exr`] = new Uint8Array(getClient().stillPassFile(p));
+      }
+      if (format === "exr") {
+        files[`${name}.exr`] = new Uint8Array(getClient().saveStillExr());
+      } else {
+        const blob = await new Promise<Blob | null>((resolve) =>
+          beautyRef.current?.toBlob(resolve, "image/png") ?? resolve(null),
+        );
+        if (blob) files[`${name}.png`] = new Uint8Array(await blob.arrayBuffer());
+      }
+      download(new Blob([zipSync(files)], { type: "application/zip" }), `${name}.zip`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      pushToast(message, "error");
+    }
   };
 
   const saveExr = () => {
@@ -185,8 +292,7 @@ export function StillRenderModal({
       // Copied out of the wasm heap before it becomes a Blob, for the reason
       // the tile drain gives: a view into that heap dies at the next
       // allocation the module makes.
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      download(new Blob([new Uint8Array(bytes)], { type: "image/x-exr" }), `solarxy_still_${stamp}.exr`);
+      download(new Blob([new Uint8Array(bytes)], { type: "image/x-exr" }), `${stem()}.exr`);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       pushToast(message, "error");
@@ -205,6 +311,37 @@ export function StillRenderModal({
         : null;
 
   const oversizeForFloat = format === "exr" && megapixels > FLOAT_MAX_MP;
+
+  // What the render node asked for, read from the settings rather than from the
+  // running job, so it reads correctly before Render is pressed too.
+  const requested = (["albedo", "normal", "depth"] as const).filter(
+    (p) =>
+      request.settings[
+        `aov${p.charAt(0).toUpperCase()}${p.slice(1)}` as
+          | "aovAlbedo"
+          | "aovNormal"
+          | "aovDepth"
+      ],
+  );
+  // Whether the chosen engine can write passes at all is a capability, read
+  // from the backend's own constant rather than decided here by its name. The
+  // engine names which capability to look at; it never answers the question.
+  const caps = useViewState((s) => s.backendCaps);
+  const engineWritesAovs =
+    caps === null
+      ? true
+      : (request.settings.engine === "pathTraced" ? caps.traced : caps.raster).writesAovs;
+  const producedNote = !engineWritesAovs
+    ? "None: this engine writes no auxiliary passes"
+    : requested.length === 0
+      ? "None"
+      : requested.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(", ");
+
+  // Offered only when there is a set to deliver. A render with no passes has
+  // nothing an archive would add to the two buttons beside it.
+  const anyPasses = (["albedo", "normal", "depth"] as const).some((p) =>
+    passAvailable(p, passes),
+  );
 
   const pct = job.tiles > 0 ? (job.tile + job.sample / Math.max(1, job.samples)) / job.tiles : 0;
 
@@ -291,7 +428,32 @@ export function StillRenderModal({
             </span>
           </Row>
         )}
+        <Row
+          label="Passes"
+          doc="Set on the render node. A pass is written beside the image for a compositor; which one this window shows is the separate control below."
+        >
+          <span className="prefs-unit">{producedNote}</span>
+        </Row>
       </Section>
+
+      {started && passOptions(passes).length > 1 && (
+        <Row
+          label="Showing"
+          doc="Which pass this window displays. Switching replays what has already arrived; it never re-renders, and it never changes what is saved."
+        >
+          <Select
+            ariaLabel="Pass shown"
+            value={pass}
+            options={passOptions(passes).map((o) => ({
+              value: o.value,
+              label: o.label,
+              hint: o.unavailable ? "not produced" : undefined,
+              disabled: o.unavailable !== undefined,
+            }))}
+            onChange={(v) => setPass(v as StillPass)}
+          />
+        </Row>
+      )}
 
       <div className="still-preview">
         <canvas
@@ -344,6 +506,16 @@ export function StillRenderModal({
         {renderedSpace && (
           <button className="btn" disabled={busy || !finished} onClick={saveExr}>
             Save EXR
+          </button>
+        )}
+        {anyPasses && (
+          <button
+            className="btn"
+            disabled={busy || !finished}
+            onClick={() => void saveAll()}
+            title="The image and every pass it produced, in one archive"
+          >
+            Save all
           </button>
         )}
         <button className="btn primary" disabled={busy || oversizeForFloat} onClick={start}>
