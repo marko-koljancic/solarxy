@@ -63,8 +63,10 @@ pub fn sibling(image: &Path, kind: AovKind) -> PathBuf {
 
 /// Drops the alpha lane of an RGBA float readback.
 ///
-/// A still has its background already in it, so the lane is a constant one
-/// pretending to be a matte. Writing it would invite a compositor to key on it.
+/// The opaque render's conversion: its background is already in the picture,
+/// so the lane is a constant one pretending to be a matte, and writing it
+/// would invite a compositor to key on it. A transparent render's lane is a
+/// real matte and skips this at the call site.
 #[must_use]
 pub fn rgb_from_rgba(pixels: &[f32]) -> Vec<f32> {
     pixels
@@ -73,6 +75,27 @@ pub fn rgb_from_rgba(pixels: &[f32]) -> Vec<f32> {
         .iter()
         .flat_map(|p| [p[0], p[1], p[2]])
         .collect()
+}
+
+/// Divides a scene-referred matte readback's coverage out of its colour, in
+/// place.
+///
+/// The accumulator counts a camera miss as black, so what a scene-referred
+/// readback holds is coverage-weighted colour beside the coverage itself.
+/// Everything on this side of the readback speaks unassociated colour plus a
+/// plain fraction, and the floating-point encoder is what re-multiplies on
+/// the way out; a display-referred readback needs no division here because
+/// the composite already divided before its nonlinear chain. The guard leaves
+/// a fully uncovered pixel alone: its zero matte is what clips whatever the
+/// colour lanes hold.
+pub fn unassociate_rgba(pixels: &mut [f32]) {
+    for px in pixels.as_chunks_mut::<4>().0 {
+        if px[3] > 0.0 {
+            px[0] /= px[3];
+            px[1] /= px[3];
+            px[2] /= px[3];
+        }
+    }
 }
 
 /// Encodes one pass and writes it beside the image.

@@ -622,11 +622,26 @@ fn write_all(
     // instead of being copied for it.
     let Assembled { color, aux, depth } = assembled;
     let encoded = if spec.readback == solarxy_host::still::StillReadback::Display8 {
+        // The eight-bit encoder already takes four channels; a transparent
+        // render's matte simply rides through it, straight, per its format's
+        // own convention, and an opaque render's constant lane is harmlessly
+        // constant.
         solarxy_formats::export::encode_png_bytes(&solarxy_core::RawImageData::new(
             color,
             spec.width,
             spec.height,
         ))?
+    } else if spec.transparent {
+        // The matte still: four channels to the writer that premultiplies on
+        // the way out. A scene-referred readback arrives coverage-weighted
+        // out of the accumulator and is divided out first, because the
+        // convention between readback and encoder is unassociated colour
+        // plus a plain fraction.
+        let mut floats = files::floats_of(&color);
+        if spec.readback == solarxy_host::still::StillReadback::SceneLinear {
+            files::unassociate_rgba(&mut floats);
+        }
+        solarxy_formats::export::encode_exr_rgba_bytes(&floats, spec.width, spec.height)?
     } else {
         solarxy_formats::export::encode_exr_rgb_bytes(&solarxy_core::RawImageHdr::new(
             files::rgb_from_rgba(&files::floats_of(&color)),

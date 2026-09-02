@@ -91,6 +91,13 @@ export function StillRenderModal({
   // here. It is also what Save writes, so what is saved does not depend on what
   // is being looked at.
   const beautyRef = useRef<HTMLCanvasElement | null>(null);
+  // The finished tiles, byte for byte, kept only for a transparent render. A
+  // canvas stores its backing premultiplied, so reading a straight-alpha
+  // image back out of one round-trips every partially covered pixel through
+  // a multiply and a divide; the PNG a transparent render saves is encoded
+  // from this copy instead, through the engine's own encoder, so the
+  // browser's file and the command line's carry the same values.
+  const pristineRef = useRef<Uint8ClampedArray | null>(null);
   const [started, setStarted] = useState(false);
   const [finished, setFinished] = useState(false);
   const [pass, setPass] = useState<StillPass>("beauty");
@@ -146,6 +153,19 @@ export function StillRenderModal({
       bytes.set(t.pixels);
       ctx.putImageData(new ImageData(bytes, t.width, t.height), t.x, t.y);
     };
+    // Finished tiles only, and copied in the same turn the tile crossed, for
+    // the wasm-heap reason paint gives. Previews never land here: they are a
+    // look at a tile that has not finished, and the pristine copy is the
+    // file.
+    const keep = (t: StillTileDto) => {
+      const dst = pristineRef.current;
+      if (!dst) return;
+      const { width } = request.settings;
+      for (let row = 0; row < t.height; row += 1) {
+        const src = row * t.width * 4;
+        dst.set(t.pixels.subarray(src, src + t.width * 4), ((t.y + row) * width + t.x) * 4);
+      }
+    };
     const pump = () => {
       const beauty = beautyRef.current?.getContext("2d");
       const visible = canvasRef.current?.getContext("2d");
@@ -169,6 +189,7 @@ export function StillRenderModal({
           if (!tile) break;
           paint(beauty, tile);
           if (showing) paint(showing, tile);
+          keep(tile);
           landed = true;
         }
         // A pass only exists for tiles that finished, so it is worth remapping
@@ -230,6 +251,11 @@ export function StillRenderModal({
     beauty.width = width;
     beauty.height = height;
     beautyRef.current = beauty;
+    // Fresh per run like the canvas, and only when the render carries a
+    // matte: an opaque render saves through the canvas as it always has.
+    pristineRef.current = request.settings.transparentBackground
+      ? new Uint8ClampedArray(width * height * 4)
+      : null;
     canvasRef.current?.getContext("2d")?.clearRect(0, 0, width, height);
     try {
       getClient().startStillRender(request.ctx, request.node, format, space);
@@ -250,9 +276,31 @@ export function StillRenderModal({
     useRenderJob.getState().stop();
   };
 
+  // The transparent render's PNG, encoded from the pristine tile copy through
+  // the engine's own encoder, or undefined when this render is opaque and the
+  // canvas path applies. Copied out of the wasm heap before it becomes a
+  // Blob, for the reason every other boundary read gives.
+  const pngBytes = (): Uint8Array<ArrayBuffer> | undefined => {
+    const pristine = pristineRef.current;
+    if (!pristine) return undefined;
+    const { width, height } = request.settings;
+    const raw = new Uint8Array(pristine.buffer, pristine.byteOffset, pristine.length);
+    return new Uint8Array(getClient().encodeStillPng(raw, width, height));
+  };
+
   // The offscreen picture rather than the visible canvas, so what is saved is
   // the render rather than whichever pass happens to be on screen.
   const save = () => {
+    try {
+      const bytes = pngBytes();
+      if (bytes) {
+        download(new Blob([bytes], { type: "image/png" }), `${stem()}.png`);
+        return;
+      }
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : String(e), "error");
+      return;
+    }
     const canvas = beautyRef.current;
     if (!canvas) return;
     canvas.toBlob((blob) => {
@@ -290,10 +338,15 @@ export function StillRenderModal({
       if (format === "exr") {
         files[`${name}.exr`] = new Uint8Array(getClient().saveStillExr());
       } else {
-        const blob = await new Promise<Blob | null>((resolve) =>
-          beautyRef.current?.toBlob(resolve, "image/png") ?? resolve(null),
-        );
-        if (blob) files[`${name}.png`] = new Uint8Array(await blob.arrayBuffer());
+        const bytes = pngBytes();
+        if (bytes) {
+          files[`${name}.png`] = bytes;
+        } else {
+          const blob = await new Promise<Blob | null>((resolve) =>
+            beautyRef.current?.toBlob(resolve, "image/png") ?? resolve(null),
+          );
+          if (blob) files[`${name}.png`] = new Uint8Array(await blob.arrayBuffer());
+        }
       }
       download(new Blob([zipSync(files)], { type: "application/zip" }), `${name}.zip`);
     } catch (e) {

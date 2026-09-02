@@ -196,6 +196,17 @@ export class SolarxyClient {
     return (this.app.stillFloatSpace() ?? undefined) as StillSpace | undefined;
   }
 
+  /** PNG-encodes an assembled RGBA8 still through the engine's own encoder.
+   *
+   * The transparent render's save path: a canvas stores its backing
+   * premultiplied, so toBlob round-trips straight alpha through a multiply
+   * and a divide and corrupts every partially covered pixel. The window keeps
+   * a pristine copy of the finished tiles and hands it here, so the browser's
+   * file and the command line's carry the same values. */
+  encodeStillPng(pixels: Uint8Array, width: number, height: number): Uint8Array {
+    return this.app.encodeStillPng(pixels, width, height) as Uint8Array;
+  }
+
   /** What a `render` node is asking for, for the dialog to show before
    * anything renders.
    *

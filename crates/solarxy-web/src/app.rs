@@ -325,6 +325,12 @@ struct RenderSettingsDto {
     aov_albedo: bool,
     aov_normal: bool,
     aov_depth: bool,
+    /// Whether the render carries a matte. The window reads it for two
+    /// things a picture cannot say about itself: showing the checker only
+    /// behind a render that actually has transparency, and routing the
+    /// eight-bit save through the engine's own encoder, whose straight alpha
+    /// a canvas round trip would corrupt.
+    transparent_background: bool,
 }
 
 impl From<solarxy_graph::nodes::RenderSettings> for RenderSettingsDto {
@@ -346,6 +352,7 @@ impl From<solarxy_graph::nodes::RenderSettings> for RenderSettingsDto {
             aov_albedo: s.aov_albedo,
             aov_normal: s.aov_normal,
             aov_depth: s.aov_depth,
+            transparent_background: s.transparent_background,
         }
     }
 }
@@ -625,7 +632,11 @@ const PREVIEW_TARGET_SAMPLES: u32 = 4096;
 /// and then encodes from them, so the peak is roughly forty bytes a pixel
 /// against the canvas path's four, inside a thirty-two-bit address space that
 /// is also holding the document, the tracer's buffers and the page. Sixteen
-/// megapixels puts the peak near 290 MB, which a tab can be asked for.
+/// megapixels puts the peak near 290 MB, which a tab can be asked for. A
+/// transparent render keeps its fourth channel and holds sixteen bytes a
+/// pixel instead of twelve, which moves that peak to roughly 350 MB at the
+/// same ceiling; the ceiling deliberately does not move for it, because a
+/// limit that shifted with a checkbox would be two limits wearing one name.
 ///
 /// The same shape as the screenshot path's four-megapixel ceiling, and for the
 /// same reason: a limit with a stated number beats an allocation failure,
@@ -2002,7 +2013,12 @@ impl SolarxyApp {
             StillEngine::PathTraced => PathBackend::CAPS.writes_aovs,
             StillEngine::Raster => solarxy_host::RasterBackend::CAPS.writes_aovs,
         };
-        self.still_float = solarxy_host::still::FloatImage::new(readback, spec.width, spec.height);
+        self.still_float = solarxy_host::still::FloatImage::new(
+            readback,
+            spec.width,
+            spec.height,
+            spec.transparent,
+        );
         // The job's own camera. Built from the named `camera` node when there
         // is one, and otherwise from the active pane's current view copied by
         // value: either way the panes are untouched, which is what makes
@@ -2276,9 +2292,46 @@ impl SolarxyApp {
                 "this still was not rendered as a floating-point image",
             ));
         };
-        let img = solarxy_core::geometry::RawImageHdr::new(f.rgb().to_vec(), f.width(), f.height());
-        let bytes = solarxy_formats::export::encode_exr_rgb_bytes(&img)
-            .map_err(|e| JsError::new(&format!("the image could not be encoded: {e}")))?;
+        // A matte still goes through the four-channel writer, which
+        // premultiplies on the way out; an opaque one keeps its three
+        // channels and its reasoning.
+        let bytes = if f.has_matte() {
+            solarxy_formats::export::encode_exr_rgba_bytes(f.rgba(), f.width(), f.height())
+        } else {
+            let img =
+                solarxy_core::geometry::RawImageHdr::new(f.rgb().to_vec(), f.width(), f.height());
+            solarxy_formats::export::encode_exr_rgb_bytes(&img)
+        }
+        .map_err(|e| JsError::new(&format!("the image could not be encoded: {e}")))?;
+        Ok(js_sys::Uint8Array::from(bytes.as_slice()))
+    }
+
+    /// PNG-encodes an assembled RGBA8 still through the same encoder the
+    /// command line writes with.
+    ///
+    /// Exists for the transparent render: a canvas stores its backing
+    /// premultiplied, so `toBlob` on one round-trips straight alpha through a
+    /// multiply and a divide and corrupts every partially covered pixel's
+    /// colour. The window keeps a pristine copy of the finished tiles beside
+    /// the canvas and hands it here, so the browser's file and the command
+    /// line's carry the same values for the same scene. Stateless on purpose:
+    /// the bytes cross once, at save time, and nothing is retained.
+    #[wasm_bindgen(js_name = encodeStillPng)]
+    pub fn encode_still_png(
+        &self,
+        pixels: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<js_sys::Uint8Array, JsError> {
+        if pixels.len() != (width as usize) * (height as usize) * 4 {
+            return Err(JsError::new("the buffer does not match the stated size"));
+        }
+        let bytes = solarxy_formats::export::encode_png_bytes(&solarxy_core::RawImageData::new(
+            pixels.to_vec(),
+            width,
+            height,
+        ))
+        .map_err(|e| JsError::new(&format!("the image could not be encoded: {e}")))?;
         Ok(js_sys::Uint8Array::from(bytes.as_slice()))
     }
 

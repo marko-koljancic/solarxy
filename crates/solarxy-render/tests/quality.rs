@@ -57,6 +57,7 @@ struct Authored {
     denoise_until_samples: Option<i64>,
     resolution_preset: Option<&'static str>,
     orientation: Option<&'static str>,
+    transparent_background: Option<bool>,
 }
 
 /// A scene lit mostly by bounce, with the render node authored from `a`.
@@ -270,6 +271,15 @@ fn scene_with(a: Authored) -> Vec<u8> {
             render,
             "orientation",
             ParamValue::Enum(orientation.into()),
+        );
+    }
+    if let Some(transparent) = a.transparent_background {
+        set(
+            &mut engine,
+            root,
+            render,
+            "transparent_background",
+            ParamValue::Bool(transparent),
         );
     }
 
@@ -722,5 +732,146 @@ fn a_named_output_size_reaches_the_written_file() {
         story,
         (1080, 1920),
         "portrait did not turn the preset on its way to the file"
+    );
+}
+
+/// Keeps the last picture whole, alpha included, for the matte assertions.
+#[derive(Default)]
+struct PixelGrab {
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+impl RenderSink for PixelGrab {
+    fn report(&mut self, _progress: &RenderProgress) {}
+
+    fn preview(&mut self, image: &Preview<'_>) {
+        assert!(
+            matches!(image.format, PreviewFormat::Rgba8),
+            "this test reads eight-bit pixels"
+        );
+        self.pixels = image.pixels.to_vec();
+        self.width = image.width;
+        self.height = image.height;
+    }
+}
+
+/// The first channel name in an EXR's header.
+///
+/// The channels attribute is `channels\0chlist\0`, a four-byte size, then the
+/// channel list with each name null-terminated, and the format requires the
+/// list sorted alphabetically. So the first name is `A` exactly when the file
+/// carries a matte and `B` (of B, G, R) exactly when it does not, and reading
+/// one byte here is what keeps this test from taking a decoder dependency for
+/// a question the header answers.
+fn first_channel(bytes: &[u8]) -> u8 {
+    let marker = b"chlist\0";
+    let at = bytes
+        .windows(marker.len())
+        .position(|w| w == marker)
+        .expect("an exr header names its channel list type");
+    bytes[at + marker.len() + 4]
+}
+
+/// The matte authored on the node reaches both files the command writes, and
+/// an opaque render keeps writing three channels.
+#[test]
+fn the_transparent_background_reaches_both_files() {
+    let dir = scratch("transparent");
+    let authored = Authored {
+        samples: Some(4),
+        seed: Some(11),
+        transparent_background: Some(true),
+        ..Authored::default()
+    };
+    let scene_path = dir.join("matte.slxy");
+    std::fs::write(&scene_path, scene_with(authored)).expect("write the scene");
+
+    // The eight-bit file, checked at the values: the sink is fed the same
+    // assembled pixels the encoder writes, and the encoder is RGBA through
+    // and through.
+    let png = dir.join("matte.png");
+    let opts = RenderOptions {
+        output: Some(Output::File(png.clone())),
+        width: Some(128),
+        height: Some(96),
+        ..RenderOptions::default()
+    };
+    let mut sink = PixelGrab::default();
+    match solarxy_render::run_render(&scene_path, &opts, &mut sink) {
+        Ok(_) => {}
+        Err(RenderError::NoAdapter) => {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        }
+        Err(e) => panic!("render failed: {e}"),
+    }
+    assert!(png.exists(), "the image was written");
+    let at = |x: u32, y: u32| -> &[u8] {
+        let i = ((y * sink.width + x) * 4) as usize;
+        &sink.pixels[i..i + 4]
+    };
+    assert_eq!(at(2, 2)[3], 0, "the sky is not covered");
+    assert_eq!(at(2, 2)[..3], [0, 0, 0], "an uncovered pixel holds nothing");
+    assert_eq!(
+        at(sink.width / 2, sink.height / 2)[3],
+        255,
+        "the subject is fully covered"
+    );
+    assert!(
+        sink.pixels.chunks_exact(4).any(|p| p[3] > 0 && p[3] < 255),
+        "a silhouette pixel is fractional"
+    );
+
+    // The floating-point file: an alpha channel exists exactly when the matte
+    // was asked for. The premultiplication itself is pinned where the encoder
+    // lives, in solarxy-formats, against the exr crate's own reader.
+    let exr = dir.join("matte.exr");
+    let opts = RenderOptions {
+        output: Some(Output::File(exr.clone())),
+        width: Some(64),
+        height: Some(48),
+        ..RenderOptions::default()
+    };
+    match solarxy_render::run_render(&scene_path, &opts, &mut solarxy_render::Silent) {
+        Ok(_) => {}
+        Err(RenderError::NoAdapter) => return,
+        Err(e) => panic!("render failed: {e}"),
+    }
+    assert_eq!(
+        first_channel(&std::fs::read(&exr).expect("the file")),
+        b'A',
+        "a matte render's float file carries an alpha channel"
+    );
+
+    // And the behaviour the reasoning still stands for: an opaque render's
+    // float file keeps its three channels, no constant fourth.
+    let opaque_scene = dir.join("opaque.slxy");
+    std::fs::write(
+        &opaque_scene,
+        scene_with(Authored {
+            samples: Some(4),
+            seed: Some(11),
+            ..Authored::default()
+        }),
+    )
+    .expect("write the scene");
+    let opaque_exr = dir.join("opaque.exr");
+    let opts = RenderOptions {
+        output: Some(Output::File(opaque_exr.clone())),
+        width: Some(64),
+        height: Some(48),
+        ..RenderOptions::default()
+    };
+    match solarxy_render::run_render(&opaque_scene, &opts, &mut solarxy_render::Silent) {
+        Ok(_) => {}
+        Err(RenderError::NoAdapter) => return,
+        Err(e) => panic!("render failed: {e}"),
+    }
+    assert_eq!(
+        first_channel(&std::fs::read(&opaque_exr).expect("the file")),
+        b'B',
+        "an opaque render's float file stays three channels"
     );
 }

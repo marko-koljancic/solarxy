@@ -1011,6 +1011,50 @@ pub fn encode_exr_rgb_bytes(img: &RawImageHdr) -> Result<Vec<u8>, FormatsError> 
     ))
 }
 
+/// EXR-encodes a linear RGBA float image with a matte, **premultiplying on
+/// the way out**.
+///
+/// `pixels` is four floats per pixel, colour unassociated and alpha a plain
+/// coverage fraction; what leaves carries `rgb * a`, because premultiplied is
+/// what the floating-point format's ecosystem assumes and what a compositor
+/// will treat the file as whether or not anyone says so. The multiplication
+/// happens here and nowhere else: doing it earlier would mean the renderer
+/// knowing which file its pixels are destined for, and the eight-bit path
+/// deliberately does not do it, because that format's specification says
+/// straight. The two files therefore differ numerically at partially covered
+/// pixels, which is the documented consequence of each format getting its own
+/// convention rather than a defect.
+///
+/// A sibling of [`encode_exr_rgb_bytes`] rather than a flag on it: the two
+/// have different callers and different channel sets, and an opaque render
+/// keeps writing three channels, because its alpha would be a constant one
+/// pretending to be a matte.
+///
+/// # Errors
+/// The encode failing, which for a well-formed image it does not.
+pub fn encode_exr_rgba_bytes(
+    pixels: &[f32],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, FormatsError> {
+    let (w, h) = (width as usize, height as usize);
+    let sampler = exr::image::SpecificChannels::rgba(|position: exr::math::Vec2<usize>| {
+        let i = (position.1 * w + position.0) * 4;
+        // Clamped rather than indexed blind, like the three-channel writer:
+        // a short buffer is a caller error, and returning nothing at all for
+        // it beats a panic inside a writer thread.
+        match pixels.get(i..i + 4) {
+            Some(p) => (p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]),
+            None => (0.0, 0.0, 0.0, 0.0),
+        }
+    });
+    write_exr(&exr::image::Image::from_encoded_channels(
+        (w, h),
+        EXR_ENCODING,
+        sampler,
+    ))
+}
+
 /// EXR-encodes a single-channel depth pass as the channel named `Z`.
 ///
 /// `Z` is what a compositing package looks for, and one channel rather than a
@@ -1667,5 +1711,63 @@ mod tests {
             .map(|c| c.name.to_string())
             .collect();
         assert_eq!(names, vec!["Z".to_string()]);
+    }
+
+    /// The matte writer premultiplies, and only the matte writer.
+    ///
+    /// Unassociated colour with a fractional matte goes in; what the file
+    /// holds is `rgb * a` beside the untouched `a`, read back through the exr
+    /// crate itself rather than through this crate's own decoder, so a writer
+    /// that quietly stopped multiplying would fail here rather than in
+    /// somebody's compositor.
+    #[test]
+    fn the_matte_writer_premultiplies_on_the_way_out() {
+        use exr::prelude::{ReadChannels, ReadLayers};
+        // One opaque pixel, one half-covered, one uncovered with stray colour
+        // (which premultiplication is what clips), one quarter-covered.
+        let pixels: Vec<f32> = vec![
+            0.8, 0.6, 0.4, 1.0, //
+            0.8, 0.6, 0.4, 0.5, //
+            0.9, 0.9, 0.9, 0.0, //
+            0.4, 0.2, 0.1, 0.25,
+        ];
+        let bytes = encode_exr_rgba_bytes(&pixels, 4, 1).expect("exr");
+        let image = exr::prelude::read()
+            .no_deep_data()
+            .largest_resolution_level()
+            .rgba_channels(
+                |size, _| vec![[0.0f32; 4]; size.0 * size.1],
+                |px: &mut Vec<[f32; 4]>, pos, (r, g, b, a): (f32, f32, f32, f32)| {
+                    px[pos.1 * 4 + pos.0] = [r, g, b, a];
+                },
+            )
+            .first_valid_layer()
+            .all_attributes()
+            .from_buffered(std::io::Cursor::new(bytes))
+            .expect("read back");
+        let back = &image.layer_data.channel_data.pixels;
+        for (i, want_a) in [1.0f32, 0.5, 0.0, 0.25].iter().enumerate() {
+            let src = &pixels[i * 4..i * 4 + 4];
+            let got = back[i];
+            for c in 0..3 {
+                assert!(
+                    (got[c] - src[c] * want_a).abs() < 1e-6,
+                    "channel {c} of pixel {i} is premultiplied"
+                );
+            }
+            assert!(
+                (got[3] - want_a).abs() < 1e-6,
+                "the matte itself is untouched"
+            );
+        }
+    }
+
+    /// The matte writer is as deterministic as its siblings.
+    #[test]
+    fn the_matte_writer_encodes_to_the_same_bytes() {
+        let pixels: Vec<f32> = (0..64 * 48 * 4).map(|i| (i % 251) as f32 / 251.0).collect();
+        let a = encode_exr_rgba_bytes(&pixels, 64, 48).expect("exr");
+        let b = encode_exr_rgba_bytes(&pixels, 64, 48).expect("exr");
+        assert_eq!(a, b, "two encodes of one matte image differed");
     }
 }

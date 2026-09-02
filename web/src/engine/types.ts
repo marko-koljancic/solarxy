@@ -883,6 +883,12 @@ export interface RenderSettings {
   aovAlbedo: boolean;
   aovNormal: boolean;
   aovDepth: boolean;
+  /** Whether the render carries a matte. The window reads it for two things
+   * the picture cannot say about itself: the checker shows only behind a
+   * render that actually has transparency, and the eight-bit save routes
+   * through the engine's own encoder, whose straight alpha a canvas round
+   * trip would corrupt. */
+  transparentBackground: boolean;
 }
 
 /** The viewport tool. Rotate and Scale select, draw and

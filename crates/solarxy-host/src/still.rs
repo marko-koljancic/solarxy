@@ -165,7 +165,11 @@ pub fn readback_for(format: &str, space: &str) -> StillReadback {
 /// The clamp *is* the tone mapping for a scene-referred image, which is why
 /// both surfaces say so rather than letting it look like the picture.
 ///
-/// `bytes` is four `f32` a pixel; the result is four bytes a pixel, opaque.
+/// `bytes` is four `f32` a pixel; the result is four bytes a pixel, with the
+/// alpha lane carried straight through. Coverage is a fraction rather than
+/// light, so it quantizes linearly with no transfer curve; an opaque render's
+/// lane is exactly one and lands as exactly 255, which is why honouring it
+/// changed no existing byte.
 #[must_use]
 pub fn float_to_rgba8(bytes: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(bytes.len() / 4);
@@ -181,7 +185,9 @@ pub fn float_to_rgba8(bytes: &[u8]) -> Vec<u8> {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             out.push((encoded * 255.0).round().clamp(0.0, 255.0) as u8);
         }
-        out.push(255);
+        let a = f32::from_le_bytes([px[12], px[13], px[14], px[15]]).clamp(0.0, 1.0);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        out.push((a * 255.0).round() as u8);
     }
     out
 }
@@ -286,10 +292,13 @@ impl StillSpec {
 
 /// A floating-point still being assembled from tiles.
 ///
-/// Three channels rather than four, because that is what the encoder takes and
-/// a still has its background already in it, so an alpha lane would be a
-/// constant one pretending to be a matte. Dropping it here rather than at
-/// encode time saves a quarter of the buffer at the size where that matters.
+/// Three channels for an opaque render, because that is what its encoder takes
+/// and its alpha would be a constant one pretending to be a matte; dropping the
+/// lane here rather than at encode time saves a quarter of the buffer at the
+/// size where that matters. A transparent render keeps all four, colour
+/// unassociated and alpha a plain coverage fraction, which is the one internal
+/// convention both formats derive their own from: the floating-point encoder
+/// multiplies on the way out and the eight-bit path does not.
 ///
 /// Shared by both graphical shells rather than written twice, which is what
 /// makes "the same scene saved from either produces the same values" a property
@@ -300,23 +309,35 @@ pub struct FloatImage {
     /// Scene-referred or display-referred, matching the readback that filled
     /// it. Carried so an encode cannot mislabel what it wrote.
     scene_linear: bool,
-    /// `width * height * 3`, in image order.
-    rgb: Vec<f32>,
+    /// Four when the still carries a matte, else three.
+    channels: usize,
+    /// `width * height * channels`, in image order.
+    data: Vec<f32>,
 }
 
 impl FloatImage {
     /// The buffer a float readback needs, or `None` for the eight-bit one,
     /// which is assembled as bytes and needs nothing here.
+    ///
+    /// `transparent` keeps the alpha lane: the still carries a matte and the
+    /// fourth channel is it.
     #[must_use]
-    pub fn new(readback: StillReadback, width: u32, height: u32) -> Option<Self> {
+    pub fn new(
+        readback: StillReadback,
+        width: u32,
+        height: u32,
+        transparent: bool,
+    ) -> Option<Self> {
         if readback == StillReadback::Display8 {
             return None;
         }
+        let channels = if transparent { 4 } else { 3 };
         Some(Self {
             width,
             height,
             scene_linear: readback == StillReadback::SceneLinear,
-            rgb: vec![0.0; (width as usize) * (height as usize) * 3],
+            channels,
+            data: vec![0.0; (width as usize) * (height as usize) * channels],
         })
     }
 
@@ -336,15 +357,37 @@ impl FloatImage {
         self.scene_linear
     }
 
+    /// Whether the fourth channel exists and is a matte.
+    #[must_use]
+    pub fn has_matte(&self) -> bool {
+        self.channels == 4
+    }
+
+    /// The opaque image: three floats a pixel.
     #[must_use]
     pub fn rgb(&self) -> &[f32] {
-        &self.rgb
+        debug_assert_eq!(self.channels, 3, "a matte image is read through rgba()");
+        &self.data
+    }
+
+    /// The matte image: four floats a pixel, colour unassociated, alpha the
+    /// coverage fraction. What [`FloatImage::has_matte`] promises.
+    #[must_use]
+    pub fn rgba(&self) -> &[f32] {
+        debug_assert_eq!(self.channels, 4, "an opaque image is read through rgb()");
+        &self.data
     }
 
     /// Copies one finished tile's colour into its place in the image.
     ///
-    /// The tile arrives as four `f32` a pixel and lands as three; the alpha a
-    /// still carries is a constant one.
+    /// The tile arrives as four `f32` a pixel. An opaque still lands as three,
+    /// its alpha a constant one; a matte still keeps the lane, and when the
+    /// readback is scene-referred the colour arrives coverage-weighted out of
+    /// the accumulator and is divided out here, because everything on the CPU
+    /// side of the readback speaks unassociated colour plus a fraction and the
+    /// encoders own their formats' conventions. A display-referred readback
+    /// arrives already unassociated: the composite divided before its
+    /// nonlinear chain.
     pub fn place(&mut self, rect: TileRect, pixels: &[u8]) {
         let src = crate::passes::floats_of(pixels);
         for row in 0..rect.height {
@@ -354,12 +397,17 @@ impl FloatImage {
                 if x >= self.width || y >= self.height {
                     continue;
                 }
-                let dst_at = ((y as usize) * (self.width as usize) + (x as usize)) * 3;
+                let dst_at = ((y as usize) * (self.width as usize) + (x as usize)) * self.channels;
                 if let (Some(p), Some(slot)) = (
-                    src.get(src_at..src_at + 3),
-                    self.rgb.get_mut(dst_at..dst_at + 3),
+                    src.get(src_at..src_at + self.channels),
+                    self.data.get_mut(dst_at..dst_at + self.channels),
                 ) {
                     slot.copy_from_slice(p);
+                    if self.channels == 4 && self.scene_linear && slot[3] > 0.0 {
+                        for c in 0..3 {
+                            slot[c] /= slot[3];
+                        }
+                    }
                 }
             }
         }
@@ -1679,5 +1727,92 @@ mod tests {
         }
         let out = super::float_to_rgba8(&bytes);
         assert_eq!(out[0], 3, "0.001 linear is 3, through the linear segment");
+    }
+
+    /// The preview carries a fractional matte straight through: coverage is a
+    /// fraction rather than light, so it quantizes linearly, with no transfer
+    /// curve.
+    #[test]
+    fn the_float_preview_carries_the_matte_linearly() {
+        let mut bytes = Vec::new();
+        for c in [0.5_f32, 0.5, 0.5, 0.5] {
+            bytes.extend_from_slice(&c.to_le_bytes());
+        }
+        let out = super::float_to_rgba8(&bytes);
+        assert_eq!(out[3], 128, "half coverage is 128, not 188");
+    }
+
+    /// A tile's floats, as the readback delivers them.
+    fn tile_bytes(pixels: &[[f32; 4]]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for px in pixels {
+            for c in px {
+                bytes.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        bytes
+    }
+
+    /// A display-referred matte tile lands as it arrived: the composite
+    /// already divided the coverage out before its nonlinear chain.
+    #[test]
+    fn a_display_referred_matte_tile_lands_unassociated_as_it_arrived() {
+        let mut image = FloatImage::new(StillReadback::DisplayFloat, 2, 1, true).expect("float");
+        assert!(image.has_matte());
+        let tile = TileRect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 1,
+        };
+        image.place(
+            tile,
+            &tile_bytes(&[[0.8, 0.6, 0.4, 0.5], [0.2, 0.2, 0.2, 0.0]]),
+        );
+        assert_eq!(image.rgba(), &[0.8, 0.6, 0.4, 0.5, 0.2, 0.2, 0.2, 0.0]);
+    }
+
+    /// A scene-referred matte tile arrives coverage-weighted out of the
+    /// accumulator and is divided out on landing, so everything on this side
+    /// of the readback speaks unassociated colour plus a fraction; the guard
+    /// leaves an uncovered pixel's lanes alone, and its zero matte is what
+    /// clips them.
+    #[test]
+    fn a_scene_referred_matte_tile_is_unassociated_on_landing() {
+        let mut image = FloatImage::new(StillReadback::SceneLinear, 2, 1, true).expect("float");
+        let tile = TileRect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 1,
+        };
+        image.place(
+            tile,
+            &tile_bytes(&[[0.4, 0.3, 0.2, 0.5], [0.1, 0.1, 0.1, 0.0]]),
+        );
+        let got = image.rgba();
+        for (i, want) in [0.8, 0.6, 0.4, 0.5].iter().enumerate() {
+            assert!((got[i] - want).abs() < 1e-6, "channel {i}");
+        }
+        assert_eq!(&got[4..8], &[0.1, 0.1, 0.1, 0.0]);
+    }
+
+    /// The opaque image is unchanged by the matte's existence: three channels,
+    /// the constant lane dropped on landing.
+    #[test]
+    fn an_opaque_float_image_stays_three_channels() {
+        let mut image = FloatImage::new(StillReadback::SceneLinear, 2, 1, false).expect("float");
+        assert!(!image.has_matte());
+        let tile = TileRect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 1,
+        };
+        image.place(
+            tile,
+            &tile_bytes(&[[0.4, 0.3, 0.2, 1.0], [0.1, 0.2, 0.3, 1.0]]),
+        );
+        assert_eq!(image.rgb(), &[0.4, 0.3, 0.2, 0.1, 0.2, 0.3]);
     }
 }

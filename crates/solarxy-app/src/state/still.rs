@@ -358,7 +358,12 @@ impl State {
         // the same clamp the browser shows a float still with, because the
         // modal's preview is a screen and a screen is eight bits.
         let image = vec![0u8; spec.width as usize * spec.height as usize * 4];
-        let float = solarxy_host::still::FloatImage::new(readback, spec.width, spec.height);
+        let float = solarxy_host::still::FloatImage::new(
+            readback,
+            spec.width,
+            spec.height,
+            spec.transparent,
+        );
 
         self.gui.begin_still();
         self.still = Some(StillState {
@@ -833,13 +838,20 @@ fn write_exr(
     path: &std::path::Path,
     image: &solarxy_host::still::FloatImage,
 ) -> Result<(), String> {
-    let hdr = solarxy_core::geometry::RawImageHdr::new(
-        image.rgb().to_vec(),
-        image.width(),
-        image.height(),
-    );
-    let bytes = solarxy_formats::export::encode_exr_rgb_bytes(&hdr)
-        .map_err(|e| format!("the image could not be encoded: {e}"))?;
+    // A matte still goes through the four-channel writer, which premultiplies
+    // on the way out; an opaque one keeps writing three channels, because its
+    // alpha would be a constant one pretending to be a matte.
+    let bytes = if image.has_matte() {
+        solarxy_formats::export::encode_exr_rgba_bytes(image.rgba(), image.width(), image.height())
+    } else {
+        let hdr = solarxy_core::geometry::RawImageHdr::new(
+            image.rgb().to_vec(),
+            image.width(),
+            image.height(),
+        );
+        solarxy_formats::export::encode_exr_rgb_bytes(&hdr)
+    }
+    .map_err(|e| format!("the image could not be encoded: {e}"))?;
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
