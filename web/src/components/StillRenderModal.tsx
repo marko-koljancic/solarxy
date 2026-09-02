@@ -589,7 +589,14 @@ export function StillRenderModal({
           ref={canvasRef}
           width={request.settings.width}
           height={request.settings.height}
-          className="render-canvas"
+          // The checker appears only behind a render that carries a matte:
+          // behind an opaque one it would read as alpha the render does not
+          // have, which is the ruling the plain ground records.
+          className={
+            request.settings.transparentBackground
+              ? "render-canvas render-canvas-matte"
+              : "render-canvas"
+          }
           aria-label="The still being rendered"
           style={{
             left: `${rect.x}px`,

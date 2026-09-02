@@ -2673,9 +2673,28 @@ body.reduce-motion * {
 }
 .render-canvas {
   position: absolute;
-  /* Checkerboard-free: a still is opaque, and a transparent-looking backdrop
-     would read as alpha the render does not have. */
+  /* This ground was ruled checkerboard-free when every still was opaque: a
+     transparent-looking backdrop would have read as alpha the render did not
+     have. That ruling was right, and the transparent film back is what made
+     it false; the matte variant below is the same reasoning pointed the
+     other way, and it appears only when the render was asked for with a
+     matte, so an opaque render still implies nothing. */
   background: var(--background-tertiary);
+}
+/* The checker behind a transparent render, on the canvas element so it sits
+   exactly under the image and nowhere else. It paints behind the bitmap and
+   is sized in CSS pixels, so it holds its scale under zoom instead of
+   becoming a pattern in the picture; it rides with the element under pan,
+   attached to the image the way its transparency is. The same recipe the
+   asset preview uses, over the same ground the opaque canvas keeps. */
+.render-canvas-matte {
+  background:
+    repeating-conic-gradient(
+        color-mix(in srgb, var(--ink-primary) 7%, transparent) 0% 25%,
+        transparent 0% 50%
+      )
+      0 0 / 24px 24px,
+    var(--background-tertiary);
 }
 .modal-actions .prefs-unit {
   margin-right: auto;

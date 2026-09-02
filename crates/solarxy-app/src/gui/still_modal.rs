@@ -131,6 +131,12 @@ pub(crate) struct StillRenderModal {
     /// does not silently revert to the default.
     format: StillFormat,
     space: StillSpace,
+    /// Whether the running render carries a matte, from the job's own spec at
+    /// start rather than from the dialog's opening: what renders is what the
+    /// node says when Render is pressed. The preview sits on a checker when
+    /// it does, so transparency reads as transparency here the way it does in
+    /// the browser's render window.
+    transparent: bool,
 }
 
 impl StillRenderModal {
@@ -167,8 +173,9 @@ impl StillRenderModal {
 
     /// The job has begun. Everything the previous run left behind is cleared
     /// here rather than at open, so the format chosen while idle survives.
-    pub fn begin(&mut self) {
+    pub fn begin(&mut self, transparent: bool) {
         self.phase = StillPhase::Running;
+        self.transparent = transparent;
         self.progress = (0, 0, 0, self.samples);
         self.elapsed_ms = 0;
         self.remaining_ms = None;
@@ -347,7 +354,20 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
         ui.add_space(6.0);
 
         if let Some(preview) = &modal.preview {
-            ui.add(egui::Image::new(preview));
+            if modal.transparent {
+                // The statement the browser's render window makes, restated
+                // here: a checker behind the image exactly where the image
+                // is, so a matte reads as a matte instead of blending into
+                // the panel. Painted cell by cell because egui has no pattern
+                // fill; the preview edge is bounded, so this is a few hundred
+                // rectangles.
+                let size = preview.size_vec2();
+                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                paint_checker(ui.painter(), rect, theme);
+                egui::Image::new(preview).paint_at(ui, rect);
+            } else {
+                ui.add(egui::Image::new(preview));
+            }
             ui.add_space(6.0);
         }
 
@@ -478,5 +498,39 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
 
     if !keep_open || close_clicked {
         modal.close();
+    }
+}
+
+/// The checker a matte preview sits on.
+///
+/// The browser's recipe, restated in egui's vocabulary: alternating cells of
+/// the foreground at seven percent over the raised surface, both read from the
+/// theme rather than authored here, per the palette rule. Cells are sized in
+/// screen points, so the checker is a reference surface rather than part of
+/// the picture, and square corners throughout, per the theme's own rule.
+fn paint_checker(painter: &egui::Painter, rect: egui::Rect, theme: &Theme) {
+    const CELL: f32 = 12.0;
+    painter.rect_filled(rect, 0.0, theme.bg_elevated);
+    let ink = theme.fg;
+    let cell_color =
+        egui::Color32::from_rgba_unmultiplied(ink.r(), ink.g(), ink.b(), (255.0 * 0.07) as u8);
+    let mut row = 0u32;
+    let mut y = rect.top();
+    while y < rect.bottom() {
+        let mut col = 0u32;
+        let mut x = rect.left();
+        while x < rect.right() {
+            if (row + col).is_multiple_of(2) {
+                let cell = egui::Rect::from_min_max(
+                    egui::pos2(x, y),
+                    egui::pos2((x + CELL).min(rect.right()), (y + CELL).min(rect.bottom())),
+                );
+                painter.rect_filled(cell, 0.0, cell_color);
+            }
+            x += CELL;
+            col += 1;
+        }
+        y += CELL;
+        row += 1;
     }
 }

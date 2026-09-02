@@ -365,7 +365,7 @@ impl State {
             spec.transparent,
         );
 
-        self.gui.begin_still();
+        self.gui.begin_still(spec.transparent);
         self.still = Some(StillState {
             job,
             camera,

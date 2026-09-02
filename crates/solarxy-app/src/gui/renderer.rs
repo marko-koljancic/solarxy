@@ -1035,9 +1035,11 @@ impl EguiRenderer {
         self.still_modal.take_render_request()
     }
 
-    /// The job has started; the dialog stops being idle.
-    pub fn begin_still(&mut self) {
-        self.still_modal.begin();
+    /// The job has started; the dialog stops being idle. `transparent` comes
+    /// from the job's own spec, so the preview's checker cannot drift from
+    /// what the render actually carries.
+    pub fn begin_still(&mut self, transparent: bool) {
+        self.still_modal.begin(transparent);
     }
 
     /// Hand the modal the render's elapsed and remaining, both computed by the
