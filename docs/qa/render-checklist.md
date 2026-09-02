@@ -119,3 +119,38 @@ should be treated as a defect.
 - [ ] The suggested filename carries the extension the chosen format decides.
 - [ ] Cancelling the save picker leaves the dialog able to save again.
 - [ ] Render again after changing the format renders in the new one.
+
+## 7. The transparent background
+
+Author `transparent_background` on a scene's render node. The Cornell box is the
+scene to prefer: its walls fill the frame, so add a camera pulled back far
+enough that sky shows around the box, or use any scene with visible sky.
+
+The convention to hold every file against: **the floating-point files carry
+premultiplied alpha and the eight-bit files carry straight alpha.** The two
+therefore differ numerically at partially covered pixels, on purpose; a
+compositor that honours each convention composites both identically over the
+same plate.
+
+- [ ] Both engines honour the option: a rasterized transparent still and a
+      traced one are transparent in the same places.
+- [ ] The environment still lights the scene: the subject in a transparent
+      render matches the same render with a background, and only the background
+      differs. A mirrored or glossy surface still carries the sky in its
+      reflections.
+- [ ] A mirrored surface against the sky is opaque in the matte.
+- [ ] The saved PNG opens with its transparency in an image editor and in a
+      browser; a silhouette is antialiased rather than staircased.
+- [ ] The saved EXR opens in a compositor and composites cleanly over a plate:
+      no dark fringe, no halo at silhouettes.
+- [ ] **A browser PNG and a command-line PNG of one transparent scene carry the
+      same values.** The browser encodes through the engine's own encoder
+      precisely so a canvas round trip cannot corrupt the straight alpha; a
+      difference here is that defect resurfacing.
+- [ ] The render window shows a checker through the matte, in both themes, and
+      the checker holds its scale under zoom. The desktop modal's preview shows
+      its checker the same way.
+- [ ] An opaque render of the same scene shows no checker anywhere and is
+      byte-for-byte what it was.
+- [ ] A graded transparent render is transparent in exactly the places the
+      ungraded one is.
