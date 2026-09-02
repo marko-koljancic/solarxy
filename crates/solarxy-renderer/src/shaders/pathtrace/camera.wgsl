@@ -21,12 +21,13 @@ struct Camera {
     inv_proj: mat4x4f,
 }
 
-// 56 bytes, and declared whole, so it is in the uniform-layout table.
+// 72 bytes, and declared whole, so it is in the uniform-layout table.
 //
-// No padding word: every member aligns to eight or four, so the struct aligns to
-// eight and fifty-six is already a multiple of it. Adding a `vec3f` or a `vec4f`
-// here would raise the alignment to sixteen and need one, which is why the
-// environment is a separate uniform rather than four more floats on the end.
+// No padding word: the flags field occupies what was the padding word, so every
+// member aligns to eight or four, the struct aligns to eight, and seventy-two
+// is already a multiple of it. Adding a `vec3f` or a `vec4f` here would raise
+// the alignment to sixteen and need one, which is why the environment is a
+// separate uniform rather than four more floats on the end.
 struct TraceParams {
     // Where this dispatch's tile sits in the image, in pixels.
     tile_offset: vec2u,
@@ -83,11 +84,18 @@ struct TraceParams {
     // The luminance one sample's indirect contribution may reach. Zero or less
     // turns the clamp off. See `path.wgsl`.
     firefly_clamp: f32,
-    // Pads the struct to its own eight-byte alignment. WGSL rounds the size up
-    // whether or not this is here; naming it is what keeps the Rust record the
-    // same size as this one.
-    reserved: u32,
+    // Bit flags; see the constants below. Zero changes no arithmetic, which is
+    // what every caller written before the flags existed sends. This word was
+    // the struct's padding, so spending it moved nothing.
+    flags: u32,
 }
+
+// The environment lights the scene without being photographed into the frame:
+// a camera ray that reaches the sky before finding a surface contributes
+// nothing, and the rays that did find one are counted into the coverage
+// buffer. The matte a transparent render carries is that count over the
+// samples drawn.
+const PATH_FLAG_TRANSPARENT: u32 = 1u;
 
 @group(3) @binding(0) var<uniform> camera: Camera;
 @group(3) @binding(1) var<uniform> params: TraceParams;

@@ -327,7 +327,8 @@ impl BindGroupLayouts {
 pub struct PathtraceLayouts {
     /// Group 0: the scene arena's storage buffers.
     pub scene: wgpu::BindGroupLayout,
-    /// Group 1: the storage textures the kernel writes.
+    /// Group 1: the storage textures the kernel writes, plus the coverage
+    /// count buffer a transparent render's matte accumulates in.
     pub target: wgpu::BindGroupLayout,
     /// Group 2: sampled textures. The atlas and its two samplers; the
     /// environment's equirect and lookup textures are reserved by number.
@@ -351,10 +352,14 @@ impl PathtraceLayouts {
         // Seven of core WebGPU's eight compute-stage storage buffers, which is
         // the whole budget the design set out to spend: 4 is the material pool
         // and 5 the lights, both arriving with their consumers rather than as
-        // placeholders. **Binding 7 is the last one and stays unspent**, the
-        // escape hatch a ninth logical array would otherwise force, which is
-        // why the numbering is not contiguous and why nothing may renumber
-        // into it.
+        // placeholders. Binding 7 stays unnumbered here, but the *count* it was
+        // reserving is now spent: the coverage buffer on the target group below
+        // is the stage's eighth storage buffer. A ninth logical array can no
+        // longer simply take a slot; it would have to move coverage into a
+        // replay kernel of its own (a primary-only kernel with its own
+        // `r32float` read-write texture, one of four in that stage), which is
+        // the recorded fallback and the price of the matte counting itself
+        // inside the path kernel rather than beside it.
         let scene = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pathtrace_scene_bind_group_layout"),
             entries: &[
@@ -386,6 +391,15 @@ impl PathtraceLayouts {
         // layout entry unused; a bind *group* may not, which is why
         // `TraceTarget` allocates both pairs whether or not anything reads
         // them.
+        //
+        // Binding 4 is a storage *buffer*, not a fifth texture: the coverage
+        // count behind a transparent render's matte. It could not be a texture
+        // -- the four above are the stage's whole texture budget -- and it
+        // needs no ping-pong, because `u32` is one of the formats read-write
+        // access is portable for, buffer or texture alike. It is the compute
+        // stage's eighth and last storage buffer beside the scene group's
+        // seven, which is a deliberate spend of the reserved slot; the comment
+        // on the scene group says what a ninth array would now cost.
         let target = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pathtrace_target_bind_group_layout"),
             entries: &[
@@ -393,6 +407,7 @@ impl PathtraceLayouts {
                 bgl_storage_texture_entry(1, wgpu::StorageTextureAccess::WriteOnly),
                 bgl_storage_texture_entry(2, wgpu::StorageTextureAccess::ReadOnly),
                 bgl_storage_texture_entry(3, wgpu::StorageTextureAccess::ReadOnly),
+                bgl_compute_storage_rw_entry(4),
             ],
         });
         // The sampled group: the atlas and its two samplers at 0 to 2, and the
@@ -532,6 +547,24 @@ fn bgl_compute_storage_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
         visibility: wgpu::ShaderStages::COMPUTE,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A compute-stage read-write storage buffer entry.
+///
+/// The accumulating kind: the coverage count loads what a chunk already wrote
+/// and adds to it inside one dispatch's own pixel, which a read-only entry
+/// cannot express and a second buffer plus a ping-pong would over-express.
+fn bgl_compute_storage_rw_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: false },
             has_dynamic_offset: false,
             min_binding_size: None,
         },

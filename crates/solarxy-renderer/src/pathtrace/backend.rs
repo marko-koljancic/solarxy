@@ -108,6 +108,15 @@ pub struct TraceSettings {
     /// mean into the pane-sized target. Never applied to a windowed
     /// render, whose tile is a window on a picture whose size is authored.
     pub resolution_scale: f32,
+    /// The environment lights the scene without being photographed into the
+    /// frame, and the kernel counts what the camera actually saw into the
+    /// coverage buffer so the resolve can write a real matte.
+    ///
+    /// A render property, never a display mode: the interactive preview
+    /// leaves it false. Changing it invalidates every pane like any other
+    /// settings change, which is right, because a mean accumulated opaque is
+    /// not a mean of the transparent render.
+    pub transparent_background: bool,
 }
 
 impl Default for TraceSettings {
@@ -125,6 +134,7 @@ impl Default for TraceSettings {
             denoise: false,
             denoise_until_samples: 0,
             resolution_scale: 1.0,
+            transparent_background: false,
         }
     }
 }
@@ -719,7 +729,11 @@ impl RenderBackend for PathBackend {
             chunk,
             sample_base: pane.samples,
             firefly_clamp: settings.firefly_clamp,
-            ..TraceParams::default()
+            flags: if settings.transparent_background {
+                TraceParams::FLAG_TRANSPARENT
+            } else {
+                0
+            },
         };
         pane.uniforms.write(ctx.queue, &params, &environment);
         kernel.encode(

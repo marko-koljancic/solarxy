@@ -31,6 +31,16 @@
 // those.
 @group(1) @binding(2) var path_prev: texture_storage_2d<rgba32float, read>;
 @group(1) @binding(3) var path_aux_prev: texture_storage_2d<rgba32float, read>;
+// One count per pixel, tile-local and row-major: how many of the run's camera
+// rays found a surface. A transparent render's matte, before the resolve
+// divides it by the samples drawn.
+//
+// A storage buffer rather than a fifth texture, because the four above are the
+// stage's whole storage-texture budget; and no ping-pong, because read-write
+// access is portable for `u32` and an integer count accumulates in place
+// exactly. Touched only under `PATH_FLAG_TRANSPARENT`, and a fresh dispatch
+// stores rather than adds, so nothing ever clears it.
+@group(1) @binding(4) var<storage, read_write> path_coverage: array<u32>;
 
 // What one path saw, beyond the light it carried back.
 struct PathResult {
@@ -45,6 +55,19 @@ struct PathResult {
     // surface to describe, and writing zeroes for it would tell a denoiser the
     // sky is a black wall facing nowhere.
     hit: bool,
+    // Whether the camera's own walk ended at a surface or a light rather than
+    // at the environment. This is coverage, and it is a different question
+    // from `hit`: a mirror is covered but describes nothing, so a matte built
+    // from `hit` would cut a hole where the camera plainly saw metal.
+    //
+    // The walk passes through alpha-mask holes and resolves alpha-blend
+    // stochastically, exactly as the shading does, so a cutout's holes are
+    // clear and a blended pane mattes by its own probability. A transmissive
+    // surface is covered: the camera found glass, and what refracted through
+    // it is in the colour. A walk that runs out of bounces while still
+    // passing through coverage found nothing and is not covered, which is
+    // self-consistent with the black it contributes.
+    covered: bool,
 }
 
 // Which surfaces are worth describing.
@@ -65,6 +88,9 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
     out.albedo = vec3f(0.0);
     out.normal = vec3f(0.0);
     out.hit = false;
+    out.covered = false;
+
+    let transparent = (params.flags & PATH_FLAG_TRANSPARENT) != 0u;
 
     var rng = rng_init(pixel, sample_index, params.samples, params.seed);
 
@@ -121,16 +147,29 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
             radiance += carried
                 * light_hit.radiance
                 * scatter_mis_weight(scatter_pdf, light_hit.pdf, params.light_count);
-            // An area light is an opaque emitter: the path ends on it.
+            // An area light is an opaque emitter: the path ends on it. The
+            // camera seeing one is coverage: an emitter is a surface, and its
+            // radiance is in the colour.
+            out.covered = true;
             break;
         }
 
         if !hit.hit {
             // Weighted, because next-event estimation samples the environment
             // too and this is the same radiance arrived at the other way.
-            radiance += throughput
-                * env_radiance(direction)
-                * scatter_mis_weight(scatter_pdf, env_pdf(direction), params.light_count);
+            //
+            // Unless this render is transparent and the camera's own walk is
+            // still going: then the environment lights the scene without being
+            // photographed into it, so a camera ray that leaves into the sky
+            // contributes nothing, and its absence is exactly what the matte
+            // records. Once the walk has ended at a surface, `covered` is set
+            // and every later miss is a reflection or a refraction of the sky,
+            // which stays: that is the environment lighting the scene.
+            if !(transparent && !out.covered) {
+                radiance += throughput
+                    * env_radiance(direction)
+                    * scatter_mis_weight(scatter_pdf, env_pdf(direction), params.light_count);
+            }
             break;
         }
 
@@ -180,6 +219,11 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
             origin = step_ray_origin(origin, direction, -geo_ws * side, hit.t);
             continue;
         }
+
+        // The ray stops here, so if it is still the camera's own -- no scatter
+        // yet -- the walk has ended at a surface and the pixel is covered.
+        // Idempotent past the first scatter, where it is already true.
+        out.covered = true;
 
         let normal_ws = world_normal(inst, shading_normal(hit));
         let tangent_obj = shading_tangent(hit);
@@ -342,6 +386,7 @@ fn path_main(@builtin(global_invocation_id) gid: vec3u) {
     var albedo = vec3f(0.0);
     var normal = vec3f(0.0);
     var described = 0u;
+    var covered = 0u;
     for (var s = 0u; s < draw; s += 1u) {
         let result = path_trace(pixel, params.sample_base + s);
         sum += result.radiance;
@@ -349,6 +394,9 @@ fn path_main(@builtin(global_invocation_id) gid: vec3u) {
             albedo += result.albedo;
             normal += result.normal;
             described += 1u;
+        }
+        if result.covered {
+            covered += 1u;
         }
     }
 
@@ -391,6 +439,28 @@ fn path_main(@builtin(global_invocation_id) gid: vec3u) {
     let described_before = select(0.0, prev_color.a, !fresh);
     let described_now = described_before + f32(described);
     textureStore(path_out, coord, vec4f(color, described_now));
+
+    // The matte's count, kept beside the mean rather than in it: how many of
+    // the run's camera rays found a surface. It cannot share the alpha lane
+    // above -- two counts to 8192 need more integer bits than an f32 carries
+    // exactly -- and it is not the same count: a mirror is covered but
+    // describes nothing, so a matte built from `described` would cut a hole
+    // where the camera plainly saw metal.
+    //
+    // An integer sum in a `u32`, so a run chunked ten ways and a run drawn in
+    // one dispatch land on the identical count, which is what makes the
+    // matte exact rather than drifting. Only a transparent render pays for
+    // the write; under that flag the colour mean above is coverage-weighted
+    // by construction, since a camera ray that found nothing contributed
+    // nothing.
+    if (params.flags & PATH_FLAG_TRANSPARENT) != 0u {
+        let cell = gid.y * params.tile_size.x + gid.x;
+        if fresh {
+            path_coverage[cell] = covered;
+        } else {
+            path_coverage[cell] += covered;
+        }
+    }
 
     // The auxiliary channels: the albedo of the first surface rough enough to
     // look like itself, and its world normal.

@@ -257,16 +257,27 @@ pub struct TraceParams {
     /// directly-viewed emitter or environment keeps its authored brightness;
     /// see `path.wgsl`.
     pub firefly_clamp: f32,
-    /// Pads the struct to its own alignment. See below. Never read; build one
-    /// of these through [`Default`] rather than naming this.
-    pub _pad: u32,
+    /// Bit flags. Bit 0 ([`TraceParams::FLAG_TRANSPARENT`]) renders with a
+    /// transparent background: a camera ray that reaches the environment
+    /// before finding a surface contributes nothing, and the kernel counts the
+    /// rays that did find one into the coverage buffer so the resolve can
+    /// write a real matte. Zero, which [`Default`] gives every caller written
+    /// before the flag existed, changes no arithmetic at all.
+    ///
+    /// This word was the struct's padding, so spending it moved nothing.
+    pub flags: u32,
 }
 
-// Seventy-two bytes with one padding word. Every member aligns to eight or
-// four, so the struct aligns to eight, and the sixty-eight bytes the members
-// occupy round up to the next multiple of it. WGSL does that rounding whether
-// or not the pad is written, so writing it is what keeps the Rust size equal to
-// the shader's; `tests/uniform_layout.rs` is what checks that it does.
+impl TraceParams {
+    /// The environment lights the scene without being photographed into the
+    /// frame, and the coverage buffer records what the camera actually saw.
+    pub const FLAG_TRANSPARENT: u32 = 1;
+}
+
+// Seventy-two bytes and no padding: the flags word occupies what was the
+// padding word, so every member aligns to eight or four, the struct aligns to
+// eight, and seventy-two is already a multiple of it.
+// `tests/uniform_layout.rs` is what checks the shader's record agrees.
 //
 // A `vec3f` or `vec4f` appended here would raise the alignment to sixteen and
 // need more, which is why the environment is its own uniform instead.
@@ -764,8 +775,9 @@ impl TraceAtlas {
     }
 }
 
-/// The accumulator: two `Rgba32Float` colour images, two auxiliary images, and
-/// a bind group for each direction of the ping-pong.
+/// The accumulator: two `Rgba32Float` colour images, two auxiliary images, a
+/// coverage count buffer, and a bind group for each direction of the
+/// ping-pong.
 ///
 /// # Why two of each
 ///
@@ -794,6 +806,18 @@ pub struct TraceTarget {
     /// Albedo in `rgb` with the octahedral world normal in `a`, indexed by
     /// the same slot as the colour it describes.
     auxiliary: [wgpu::Texture; 2],
+    /// One `u32` per pixel: how many of the run's camera rays found a surface,
+    /// which is a transparent render's matte before the resolve divides it by
+    /// the samples drawn.
+    ///
+    /// A buffer rather than a fifth texture, because the four textures above
+    /// are the stage's whole storage-texture budget; and one buffer rather
+    /// than a pair, because read-write access is portable for `u32` and the
+    /// count accumulates in place. It does not ping-pong and both bind groups
+    /// share it. The kernel touches it only under
+    /// [`TraceParams::FLAG_TRANSPARENT`], and a fresh dispatch stores rather
+    /// than adds, so nothing ever clears it.
+    coverage: wgpu::Buffer,
     /// `groups[i]` writes slot `i` and reads slot `i ^ 1`.
     groups: [wgpu::BindGroup; 2],
     /// Held so the resolve and the denoiser can bind the colour without
@@ -839,6 +863,15 @@ impl TraceTarget {
             storage("Pathtrace Auxiliary A"),
             storage("Pathtrace Auxiliary B"),
         ];
+        // A bind group must fill every layout entry, so the coverage buffer
+        // exists whether or not a render is transparent. Four bytes a pixel,
+        // beside four textures of sixteen each.
+        let coverage = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Coverage"),
+            size: u64::from(width) * u64::from(height) * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
         let views = |t: &[wgpu::Texture; 2]| {
             [
                 t[0].create_view(&wgpu::TextureViewDescriptor::default()),
@@ -868,6 +901,10 @@ impl TraceTarget {
                         binding: 3,
                         resource: wgpu::BindingResource::TextureView(&aux_views[slot ^ 1]),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: coverage.as_entire_binding(),
+                    },
                 ],
             })
         };
@@ -875,6 +912,7 @@ impl TraceTarget {
         Self {
             color,
             auxiliary,
+            coverage,
             groups,
             color_views,
             aux_views,
@@ -963,6 +1001,41 @@ impl TraceTarget {
     #[must_use]
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    /// The coverage count buffer: one `u32` per pixel, row-major at the
+    /// target's own size, meaningful only after a dispatch that ran under
+    /// [`TraceParams::FLAG_TRANSPARENT`].
+    ///
+    /// Exposed rather than private to the resolve, because the matte this
+    /// counts is the alpha pass a later compositing pass set will want.
+    #[must_use]
+    pub fn coverage_buffer(&self) -> &wgpu::Buffer {
+        &self.coverage
+    }
+
+    /// Encodes a copy of the coverage counts into a mappable buffer.
+    ///
+    /// Submit the encoder, then drive [`CoverageReadback::poll`] the way the
+    /// float readbacks are driven.
+    #[must_use]
+    pub fn encode_coverage_readback(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> CoverageReadback {
+        let size = u64::from(self.width) * u64::from(self.height) * 4;
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Coverage Readback"),
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        encoder.copy_buffer_to_buffer(&self.coverage, 0, &staging, 0, size);
+        CoverageReadback {
+            buffer: staging,
+            receiver: None,
+        }
     }
 
     /// Encodes a full-image copy into a mappable buffer.
@@ -1056,6 +1129,61 @@ impl FloatReadback {
         drop(data);
         self.buffer.unmap();
         ReadbackPoll::Ready(out)
+    }
+}
+
+/// One in-flight readback of the coverage count buffer.
+///
+/// A buffer copy rather than a texture copy, so there is no row padding to
+/// strip; otherwise it is driven exactly like [`FloatReadback`], polled and
+/// never blocking.
+pub struct CoverageReadback {
+    buffer: wgpu::Buffer,
+    receiver: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
+}
+
+/// The state of a polled coverage readback.
+pub enum CoveragePoll {
+    /// Not resolved yet; poll again next frame.
+    Pending,
+    /// The map failed; the readback is abandoned.
+    Failed,
+    /// One count per pixel, row-major at the target's size.
+    Ready(Vec<u32>),
+}
+
+impl CoverageReadback {
+    /// Pumps the device without blocking and checks the map, arming it on the
+    /// first call.
+    pub fn poll(&mut self, device: &wgpu::Device) -> CoveragePoll {
+        if self.receiver.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.buffer
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = tx.send(result);
+                });
+            self.receiver = Some(rx);
+        }
+        let _ = device.poll(wgpu::PollType::Poll);
+
+        let Some(rx) = self.receiver.as_ref() else {
+            return CoveragePoll::Failed;
+        };
+        match rx.try_recv() {
+            Ok(Ok(())) => {}
+            Err(std::sync::mpsc::TryRecvError::Empty) => return CoveragePoll::Pending,
+            Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                tracing::error!("pathtrace coverage readback map failed");
+                return CoveragePoll::Failed;
+            }
+        }
+
+        let data = self.buffer.slice(..).get_mapped_range();
+        let out = bytemuck::cast_slice::<u8, u32>(&data).to_vec();
+        drop(data);
+        self.buffer.unmap();
+        CoveragePoll::Ready(out)
     }
 }
 
