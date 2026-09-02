@@ -167,6 +167,20 @@ pub const GIZMO_PX: f32 = 90.0;
 /// Click tolerance around an axis shaft or a ring band, in pixels.
 pub const HIT_PX: f32 = 9.0;
 
+/// The radius of a light's viewport marker, in pixels.
+///
+/// Lives here beside the gizmo's own sizes rather than with the marker
+/// geometry, because it is read twice and by two crates that must agree: the
+/// renderer draws a marker this big, and the engine's pick tests a disc this
+/// big in screen space. They cannot disagree, because the host reads this one
+/// constant and hands it to both, the same way it already hands
+/// `GIZMO_PX * world_per_pixel` to the manipulator.
+///
+/// Smaller than a gizmo handle on purpose. A marker is a thing to find and
+/// click, not a thing to drag, and at gizmo size six of them would crowd a
+/// scene they exist to help you read.
+pub const MARKER_PX: f32 = 11.0;
+
 /// Where the shaft stops and the arrowhead begins.
 const HEAD_START: f32 = 0.78;
 const HEAD_RADIUS: f32 = 0.055;

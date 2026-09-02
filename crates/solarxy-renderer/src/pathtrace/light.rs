@@ -225,6 +225,7 @@ mod tests {
 
     fn def(kind: LightKind) -> LightDef {
         LightDef {
+            id: solarxy_core::scene::SceneObjectId::UNAUTHORED,
             kind,
             position: [1.0, 2.0, 3.0],
             direction: [0.0, -1.0, 0.0],

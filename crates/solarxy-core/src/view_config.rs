@@ -249,6 +249,13 @@ fn default_exposure() -> f32 {
     1.0
 }
 
+/// For a serde default that has to be on rather than off. `#[serde(default)]`
+/// on a `bool` gives false, which for a visibility flag means the feature
+/// silently disappears for everyone with a saved layout.
+fn default_true() -> bool {
+    true
+}
+
 fn unit_vec3() -> [f32; 3] {
     [1.0; 3]
 }
@@ -319,6 +326,10 @@ impl PaneDisplaySettings {
             uv_zoom: 1.0,
             show_uv_overlap: false,
             show_validation: false,
+            // A still is a photograph of the scene. A light marker is a thing
+            // you aim with, not a thing in the scene, so it stays out for the
+            // same reason the grid does.
+            show_light_markers: false,
             turntable_active: false,
             // A still's engine is authored on the render node and carried
             // by the job's spec, never by these settings.
@@ -350,6 +361,20 @@ pub struct PaneDisplaySettings {
     pub uv_zoom: f32,
     pub show_uv_overlap: bool,
     pub show_validation: bool,
+    /// Draw a screen-constant marker at every light, so a light can be found
+    /// and aimed at without knowing where it already is.
+    ///
+    /// On by default, because a light with no marker is invisible and the
+    /// alternative is hunting for it in the parameter panel. Distinct from a
+    /// light's own `show_helper`, which draws the world-scaled wireframe
+    /// describing that light's *extent*: the two answer different questions
+    /// and coexist.
+    ///
+    /// Serde default so older pane blobs deserialize, and it defaults to
+    /// **true** rather than to `bool`'s false, which is why it names a
+    /// function rather than taking the bare attribute.
+    #[serde(default = "default_true")]
+    pub show_light_markers: bool,
     /// Live per-pane turntable spin. Session-temporary: the web host
     /// resets it on load, so it is never restored from a saved scene. Serde
     /// default so older pane blobs deserialize.
@@ -375,4 +400,45 @@ pub enum PaneEngine {
     #[default]
     Raster,
     Traced,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::preferences::BackgroundMode;
+
+    /// What a still is, asserted rather than left to the struct literal.
+    ///
+    /// The literal is exhaustive, so a new field cannot be forgotten; what it
+    /// cannot catch is a field added with the wrong answer. Every flag here is
+    /// a working aid, and a delivered still is a photograph of the scene.
+    #[test]
+    fn a_still_draws_the_scene_and_none_of_the_aids_for_working_on_it() {
+        let pds = PaneDisplaySettings::for_still(BackgroundMode::GRADIENT);
+        assert!(!pds.show_grid, "grid");
+        assert!(!pds.show_axis_gizmo, "axis gizmo");
+        assert!(!pds.show_local_axes, "local axes");
+        assert!(!pds.show_validation, "validation overlay");
+        assert!(!pds.show_light_markers, "light markers");
+        assert_eq!(pds.bounds_mode, BoundsMode::Off);
+        assert_eq!(pds.normals_mode, NormalsMode::Off);
+        assert_eq!(pds.material_override, MaterialOverride::None);
+    }
+
+    /// A pane blob saved before markers existed has to come back with them on,
+    /// or the feature silently disappears for everyone with a saved layout.
+    #[test]
+    fn an_older_pane_blob_deserializes_with_markers_on() {
+        let mut v = serde_json::to_value(PaneDisplaySettings::for_still(BackgroundMode::GRADIENT))
+            .expect("serializes");
+        v.as_object_mut()
+            .expect("an object")
+            .remove("showLightMarkers")
+            .expect("the field was there to remove");
+        let back: PaneDisplaySettings = serde_json::from_value(v).expect("deserializes");
+        assert!(
+            back.show_light_markers,
+            "a missing flag must default on, not to bool's false"
+        );
+    }
 }

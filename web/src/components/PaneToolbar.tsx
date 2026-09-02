@@ -510,6 +510,12 @@ function PaneControls({ pane, settings, projection, active }: {
           onPick={() => patch({ showAxisGizmo: !settings.showAxisGizmo })}
         />
         <GhostItem
+          label="Light markers"
+          checked={settings.showLightMarkers}
+          sticky
+          onPick={() => patch({ showLightMarkers: !settings.showLightMarkers })}
+        />
+        <GhostItem
           label="Validation overlay"
           checked={settings.showValidation}
           sticky

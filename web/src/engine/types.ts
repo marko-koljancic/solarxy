@@ -685,6 +685,11 @@ export interface PaneDisplaySettings {
   uvZoom: number;
   showUvOverlap: boolean;
   showValidation: boolean;
+  /** Draw a screen-constant marker at every light, so one can be found and
+   * clicked without knowing where it already is. On by default. Distinct from
+   * a light's own Show Helper param, which draws the world-scaled wireframe
+   * describing that light's extent; the two answer different questions. */
+  showLightMarkers: boolean;
   /** Live per-pane turntable spin; session-temporary, not persisted. */
   turntableActive: boolean;
   /** Which backend draws this pane's 3D content. A traced pane is still a

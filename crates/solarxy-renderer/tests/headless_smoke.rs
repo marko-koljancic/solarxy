@@ -222,6 +222,8 @@ fn a_frame_with_labels_submits_without_validation_errors() {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        // The smoke suite draws no authored lights.
+        show_light_markers: false,
         turntable_active: false,
         pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     };
@@ -512,6 +514,8 @@ fn the_two_grading_slots_behave_as_specified() {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        // The smoke suite draws no authored lights.
+        show_light_markers: false,
         turntable_active: false,
         pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     };

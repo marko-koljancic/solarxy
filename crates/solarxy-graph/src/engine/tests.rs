@@ -2707,19 +2707,135 @@ fn geo_cast_shadow_toggle_reaches_the_delta_and_spares_the_lights() {
     let _ = light;
 }
 
+// ---- light marker picking ----
+
+/// A camera looking down -Z from z = 10 at the origin, and the screen context
+/// a pick from its centre would carry. 200 by 200 pixels, so a marker at the
+/// world origin projects to (100, 100).
+fn marker_context(cursor_px: [f32; 2]) -> (solarxy_core::gizmo::TransformParams, MarkerPick) {
+    let view = cgmath::Matrix4::look_at_rh(
+        cgmath::Point3::new(0.0, 0.0, 10.0),
+        cgmath::Point3::new(0.0, 0.0, 0.0),
+        cgmath::Vector3::unit_y(),
+    );
+    let proj = cgmath::perspective(cgmath::Deg(45.0), 1.0, 0.1, 100.0);
+    let vp: cgmath::Matrix4<f32> = proj * view;
+    (
+        solarxy_core::gizmo::TransformParams::default(),
+        MarkerPick {
+            view_proj: vp.into(),
+            viewport_px: [200.0, 200.0],
+            cursor_px,
+            radius_px: 11.0,
+        },
+    )
+}
+
+#[test]
+fn a_click_on_a_lights_marker_selects_that_light() {
+    let mut e = engine();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    // Park it where the camera is looking, so its marker lands mid-screen.
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: light,
+        key: "position".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([0.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let (_, hit) = marker_context([100.0, 100.0]);
+    let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
+    assert_eq!(e.pick(origin, dir, Some(hit)), Some(light));
+
+    // Well outside the marker's radius: nothing, rather than the light.
+    let (_, miss) = marker_context([160.0, 100.0]);
+    assert_eq!(e.pick(origin, dir, Some(miss)), None);
+
+    // And with no marker context the pick is exactly what it always was.
+    assert_eq!(e.pick(origin, dir, None), None);
+}
+
+/// The precedence the criteria name: a marker drawn over geometry takes the
+/// click, because it is drawn on top and a person clicking what they can see
+/// expects to get it.
+#[test]
+fn a_marker_over_geometry_takes_the_click() {
+    let (mut e, geo, ..) = displayed_box();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: light,
+        key: "position".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([0.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
+    // The ray alone finds the box, which is what the geometry walk answers.
+    assert_eq!(e.pick(origin, dir, None), Some(geo));
+
+    // With the marker in play, the same click takes the light instead.
+    let (_, hit) = marker_context([100.0, 100.0]);
+    assert_eq!(e.pick(origin, dir, Some(hit)), Some(light));
+
+    // A click away from the marker still falls through to the geometry.
+    let (_, off) = marker_context([100.0, 160.0]);
+    assert_eq!(e.pick(origin, dir, Some(off)), Some(geo));
+}
+
+#[test]
+fn an_invisible_light_catches_no_clicks() {
+    let mut e = engine();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: light,
+        key: "position".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([0.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
+    let (_, hit) = marker_context([100.0, 100.0]);
+    assert_eq!(e.pick(origin, dir, Some(hit)), Some(light));
+
+    set_root_bool(&mut e, light, "visible", false);
+    assert_eq!(
+        e.pick(origin, dir, Some(hit)),
+        None,
+        "an invisible light draws no marker, so it has nothing to click"
+    );
+}
+
+/// The two lights with no position mark the world origin, which is where the
+/// hemisphere light's helper dome has always drawn.
+#[test]
+fn a_scene_wide_light_marks_the_world_origin() {
+    let mut e = engine();
+    let ambient = add(&mut e, GraphContext::Root, "ambient_light");
+    e.cook(&mut || true);
+
+    let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
+    let (_, hit) = marker_context([100.0, 100.0]);
+    assert_eq!(e.pick(origin, dir, Some(hit)), Some(ambient));
+}
+
 #[test]
 fn hidden_geo_is_not_pickable() {
     let (mut e, geo, ..) = displayed_box();
     let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
-    assert_eq!(e.pick(origin, dir), Some(geo));
+    assert_eq!(e.pick(origin, dir, None), Some(geo));
     assert!(e.pick_detailed(origin, dir).is_some());
 
     set_root_bool(&mut e, geo, "visible", false);
-    assert_eq!(e.pick(origin, dir), None);
+    assert_eq!(e.pick(origin, dir, None), None);
     assert!(e.pick_detailed(origin, dir).is_none());
 
     set_root_bool(&mut e, geo, "visible", true);
-    assert_eq!(e.pick(origin, dir), Some(geo));
+    assert_eq!(e.pick(origin, dir, None), Some(geo));
 }
 
 #[test]
@@ -2832,13 +2948,13 @@ fn pick_returns_the_geo_container_under_the_ray() {
     e.cook(&mut || true);
 
     // A ray down the +Z axis toward the origin hits the box's geo.
-    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0]), Some(geo));
+    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0], None), Some(geo));
     // The same ray reversed points away: no hit.
-    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 1.0]), None);
+    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 1.0], None), None);
     // A ray that misses the box entirely.
-    assert_eq!(e.pick([100.0, 100.0, 100.0], [1.0, 0.0, 0.0]), None);
+    assert_eq!(e.pick([100.0, 100.0, 100.0], [1.0, 0.0, 0.0], None), None);
     // A degenerate (zero-length) direction is rejected.
-    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 0.0]), None);
+    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 0.0], None), None);
 }
 
 #[test]
@@ -2897,7 +3013,7 @@ fn save_and_load_document_round_trips_and_emits_replaced() {
 
     // The loaded document cooks and picks like the original.
     e2.cook(&mut || true);
-    assert_eq!(e2.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0]), Some(geo));
+    assert_eq!(e2.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0], None), Some(geo));
 
     // A freshly minted node gets a brand-new id (the mint resumed past the
     // loaded ids), so it is distinct from the loaded box.

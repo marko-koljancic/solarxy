@@ -21,7 +21,7 @@ use solarxy_bvh::Bvh;
 use solarxy_core::AABB;
 use solarxy_core::geometry::RawMaterialData;
 use solarxy_core::preferences::ProjectionMode;
-use solarxy_core::scene::{LightDef, LightKind};
+use solarxy_core::scene::{LightDef, LightKind, SceneObjectId};
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::pathtrace::arena::{ArenaMesh, ArenaPlacement, INSTANCE_VISIBLE, TraceArena};
 use solarxy_renderer::pathtrace::light::TracedLight;
@@ -241,6 +241,7 @@ fn panel() -> LightDef {
 /// A rect light with everything but its shape and brightness at rest.
 fn base_light() -> LightDef {
     LightDef {
+        id: SceneObjectId::UNAUTHORED,
         kind: LightKind::RectArea,
         position: [0.0, 3.0, 0.0],
         direction: [0.0, -1.0, 0.0],

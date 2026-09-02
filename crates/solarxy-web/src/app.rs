@@ -153,6 +153,9 @@ fn default_pane_settings() -> PaneDisplaySettings {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        // On: a light with no marker is invisible, and this is the shell that
+        // can grab one.
+        show_light_markers: true,
         turntable_active: false,
         pane_engine: PaneEngine::Raster,
     }
@@ -1655,9 +1658,13 @@ impl SolarxyApp {
         }
     }
 
-    /// Picks the geo node under a canvas CSS pixel, pane-aware: the ray is
+    /// Picks the node under a canvas CSS pixel, pane-aware: the ray is
     /// built from the pane under the cursor with that pane's camera.
     /// Returns the node id as a number, or `undefined` on a miss.
+    ///
+    /// A light's marker is tested before the geometry, and only where the pane
+    /// actually draws markers, so a pane with them turned off picks exactly
+    /// what it did before.
     pub fn pick(&self, x: f32, y: f32) -> Option<f64> {
         if self.player_mode {
             return None;
@@ -1668,14 +1675,27 @@ impl SolarxyApp {
         let pane = rects.get(pane_idx)?;
         let mut cam = self.view.cameras[pane_idx].as_ref()?.camera;
         cam.aspect = pane.width / pane.height.max(1.0);
+        let view_proj = cam.build_view_projection_matrix();
         let ray = screen_to_world_ray(
             (p.0 - pane.x, p.1 - pane.y),
             (pane.width, pane.height),
-            cam.build_view_projection_matrix(),
+            view_proj,
         );
         let origin = [ray.origin.x, ray.origin.y, ray.origin.z];
         let dir = [ray.direction.x, ray.direction.y, ray.direction.z];
-        self.engine.pick(origin, dir).map(|n| n.0 as f64)
+        let markers = self.view.pane_settings[pane_idx]
+            .show_light_markers
+            .then(|| solarxy_graph::engine::MarkerPick {
+                view_proj: view_proj.into(),
+                // Physical pixels on both, matching the ray above. The radius
+                // is a CSS size, so it scales with the device ratio or a
+                // marker would be half as clickable on a retina display as it
+                // looks -- the same trap the gizmo hit.
+                viewport_px: [pane.width, pane.height],
+                cursor_px: [p.0 - pane.x, p.1 - pane.y],
+                radius_px: manipulator::MARKER_PX * self.dpr,
+            });
+        self.engine.pick(origin, dir, markers).map(|n| n.0 as f64)
     }
 
     /// [`SolarxyApp::pick`] with the full hit detail (mesh, face,
@@ -2653,6 +2673,16 @@ impl SolarxyApp {
         if !opts.overlays.validation {
             pds.show_validation = false;
         }
+        // Markers stay out of a saved image. They are an aiming aid rather
+        // than something the picture is of, and the person saving a frame is
+        // framing a shot.
+        pds.show_light_markers = false;
+        // So does the manipulator, which is transient tool state rather than
+        // anything the viewport was configured to show, and which would come
+        // out at the previous pane's scale besides. The camera and light
+        // helpers deliberately stay: those are switched on per node and behave
+        // like the grid toggle, so a screenshot of the viewport keeps them.
+        self.renderer.set_manipulator(None);
 
         let mut encoder = self
             .device
@@ -5136,6 +5166,10 @@ impl SolarxyApp {
             Some(defs) => self.renderer.write_light_helpers(&self.queue, defs),
             None => self.renderer.write_light_helpers(&self.queue, &[]),
         }
+        // Immediately after the write that repopulates them, because that is
+        // the only thing that could undo it. The lighting below still runs: a
+        // still needs the lights, it just must not photograph the furniture.
+        self.suppress_furniture_during_still();
 
         if let Some(defs) = self.raster.scene().authored_lights() {
             self.env.lights_uniform =
@@ -5203,6 +5237,21 @@ impl SolarxyApp {
         self.renderer.resize_targets(&self.device, width, height);
     }
 
+    /// Drops the viewport's furniture while a still render owns the frame.
+    ///
+    /// A still is a photograph of the scene rather than a screenshot of the
+    /// viewport. `PaneDisplaySettings::for_still` states that for everything a
+    /// pane flag reaches; the manipulator, the two helper channels and the
+    /// light markers are host-fed and reach none of them, so they held
+    /// whatever the last ordinary frame left in them and a rasterized still
+    /// photographed the gizmo. Cleared rather than gated, and repopulated by
+    /// the next ordinary frame, so there is nothing to restore.
+    fn suppress_furniture_during_still(&mut self) {
+        if self.still.is_some() {
+            self.renderer.clear_viewport_furniture();
+        }
+    }
+
     /// Assemble this pane's parameters and hand them to the shared body.
     ///
     /// What is left here is policy and assembly: the grading tables, the
@@ -5231,6 +5280,20 @@ impl SolarxyApp {
             self.renderer
                 .write_manipulator(&self.queue, &cam_data, pane.height / self.dpr);
             self.write_pane_camera_helpers(i);
+            // Markers are per pane for the same reason the manipulator is:
+            // screen-constant means a pane's own camera and height decide the
+            // world size. CSS pixels, so a retina display does not halve them.
+            if pds.show_light_markers {
+                let selected = self.selected_object;
+                let lights = self.raster.scene().lights().map(<[_]>::to_vec);
+                self.renderer.write_light_markers(
+                    &self.queue,
+                    lights.as_deref().unwrap_or(&[]),
+                    &cam_data,
+                    pane.height / self.dpr,
+                    selected,
+                );
+            }
             if is_split && i >= 1 {
                 self.setup_pane_lighting(&cam_data);
             }

@@ -64,6 +64,8 @@ fn modes() -> Vec<(&'static str, PaneDisplaySettings)> {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        // The pixel gate photographs geometry, not viewport furniture.
+        show_light_markers: false,
         turntable_active: false,
         pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     };
@@ -422,6 +424,8 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         let d = scene.model.bounds.diagonal().max(1e-3);
         let at = |x: f32, y: f32, z: f32| [c.x + x * d, c.y + y * d, c.z + z * d];
         let lamp = |position: [f32; 3], color: [f32; 3], intensity: f32| LightDef {
+            // The harness authors no document, so its lamps name no node.
+            id: solarxy_core::scene::SceneObjectId::UNAUTHORED,
             kind: LightKind::Point,
             position,
             direction: [0.0, -1.0, 0.0],

@@ -37,6 +37,11 @@ mod scene;
 mod scenefile;
 mod undo;
 
+/// The screen-space half of a viewport pick, which a host fills from the same
+/// camera it built the pick ray with. Re-exported because it is an argument to
+/// [`Engine::pick`]; the rest of `scene` stays internal.
+pub use scene::MarkerPick;
+
 pub use scenefile::{LoadedScene, SceneSidecar};
 
 use undo::{Transaction, UndoOp, UndoStack};
@@ -3537,13 +3542,23 @@ impl Engine {
         std::mem::take(&mut self.scene)
     }
 
-    /// Picks the root `geo` container the ray hits nearest over the
-    /// committed, world-transformed display geometry (single-pane picking;
-    /// Runs in Rust over CPU-retained geometry,
-    /// so nothing crosses into JavaScript. The host builds the ray from the
-    /// cursor via `solarxy_core::raycast::screen_to_world_ray`.
+    /// Picks the node under the cursor: a light's marker if `markers` is
+    /// supplied and one is under it, else the root `geo` container the ray
+    /// hits nearest over the committed, world-transformed display geometry
+    /// (single-pane picking). Runs in Rust over CPU-retained geometry, so
+    /// nothing crosses into JavaScript. The host builds the ray from the
+    /// cursor via `solarxy_core::raycast::screen_to_world_ray`, and fills
+    /// [`MarkerPick`] from the same camera.
+    ///
+    /// A marker wins over geometry because it is drawn on top of it, not as a
+    /// preference between two candidates.
     #[must_use]
-    pub fn pick(&self, origin: [f32; 3], direction: [f32; 3]) -> Option<NodeId> {
+    pub fn pick(
+        &self,
+        origin: [f32; 3],
+        direction: [f32; 3],
+        markers: Option<MarkerPick>,
+    ) -> Option<NodeId> {
         scene::pick_node(
             &self.doc,
             &self.registry,
@@ -3551,6 +3566,7 @@ impl Engine {
             &self.previews,
             origin,
             direction,
+            markers,
         )
     }
 

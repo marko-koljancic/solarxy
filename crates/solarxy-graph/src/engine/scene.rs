@@ -341,10 +341,38 @@ pub(crate) fn geo_world_matrix(
     )
 }
 
+/// What the viewport needs in order to test a click against a light's marker,
+/// which is a screen-space question the ray alone cannot answer.
+///
+/// The engine has no renderer and must not gain one, so nothing here asks the
+/// renderer where it drew anything: the marker's position is projected from
+/// the same camera the pick ray was built from, and `radius_px` is the
+/// renderer's own `MARKER_PX`, handed down by the host exactly the way it
+/// already hands `GIZMO_PX * world_per_pixel` to the manipulator. That is what
+/// keeps the drawn marker and its click target the same size without either
+/// side knowing about the other.
+#[derive(Debug, Clone, Copy)]
+pub struct MarkerPick {
+    /// The pane's view-projection, as the camera built it.
+    pub view_proj: [[f32; 4]; 4],
+    /// The pane's size in the same pixels `cursor_px` is measured in.
+    pub viewport_px: [f32; 2],
+    /// The cursor, in pane-relative pixels with the origin top left.
+    pub cursor_px: [f32; 2],
+    /// How far from a marker's centre still counts as hitting it.
+    pub radius_px: f32,
+}
+
 /// Picks the root `geo` container whose displayed, world-transformed
 /// geometry the ray hits nearest (single-pane picking; pane-awareness is
 /// Runs entirely in Rust over CPU-retained cooked geometry, so
 /// nothing crosses into JavaScript. Returns the producing geo node's id.
+///
+/// With `markers`, a light's marker is tested FIRST and wins outright. That is
+/// not a preference between two candidates but a consequence of how they are
+/// drawn: the marker is painted over the scene, so a click that lands on one
+/// takes it rather than falling through to whatever is behind. Passing `None`
+/// is the geometry-only behaviour, unchanged.
 #[must_use]
 pub fn pick_node(
     doc: &Document,
@@ -353,6 +381,7 @@ pub fn pick_node(
     previews: &Previews,
     origin: [f32; 3],
     direction: [f32; 3],
+    markers: Option<MarkerPick>,
 ) -> Option<NodeId> {
     let dir = Vector3::from(direction);
     if dir.magnitude2() <= 1e-12 {
@@ -362,6 +391,11 @@ pub fn pick_node(
         origin: Point3::from(origin),
         direction: dir.normalize(),
     };
+    if let Some(m) = markers
+        && let Some(hit) = pick_light_marker(doc, registry, previews, &m)
+    {
+        return Some(hit);
+    }
     let root = doc.graph(GraphContext::Root).ok()?;
     let mut best: Option<(f32, NodeId)> = None;
     for node in root.nodes() {
@@ -414,6 +448,73 @@ pub fn pick_node(
         }
     }
     best.map(|(_, node)| node)
+}
+
+/// The light whose marker the cursor is nearest, within the marker's own
+/// radius, or `None`.
+///
+/// Screen space rather than a ray, because a light has no geometry to
+/// intersect. That is also what gives a marker a predictable click area
+/// wherever the light is: a distant light is exactly as easy to hit as a near
+/// one, which a world-space test could not promise.
+///
+/// Ties break toward the camera. Two markers can genuinely coincide, because
+/// ambient and hemisphere lights have no position and both mark the world
+/// origin; the nearer one wins, and the other stays selectable from the node
+/// canvas.
+fn pick_light_marker(
+    doc: &Document,
+    registry: &Registry,
+    previews: &Previews,
+    m: &MarkerPick,
+) -> Option<NodeId> {
+    let root = doc.graph(GraphContext::Root).ok()?;
+    let (w, h) = (m.viewport_px[0], m.viewport_px[1]);
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let vp = Matrix4::from(m.view_proj);
+    let mut best: Option<(f32, f32, NodeId)> = None;
+
+    for node in root.nodes() {
+        if !is_light(&node.type_id) {
+            continue;
+        }
+        let Some(light) = light_from_node(doc, registry, previews, node) else {
+            continue;
+        };
+        // An invisible light draws no marker, so it catches no clicks.
+        if !light.visible {
+            continue;
+        }
+        let anchor = match light.kind {
+            // No position: their markers sit at the world origin, which is
+            // where their helper has always drawn for the same reason.
+            solarxy_core::scene::LightKind::Ambient
+            | solarxy_core::scene::LightKind::Hemisphere => [0.0, 0.0, 0.0],
+            _ => light.position,
+        };
+
+        let clip = vp * cgmath::Vector4::new(anchor[0], anchor[1], anchor[2], 1.0);
+        // Behind the eye, or exactly on the plane through it: not on screen.
+        if clip.w <= 1e-6 {
+            continue;
+        }
+        let ndc = (clip.x / clip.w, clip.y / clip.w);
+        // NDC to pane pixels, y flipped: clip space is y-up and a cursor is
+        // y-down.
+        let px = (ndc.0 * 0.5 + 0.5) * w;
+        let py = (0.5 - ndc.1 * 0.5) * h;
+        let d = (px - m.cursor_px[0]).hypot(py - m.cursor_px[1]);
+        if d > m.radius_px {
+            continue;
+        }
+        let depth = clip.w;
+        if best.is_none_or(|(_, bd, _)| depth < bd) {
+            best = Some((d, depth, node.id));
+        }
+    }
+    best.map(|(_, _, node)| node)
 }
 
 /// [`pick_node`] with the full hit detail the review workflow anchors to:
@@ -713,6 +814,9 @@ fn light_from_node(
     let boolp = |key: &str| matches!(p.get(key), Some(ParamValue::Bool(true)));
 
     let mut light = LightDef {
+        // Derived the same way a geo's and a camera's are, so a marker click
+        // comes back naming the node the canvas and the panel already mean.
+        id: solarxy_core::scene::SceneObjectId(node.id.0),
         kind: LightKind::Point,
         position: [0.0; 3],
         direction: [0.0, -1.0, 0.0],

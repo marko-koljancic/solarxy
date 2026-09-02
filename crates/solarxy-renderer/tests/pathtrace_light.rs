@@ -32,7 +32,7 @@ mod common;
 
 use cgmath::SquareMatrix;
 use solarxy_bvh::Bvh;
-use solarxy_core::scene::{LightDef, LightKind};
+use solarxy_core::scene::{LightDef, LightKind, SceneObjectId};
 use solarxy_renderer::pathtrace::arena::{ArenaMesh, ArenaPlacement, INSTANCE_VISIBLE, TraceArena};
 use solarxy_renderer::pathtrace::light::{LIGHT_RECT, TracedLight};
 use solarxy_renderer::pathtrace::material::TracedMaterial;
@@ -48,6 +48,7 @@ const SAMPLES: u32 = 8192;
 /// A light that is nothing in particular, so each test says what it changed.
 fn base_light(kind: LightKind) -> LightDef {
     LightDef {
+        id: SceneObjectId::UNAUTHORED,
         kind,
         position: [0.0, 4.0, 0.0],
         direction: [0.0, -1.0, 0.0],

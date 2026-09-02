@@ -143,6 +143,202 @@ pub fn build_light_helpers(lights: &[LightDef]) -> Vec<GizmoVertex> {
     lines
 }
 
+/// Where a light's marker is drawn.
+///
+/// Every positional light marks its own position. The two scene-wide kinds
+/// have no position at all, so they mark the world origin, which is where the
+/// hemisphere light's helper dome has always drawn for the same reason: it is
+/// an indicator that the light exists, not a picture of where it is.
+#[must_use]
+pub fn marker_anchor(light: &LightDef) -> Point3<f32> {
+    match light.kind {
+        LightKind::Ambient | LightKind::Hemisphere => Point3::new(0.0, 0.0, 0.0),
+        _ => Point3::from(light.position),
+    }
+}
+
+/// Builds the screen-constant marker for every visible light.
+///
+/// A DIFFERENT thing from [`build_light_helpers`], and both survive. A helper
+/// is world-scaled and describes a light's extent: a spot's cone really is
+/// that wide, which is information. A marker is screen-constant and says only
+/// "a light is here", which is what you need to find one and aim at it, and
+/// which a world-scaled shape cannot do because it is lost at distance and
+/// enormous up close.
+///
+/// Billboarded into the camera's plane so every marker reads the same from any
+/// angle and none of them collapses to a line edge-on. `world_per_px` converts
+/// the marker's pixel radius into world units at the light's own depth, which
+/// is what makes it constant on screen; it is the caller's job for the same
+/// reason the manipulator's is, so both read one definition of a pixel.
+///
+/// `selected` draws its marker brighter, because the viewport's selection tint
+/// and its outline are both keyed to geometry and a light has none.
+#[must_use]
+pub fn build_light_markers(
+    lights: &[LightDef],
+    right: Vector3<f32>,
+    up: Vector3<f32>,
+    world_per_px: impl Fn(Point3<f32>) -> f32,
+    selected: Option<SceneObjectId>,
+) -> Vec<GizmoVertex> {
+    let mut lines = Vec::new();
+    for light in lights {
+        // An invisible light is not in the scene, so it has no marker, for the
+        // same reason it has no helper.
+        if !light.visible {
+            continue;
+        }
+        let origin = marker_anchor(light);
+        let r = world_per_px(origin) * crate::manipulator::MARKER_PX;
+        if !(r.is_finite() && r > 0.0) {
+            continue;
+        }
+        let color = marker_color(light, selected);
+        let (u, v) = (right * r, up * r);
+
+        // The ring every marker shares: one silhouette, so the click target is
+        // the same size and shape whatever kind of light it is.
+        push_billboard_arc(&mut lines, origin, u, v, 0.0, std::f32::consts::TAU, color);
+
+        match light.kind {
+            // Radiating in every direction.
+            LightKind::Point => push_spokes(&mut lines, origin, u, v, 8, 1.35, 1.95, color),
+            // Travelling one way: a stub along the light's own direction,
+            // flattened into the camera plane so it reads at any angle.
+            LightKind::Directional => {
+                push_direction_stub(&mut lines, origin, u, v, right, up, light, color);
+            }
+            // The same stub, plus the two cone edges that make it a spot.
+            LightKind::Spot => {
+                push_direction_stub(&mut lines, origin, u, v, right, up, light, color);
+                push_spokes(&mut lines, origin, u, v, 2, 0.0, 1.0, color);
+            }
+            // A panel: a square inside the ring.
+            LightKind::RectArea => {
+                let (a, b) = (u * 0.62, v * 0.62);
+                let c = [
+                    origin + a + b,
+                    origin - a + b,
+                    origin - a - b,
+                    origin + a - b,
+                ];
+                for i in 0..4 {
+                    push_line(&mut lines, c[i], c[(i + 1) % 4], color);
+                }
+            }
+            // Everywhere and from nowhere: a broken ring, which reads as
+            // "not a place" beside the solid ones.
+            LightKind::Ambient => {
+                for i in 0..4 {
+                    let a = (i as f32) * std::f32::consts::FRAC_PI_2 + 0.35;
+                    push_billboard_arc(&mut lines, origin, u * 0.55, v * 0.55, a, a + 0.9, color);
+                }
+            }
+            // Sky over ground: a dome on its horizon.
+            LightKind::Hemisphere => {
+                push_billboard_arc(
+                    &mut lines,
+                    origin,
+                    u * 0.62,
+                    v * 0.62,
+                    0.0,
+                    std::f32::consts::PI,
+                    color,
+                );
+                push_line(&mut lines, origin - u * 0.62, origin + u * 0.62, color);
+            }
+        }
+    }
+    lines
+}
+
+/// A selected marker is lifted toward white rather than tinted with the accent,
+/// so it still reads as its own light's colour while standing out from the
+/// others. A light has no geometry, so neither the selection tint nor the
+/// jump-flood outline can say this for it.
+fn marker_color(light: &LightDef, selected: Option<SceneObjectId>) -> [f32; 3] {
+    let c = light.color;
+    if selected == Some(light.id) {
+        // Toward white, and never darker than the light already is.
+        [
+            c[0].mul_add(0.35, 0.65),
+            c[1].mul_add(0.35, 0.65),
+            c[2].mul_add(0.35, 0.65),
+        ]
+    } else {
+        c
+    }
+}
+
+/// Marker circle resolution. Lower than a helper's: a marker is about eleven
+/// pixels across, where more segments buy nothing but vertices.
+const MARKER_SEGMENTS: usize = 20;
+
+/// An arc of the billboard ellipse spanned by `u` and `v`, from `from` to `to`
+/// radians. A full turn is the plain ring.
+fn push_billboard_arc(
+    lines: &mut Vec<GizmoVertex>,
+    center: Point3<f32>,
+    u: Vector3<f32>,
+    v: Vector3<f32>,
+    from: f32,
+    to: f32,
+    color: [f32; 3],
+) {
+    let steps = MARKER_SEGMENTS.max(2);
+    let at = |i: usize| {
+        let t = from + (to - from) * (i as f32) / (steps as f32);
+        center + u * t.cos() + v * t.sin()
+    };
+    for i in 0..steps {
+        push_line(lines, at(i), at(i + 1), color);
+    }
+}
+
+/// `count` spokes radiating from the marker, spanning `inner` to `outer` in
+/// units of the ring's radius.
+fn push_spokes(
+    lines: &mut Vec<GizmoVertex>,
+    center: Point3<f32>,
+    u: Vector3<f32>,
+    v: Vector3<f32>,
+    count: usize,
+    inner: f32,
+    outer: f32,
+    color: [f32; 3],
+) {
+    for i in 0..count {
+        let t = (i as f32) * std::f32::consts::TAU / (count as f32);
+        let d = u * t.cos() + v * t.sin();
+        push_line(lines, center + d * inner, center + d * outer, color);
+    }
+}
+
+/// A short stub along the light's travel direction, projected into the camera
+/// plane so it never collapses to a point when the light aims at the viewer.
+fn push_direction_stub(
+    lines: &mut Vec<GizmoVertex>,
+    center: Point3<f32>,
+    u: Vector3<f32>,
+    v: Vector3<f32>,
+    right: Vector3<f32>,
+    up: Vector3<f32>,
+    light: &LightDef,
+    color: [f32; 3],
+) {
+    let d = dir_of(light);
+    let (x, y) = (d.dot(right), d.dot(up));
+    // Aimed straight at or away from the camera: there is no direction to draw
+    // in this plane, and a stub of arbitrary angle would be a lie.
+    if x.hypot(y) < 1e-3 {
+        return;
+    }
+    let (x, y) = (x / x.hypot(y), y / x.hypot(y));
+    let flat = u * x + v * y;
+    push_line(lines, center + flat, center + flat * 2.1, color);
+}
+
 fn dir_of(light: &LightDef) -> Vector3<f32> {
     let d = Vector3::from(light.direction);
     if d.magnitude2() < 1e-12 {
@@ -316,6 +512,7 @@ mod tests {
 
     fn light(kind: LightKind) -> LightDef {
         LightDef {
+            id: solarxy_core::scene::SceneObjectId::UNAUTHORED,
             kind,
             position: [1.0, 2.0, 3.0],
             direction: [0.0, -1.0, 0.0],

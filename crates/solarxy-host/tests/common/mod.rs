@@ -190,6 +190,8 @@ pub fn pane_settings() -> PaneDisplaySettings {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        // Nothing here authors a light node, so there is no marker to draw.
+        show_light_markers: false,
         turntable_active: false,
         pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     }

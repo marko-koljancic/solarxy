@@ -340,6 +340,9 @@ pub fn viewer_rig(camera: &Camera) -> [LightDef; 3] {
 
     let light = |position: cgmath::Point3<f32>, color: [f32; 3], intensity: f32, key: bool| {
         LightDef {
+            // The rig is synthesized rather than authored, so it names no node
+            // and nothing can select it.
+            id: solarxy_core::scene::SceneObjectId::UNAUTHORED,
             kind: LightKind::Point,
             position: [position.x, position.y, position.z],
             // Unread for a point light by either renderer, and stated rather

@@ -45,6 +45,10 @@ fn truncate_to_budget<V>(verts: &mut Vec<V>, verts_per_prim: usize, what: &str) 
 /// the manipulator's buffer would make one starve the other.
 const LIGHT_HELPER_BUF_BYTES: u64 = 256 * 1024;
 const CAMERA_HELPER_BUF_BYTES: u64 = 256 * 1024;
+/// Markers are far smaller than helpers (a ring and a few strokes each, at a
+/// fixed eleven pixels) but there is one per light rather than one per light
+/// that asked, so they get their own modest budget rather than sharing.
+const LIGHT_MARKER_BUF_BYTES: u64 = 64 * 1024;
 use crate::model::{DrawMeshSimple, DrawModel};
 use crate::pipelines::Pipelines;
 use crate::texture::SharedSamplers;
@@ -423,6 +427,11 @@ pub struct Renderer {
     manipulator_line_count: u32,
     light_helper_buf: wgpu::Buffer,
     light_helper_count: u32,
+    /// Light markers. Written PER PANE, unlike the helpers beside them,
+    /// because a screen-constant size depends on the pane's own camera and
+    /// height. Same reason the camera gizmos and the manipulator are per pane.
+    light_marker_buf: wgpu::Buffer,
+    light_marker_count: u32,
     /// Camera gizmos. Written PER PANE (not once per frame like the light
     /// helpers), because each pane hides the camera it is looking through.
     camera_helper_buf: wgpu::Buffer,
@@ -880,6 +889,13 @@ impl Renderer {
                 mapped_at_creation: false,
             }),
             light_helper_count: 0,
+            light_marker_buf: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Light Markers"),
+                size: LIGHT_MARKER_BUF_BYTES,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            light_marker_count: 0,
             camera_helper_buf: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Camera Helpers"),
                 size: CAMERA_HELPER_BUF_BYTES,
@@ -1373,6 +1389,7 @@ impl Renderer {
         }
         // Last, so it sits over everything; its pipelines ignore depth anyway.
         self.draw_light_helpers(&mut pass, cam_bg);
+        self.draw_light_markers(&mut pass, cam_bg, pds);
         self.draw_camera_helpers(&mut pass, cam_bg);
         self.draw_manipulator(&mut pass, cam_bg);
     }
@@ -1414,6 +1431,27 @@ impl Renderer {
         pass.set_pipeline(&self.pipelines.overlay.manipulator_lines);
         pass.set_vertex_buffer(0, self.light_helper_buf.slice(..));
         pass.draw(0..self.light_helper_count, 0..1);
+    }
+
+    /// Draws the light markers, if this pane asks for them.
+    ///
+    /// Gated on the pane rather than on the light, unlike the helpers beside
+    /// it: a helper answers "how big is this light", which is a property of
+    /// the light, and a marker answers "where do I click to get it", which is
+    /// a property of how you are looking at the scene.
+    fn draw_light_markers<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        cam_bg: &'a wgpu::BindGroup,
+        pds: &PaneDisplaySettings,
+    ) {
+        if !pds.show_light_markers || self.light_marker_count == 0 {
+            return;
+        }
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_pipeline(&self.pipelines.overlay.manipulator_lines);
+        pass.set_vertex_buffer(0, self.light_marker_buf.slice(..));
+        pass.draw(0..self.light_marker_count, 0..1);
     }
 
     /// Draws the camera gizmos. Its own draw/buffer, like the light helpers,
@@ -1487,6 +1525,73 @@ impl Renderer {
         }
         queue.write_buffer(&self.light_helper_buf, 0, bytes);
         self.light_helper_count = u32::try_from(lines.len()).unwrap_or(0);
+    }
+
+    /// Uploads this pane's light markers. PER PANE, unlike the helpers above,
+    /// because the size is screen-constant and a pane's own camera and height
+    /// decide how many world units a pixel is. Same shape as
+    /// [`Renderer::write_manipulator`], for the same reason.
+    pub fn write_light_markers(
+        &mut self,
+        queue: &wgpu::Queue,
+        lights: &[solarxy_core::scene::LightDef],
+        camera: &Camera,
+        pane_height_px: f32,
+        selected: Option<solarxy_core::scene::SceneObjectId>,
+    ) {
+        use cgmath::InnerSpace;
+        let forward = camera.forward();
+        let mut right = forward.cross(camera.up);
+        if right.magnitude2() < 1e-9 {
+            right = cgmath::Vector3::unit_x();
+        }
+        let right = right.normalize();
+        let up = right.cross(forward).normalize();
+
+        let lines = crate::helpers::build_light_markers(
+            lights,
+            right,
+            up,
+            |p| camera.world_per_pixel(p, pane_height_px),
+            selected,
+        );
+        if lines.is_empty() {
+            self.light_marker_count = 0;
+            return;
+        }
+        let bytes: &[u8] = bytemuck::cast_slice(&lines);
+        if bytes.len() as u64 > LIGHT_MARKER_BUF_BYTES {
+            tracing::warn!(
+                bytes = bytes.len(),
+                budget = LIGHT_MARKER_BUF_BYTES,
+                "light markers exceeded their vertex buffer; not drawing"
+            );
+            self.light_marker_count = 0;
+            return;
+        }
+        queue.write_buffer(&self.light_marker_buf, 0, bytes);
+        self.light_marker_count = u32::try_from(lines.len()).unwrap_or(0);
+    }
+
+    /// Drops every piece of viewport furniture the host feeds this renderer:
+    /// the manipulator, both helper channels, and the light markers.
+    ///
+    /// The one call a delivered image makes.
+    /// [`solarxy_core::view_config::PaneDisplaySettings::for_still`] already
+    /// states what a still is for everything a pane flag can reach, but these
+    /// four channels are host-fed and reach no pane flag: they hold whatever
+    /// the last viewport frame left in them, and a still or a screenshot would
+    /// otherwise photograph a gizmo. One call rather than four, because
+    /// clearing three of four is precisely the bug this closes.
+    ///
+    /// Nothing has to be restored: an ordinary frame rewrites all four.
+    pub fn clear_viewport_furniture(&mut self) {
+        self.manipulator = None;
+        self.manipulator_line_count = 0;
+        self.manipulator_tri_count = 0;
+        self.light_helper_count = 0;
+        self.light_marker_count = 0;
+        self.camera_helper_count = 0;
     }
 
     /// Points a colour-grading slot at a table, or clears it with `None`.

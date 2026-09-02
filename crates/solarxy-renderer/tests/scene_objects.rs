@@ -251,6 +251,7 @@ fn set_lights_stores_and_flags_dirty_once() {
     assert!(!scene.take_lights_dirty());
 
     let light = LightDef {
+        id: SceneObjectId::UNAUTHORED,
         kind: LightKind::Point,
         position: [0.0, 5.0, 0.0],
         direction: [0.0, -1.0, 0.0],

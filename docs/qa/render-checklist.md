@@ -154,3 +154,35 @@ same plate.
       byte-for-byte what it was.
 - [ ] A graded transparent render is transparent in exactly the places the
       ungraded one is.
+
+## 8. Light markers stay out of the picture
+
+Markers are viewport furniture: an aiming aid, not scene content. They belong
+on screen while you work and nowhere in a delivered image. Two of the three
+channels this covers leaked before 0.9.0, so check all of them rather than
+assuming the marker is the only one.
+
+Use any scene with lights; the Cornell box has an area light and the look-dev
+sample has an area light plus a hemisphere, which between them cover the
+distinguishable shapes.
+
+- [ ] Every light in the scene carries a marker, and the six kinds are
+      distinguishable from each other at a glance.
+- [ ] A marker holds its size as the camera dollies in and out, and is no
+      harder to click far away than near.
+- [ ] Clicking a marker selects that light: the node canvas highlights the same
+      node and the parameter panel shows its params.
+- [ ] A marker drawn over geometry takes the click; a click just off it selects
+      the geometry behind.
+- [ ] Turning **Display > Light markers** off in a pane removes them from that
+      pane only, and clicks there fall through to geometry again.
+- [ ] **A rendered still carries no markers, no transform gizmo and no light or
+      camera helpers**, with a light selected and the move tool armed while the
+      render runs. Check a rasterized still; a traced one draws no overlays at
+      all by construction.
+- [ ] **A saved screenshot carries no markers and no gizmo**, taken with a
+      light selected and the move tool armed. Camera and light helpers do stay,
+      because those are switched on per node like the grid.
+- [ ] A light's own Show Helper still draws its world-scaled wireframe, and
+      still grows and shrinks with the camera, which is what tells it apart
+      from the marker.
