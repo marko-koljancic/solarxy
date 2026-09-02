@@ -8,6 +8,9 @@ The automated half is `crates/solarxy-renderer/examples/golden.rs` (see
 "Golden captures" below). This file covers what goldens cannot: interaction,
 input, dialogs, and anything that needs a window.
 
+Rendering has its own gate, `docs/qa/render-checklist.md`, because it spans all
+three shells and half of what it checks is not on this one.
+
 Record the run in `SOLARXY-WEB-INTEGRATION-IMPLEMENTATION-LOG.md`: date, commit,
 platform, and any box left unticked with the reason.
 

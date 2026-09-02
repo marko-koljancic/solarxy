@@ -845,6 +845,10 @@ export const RELEASE_PLAN: ReleasePlanEntry[] = [
     items: [
       "A compute path tracer on core WebGPU (12.5): global illumination, soft area-light shadows, optical depth of field, unbounded light count.",
       "A render command for the CLI (17.3), making it the first native node-engine host: .slxy in, PNG or EXR with AOVs out.",
+      "The render window finished: the picture refines while it renders rather than appearing at the end, the albedo, normal and depth passes are selectable and viewable in the browser, and the image pans and zooms while it converges.",
+      "Controls to tune a render for your own scene: an exact sample count beside the presets, an indirect clamp, a seed, denoiser strength and a threshold, and named output sizes.",
+      "Rendering with a transparent background, so a still arrives as an element that can be composited over something else rather than as a finished picture.",
+      "Lights can be moved by grabbing them in the viewport, which is the first thing there that is not geometry.",
       "Priya joins the personas: technical director and pipeline engineer, with two new journeys.",
       "The last release whose authoring surface is web-only.",
     ],
