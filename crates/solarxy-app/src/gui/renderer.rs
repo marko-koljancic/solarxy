@@ -1018,6 +1018,28 @@ impl EguiRenderer {
         self.still_modal.set_progress(tile, tiles, sample, samples);
     }
 
+    /// The output format and space the dialog is set to, in the words the
+    /// shared readback rule takes.
+    pub fn still_output_choice(&self) -> (&'static str, &'static str) {
+        self.still_modal.output_choice()
+    }
+
+    /// Whether the dialog is set to write a floating-point image, which is
+    /// what decides the save filter and the extension.
+    pub fn still_is_float(&self) -> bool {
+        self.still_modal.is_float()
+    }
+
+    /// The dialog's Render button was pressed.
+    pub fn take_still_render_request(&mut self) -> bool {
+        self.still_modal.take_render_request()
+    }
+
+    /// The job has started; the dialog stops being idle.
+    pub fn begin_still(&mut self) {
+        self.still_modal.begin();
+    }
+
     /// Hand the modal the render's elapsed and remaining, both computed by the
     /// shared job so this shell agrees with the other two.
     pub fn set_still_timing(&mut self, elapsed_ms: u64, remaining_ms: Option<u64>) {

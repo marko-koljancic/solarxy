@@ -45,8 +45,12 @@ pub(crate) struct StillState {
     /// a sky is shot against it.
     pub background: BackgroundMode,
     pub engine: StillEngine,
-    /// The assembled picture, RGBA8, `width * height * 4`.
+    /// The assembled picture, RGBA8, `width * height * 4`. What the modal
+    /// previews and what a PNG is written from.
     pub image: Vec<u8>,
+    /// The assembled floating-point picture, when the render is one. `None`
+    /// for an eight-bit still, which costs nothing.
+    pub float: Option<solarxy_host::still::FloatImage>,
     /// Whether the job ingested a synthesized model document into the
     /// session's scene objects, which the teardown then clears.
     pub synthesized_scene: bool,
@@ -57,17 +61,40 @@ pub(crate) struct StillState {
 }
 
 impl State {
-    /// Start a still render of the cooked scene, or say why not.
+    /// Open the still dialog without rendering anything.
     ///
-    /// The refusals come first and each names its reason: a still over a
-    /// scene whose cook silently failed would be a wrong picture behind
-    /// a clean progress bar.
-    pub(super) fn start_still_render(&mut self) {
-        use crate::gui::ToastSeverity;
-
+    /// The menu's entry point. The job starts when Render is pressed, which is
+    /// what gives the output format somewhere to be chosen: the format decides
+    /// what the renderer reads back and so cannot be settled at save time. The
+    /// browser dialog has always worked this way; this is the desktop catching
+    /// up to it.
+    pub(super) fn open_still_dialog(&mut self) {
         if self.still.is_some() {
             return;
         }
+        let Some((_, settings)) = self.resolve_still_request() else {
+            return;
+        };
+        self.gui.open_still_modal(
+            settings.width,
+            settings.height,
+            settings.engine == RenderEngine::PathTraced,
+            settings.samples,
+            settings.denoise,
+            still_filename(),
+        );
+    }
+
+    /// What this render would be, or nothing with the reason already said.
+    ///
+    /// Shared by the dialog's opening and by the render it starts, and run
+    /// again for the render rather than carried over from the opening: what
+    /// runs is what the node says at the moment Render is pressed, which is the
+    /// rule the browser host states for the same reason.
+    fn resolve_still_request(
+        &mut self,
+    ) -> Option<(Option<Box<solarxy_graph::Engine>>, RenderSettings)> {
+        use crate::gui::ToastSeverity;
         // Which root renders: the open engine as before, or a document
         // synthesized from the open model, so the desktop renders the file
         // it is displaying the way the terminal already does. One synthesis
@@ -83,7 +110,7 @@ impl State {
                     "Open a scene or a model to render a still",
                     ToastSeverity::Warning,
                 );
-                return;
+                return None;
             };
             match engine_for_model(&path) {
                 Ok((engine, warnings)) => {
@@ -99,7 +126,7 @@ impl State {
                 }
                 Err(message) => {
                     self.gui.set_toast(&message, ToastSeverity::Error);
-                    return;
+                    return None;
                 }
             }
         };
@@ -108,9 +135,7 @@ impl State {
         // document was just cooked to quiescence, and a failure there has
         // already returned with its own message.
         if synthesized.is_none() {
-            let Some(engine) = self.engine.as_ref() else {
-                return;
-            };
+            let engine = self.engine.as_ref()?;
             if !self.cook_health.is_healthy() {
                 let failing = self.cook_health.failing();
                 let message = failing.iter().next().map_or_else(
@@ -128,15 +153,12 @@ impl State {
                     },
                 );
                 self.gui.set_toast(&message, ToastSeverity::Error);
-                return;
+                return None;
             }
         }
         let engine: &solarxy_graph::Engine = match synthesized.as_deref() {
             Some(e) => e,
-            None => match self.engine.as_deref() {
-                Some(e) => e,
-                None => return,
-            },
+            None => self.engine.as_deref()?,
         };
 
         let settings = match resolve_still_settings(engine) {
@@ -148,8 +170,25 @@ impl State {
             }
             Err(message) => {
                 self.gui.set_toast(&message, ToastSeverity::Error);
-                return;
+                return None;
             }
+        };
+        Some((synthesized, settings))
+    }
+
+    /// Start the still render the dialog is showing.
+    ///
+    /// The refusals come first and each names its reason: a still over a
+    /// scene whose cook silently failed would be a wrong picture behind
+    /// a clean progress bar.
+    pub(super) fn start_still_render(&mut self) {
+        use crate::gui::ToastSeverity;
+
+        if self.still.is_some() {
+            return;
+        }
+        let Some((synthesized, settings)) = self.resolve_still_request() else {
+            return;
         };
 
         let width = settings.width;
@@ -255,7 +294,13 @@ impl State {
             // delta feed goes to the raster backend alone, so a tracer
             // kept from a previous still has seen nothing since. Cheap,
             // because unchanged geometry stays a hierarchy-cache hit.
-            let delta = engine.scene_snapshot();
+            let delta = match synthesized.as_deref() {
+                Some(e) => e.scene_snapshot(),
+                None => match self.engine.as_deref() {
+                    Some(e) => e.scene_snapshot(),
+                    None => return,
+                },
+            };
             if let Some(t) = self.tracer.as_mut() {
                 t.apply_snapshot(&self.device, &self.queue, &delta);
             }
@@ -284,6 +329,8 @@ impl State {
         }
 
         let background = self.view.pane_settings[ap].background_mode;
+        let (format, space) = self.gui.still_output_choice();
+        let readback = solarxy_host::still::readback_for(format, space);
         let spec = StillSpec {
             width,
             height,
@@ -293,7 +340,9 @@ impl State {
             // is what decides the tile apron.
             screen_space_post: self.renderer.post.bloom_enabled,
             tile_budget: TILE_BUDGET_PIXELS,
-            readback: solarxy_host::still::StillReadback::Display8,
+            // From the dialog, through the rule all three shells read, which is
+            // what makes the choice spelled the same way on each of them.
+            readback,
             aux: false,
             depth: false,
             // The modal is watching, so the job publishes what it has on the
@@ -304,16 +353,13 @@ impl State {
         };
         let job = StillRenderJob::new(spec);
         let spec = job.spec();
+        // The display buffer, always. A float render fills this too, through
+        // the same clamp the browser shows a float still with, because the
+        // modal's preview is a screen and a screen is eight bits.
         let image = vec![0u8; spec.width as usize * spec.height as usize * 4];
+        let float = solarxy_host::still::FloatImage::new(readback, spec.width, spec.height);
 
-        self.gui.open_still_modal(
-            spec.width,
-            spec.height,
-            engine_kind == StillEngine::PathTraced,
-            settings.samples,
-            settings.denoise,
-            still_filename(),
-        );
+        self.gui.begin_still();
         self.still = Some(StillState {
             job,
             camera,
@@ -321,6 +367,7 @@ impl State {
             background,
             engine: engine_kind,
             image,
+            float,
             synthesized_scene,
             started: std::time::Instant::now(),
         });
@@ -381,7 +428,17 @@ impl State {
             StillStep::Working => {}
             StillStep::Tile => {
                 while let Some(t) = still.job.take_tile() {
-                    blit_tile(&mut still.image, spec.width, &t);
+                    // A float tile lands in the image being assembled and
+                    // reaches the modal as eight bits, which is the same
+                    // arrangement the browser uses: the preview is a screen and
+                    // a screen cannot show sixteen bytes a pixel.
+                    if let Some(f) = still.float.as_mut() {
+                        f.place(t.rect, &t.pixels);
+                        let shown = solarxy_host::still::float_to_rgba8(&t.pixels);
+                        blit_rect(&mut still.image, spec.width, t.rect, &shown);
+                    } else {
+                        blit_tile(&mut still.image, spec.width, &t);
+                    }
                 }
                 self.gui
                     .set_still_preview(preview_of(&still.image, spec.width, spec.height));
@@ -440,6 +497,10 @@ impl State {
         self.gui
             .set_still_timing(done.started.elapsed().as_millis() as u64, None);
         let spec = done.job.spec();
+        // Kept beside the modal's eight-bit picture rather than inside it: the
+        // modal shows a screen image and the float one is only ever written,
+        // so the two live where each is used.
+        self.finished_float = done.float;
         let Some(image) = image::RgbaImage::from_raw(spec.width, spec.height, done.image) else {
             self.gui.fail_still();
             return;
@@ -467,29 +528,58 @@ impl State {
         if self.gui.take_still_cancel() {
             self.cancel_still_render();
         }
-        if self.gui.take_still_save_request()
-            && let Some(path) = rfd::FileDialog::new()
-                .set_file_name(self.gui.still_suggested_filename())
-                .add_filter("PNG image", &["png"])
-                .save_file()
-            && let Some(image) = self.gui.take_still_image()
-        {
-            match image.save_with_format(&path, image::ImageFormat::Png) {
-                Ok(()) => {
-                    let name = path
-                        .file_name()
-                        .and_then(std::ffi::OsStr::to_str)
-                        .unwrap_or("still")
-                        .to_string();
-                    self.gui
-                        .set_toast(&format!("Saved {name}"), crate::gui::ToastSeverity::Success);
-                }
-                Err(e) => {
-                    self.gui.set_toast(
-                        &format!("Couldn't save still: {e}"),
-                        crate::gui::ToastSeverity::Error,
-                    );
-                }
+        if self.gui.take_still_render_request() {
+            self.start_still_render();
+        }
+        if !self.gui.take_still_save_request() {
+            return;
+        }
+        // The float image is taken before the picker opens, because taking it
+        // is also what closes the dialog and a cancelled picker should leave
+        // both where they were. The eight-bit image follows the same rule.
+        let float = self.finished_float.take();
+        let is_float = self.gui.still_is_float() && float.is_some();
+        let (filter, ext) = if is_float {
+            ("OpenEXR image", "exr")
+        } else {
+            ("PNG image", "png")
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .set_file_name(self.gui.still_suggested_filename())
+            .add_filter(filter, &[ext])
+            .save_file()
+        else {
+            // Put it back: the dialog is still open and Save can be pressed
+            // again.
+            self.finished_float = float;
+            return;
+        };
+        let written = if let Some(f) = float.filter(|_| is_float) {
+            self.gui.take_still_image();
+            write_exr(&path, &f)
+        } else {
+            match self.gui.take_still_image() {
+                Some(image) => image
+                    .save_with_format(&path, image::ImageFormat::Png)
+                    .map_err(|e| e.to_string()),
+                None => Err("the picture is no longer available".to_owned()),
+            }
+        };
+        match written {
+            Ok(()) => {
+                let name = path
+                    .file_name()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .unwrap_or("still")
+                    .to_string();
+                self.gui
+                    .set_toast(&format!("Saved {name}"), crate::gui::ToastSeverity::Success);
+            }
+            Err(e) => {
+                self.gui.set_toast(
+                    &format!("Couldn't save still: {e}"),
+                    crate::gui::ToastSeverity::Error,
+                );
             }
         }
     }
@@ -727,7 +817,26 @@ fn still_filename() -> String {
             "[year][month][day]-[hour][minute][second]"
         ))
         .unwrap_or_default();
-    format!("still_{stamp}.png")
+    // No extension: the dialog adds the one the chosen format decides, and a
+    // name that said `.png` while EXR was selected would be a name arguing with
+    // the file beside it.
+    format!("still_{stamp}")
+}
+
+/// Writes the floating-point still, through the same encoder the browser and
+/// the headless command write one with.
+fn write_exr(
+    path: &std::path::Path,
+    image: &solarxy_host::still::FloatImage,
+) -> Result<(), String> {
+    let hdr = solarxy_core::geometry::RawImageHdr::new(
+        image.rgb().to_vec(),
+        image.width(),
+        image.height(),
+    );
+    let bytes = solarxy_formats::export::encode_exr_rgb_bytes(&hdr)
+        .map_err(|e| format!("the image could not be encoded: {e}"))?;
+    std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
 /// Copy one cropped tile into its place in the assembled picture.

@@ -16,11 +16,82 @@ use super::theme::Theme;
 /// What the render is doing, which is what the modal shows.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum StillPhase {
+    /// Open, nothing rendering yet.
+    ///
+    /// The modal used to open already running, which left nowhere to choose
+    /// the output format: the format decides what the renderer reads back, so
+    /// it has to be settled before the first tile rather than at save time.
+    /// This is also the browser dialog's shape, which is the point.
     #[default]
+    Idle,
     Running,
     Finished,
     Cancelled,
     Failed,
+}
+
+/// What the still is written as.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StillFormat {
+    #[default]
+    Png,
+    Exr,
+}
+
+impl StillFormat {
+    /// The word the shared readback rule takes. One vocabulary across the
+    /// three shells rather than three spellings of one choice.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Exr => "exr",
+        }
+    }
+}
+
+impl std::fmt::Display for StillFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Png => "PNG (8-bit)",
+            Self::Exr => "EXR (float)",
+        })
+    }
+}
+
+/// Which space a floating-point still carries.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StillSpace {
+    #[default]
+    SceneLinear,
+    Display,
+}
+
+impl StillSpace {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::SceneLinear => "sceneLinear",
+            Self::Display => "display",
+        }
+    }
+
+    /// The browser dialog's own wording, reused rather than rewritten: the two
+    /// spaces are a genuinely confusing pair, and three surfaces explaining
+    /// them three ways would be three chances to explain one of them wrongly.
+    fn doc_pair() -> &'static str {
+        "Scene-linear carries scene-referred light with no exposure, tone map or grade \
+         applied, which is what a compositing package wants because it has not decided \
+         anything yet. Display-referred carries the finished look in floating point: the \
+         image the screen would show, without the quantization."
+    }
+}
+
+impl std::fmt::Display for StillSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::SceneLinear => "Scene-linear",
+            Self::Display => "Display-referred",
+        })
+    }
 }
 
 /// State for the still-render modal — owned by `EguiRenderer`.
@@ -52,6 +123,14 @@ pub(crate) struct StillRenderModal {
     cancel_request: bool,
     /// Set when `Save As…` is clicked; drained by the state layer.
     save_request: bool,
+    /// Set when Render is clicked; drained by the state layer, which is what
+    /// actually starts the job.
+    render_request: bool,
+    /// What the render writes. Chosen before it starts, because it decides
+    /// what the renderer reads back, and kept across runs so a second render
+    /// does not silently revert to the default.
+    format: StillFormat,
+    space: StillSpace,
 }
 
 impl StillRenderModal {
@@ -66,7 +145,9 @@ impl StillRenderModal {
         filename: String,
     ) {
         self.open = true;
-        self.phase = StillPhase::Running;
+        // Idle, not running. The job starts when Render is pressed, which is
+        // what gives the format choice somewhere to be made.
+        self.phase = StillPhase::Idle;
         self.width = width;
         self.height = height;
         self.traced = traced;
@@ -81,6 +162,38 @@ impl StillRenderModal {
         self.filename = filename;
         self.cancel_request = false;
         self.save_request = false;
+        self.render_request = false;
+    }
+
+    /// The job has begun. Everything the previous run left behind is cleared
+    /// here rather than at open, so the format chosen while idle survives.
+    pub fn begin(&mut self) {
+        self.phase = StillPhase::Running;
+        self.progress = (0, 0, 0, self.samples);
+        self.elapsed_ms = 0;
+        self.remaining_ms = None;
+        self.image = None;
+        self.pending_preview = None;
+        self.preview = None;
+        self.cancel_request = false;
+        self.save_request = false;
+    }
+
+    pub fn take_render_request(&mut self) -> bool {
+        std::mem::take(&mut self.render_request)
+    }
+
+    /// The chosen format and space, in the words the shared readback rule
+    /// takes. Handing over strings rather than the enums keeps this shell's
+    /// vocabulary the same as the other two shells'.
+    pub fn output_choice(&self) -> (&'static str, &'static str) {
+        (self.format.as_str(), self.space.as_str())
+    }
+
+    /// Whether the finished still is a floating-point one, which is what
+    /// decides the save dialog's filter and the file's extension.
+    pub fn is_float(&self) -> bool {
+        self.format == StillFormat::Exr
     }
 
     pub fn set_progress(&mut self, tile: u32, tiles: u32, sample: u32, samples: u32) {
@@ -209,6 +322,30 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
         );
         ui.add_space(6.0);
 
+        // The output choice, in the sidebar's established labelled-combo idiom.
+        // Locked once tiles start arriving, because the format decides what the
+        // renderer reads back and cannot be changed under a running job.
+        ui.add_enabled_ui(!running, |ui| {
+            super::sidebar::combo_with_tooltip(
+                ui,
+                "Format",
+                "What the still is written as. Eight-bit PNG, or floating-point \
+                 EXR for a compositor.",
+                &mut modal.format,
+                &[StillFormat::Png, StillFormat::Exr],
+            );
+            if modal.format == StillFormat::Exr {
+                super::sidebar::combo_with_tooltip(
+                    ui,
+                    "Space",
+                    StillSpace::doc_pair(),
+                    &mut modal.space,
+                    &[StillSpace::SceneLinear, StillSpace::Display],
+                );
+            }
+        });
+        ui.add_space(6.0);
+
         if let Some(preview) = &modal.preview {
             ui.add(egui::Image::new(preview));
             ui.add_space(6.0);
@@ -266,6 +403,28 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
                         .color(theme.muted),
                 );
             }
+            StillPhase::Idle => {
+                ui.label(
+                    egui::RichText::new("Ready. Press Render to begin.")
+                        .small()
+                        .color(theme.muted),
+                );
+                // A float still is bounded by the same edge an eight-bit one
+                // is, so there is no separate limit to announce; what a person
+                // is owed before pressing Render is what it will cost, because
+                // that is the part that scales with the choice they just made.
+                if modal.format == StillFormat::Exr {
+                    let pixels = u64::from(modal.width) * u64::from(modal.height);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Holds about {} MB while it renders, at twelve bytes a pixel.",
+                            pixels * 12 / (1024 * 1024)
+                        ))
+                        .small()
+                        .color(theme.muted),
+                    );
+                }
+            }
             StillPhase::Cancelled => {
                 ui.label(egui::RichText::new("Cancelled").small().color(theme.muted));
             }
@@ -282,6 +441,14 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
         ui.separator();
         ui.add_space(4.0);
         ui.horizontal(|ui| match modal.phase {
+            StillPhase::Idle => {
+                if ui.button("Close").clicked() {
+                    close_clicked = true;
+                }
+                if ui.button("Render").clicked() {
+                    modal.render_request = true;
+                }
+            }
             StillPhase::Running => {
                 if ui.button("Cancel").clicked() {
                     modal.cancel_request = true;
@@ -294,10 +461,16 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
                 if ui.button("Save As\u{2026}").clicked() {
                     modal.save_request = true;
                 }
+                if ui.button("Render again").clicked() {
+                    modal.render_request = true;
+                }
             }
             StillPhase::Cancelled | StillPhase::Failed => {
                 if ui.button("Close").clicked() {
                     close_clicked = true;
+                }
+                if ui.button("Render again").clicked() {
+                    modal.render_request = true;
                 }
             }
         });

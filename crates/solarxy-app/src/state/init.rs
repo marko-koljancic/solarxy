@@ -196,6 +196,7 @@ impl State {
             selected_object: None,
             cook_health: super::cook_health::CookHealth::default(),
             still: None,
+            finished_float: None,
             tracer: None,
             traced_env_dirty: false,
             look_through: [None; 4],

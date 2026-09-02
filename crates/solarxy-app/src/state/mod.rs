@@ -140,6 +140,11 @@ pub struct State {
     /// The still render in flight, if any. While it runs it owns the
     /// shared render targets, so panes are not rendered.
     pub(super) still: Option<still::StillState>,
+    /// The finished floating-point picture, waiting for a save path.
+    ///
+    /// Beside the modal's eight-bit copy rather than inside it: the modal shows
+    /// a screen image, and this one is only ever written to a file.
+    pub(super) finished_float: Option<solarxy_host::still::FloatImage>,
     /// The traced backend, built on the first traced still and kept for
     /// the session. It sees no per-frame deltas (those feed the raster
     /// backend alone), so every still start snapshots the scene into it.

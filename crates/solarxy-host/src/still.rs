@@ -273,6 +273,88 @@ impl StillSpec {
     }
 }
 
+/// A floating-point still being assembled from tiles.
+///
+/// Three channels rather than four, because that is what the encoder takes and
+/// a still has its background already in it, so an alpha lane would be a
+/// constant one pretending to be a matte. Dropping it here rather than at
+/// encode time saves a quarter of the buffer at the size where that matters.
+///
+/// Shared by both graphical shells rather than written twice, which is what
+/// makes "the same scene saved from either produces the same values" a property
+/// of the code instead of a thing to be checked and hoped for.
+pub struct FloatImage {
+    width: u32,
+    height: u32,
+    /// Scene-referred or display-referred, matching the readback that filled
+    /// it. Carried so an encode cannot mislabel what it wrote.
+    scene_linear: bool,
+    /// `width * height * 3`, in image order.
+    rgb: Vec<f32>,
+}
+
+impl FloatImage {
+    /// The buffer a float readback needs, or `None` for the eight-bit one,
+    /// which is assembled as bytes and needs nothing here.
+    #[must_use]
+    pub fn new(readback: StillReadback, width: u32, height: u32) -> Option<Self> {
+        if readback == StillReadback::Display8 {
+            return None;
+        }
+        Some(Self {
+            width,
+            height,
+            scene_linear: readback == StillReadback::SceneLinear,
+            rgb: vec![0.0; (width as usize) * (height as usize) * 3],
+        })
+    }
+
+    #[must_use]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[must_use]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Whether this holds scene-referred light rather than a finished look.
+    #[must_use]
+    pub fn is_scene_linear(&self) -> bool {
+        self.scene_linear
+    }
+
+    #[must_use]
+    pub fn rgb(&self) -> &[f32] {
+        &self.rgb
+    }
+
+    /// Copies one finished tile's colour into its place in the image.
+    ///
+    /// The tile arrives as four `f32` a pixel and lands as three; the alpha a
+    /// still carries is a constant one.
+    pub fn place(&mut self, rect: TileRect, pixels: &[u8]) {
+        let src = crate::passes::floats_of(pixels);
+        for row in 0..rect.height {
+            for col in 0..rect.width {
+                let src_at = ((row * rect.width + col) as usize) * 4;
+                let (x, y) = (rect.x + col, rect.y + row);
+                if x >= self.width || y >= self.height {
+                    continue;
+                }
+                let dst_at = ((y as usize) * (self.width as usize) + (x as usize)) * 3;
+                if let (Some(p), Some(slot)) = (
+                    src.get(src_at..src_at + 3),
+                    self.rgb.get_mut(dst_at..dst_at + 3),
+                ) {
+                    slot.copy_from_slice(p);
+                }
+            }
+        }
+    }
+}
+
 /// A rectangle of the image, in pixels.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TileRect {

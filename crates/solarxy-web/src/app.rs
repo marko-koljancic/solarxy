@@ -549,7 +549,7 @@ pub struct SolarxyApp {
     /// The floating-point image being assembled, when the running still is a
     /// float one. `None` for the ordinary eight-bit still, which is assembled
     /// on a canvas the browser owns and never needs a copy here.
-    still_float: Option<FloatStill>,
+    still_float: Option<solarxy_host::still::FloatImage>,
     /// Whether the traced preview runs its edge-aware filter.
     ///
     /// A preference rather than a per-pane setting, matching the two effects
@@ -726,79 +726,6 @@ fn place_plane(
             src.get(src_at..src_at + row_bytes),
         ) {
             slot.copy_from_slice(bytes);
-        }
-    }
-}
-
-/// Reinterprets a float plane's bytes.
-///
-/// The still job hands every float plane back as its bytes, so a tile is one
-/// copy rather than a typed buffer per plane. The headless crate carries the
-/// same three lines for the same reason; duplicating them here is cheaper than
-/// giving the wasm build a dependency on a crate that reads files.
-fn floats_of(bytes: &[u8]) -> Vec<f32> {
-    bytes
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|c| f32::from_le_bytes(*c))
-        .collect()
-}
-
-/// How a still's floating-point image is assembled, when one is being kept.
-///
-/// Three channels rather than four, because that is what the encoder takes and
-/// a still has its background already in it, so an alpha lane would be a
-/// constant one pretending to be a matte. Dropping it here rather than at
-/// encode time saves a quarter of the buffer at the size where that matters.
-struct FloatStill {
-    width: u32,
-    height: u32,
-    /// Scene-referred or display-referred, matching the readback that filled
-    /// it. Carried so the encode cannot mislabel what it wrote.
-    scene_linear: bool,
-    /// `width * height * 3`, in image order. Empty when the still is
-    /// eight-bit, which is the ordinary case and costs nothing.
-    rgb: Vec<f32>,
-}
-
-impl FloatStill {
-    fn new(readback: solarxy_host::still::StillReadback, width: u32, height: u32) -> Option<Self> {
-        use solarxy_host::still::StillReadback;
-        if readback == StillReadback::Display8 {
-            return None;
-        }
-        let len = (width as usize) * (height as usize) * 3;
-        Some(Self {
-            width,
-            height,
-            scene_linear: readback == StillReadback::SceneLinear,
-            rgb: vec![0.0; len],
-        })
-    }
-
-    /// Copies one finished tile's colour into its place in the image.
-    ///
-    /// The tile arrives as four `f32` a pixel and lands as three; the alpha a
-    /// still carries is a constant one.
-    fn place(&mut self, rect: solarxy_host::still::TileRect, pixels: &[u8]) {
-        let src = floats_of(pixels);
-        for row in 0..rect.height {
-            for col in 0..rect.width {
-                let src_at = ((row * rect.width + col) as usize) * 4;
-                let image_x = rect.x + col;
-                let image_y = rect.y + row;
-                if image_x >= self.width || image_y >= self.height {
-                    continue;
-                }
-                let dst_at = ((image_y as usize) * (self.width as usize) + (image_x as usize)) * 3;
-                if let (Some(p), Some(slot)) = (
-                    src.get(src_at..src_at + 3),
-                    self.rgb.get_mut(dst_at..dst_at + 3),
-                ) {
-                    slot.copy_from_slice(p);
-                }
-            }
         }
     }
 }
@@ -2075,7 +2002,7 @@ impl SolarxyApp {
             StillEngine::PathTraced => PathBackend::CAPS.writes_aovs,
             StillEngine::Raster => solarxy_host::RasterBackend::CAPS.writes_aovs,
         };
-        self.still_float = FloatStill::new(readback, spec.width, spec.height);
+        self.still_float = solarxy_host::still::FloatImage::new(readback, spec.width, spec.height);
         // The job's own camera. Built from the named `camera` node when there
         // is one, and otherwise from the active pane's current view copied by
         // value: either way the panes are untouched, which is what makes
@@ -2349,7 +2276,7 @@ impl SolarxyApp {
                 "this still was not rendered as a floating-point image",
             ));
         };
-        let img = solarxy_core::geometry::RawImageHdr::new(f.rgb.clone(), f.width, f.height);
+        let img = solarxy_core::geometry::RawImageHdr::new(f.rgb().to_vec(), f.width(), f.height());
         let bytes = solarxy_formats::export::encode_exr_rgb_bytes(&img)
             .map_err(|e| JsError::new(&format!("the image could not be encoded: {e}")))?;
         Ok(js_sys::Uint8Array::from(bytes.as_slice()))
@@ -2362,7 +2289,7 @@ impl SolarxyApp {
     #[must_use]
     pub fn still_float_space(&self) -> Option<String> {
         self.still_float.as_ref().map(|f| {
-            if f.scene_linear {
+            if f.is_scene_linear() {
                 "sceneLinear".to_string()
             } else {
                 "display".to_string()

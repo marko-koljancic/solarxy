@@ -6,8 +6,13 @@ use solarxy_core::view_config::{
 
 use super::snapshot::GuiSnapshot;
 
-fn combo_with_tooltip<T>(ui: &mut egui::Ui, label: &str, shortcut: &str, current: &mut T, all: &[T])
-where
+pub(super) fn combo_with_tooltip<T>(
+    ui: &mut egui::Ui,
+    label: &str,
+    shortcut: &str,
+    current: &mut T,
+    all: &[T],
+) where
     T: Copy + PartialEq + std::fmt::Display,
 {
     ui.horizontal(|ui| {
