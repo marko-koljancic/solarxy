@@ -1540,19 +1540,26 @@ body.precision-drag-active {
   border-color: var(--border-primary);
 }
 
-.tbtn.cook {
+/* The strip's emphasized action. Named for its role rather than for one
+   feature, because a second toolbar now has one: the render window's Render
+   button is to that strip what Cook is to the header's. Same declarations, so
+   no colour is introduced. */
+.tbtn.cook,
+.tbtn.accent {
   background: var(--accent-primary);
   color: var(--text-on-accent);
   border-color: var(--accent-primary);
   font-weight: 600;
 }
 
-.tbtn.cook:hover:not(:disabled) {
+.tbtn.cook:hover:not(:disabled),
+.tbtn.accent:hover:not(:disabled) {
   background: var(--accent-secondary);
   color: var(--text-on-accent);
 }
 
-.tbtn.cook:disabled {
+.tbtn.cook:disabled,
+.tbtn.accent:disabled {
   background: none;
   color: var(--text-secondary);
   border-color: var(--border-primary);
@@ -2580,21 +2587,92 @@ body.reduce-motion * {
    scaled to fit rather than sized: one buffer serves both the preview and the
    save, and a second scaled copy would double the memory of the one thing here
    that can reach hundreds of megabytes. */
-.still-preview {
-  flex: 1;
-  min-height: 12rem;
+/* The render window's control strip: one row that reads left to right, built
+   from the same toolbar primitives the application header uses. */
+.render-strip {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  padding-bottom: 0.5rem;
+}
+.render-strip-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.2rem 0.2rem;
+  background: var(--border-primary);
+}
+.render-strip-field {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+.render-strip-label {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+.render-strip-view {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.render-strip-zoom {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  min-width: 3.2rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* Readings, not controls: what the render node decided. Pushed to the end so
+   the controls keep the left edge, where they are looked for. */
+.render-strip-readings {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The strip collapses in a stated order rather than wrapping arbitrarily.
+   Readings go first, because they are the only part a person can find
+   elsewhere: they are the render node's own parameters. Then the field labels,
+   whose controls carry their own accessible names and stay operable without
+   them. The render action, the pass selector and the view controls never go. */
+@media (max-width: 60rem) {
+  .render-strip-readings {
+    display: none;
+  }
+}
+@media (max-width: 44rem) {
+  .render-strip-label {
+    display: none;
+  }
+}
+
+/* The stage the picture sits on. Positioned rather than centred by flexbox,
+   because the view transform decides where the picture goes and a flex rule
+   would be a second opinion about it. */
+.render-stage {
+  position: relative;
+  flex: 1;
+  min-height: 14rem;
   background: var(--background-quaternary);
   border: 1px solid var(--border-primary);
   border-radius: 0.5rem;
   overflow: hidden;
+  touch-action: none;
+  cursor: grab;
 }
-.still-canvas {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+.render-stage:active {
+  cursor: grabbing;
+}
+.render-canvas {
+  position: absolute;
   /* Checkerboard-free: a still is opaque, and a transparent-looking backdrop
      would read as alpha the render does not have. */
   background: var(--background-tertiary);

@@ -14,6 +14,7 @@
 // a machine that can render it can usually hold it, and a machine that cannot
 // should be told why before it tries.
 
+import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { getClient } from "../engine/session";
 import type {
@@ -31,8 +32,16 @@ import { useRenderJob } from "../store/renderJob";
 import { useViewState } from "../store/viewState";
 import { formatDurationMs } from "../render/duration";
 import { passAvailable, passOptions } from "../render/passes";
+import {
+  actualSize,
+  pan,
+  viewRect,
+  zoomAbout,
+  zoomOf,
+  type Size,
+  type ViewMode,
+} from "../render/view";
 import { Modal } from "./Modal";
-import { Row, Section } from "./DialogRow";
 import { Select } from "./Select";
 
 /** What the render node asked for, handed over when the action fires.
@@ -86,6 +95,13 @@ export function StillRenderModal({
   const [finished, setFinished] = useState(false);
   const [pass, setPass] = useState<StillPass>("beauty");
   const [passes, setPasses] = useState<StillPasses | undefined>(undefined);
+  // The view over the picture. `null` is the letterbox fit, which is also what
+  // a resize falls back to on its own, because the fit is recomputed from the
+  // sizes at hand rather than stored.
+  const [view, setView] = useState<ViewMode>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stage, setStage] = useState<Size>({ w: 0, h: 0 });
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
   // The format is a property of the render rather than of the save, so it is
   // chosen here and locked once tiles start arriving.
   const [format, setFormat] = useState<StillFormat>("png");
@@ -132,11 +148,11 @@ export function StillRenderModal({
     };
     const pump = () => {
       const beauty = beautyRef.current?.getContext("2d");
-      const view = canvasRef.current?.getContext("2d");
+      const visible = canvasRef.current?.getContext("2d");
       // Painted into the visible canvas as well as the offscreen one, rather
       // than blitting the whole picture every frame: a tile is a small
       // rectangle and the whole picture is not.
-      const showing = pass === "beauty" ? view : null;
+      const showing = pass === "beauty" ? visible : null;
       if (beauty) {
         // Previews first, tiles second, so that within one frame a finished
         // tile always lands on top of the unfinished look at the same
@@ -158,7 +174,7 @@ export function StillRenderModal({
         // A pass only exists for tiles that finished, so it is worth remapping
         // exactly when one has. A preview carries no passes and changes nothing
         // here.
-        if (landed && pass !== "beauty" && view) showPass(view, pass);
+        if (landed && pass !== "beauty" && visible) showPass(visible, pass);
       }
       raf = requestAnimationFrame(pump);
     };
@@ -345,6 +361,57 @@ export function StillRenderModal({
 
   const pct = job.tiles > 0 ? (job.tile + job.sample / Math.max(1, job.samples)) / job.tiles : 0;
 
+  // The glass the picture sits on. Measured rather than assumed, because the
+  // dialog is a percentage of the viewport and the fit has to follow it.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return undefined;
+    const observer = new ResizeObserver(([entry]) => {
+      const box = entry.contentRect;
+      setStage({ w: Math.round(box.width), h: Math.round(box.height) });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const picture: Size = { w: request.settings.width, h: request.settings.height };
+  const rect = viewRect(view, picture, stage);
+  const zoom = zoomOf(view, picture, stage);
+
+  // The transform applies to the element, never to the pixels: tiles keep
+  // arriving into the same canvas at the same coordinates whatever the view is
+  // doing, which is what makes panning during a render safe and what leaves the
+  // save path alone.
+  const onWheel = (e: ReactWheelEvent) => {
+    const box = stageRef.current?.getBoundingClientRect();
+    if (!box) return;
+    // Exponential in the delta, so a trackpad's many small events and a
+    // mouse's few large ones travel the same distance per unit scrolled.
+    const factor = Math.exp(-e.deltaY * 0.002);
+    setView((v) =>
+      zoomAbout(v, { x: e.clientX - box.left, y: e.clientY - box.top }, factor, picture, stage),
+    );
+  };
+
+  const onPointerDown = (e: ReactPointerEvent) => {
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: ReactPointerEvent) => {
+    const from = dragRef.current;
+    if (!from) return;
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    setView((v) => pan(v, { x: e.clientX - from.x, y: e.clientY - from.y }, picture, stage));
+  };
+
+  const endDrag = (e: ReactPointerEvent) => {
+    dragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
   return (
     <Modal
       id="still-render"
@@ -355,61 +422,62 @@ export function StillRenderModal({
       closeOnEsc={false}
       closeOnBackdrop={!busy}
     >
-      <Section title="Output">
-        <Row label="Size" doc="Set on the render node. Large renders are drawn in tiles and assembled, so the size you ask for is the size you get.">
-          <span className="prefs-unit">
-            {request.settings.width} x {request.settings.height}
-            {megapixels >= CANVAS_WARN_MP
-              ? ` (${megapixels.toFixed(0)} megapixels; this needs about ${Math.round(
-                  megapixels * 4,
-                )} MB of browser memory to hold)`
-              : ""}
-          </span>
-        </Row>
-        <Row label="Engine" doc="Set on the render node. Path traced follows light through the scene; rasterized is the viewport's own renderer.">
-          <Select
-            ariaLabel="Engine"
-            value={request.settings.engine}
-            options={[
-              { value: "raster", label: "Rasterized" },
-              { value: "pathTraced", label: "Path traced" },
-            ]}
-            onChange={() => {
-              /* Read-only here: the render node owns it. */
-            }}
-            disabled
-          />
-        </Row>
-        {request.settings.engine === "pathTraced" && (
-          <Row label="Samples" doc="Set on the render node's Quality. Four times the samples is half the noise.">
-            <span className="prefs-unit">
-              {request.settings.samples} per pixel{request.settings.denoise ? ", denoised" : ""}
-            </span>
-          </Row>
-        )}
-        <Row
-          label="Format"
-          doc="Chosen before rendering, because it decides what the renderer reads back and cannot change once tiles are arriving. PNG is eight bits with the look already applied. EXR is 32-bit float, which is what a compositing package wants."
+      {/* The strip. One row that reads left to right: what the window does,
+          what it shows, what it will write, and how it is being looked at.
+          What this window cannot change is a reading at the end rather than a
+          disabled copy of a control that lives on the render node, because a
+          dead input invites a click and answers nothing. */}
+      <div className="render-strip">
+        <button
+          className="tbtn accent"
+          disabled={!busy && oversizeForFloat}
+          onClick={busy ? cancel : start}
         >
+          {busy ? "Cancel" : started ? "Render again" : "Render"}
+        </button>
+
+        <span className="render-strip-sep" aria-hidden="true" />
+
+        {passOptions(passes).length > 1 && (
+          <label className="render-strip-field">
+            <span className="render-strip-label">Showing</span>
+            <Select
+              ariaLabel="Pass shown"
+              value={pass}
+              width={130}
+              options={passOptions(passes).map((o) => ({
+                value: o.value,
+                label: o.label,
+                hint: o.unavailable ? "not produced" : undefined,
+                disabled: o.unavailable !== undefined,
+              }))}
+              onChange={(v) => setPass(v as StillPass)}
+            />
+          </label>
+        )}
+
+        <label className="render-strip-field">
+          <span className="render-strip-label">Format</span>
           <Select
-            ariaLabel="Format"
+            ariaLabel="Output format"
             value={format}
+            width={110}
             options={[
-              { value: "png", label: "PNG (8-bit)" },
-              { value: "exr", label: "EXR (32-bit float)" },
+              { value: "png", label: "PNG" },
+              { value: "exr", label: "EXR" },
             ]}
             onChange={(v) => setFormat(v as StillFormat)}
             disabled={busy}
           />
-        </Row>
+        </label>
+
         {format === "exr" && (
-          <Row
-            label="Space"
-            doc="Which floats the file carries. Scene-linear is light with no exposure, tone map or grade applied, which is what a compositing package expects to be handed and what lets it apply a look of its own. Display is the finished look without the quantization. The same choice, and the same default, as the command line."
-          >
+          <label className="render-strip-field">
+            <span className="render-strip-label">Space</span>
             <Select
-              ariaLabel="Space"
+              ariaLabel="Floating-point space"
               value={space}
+              width={160}
               options={[
                 { value: "sceneLinear", label: "Scene-linear" },
                 { value: "display", label: "Display-referred" },
@@ -417,55 +485,79 @@ export function StillRenderModal({
               onChange={(v) => setSpace(v as StillSpace)}
               disabled={busy}
             />
-          </Row>
+          </label>
         )}
-        {format === "exr" && megapixels > FLOAT_MAX_MP && (
-          <Row label="" doc="">
-            <span className="prefs-unit">
-              A float still is limited to {FLOAT_MAX_MP} megapixels and this one is{" "}
-              {megapixels.toFixed(1)}. Render it smaller, or take it from the command line, which
-              writes the same image with no such limit.
+
+        <span className="render-strip-sep" aria-hidden="true" />
+
+        <div className="render-strip-view">
+          <button className="tbtn" onClick={() => setView(null)} title="Fit the picture to the window">
+            Fit
+          </button>
+          <button
+            className="tbtn"
+            onClick={() => setView(actualSize(picture, stage))}
+            title="One image pixel to one screen pixel"
+          >
+            100%
+          </button>
+          <span className="render-strip-zoom" aria-label={`Zoom ${Math.round(zoom * 100)} percent`}>
+            {Math.round(zoom * 100)}%
+          </span>
+        </div>
+
+        {/* Readings, not controls. First to go when the window is narrow. */}
+        <div className="render-strip-readings">
+          <span>
+            {request.settings.width} x {request.settings.height}
+          </span>
+          <span>{request.settings.engine === "pathTraced" ? "Path traced" : "Rasterized"}</span>
+          {request.settings.engine === "pathTraced" && (
+            <span>
+              {request.settings.samples} spp{request.settings.denoise ? ", denoised" : ""}
             </span>
-          </Row>
-        )}
-        <Row
-          label="Passes"
-          doc="Set on the render node. A pass is written beside the image for a compositor; which one this window shows is the separate control below."
-        >
-          <span className="prefs-unit">{producedNote}</span>
-        </Row>
-      </Section>
+          )}
+          <span>Passes: {producedNote}</span>
+        </div>
+      </div>
 
-      {started && passOptions(passes).length > 1 && (
-        <Row
-          label="Showing"
-          doc="Which pass this window displays. Switching replays what has already arrived; it never re-renders, and it never changes what is saved."
-        >
-          <Select
-            ariaLabel="Pass shown"
-            value={pass}
-            options={passOptions(passes).map((o) => ({
-              value: o.value,
-              label: o.label,
-              hint: o.unavailable ? "not produced" : undefined,
-              disabled: o.unavailable !== undefined,
-            }))}
-            onChange={(v) => setPass(v as StillPass)}
-          />
-        </Row>
-      )}
-
-      <div className="still-preview">
+      {/* The stage. The canvas keeps its intrinsic output size and is placed by
+          CSS, so the picture can be moved without the pixels being touched. */}
+      <div
+        className="render-stage"
+        ref={stageRef}
+        onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
         <canvas
           ref={canvasRef}
           width={request.settings.width}
           height={request.settings.height}
-          className="still-canvas"
+          className="render-canvas"
           aria-label="The still being rendered"
+          style={{
+            left: `${rect.x}px`,
+            top: `${rect.y}px`,
+            width: `${rect.w}px`,
+            height: `${rect.h}px`,
+            // Past one to one the reader is looking at pixels and should see
+            // them, rather than a smoothing of them.
+            imageRendering: zoom >= 1 ? "pixelated" : "auto",
+          }}
         />
       </div>
-      {started && previewNote && (
-        <div className="prefs-unit">{previewNote}</div>
+
+      {(oversizeForFloat || (started && previewNote) || megapixels >= CANVAS_WARN_MP) && (
+        <div className="prefs-unit">
+          {oversizeForFloat
+            ? `A float still is limited to ${FLOAT_MAX_MP} megapixels and this one is ${megapixels.toFixed(1)}. Render it smaller, or take it from the command line, which writes the same image with no such limit.`
+            : started && previewNote
+              ? previewNote
+              : `${megapixels.toFixed(0)} megapixels; this needs about ${Math.round(megapixels * 4)} MB of browser memory to hold.`}
+        </div>
       )}
 
       {started && (
@@ -518,9 +610,6 @@ export function StillRenderModal({
             Save all
           </button>
         )}
-        <button className="btn primary" disabled={busy || oversizeForFloat} onClick={start}>
-          {started ? "Render again" : "Render"}
-        </button>
       </div>
     </Modal>
   );
