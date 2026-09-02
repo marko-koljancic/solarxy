@@ -363,6 +363,7 @@ fn endurance(args: &[String]) -> anyhow::Result<()> {
         aux: false,
         depth: false,
         preview_interval_ms: 0,
+        transparent: false,
     };
     let tiles = StillRenderJob::new(spec).plan().len();
     println!(
@@ -413,6 +414,7 @@ fn once(args: &[String]) -> anyhow::Result<()> {
         aux: false,
         depth: false,
         preview_interval_ms: 0,
+        transparent: false,
     };
     let tiles = StillRenderJob::new(spec).plan().len();
     println!("STILL {width}x{height} at {samples} spp in {tiles} tiles");
@@ -537,6 +539,7 @@ fn probe_still(
         aux: false,
         depth: false,
         preview_interval_ms: 0,
+        transparent: false,
     };
     let tiles = StillRenderJob::new(spec).plan().len();
 

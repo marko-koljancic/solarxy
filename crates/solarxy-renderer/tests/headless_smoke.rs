@@ -569,6 +569,7 @@ fn the_two_grading_slots_behave_as_specified() {
             look,
             &renderer.post.luts,
             InspectionMode::Shaded,
+            false,
         );
         renderer.post.composite.render(
             &mut encoder,

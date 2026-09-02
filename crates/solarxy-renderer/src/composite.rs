@@ -131,6 +131,7 @@ impl CompositeState {
             luts,
             InspectionMode::Shaded,
             strengths,
+            false,
         );
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Composite Params Uniform"),
@@ -248,6 +249,12 @@ impl CompositeState {
     /// exposure, because the look is now nine values rather than two and a
     /// ninth positional argument is how the wrong pane's grade gets
     /// written.
+    /// `carry_alpha` marks the scene texture's alpha lane as a matte to carry
+    /// through the chain rather than a constant to drop. Only the still job
+    /// sets it, and only for a transparent render; a pane, a screenshot and
+    /// the smoke harness all pass false, which leaves the shader's arithmetic
+    /// exactly what it was.
+    #[allow(clippy::too_many_arguments)]
     pub fn write_params(
         &self,
         queue: &wgpu::Queue,
@@ -256,6 +263,7 @@ impl CompositeState {
         look: &CompositeLook,
         luts: &LutSlots,
         inspection_mode: InspectionMode,
+        carry_alpha: bool,
     ) {
         let params = build_params(
             bloom_enabled,
@@ -264,6 +272,7 @@ impl CompositeState {
             luts,
             inspection_mode,
             self.strengths,
+            carry_alpha,
         );
         queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
     }
@@ -331,7 +340,12 @@ pub struct CompositeParams {
     tone_mode: u32,
     exposure: f32,
     inspection_mode: u32,
-    _pad: u32,
+    /// Whether the scene texture's alpha lane is a matte to carry through
+    /// rather than a constant to drop. Set only by the still job for a
+    /// transparent render; every viewport pane writes zero, which is the
+    /// arithmetic the goldens pin. This word was the struct's padding, so
+    /// spending it moved nothing.
+    carry_alpha: u32,
 
     lut_a_enabled: u32,
     lut_a_strength: f32,
@@ -375,6 +389,7 @@ fn build_params(
     luts: &LutSlots,
     inspection_mode: InspectionMode,
     strengths: PostStrengths,
+    carry_alpha: bool,
 ) -> CompositeParams {
     // A slot is on only when it holds a real table: a strength left turned
     // up on an empty slot must not blend towards the identity texture that
@@ -393,7 +408,7 @@ fn build_params(
         tone_mode: look.tone_mode.as_u32(),
         exposure: look.exposure,
         inspection_mode: inspection_mode.as_u32(),
-        _pad: 0,
+        carry_alpha: u32::from(carry_alpha),
 
         lut_a_enabled: u32::from(a_on),
         lut_a_strength: look.lut_a_strength.clamp(0.0, 1.0),

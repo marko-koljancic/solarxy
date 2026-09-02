@@ -49,8 +49,10 @@ pub(crate) fn trace_settings_for(
         denoise_normal_power: _,
         denoise_sigma_albedo: _,
         denoise_level_falloff: _,
-        // The film back and what leaves beside the picture.
-        transparent_background: _,
+        // The film back reaches the tracer too: its kernel is what withholds
+        // the environment from uncovered camera rays and counts the matte.
+        transparent_background,
+        // What leaves beside the picture stays the still spec's business.
         aov_albedo: _,
         aov_normal: _,
         aov_depth: _,
@@ -68,6 +70,10 @@ pub(crate) fn trace_settings_for(
         seed,
         denoise,
         denoise_until_samples,
+        // Explicit rather than riding `current`, for the same reason as the
+        // sample count: the still authors it and the pane preview's own
+        // settings put it back to false on the preview's next encode.
+        transparent_background,
         // Everything else carries over from what the backend already holds,
         // because this shell shares one tracer between the pane preview and the
         // still. The lens is installed right after this, from the camera the
@@ -122,6 +128,7 @@ mod tests {
         s.firefly_clamp = 3.5;
         s.seed = 4242;
         s.denoise = true;
+        s.transparent_background = true;
 
         let t = trace_settings_for(&s, TraceSettings::default());
         assert_eq!(t.samples, 91);
@@ -130,6 +137,7 @@ mod tests {
         assert!((t.firefly_clamp - 3.5).abs() < f32::EPSILON);
         assert_eq!(t.seed, 4242);
         assert!(t.denoise);
+        assert!(t.transparent_background, "the film back reaches the kernel");
     }
 
     /// The page's pacing is the page's, whatever the node says.

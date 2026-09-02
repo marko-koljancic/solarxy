@@ -38,6 +38,15 @@ fn vs_fullscreen(@builtin(vertex_index) id: u32) -> VertexOutput {
 // and interpolation would dress that up as blur.
 @group(0) @binding(0) var accumulated: texture_2d<f32>;
 
+// The matte's inputs, bound only by the matte pipeline: the kernel's coverage
+// counts, row-major at the accumulator's size, and how many samples the run
+// has drawn so far. A count over a count rather than a stored fraction,
+// because integer sums are what keep a chunked run and a one-shot run on the
+// identical matte; the division happens here, once, per resolve, which is
+// also what makes a mid-render preview's partial fraction correct for free.
+@group(0) @binding(1) var<storage, read> resolve_coverage: array<u32>;
+@group(0) @binding(2) var<uniform> resolve_drawn: u32;
+
 @fragment
 fn fs_resolve(in: VertexOutput) -> @location(0) vec4<f32> {
     // Clip-space y points up while texel rows grow down, so the quad's uv is
@@ -51,8 +60,31 @@ fn fs_resolve(in: VertexOutput) -> @location(0) vec4<f32> {
         vec2<i32>(0, 0),
         vec2<i32>(dims) - vec2<i32>(1, 1),
     );
-    // Alpha is one rather than the accumulator's: the mean carries a coverage
-    // lane nothing downstream reads, and handing the composite a partially
-    // transparent scene would darken it against whatever the target held.
+    // Alpha is one rather than the accumulator's: that lane is the described
+    // count steering the denoiser, not a matte, and handing the composite a
+    // partially transparent scene would darken it against whatever the target
+    // held. A transparent render resolves through `fs_resolve_matte` below,
+    // which has a real matte to write; this entry point is every opaque
+    // render, unchanged.
     return vec4<f32>(textureLoad(accumulated, texel, 0).rgb, 1.0);
+}
+
+@fragment
+fn fs_resolve_matte(in: VertexOutput) -> @location(0) vec4<f32> {
+    // The same addressing as `fs_resolve`, for the same reasons.
+    let dims = textureDimensions(accumulated);
+    let screen = vec2<f32>(in.uv.x, 1.0 - in.uv.y);
+    let texel = clamp(
+        vec2<i32>(screen * vec2<f32>(dims)),
+        vec2<i32>(0, 0),
+        vec2<i32>(dims) - vec2<i32>(1, 1),
+    );
+    // The colour stays the accumulator's mean, which under the transparent
+    // flag is already weighted by coverage: a camera miss contributed
+    // nothing. The matte beside it is the plain fraction of camera rays that
+    // found a surface, and the composite is what divides the weighting out
+    // before the display chain.
+    let cell = u32(texel.y) * dims.x + u32(texel.x);
+    let coverage = f32(resolve_coverage[cell]) / f32(max(resolve_drawn, 1u));
+    return vec4<f32>(textureLoad(accumulated, texel, 0).rgb, coverage);
 }

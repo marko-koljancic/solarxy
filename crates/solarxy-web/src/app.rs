@@ -2696,6 +2696,7 @@ impl SolarxyApp {
             &self.pane_look(pane_idx),
             &self.renderer.post.luts,
             inspection,
+            false,
         );
         let rect = target.rect;
         self.renderer.post.composite.render(
@@ -4086,6 +4087,7 @@ impl SolarxyApp {
             // 1080 render is a single tile, so without this nothing reaches the
             // canvas until the whole image is finished.
             preview_interval_ms: solarxy_host::still::PREVIEW_INTERVAL_MS,
+            transparent: opts.transparent_background,
         }
     }
 
@@ -5829,6 +5831,7 @@ impl SolarxyApp {
             &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
             &self.renderer.post.luts,
             pds.inspection_mode,
+            false,
         );
         self.renderer.post.composite.render(
             &mut encoder,

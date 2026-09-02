@@ -359,6 +359,9 @@ pub fn composite_and_submit(
         &c.look,
         &renderer.post.luts,
         c.inspection,
+        // A pane never carries a matte: transparency is a property of a
+        // render, not a display mode.
+        false,
     );
 
     let viewport = Some([c.rect.x, c.rect.y, c.rect.width, c.rect.height]);

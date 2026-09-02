@@ -486,6 +486,7 @@ impl State {
             &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
             &self.renderer.post.luts,
             active_inspection,
+            false,
         );
     }
 

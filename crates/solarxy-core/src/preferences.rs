@@ -194,6 +194,14 @@ pub enum BgKind {
     Gradient,
     /// HDRI equirect skybox pass.
     Hdri,
+    /// Nothing at all: the pass clears to zero alpha and no background is
+    /// drawn, so what the render carries behind the subject is a matte.
+    ///
+    /// A render property rather than a user background: nothing resolves to
+    /// it from preferences, and no viewport pane ever carries it. The still
+    /// job substitutes it when a render asks for a transparent background;
+    /// see [`ResolvedBackground::TRANSPARENT`].
+    Transparent,
 }
 
 /// A background resolved to concrete colours — the registry-free form the
@@ -208,6 +216,20 @@ pub struct ResolvedBackground {
     pub sky_top: [f32; 3],
     /// Lower sky colour — gradient-pass bottom + IBL lower hemisphere.
     pub sky_bottom: [f32; 3],
+}
+
+impl ResolvedBackground {
+    /// The transparent film back: zero everywhere, nothing drawn behind the
+    /// subject. Substituted by the still job when a render asks for it; it is
+    /// deliberately not reachable from any background preference, because the
+    /// environment that lights the scene is unchanged and only the photograph
+    /// of it is withheld.
+    pub const TRANSPARENT: Self = Self {
+        kind: BgKind::Transparent,
+        clear: [0.0; 3],
+        sky_top: [0.0; 3],
+        sky_bottom: [0.0; 3],
+    };
 }
 
 impl BuiltinBg {

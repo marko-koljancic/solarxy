@@ -65,6 +65,7 @@ fn spec(engine: StillEngine, samples: u32, budget: u32) -> StillSpec {
         aux: false,
         depth: false,
         preview_interval_ms: 0,
+        transparent: false,
     }
 }
 
@@ -96,8 +97,19 @@ const JOB_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
 /// test has nothing pacing it, so it yields between polls rather than spinning
 /// against the device it is waiting for.
 fn run(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBackend) -> Vec<u8> {
+    run_with_look(h, job, backend, CompositeLook::default())
+}
+
+/// The same drive under a non-default look, for the tests that assert what a
+/// grade may and may not touch.
+fn run_with_look(
+    h: &mut Harness,
+    job: &mut StillRenderJob,
+    backend: &mut dyn RenderBackend,
+    look: CompositeLook,
+) -> Vec<u8> {
     let mut image = vec![0u8; (W * H * 4) as usize];
-    for tile in run_tiles(h, job, backend).tiles {
+    for tile in run_tiles_with(h, job, backend, look).tiles {
         blit(&mut image, &tile);
     }
     image
@@ -112,6 +124,15 @@ struct Run {
 /// The same drive, handing back what the job emitted rather than the picture,
 /// for a test that is about what a tile carries or how often the job publishes.
 fn run_tiles(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBackend) -> Run {
+    run_tiles_with(h, job, backend, CompositeLook::default())
+}
+
+fn run_tiles_with(
+    h: &mut Harness,
+    job: &mut StillRenderJob,
+    backend: &mut dyn RenderBackend,
+    look: CompositeLook,
+) -> Run {
     let pds: PaneDisplaySettings = pane_settings();
     let display: DisplaySettings = display_settings();
     let background: ResolvedBackground = BackgroundMode::GRADIENT.resolve(&[]);
@@ -144,7 +165,7 @@ fn run_tiles(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn Render
                 display: &display,
                 background,
                 bounds: Some(&bounds),
-                look: CompositeLook::default(),
+                look,
                 format,
                 scene_present: true,
                 now_ms: started.elapsed().as_millis() as u64,
@@ -651,4 +672,141 @@ fn the_shipped_budget_leaves_a_four_megapixel_still_in_whole_tiles() {
     for tile in &plan.tiles {
         assert!(tile.render.area() <= u64::from(TILE_BUDGET_PIXELS));
     }
+}
+
+/// One pixel of an assembled RGBA8 image.
+fn px(image: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let at = ((y * W + x) * 4) as usize;
+    [image[at], image[at + 1], image[at + 2], image[at + 3]]
+}
+
+/// The tracer with the transparent film back authored into its settings, the
+/// way every shell's mapping now sets it.
+fn traced_transparent(h: &Harness, samples: u32) -> PathBackend {
+    let mut backend = PathBackend::new(&h.device, &h.queue);
+    backend.apply(&h.device, &h.queue, &sphere_delta());
+    backend.set_sky(SKY_UP, SKY_DOWN);
+    backend.set_settings(TraceSettings {
+        samples,
+        chunk: samples,
+        transparent_background: true,
+        ..TraceSettings::default()
+    });
+    backend
+}
+
+/// The rasterized film back: the sky leaves the frame entirely, the silhouette
+/// antialiases through the multisample resolve, and the subject is lit byte
+/// for byte as an opaque render lights it, because withholding the photograph
+/// of the environment is not the same as removing the environment.
+#[test]
+fn a_transparent_raster_still_mattes_the_sky_and_lights_the_subject_identically() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = raster(&h);
+
+    let mut opaque_job = StillRenderJob::new(spec(StillEngine::Raster, 1, WHOLE));
+    let opaque = run(&mut h, &mut opaque_job, &mut backend);
+
+    let mut matte_job = StillRenderJob::new(StillSpec {
+        transparent: true,
+        ..spec(StillEngine::Raster, 1, WHOLE)
+    });
+    let matte = run(&mut h, &mut matte_job, &mut backend);
+
+    assert_eq!(
+        px(&matte, 1, 1),
+        [0, 0, 0, 0],
+        "the sky is nothing at all, in every lane"
+    );
+    let center = px(&matte, W / 2, H / 2);
+    assert_eq!(center[3], 255, "the subject is fully covered");
+    assert_eq!(
+        center[..3],
+        px(&opaque, W / 2, H / 2)[..3],
+        "the environment lights a covered pixel identically"
+    );
+    assert!(
+        matte.chunks_exact(4).any(|p| p[3] > 0 && p[3] < 255),
+        "a silhouette pixel is fractional rather than staircased"
+    );
+    assert!(
+        opaque.chunks_exact(4).all(|p| p[3] == 255),
+        "an ordinary opaque render stays opaque in every pixel"
+    );
+}
+
+/// The look shapes light and coverage is not light: a graded transparent
+/// render is transparent in exactly the places an ungraded one is.
+#[test]
+fn a_grade_leaves_the_matte_alone() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = raster(&h);
+    let transparent_spec = || StillSpec {
+        transparent: true,
+        ..spec(StillEngine::Raster, 1, WHOLE)
+    };
+
+    let mut plain_job = StillRenderJob::new(transparent_spec());
+    let plain = run(&mut h, &mut plain_job, &mut backend);
+
+    let mut graded_job = StillRenderJob::new(transparent_spec());
+    let graded = run_with_look(
+        &mut h,
+        &mut graded_job,
+        &mut backend,
+        CompositeLook {
+            exposure: 0.5,
+            lift: [0.2, 0.0, 0.0],
+            ..CompositeLook::default()
+        },
+    );
+
+    let alphas = |img: &[u8]| img.chunks_exact(4).map(|p| p[3]).collect::<Vec<u8>>();
+    assert_eq!(
+        alphas(&plain),
+        alphas(&graded),
+        "exposure and the grade left the alpha lane alone"
+    );
+    assert_ne!(
+        plain, graded,
+        "the grade did reach the colour, or this proves nothing"
+    );
+}
+
+/// The traced film back through the shared job: the same shape the raster test
+/// pins, with the matte coming out of the kernel's own coverage counts.
+#[test]
+fn a_transparent_traced_still_mattes_the_sky_and_keeps_the_subject_lit() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let samples = 4;
+
+    let mut opaque_backend = traced(&h, samples);
+    let mut opaque_job = StillRenderJob::new(spec(StillEngine::PathTraced, samples, WHOLE));
+    let opaque = run(&mut h, &mut opaque_job, &mut opaque_backend);
+
+    let mut backend = traced_transparent(&h, samples);
+    let mut job = StillRenderJob::new(StillSpec {
+        transparent: true,
+        ..spec(StillEngine::PathTraced, samples, WHOLE)
+    });
+    let matte = run(&mut h, &mut job, &mut backend);
+
+    assert_eq!(
+        px(&matte, 1, 1),
+        [0, 0, 0, 0],
+        "a camera ray that left into the sky contributed nothing"
+    );
+    let center = px(&matte, W / 2, H / 2);
+    assert_eq!(center[3], 255, "the subject is fully covered");
+    assert_eq!(
+        center[..3],
+        px(&opaque, W / 2, H / 2)[..3],
+        "a fully covered pixel is lit byte for byte as the opaque render lit it"
+    );
 }

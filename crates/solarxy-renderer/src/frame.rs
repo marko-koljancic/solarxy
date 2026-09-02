@@ -954,7 +954,12 @@ impl Renderer {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
-        self.draw_background_gradient(&mut pass);
+        // The empty pass predates backgrounds being resolved per pane and
+        // always drew the gradient; the transparent film back is the one kind
+        // that must draw nothing, because the clear it made is the matte.
+        if bg.kind != BgKind::Transparent {
+            self.draw_background_gradient(&mut pass);
+        }
     }
 
     pub fn render_gbuffer_pass(
@@ -1233,7 +1238,9 @@ impl Renderer {
         match bg.kind {
             BgKind::Gradient => self.draw_background_gradient(&mut pass),
             BgKind::Hdri => self.draw_skybox(&mut pass, cam_bg),
-            BgKind::Solid => {}
+            // For a solid the clear IS the background; for the transparent
+            // film back the clear is the absence of one.
+            BgKind::Solid | BgKind::Transparent => {}
         }
 
         // Scene-level draws (floor, overlays) bind the environment's own
@@ -1246,7 +1253,15 @@ impl Renderer {
                     self.draw_opaque_meshes(&mut pass, env, objects, cam_bg);
                     // Floor relies on slot 1 = the env instance buffer.
                     pass.set_vertex_buffer(1, env.instance_buffer.slice(..));
-                    self.draw_floor(&mut pass, env, cam_bg);
+                    // The drop-shadow floor blends a partial alpha, so over a
+                    // transparent film back it would matte the ground shadow
+                    // in: an accidental shadow catcher, which is a shading
+                    // feature this release deliberately does not ship. The
+                    // floor is a viewer aid like the background, and it goes
+                    // with it.
+                    if bg.kind != BgKind::Transparent {
+                        self.draw_floor(&mut pass, env, cam_bg);
+                    }
                     if pds.view_mode == ViewMode::ShadedWireframe {
                         self.draw_edge_wireframe(
                             &mut pass,

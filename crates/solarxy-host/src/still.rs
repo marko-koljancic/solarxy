@@ -241,6 +241,16 @@ pub struct StillSpec {
     /// [`PREVIEW_INTERVAL_MS`]; the headless command passes zero and pays
     /// nothing, since its own reader is fed when a tile lands.
     pub preview_interval_ms: u64,
+    /// Render with nothing behind the subject: the environment lights the
+    /// scene but is not photographed into it, and the image leaves with a
+    /// real matte in its alpha lane.
+    ///
+    /// The one field a shell sets. The job substitutes the transparent
+    /// background into the frame it hands the backend, which the rasterizer
+    /// reads as clear-to-zero-and-draw-no-background and the tracer ignores
+    /// in favour of its own settings flag, and it tells the composite to
+    /// carry the alpha lane instead of dropping it.
+    pub transparent: bool,
 }
 
 impl Default for StillSpec {
@@ -256,6 +266,7 @@ impl Default for StillSpec {
             aux: false,
             depth: false,
             preview_interval_ms: 0,
+            transparent: false,
         }
     }
 }
@@ -1095,6 +1106,7 @@ impl StillRenderJob {
             &ctx.look,
             &ctx.renderer.post.luts,
             InspectionMode::Shaded,
+            self.spec.transparent,
         );
         let r = target.rect;
         ctx.renderer.post.composite.render(
@@ -1160,7 +1172,15 @@ impl StillRenderJob {
                 is_split: false,
                 pds: ctx.pds,
                 display: ctx.display,
-                background: ctx.background,
+                // The film back the render was authored with wins over the
+                // viewer's background: this is what "transparent" means to the
+                // rasterizer, and the tracer ignores the field either way, so
+                // the substitution asks neither backend what it is.
+                background: if self.spec.transparent {
+                    solarxy_core::preferences::ResolvedBackground::TRANSPARENT
+                } else {
+                    ctx.background
+                },
                 camera: Some(ctx.camera),
                 env: ctx.env,
                 bounds: ctx.bounds,
@@ -1218,6 +1238,7 @@ impl StillRenderJob {
             &ctx.look,
             &ctx.renderer.post.luts,
             InspectionMode::Shaded,
+            self.spec.transparent,
         );
         let r = target.rect;
         ctx.renderer.post.composite.render(

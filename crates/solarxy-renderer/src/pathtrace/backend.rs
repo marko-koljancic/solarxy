@@ -170,6 +170,11 @@ pub const DEFAULT_FIREFLY_CLAMP: f32 = 16.0;
 struct PaneAccumulator {
     target: TraceTarget,
     uniforms: PathUniforms,
+    /// The drawn-sample total the matte resolve divides coverage by, written
+    /// per encode. Per pane rather than one buffer on the resolve, because a
+    /// queue write lands before the whole submission: a shared buffer written
+    /// for two panes in one frame would hand both the second pane's total.
+    drawn: wgpu::Buffer,
     /// How many samples the mean already averages. Zero means the read slot
     /// holds nothing.
     samples: u32,
@@ -663,6 +668,12 @@ impl RenderBackend for PathBackend {
             *slot = Some(PaneAccumulator {
                 target: TraceTarget::new(ctx.device, layouts, width, height),
                 uniforms: PathUniforms::new(ctx.device, &camera.buffer),
+                drawn: ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Pathtrace Drawn Samples"),
+                    size: std::mem::size_of::<u32>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
                 samples: 0,
                 width,
                 height,
@@ -691,13 +702,27 @@ impl RenderBackend for PathBackend {
             } else {
                 pane.target.color_view()
             };
-            resolve.encode(
-                ctx.device,
-                ctx.encoder,
-                source,
-                target,
-                (full_width, full_height),
-            );
+            if settings.transparent_background {
+                ctx.queue
+                    .write_buffer(&pane.drawn, 0, bytemuck::bytes_of(&pane.samples));
+                resolve.encode_matte(
+                    ctx.device,
+                    ctx.encoder,
+                    source,
+                    pane.target.coverage_buffer(),
+                    &pane.drawn,
+                    target,
+                    (full_width, full_height),
+                );
+            } else {
+                resolve.encode(
+                    ctx.device,
+                    ctx.encoder,
+                    source,
+                    target,
+                    (full_width, full_height),
+                );
+            }
             return FrameOutcome::Complete;
         }
 
@@ -764,13 +789,30 @@ impl RenderBackend for PathBackend {
         } else {
             pane.target.color_view()
         };
-        resolve.encode(
-            ctx.device,
-            ctx.encoder,
-            source,
-            target,
-            (full_width, full_height),
-        );
+        if settings.transparent_background {
+            // The drawn total the matte divides its counts by, written per
+            // encode so a mid-render preview resolves the correct partial
+            // fraction rather than a stale one.
+            ctx.queue
+                .write_buffer(&pane.drawn, 0, bytemuck::bytes_of(&pane.samples));
+            resolve.encode_matte(
+                ctx.device,
+                ctx.encoder,
+                source,
+                pane.target.coverage_buffer(),
+                &pane.drawn,
+                target,
+                (full_width, full_height),
+            );
+        } else {
+            resolve.encode(
+                ctx.device,
+                ctx.encoder,
+                source,
+                target,
+                (full_width, full_height),
+            );
+        }
 
         if pane.samples >= total {
             FrameOutcome::Complete

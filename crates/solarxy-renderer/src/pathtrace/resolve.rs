@@ -28,6 +28,14 @@ use crate::texture::Texture;
 pub struct TraceResolve {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
+    /// The transparent render's variant: the same copy, with the coverage
+    /// counts and the drawn-sample total bound beside the mean so the alpha
+    /// it writes is a real matte rather than the constant one. A second
+    /// pipeline rather than a mode on the first, so the opaque path's
+    /// pipeline, layout and arithmetic are untouched objects rather than a
+    /// branch believed inert.
+    matte_layout: wgpu::BindGroupLayout,
+    matte_pipeline: wgpu::RenderPipeline,
 }
 
 impl TraceResolve {
@@ -77,7 +85,68 @@ impl TraceResolve {
         .no_blend()
         .no_depth()
         .build();
-        Self { layout, pipeline }
+
+        let matte_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_resolve_matte_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // The kernel's coverage counts, read-only here: the fragment
+                // stage divides them by the drawn total, it never writes them.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let matte_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Pathtrace Resolve Matte Pipeline Layout"),
+                bind_group_layouts: &[&matte_layout],
+                push_constant_ranges: &[],
+            });
+        let matte_pipeline = crate::pipeline_builder::PipelineBuilder::new(
+            device,
+            "Pathtrace Resolve Matte Pipeline",
+            &matte_pipeline_layout,
+            &shader,
+        )
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_resolve_matte")
+        .color_format(Texture::HDR_FORMAT)
+        .no_blend()
+        .no_depth()
+        .build();
+        Self {
+            layout,
+            pipeline,
+            matte_layout,
+            matte_pipeline,
+        }
     }
 
     /// Encodes the copy from `source` into the `viewport`-sized corner of
@@ -116,6 +185,56 @@ impl TraceResolve {
                 resource: wgpu::BindingResource::TextureView(source),
             }],
         });
+        Self::encode_pass(encoder, &self.pipeline, &bind_group, target, viewport);
+    }
+
+    /// The transparent render's resolve: the same copy, writing the coverage
+    /// fraction as alpha instead of the constant one.
+    ///
+    /// `coverage` is the target's own count buffer and `drawn` a uniform
+    /// holding how many samples the run has integrated so far. The buffer
+    /// lives on the pane rather than on this pass, because a queue write lands
+    /// before the whole submission: one shared buffer written per pane would
+    /// hand every pane the last pane's total.
+    pub fn encode_matte(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::TextureView,
+        coverage: &wgpu::Buffer,
+        drawn: &wgpu::Buffer,
+        target: &wgpu::TextureView,
+        viewport: (u32, u32),
+    ) {
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtrace Resolve Matte Bind Group"),
+            layout: &self.matte_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(source),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: coverage.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: drawn.as_entire_binding(),
+                },
+            ],
+        });
+        Self::encode_pass(encoder, &self.matte_pipeline, &bind_group, target, viewport);
+    }
+
+    /// The pass both resolves share: clear, viewport, one triangle.
+    fn encode_pass(
+        encoder: &mut wgpu::CommandEncoder,
+        pipeline: &wgpu::RenderPipeline,
+        bind_group: &wgpu::BindGroup,
+        target: &wgpu::TextureView,
+        viewport: (u32, u32),
+    ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Pathtrace Resolve Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -131,8 +250,8 @@ impl TraceResolve {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
         #[allow(clippy::cast_precision_loss)]
         pass.set_viewport(
             0.0,

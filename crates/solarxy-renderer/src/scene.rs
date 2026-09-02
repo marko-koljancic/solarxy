@@ -44,7 +44,15 @@ impl BackgroundModeExt for ResolvedBackground {
             r: f64::from(self.clear[0]),
             g: f64::from(self.clear[1]),
             b: f64::from(self.clear[2]),
-            a: 1.0,
+            // Opaque, except for the transparent film back, whose whole point
+            // is that the alpha lane leaves the pass as a matte: zero where
+            // nothing was drawn, fractional where the MSAA resolve averaged a
+            // silhouette.
+            a: if self.kind == BgKind::Transparent {
+                0.0
+            } else {
+                1.0
+            },
         }
     }
 

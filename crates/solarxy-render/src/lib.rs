@@ -831,6 +831,7 @@ fn still_spec(settings: &RenderSettings, output: &Output, opts: &RenderOptions) 
         // second in a render nobody is watching would be a tax on every
         // scripted run.
         preview_interval_ms: 0,
+        transparent: settings.transparent_background,
     }
 }
 
@@ -880,9 +881,11 @@ fn trace_settings_for(settings: &RenderSettings) -> TraceSettings {
         denoise_normal_power: _,
         denoise_sigma_albedo: _,
         denoise_level_falloff: _,
-        // The film back and what is written beside the picture: the still
-        // spec's business and the encoder's, not the tracer's.
-        transparent_background: _,
+        // The film back reaches the tracer too: its kernel is what withholds
+        // the environment from uncovered camera rays and counts the matte.
+        // What is written beside the picture stays the still spec's business
+        // and the encoder's.
+        transparent_background,
         aov_albedo: _,
         aov_normal: _,
         aov_depth: _,
@@ -896,6 +899,7 @@ fn trace_settings_for(settings: &RenderSettings) -> TraceSettings {
         seed,
         denoise,
         denoise_until_samples,
+        transparent_background,
         // The job takes its chunk from the backend by design: a browser paces
         // one sample per frame to stay responsive and a terminal has no frame
         // to pace against.
@@ -1323,6 +1327,7 @@ mod tests {
         s.firefly_clamp = 3.5;
         s.seed = 4242;
         s.denoise = true;
+        s.transparent_background = true;
 
         let t = trace_settings_for(&s);
         assert_eq!(t.samples, 91);
@@ -1332,6 +1337,26 @@ mod tests {
         assert_eq!(t.seed, 4242);
         assert!(t.denoise);
         assert_eq!(t.chunk, 8, "a terminal has no frame to pace against");
+        assert!(t.transparent_background, "the film back reaches the kernel");
+    }
+
+    /// The film back reaches the still spec too: the job is what substitutes
+    /// the transparent background for the rasterizer and tells the composite
+    /// to carry the lane, and it can only do either if the spec says so.
+    #[test]
+    fn the_film_back_reaches_the_still_spec() {
+        let mut s = RenderSettings::defaults();
+        s.transparent_background = true;
+        let spec = still_spec(&s, &Output::Stdout, &RenderOptions::default());
+        assert!(spec.transparent);
+        assert!(
+            !still_spec(
+                &RenderSettings::defaults(),
+                &Output::Stdout,
+                &RenderOptions::default()
+            )
+            .transparent
+        );
     }
 
     /// The four steering values reach the filter, and strength multiplies the

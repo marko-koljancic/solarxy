@@ -350,6 +350,7 @@ impl State {
             // still that fits in one tile shows a blank frame for its whole
             // duration.
             preview_interval_ms: solarxy_host::still::PREVIEW_INTERVAL_MS,
+            transparent: settings.transparent_background,
         };
         let job = StillRenderJob::new(spec);
         let spec = job.spec();
@@ -767,9 +768,11 @@ fn trace_settings_for(settings: &RenderSettings) -> TraceSettings {
         denoise_normal_power: _,
         denoise_sigma_albedo: _,
         denoise_level_falloff: _,
-        // The film back and what leaves beside the picture: the still spec's
-        // business, not the tracer's.
-        transparent_background: _,
+        // The film back reaches the tracer too: its kernel is what withholds
+        // the environment from uncovered camera rays and counts the matte.
+        transparent_background,
+        // What leaves beside the picture is the still spec's business, not
+        // the tracer's.
         aov_albedo: _,
         aov_normal: _,
         aov_depth: _,
@@ -787,6 +790,7 @@ fn trace_settings_for(settings: &RenderSettings) -> TraceSettings {
         seed,
         denoise,
         denoise_until_samples,
+        transparent_background,
         // The lens is set immediately after this, by `set_lens`. Everything
         // else keeps the tracer's own default.
         ..TraceSettings::default()
@@ -903,6 +907,7 @@ mod tests {
         s.firefly_clamp = 3.5;
         s.seed = 4242;
         s.denoise = true;
+        s.transparent_background = true;
 
         let t = trace_settings_for(&s);
         assert_eq!(t.samples, 91);
@@ -911,6 +916,7 @@ mod tests {
         assert!((t.firefly_clamp - 3.5).abs() < f32::EPSILON);
         assert_eq!(t.seed, 4242);
         assert!(t.denoise);
+        assert!(t.transparent_background, "the film back reaches the kernel");
         // This shell's own pacing rather than the node's: eight samples to a
         // submission, native having no frame to pace against.
         assert_eq!(t.chunk, 8);
