@@ -726,7 +726,13 @@ fn report(
 /// A bare model has none, and demanding one would mean the simplest possible
 /// invocation could not work. The defaults are the node's own, so the two
 /// answers agree.
-fn resolve_settings(
+/// What a cooked document renders at, before any command-line override.
+///
+/// Public so the desktop shell's own resolution can be pinned against it: the
+/// two shells read one document and must read it the same way, and the only
+/// thing that could prove that was a comparison neither of them could make
+/// alone.
+pub fn resolve_settings(
     engine: &solarxy_graph::engine::Engine,
     opts: &RenderOptions,
     warnings: &mut Vec<String>,

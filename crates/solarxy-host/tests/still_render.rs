@@ -216,16 +216,11 @@ fn raster(h: &Harness) -> RasterBackend {
 }
 
 /// Mean absolute difference between two RGBA8 images, over the colour lanes.
+///
+/// The shared comparator's own reading. Kept as a one-line helper because every
+/// caller here wants the mean and none of them wants the count.
 fn difference(a: &[u8], b: &[u8]) -> f64 {
-    let mut total = 0.0f64;
-    let mut count = 0u64;
-    for (p, q) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0) {
-        for c in 0..3 {
-            total += f64::from(i32::from(p[c]) - i32::from(q[c])).abs();
-            count += 1;
-        }
-    }
-    total / count.max(1) as f64
+    solarxy_host::compare_rgba8(a, b, 0).mean_abs
 }
 
 #[test]

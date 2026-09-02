@@ -4091,6 +4091,7 @@ dependencies = [
  "solarxy-formats",
  "solarxy-graph",
  "solarxy-host",
+ "solarxy-render",
  "solarxy-renderer",
  "solarxy-scenefile",
  "time",

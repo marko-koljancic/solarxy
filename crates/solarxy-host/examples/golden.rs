@@ -948,23 +948,11 @@ fn compare(args: &[String]) -> anyhow::Result<()> {
             failures += 1;
             continue;
         }
-        let mut max_delta = 0u8;
-        let mut differing = 0usize;
-        for (pa, pb) in a.pixels().zip(b.pixels()) {
-            let mut pixel_differs = false;
-            for c in 0..4 {
-                let d = pa.0[c].abs_diff(pb.0[c]);
-                max_delta = max_delta.max(d);
-                if d > tolerance {
-                    pixel_differs = true;
-                }
-            }
-            if pixel_differs {
-                differing += 1;
-            }
-        }
-        let total = (a.width() * a.height()) as usize;
-        let status = if differing == 0 { "OK" } else { "DIFF" };
+        // The shared comparator, so a gate and a test cannot come to disagree
+        // about what "the same image" means.
+        let d = solarxy_host::compare_rgba8(a.as_raw(), b.as_raw(), tolerance);
+        let (max_delta, differing, total) = (d.max_channel, d.differing, d.total);
+        let status = if d.within_tolerance() { "OK" } else { "DIFF" };
         println!(
             "GOLDEN {name}: {status} max_channel_delta={max_delta} differing_pixels={differing}/{total}"
         );

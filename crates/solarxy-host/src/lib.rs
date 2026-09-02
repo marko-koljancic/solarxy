@@ -77,6 +77,7 @@
 pub mod attr_labels;
 pub mod attr_viz;
 pub mod cameras;
+pub mod compare;
 pub mod display_defaults;
 pub mod gizmo;
 pub mod headless;
@@ -88,6 +89,7 @@ pub mod still;
 pub mod view;
 
 pub use cameras::{depth_bounds, ensure_pane_cameras};
+pub use compare::{ImageDifference, compare_rgba8};
 pub use lighting::{active_ibl, rebuild_light_bind_group};
 pub use pane::{
     EncodedPane, PaneComposite, PaneScene, PaneUniforms, apply_viewer_rig, composite_and_submit,

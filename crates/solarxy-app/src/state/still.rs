@@ -1029,3 +1029,99 @@ mod tests {
         assert_eq!(p.get_pixel(99, 49)[0], 200);
     }
 }
+
+/// The desktop and the headless command read one document the same way.
+///
+/// **This is the automatable half of the cross-shell parity question, and it is
+/// worth being precise about which half.** Three shells rendering "the same
+/// image" can fail in two independent places: they can read different settings
+/// out of one scene, or they can turn identical settings into different pixels.
+/// The first is a pure function of the document and is checked here on every
+/// `cargo test`, with no device. The second needs a real adapter on each of
+/// three surfaces, one of which is a browser, and lives in
+/// `Docs/qa/render-checklist.md` as a written check with named scenes.
+///
+/// The settings half is also the half that actually drifts. Pixels differ by
+/// float reassociation, which this release already ruled on and bounded; a
+/// shell reading a different sample count out of the same node is a defect that
+/// no tolerance excuses.
+#[cfg(test)]
+mod parity {
+    use super::*;
+
+    /// Both shipped samples, which between them carry the four features a
+    /// render can diverge on: transmission and an area light in the first, a
+    /// procedural texture network and a graded camera in the second.
+    const SCENES: [&str; 2] = ["cornell-box.slxy", "procedural-lookdev.slxy"];
+
+    fn sample(name: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../web/public/samples")
+            .join(name)
+    }
+
+    #[test]
+    fn both_native_shells_resolve_one_scene_the_same_way() {
+        for name in SCENES {
+            let path = sample(name);
+            assert!(path.exists(), "the shipped sample {name} is missing");
+
+            let loaded = solarxy_render::input::load(&path, None, &mut solarxy_render::Silent)
+                .unwrap_or_else(|e| panic!("{name} did not load: {e}"));
+
+            // The headless command's answer, and this shell's own, over one
+            // cooked document.
+            let mut warnings = Vec::new();
+            let headless = solarxy_render::resolve_settings(
+                &loaded.engine,
+                &solarxy_render::RenderOptions::default(),
+                &mut warnings,
+            )
+            .unwrap_or_else(|e| panic!("{name} would not resolve headlessly: {e}"));
+
+            let (desktop, _note) = resolve_still_settings(&loaded.engine)
+                .unwrap_or_else(|e| panic!("{name} would not resolve on the desktop: {e}"));
+
+            // Field by field rather than by equality, so a failure names what
+            // disagreed instead of printing two structs and leaving the reader
+            // to diff them.
+            assert_eq!(desktop.width, headless.width, "{name}: width");
+            assert_eq!(desktop.height, headless.height, "{name}: height");
+            assert_eq!(desktop.engine, headless.engine, "{name}: engine");
+            assert_eq!(desktop.samples, headless.samples, "{name}: samples");
+            assert_eq!(desktop.bounces, headless.bounces, "{name}: bounces");
+            assert_eq!(
+                desktop.transmissive_bounces, headless.transmissive_bounces,
+                "{name}: transmissive bounces"
+            );
+            assert_eq!(desktop.denoise, headless.denoise, "{name}: denoise");
+            assert_eq!(desktop.seed, headless.seed, "{name}: seed");
+            assert_eq!(
+                desktop.firefly_clamp, headless.firefly_clamp,
+                "{name}: firefly clamp"
+            );
+            assert_eq!(desktop.camera, headless.camera, "{name}: camera");
+            assert_eq!(
+                desktop.aov_albedo, headless.aov_albedo,
+                "{name}: albedo pass"
+            );
+            assert_eq!(
+                desktop.aov_normal, headless.aov_normal,
+                "{name}: normal pass"
+            );
+            assert_eq!(desktop.aov_depth, headless.aov_depth, "{name}: depth pass");
+            assert_eq!(
+                desktop.transparent_background, headless.transparent_background,
+                "{name}: transparent background"
+            );
+        }
+    }
+
+    /// A scene with no render node falls to the node type's own descriptor on
+    /// both shells, rather than to two hand-written literals that agreed until
+    /// somebody changed one.
+    #[test]
+    fn a_scene_with_no_render_node_falls_to_one_set_of_defaults() {
+        assert_eq!(default_still_settings(), RenderSettings::defaults());
+    }
+}

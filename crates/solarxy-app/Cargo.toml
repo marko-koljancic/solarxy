@@ -56,3 +56,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 version = "0.25.9"
 default-features = false
 features = ["png", "jpeg", "webp", "hdr"]
+
+[dev-dependencies]
+# For the cross-shell parity test: this shell and the headless command read one
+# document, and the only way to prove they read it the same way is a comparison
+# neither can make alone. Nothing new enters the tree; both crates it adds are
+# already dependencies here.
+solarxy-render = { path = "../solarxy-render" }
