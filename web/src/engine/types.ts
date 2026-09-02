@@ -785,6 +785,12 @@ export type HostEvent =
     }
   | { type: "renderNotice"; message: string }
   | { type: "paneSamples"; pane: number; samples: number; target: number }
+  /** What the current selection can be manipulated with. `tools` is the set
+   * that applies to it, and `transformParams` names the params its transform
+   * is made of, which is what "reset transform" resets. Both empty when
+   * nothing manipulable is selected, which the tool column reads as "do not
+   * narrow anything" rather than as "nothing is possible". Pushed on change. */
+  | { type: "selectionCapability"; tools: ToolMode[]; transformParams: string[] }
   | {
       type: "gpuFault";
       kind: "validation" | "outOfMemory" | "internal";
@@ -896,9 +902,17 @@ export interface RenderSettings {
   transparentBackground: boolean;
 }
 
-/** The viewport tool. Rotate and Scale select, draw and
- * grab nothing, which is why their buttons ship disabled rather than dead. */
-export type ToolMode = "select" | "move" | "rotate" | "scale";
+/** The viewport tool.
+ *
+ * Which of these apply is a property of what is SELECTED, not of the toolbar:
+ * a point light has no rotation and no size, so arming Rotate on one would
+ * draw handles that write nowhere. The host reports the applicable set as it
+ * changes (`selectionCapability`); a tool outside it renders disabled.
+ *
+ * `aim` moves the point a light points at. It is its own tool rather than a
+ * mode of `rotate` because aiming is not rotating: a spot light carries a
+ * second point in space, not an orientation, so the handle writes a position. */
+export type ToolMode = "select" | "move" | "rotate" | "scale" | "aim";
 
 export type ViewAxis = "top" | "bottom" | "front" | "back" | "left" | "right";
 

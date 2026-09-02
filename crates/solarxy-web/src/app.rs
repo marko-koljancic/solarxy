@@ -194,8 +194,21 @@ const PANE_LOOK_KEY: &str = "look";
 // makes about a renderer trait: one consumer is not yet something to share.
 
 /// Async happenings the frontend drains once per frame.
+///
+/// `rename_all_fields` is load-bearing and was missing. `rename_all` on an
+/// enum renames the VARIANTS and nothing else, so a multi-word field went out
+/// in snake case while `web/src/engine/types.ts` declared it camel: the
+/// frontend read `undefined` and said so in the interface. Every single-word
+/// field hid it, and `renderProgress` was the first variant to carry one that
+/// was not, which is why the still dialog's elapsed and remaining readouts
+/// were blank. The engine's `Command` enum has carried both attributes from
+/// the start; this one now matches it.
 #[derive(Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 enum HostEvent {
     /// Pane rectangles changed (layout, split, or resize), in CSS pixels.
     PaneRects { rects: Vec<RectDto> },
@@ -244,6 +257,20 @@ enum HostEvent {
         pane: usize,
         samples: u32,
         target: u32,
+    },
+    /// What the current selection can be manipulated with: the tools that
+    /// apply to it, and the parameters its transform is made of.
+    ///
+    /// One answer to two questions, deliberately. The tool column greys out
+    /// what is missing and the context menu resets exactly these params, and
+    /// deriving the second from the first somewhere in the frontend would put
+    /// a second opinion about what a light is where there should be none.
+    ///
+    /// Pushed on change rather than polled: a selection changes far less often
+    /// than a frame ticks.
+    SelectionCapability {
+        tools: Vec<&'static str>,
+        transform_params: Vec<&'static str>,
     },
     /// The device reported an uncaptured graphics fault. The frontend
     /// writes the full message to `console.error`, which the crash
@@ -453,6 +480,10 @@ pub struct SolarxyApp {
     /// The live drag's delta text, rebuilt each pointer move and polled once per
     /// frame by the shell. `None` whenever nothing is being dragged.
     gizmo_readout: Option<String>,
+    /// The last capability pushed to the frontend, so the event fires on
+    /// change rather than every frame. `None` means nothing manipulable is
+    /// selected, which is a distinct answer from an empty tool list.
+    last_capability: Option<(Vec<&'static str>, Vec<&'static str>)>,
     /// The scene object tinted as selected in the viewports,
     /// or `None`.
     selected_object: Option<SceneObjectId>,
@@ -797,8 +828,10 @@ fn gizmo_pose(t: &GizmoTarget) -> GizmoPose {
         scale: t.scale,
         uniform_scale: t.uniform_scale,
         extent: t.extent,
+        aim: t.aim,
         params: t.params,
         anchor: t.anchor,
+        aim_anchor: t.aim_anchor,
         basis: t.basis,
         parent_basis: t.parent_basis,
         parent: t.parent,
@@ -1114,6 +1147,7 @@ impl SolarxyApp {
             gizmo: GizmoState::default(),
             gizmo_addr: None,
             gizmo_readout: None,
+            last_capability: None,
         })
     }
 
@@ -1190,23 +1224,7 @@ impl SolarxyApp {
         }
         self.feed_traced_preview(&delta);
 
-        // The manipulator is pull-based: recompute what it should be, every
-        // frame, from the engine's own view of the world. A selection change or
-        // an undo therefore moves or removes it with no extra plumbing.
-        // `view_dir` and `scale` are per-pane, so they are placeholders here:
-        // `Renderer::write_manipulator` overwrites both before each pane's pass.
-        let manip = if self.player_mode {
-            // A published scene has nothing to manipulate.
-            None
-        } else {
-            self.engine
-                .gizmo_target(self.current_ctx)
-                .and_then(|target| {
-                    self.gizmo
-                        .manipulator(&gizmo_pose(&target), cgmath::Vector3::unit_z(), 1.0)
-                })
-        };
-        self.renderer.set_manipulator(manip);
+        self.sync_gizmo();
 
         self.sync_env_bounds();
         self.sync_visualization();
@@ -1526,7 +1544,7 @@ impl SolarxyApp {
         // stolen by a tool. In Select mode this whole branch is skipped and the
         // behaviour is bit-for-bit what it was.
         if button == 0
-            && self.gizmo.tool.manipulates()
+            && self.gizmo.tool.is_transform_tool()
             && let Some(batch) = self.begin_gizmo_drag(p)?
         {
             return Ok(batch);
@@ -1566,7 +1584,7 @@ impl SolarxyApp {
             return;
         }
         // Otherwise, with a tool armed, keep the hover highlight fresh.
-        if self.gizmo.tool.manipulates() && self.pointer_buttons_down == 0 {
+        if self.gizmo.tool.is_transform_tool() && self.pointer_buttons_down == 0 {
             self.update_gizmo_hover(p);
         }
 
@@ -3997,7 +4015,9 @@ impl SolarxyApp {
             target = fresh;
         }
 
-        let Some(drag) = gizmo::begin_drag(&ray, &state, gizmo_pose(&target), handle) else {
+        let Some(drag) =
+            gizmo::begin_drag(&ray, &state, gizmo_pose(&target), handle, self.gizmo.tool)
+        else {
             return Ok(None);
         };
         self.gizmo.drag = Some(drag);
@@ -5235,6 +5255,49 @@ impl SolarxyApp {
     /// frame's sync call).
     fn set_target_dims(&mut self, width: u32, height: u32) {
         self.renderer.resize_targets(&self.device, width, height);
+    }
+
+    /// Recomputes the manipulator and, when it changed, tells the frontend
+    /// what the selection can be manipulated with.
+    ///
+    /// The manipulator is pull-based: recomputed every frame from the engine's
+    /// own view of the world, so a selection change or an undo moves or
+    /// removes it with no extra plumbing. `view_dir` and `scale` are per-pane,
+    /// so they are placeholders here; `Renderer::write_manipulator` overwrites
+    /// both before each pane's pass.
+    fn sync_gizmo(&mut self) {
+        // A published scene has nothing to manipulate.
+        let target = if self.player_mode {
+            None
+        } else {
+            self.engine.gizmo_target(self.current_ctx)
+        };
+        let manip = target.and_then(|t| {
+            self.gizmo
+                .manipulator(&gizmo_pose(&t), cgmath::Vector3::unit_z(), 1.0)
+        });
+        self.renderer.set_manipulator(manip);
+
+        // With nothing selected there is no target and therefore no answer.
+        // The frontend reads that as "do not narrow anything", which is what
+        // keeps an empty scene's tool column looking the way it always has.
+        let capability = target.map(|t| {
+            (
+                gizmo::tools_for(&t.params)
+                    .into_iter()
+                    .map(gizmo::ToolMode::id)
+                    .collect::<Vec<_>>(),
+                t.params.names(),
+            )
+        });
+        if capability != self.last_capability {
+            self.last_capability.clone_from(&capability);
+            let (tools, transform_params) = capability.unwrap_or_default();
+            self.host_events.push(HostEvent::SelectionCapability {
+                tools,
+                transform_params,
+            });
+        }
     }
 
     /// Drops the viewport's furniture while a still render owns the frame.

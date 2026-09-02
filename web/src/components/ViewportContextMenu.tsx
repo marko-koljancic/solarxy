@@ -10,13 +10,16 @@ import { useEffect, useRef } from "react";
 import { cameraCommand, dispatch, duplicateSelection, setTool } from "../engine/session";
 import type { ParamSource, ToolMode } from "../engine/types";
 import { selectGraph, useMirror } from "../store/mirror";
-import { useViewState } from "../store/viewState";
+import { toolApplies, useViewState } from "../store/viewState";
 
+/** Mode, label, and the key that arms it (blank for a tool the keymap does
+ * not bind). Mirrors the tool column, including its order. */
 const TOOLS: [ToolMode, string, string][] = [
   ["select", "Select", "Q"],
   ["move", "Move", "W"],
   ["rotate", "Rotate", "E"],
   ["scale", "Scale", "R"],
+  ["aim", "Aim", ""],
 ];
 
 const vec3 = (value: [number, number, number]): ParamSource => ({
@@ -38,6 +41,7 @@ export function ViewportContextMenu({
 }) {
   const rootGraph = useMirror((s) => selectGraph(s, "root"));
   const tool = useViewState((s) => s.toolMode);
+  const availableTools = useViewState((s) => s.selectionTools);
   const activePane = useViewState((s) => s.view?.activePane ?? 0);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -93,17 +97,23 @@ export function ViewportContextMenu({
       onContextMenu={(e) => e.preventDefault()}
     >
       <div className="ctx-heading">Tools</div>
-      {TOOLS.map(([mode, label, key]) => (
-        <button
-          key={mode}
-          type="button"
-          className={`ctx-item${tool === mode ? " active" : ""}`}
-          onClick={() => run(() => setTool(mode))}
-        >
-          <span>{label}</span>
-          <span className="ctx-key">{key}</span>
-        </button>
-      ))}
+      {TOOLS.map(([mode, label, key]) => {
+        // Same rule as the tool column: a tool the selection cannot use shows
+        // as unavailable rather than looking armed.
+        const enabled = toolApplies(mode, availableTools);
+        return (
+          <button
+            key={mode}
+            type="button"
+            className={`ctx-item${tool === mode && enabled ? " active" : ""}`}
+            disabled={!enabled}
+            onClick={() => run(() => setTool(mode))}
+          >
+            <span>{label}</span>
+            <span className="ctx-key">{key}</span>
+          </button>
+        );
+      })}
       <div className="ctx-sep" />
       <button
         type="button"

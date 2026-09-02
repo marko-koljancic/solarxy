@@ -1184,6 +1184,8 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "renderNotice") pushToast(ev.message, "warn");
     else if (ev.type === "paneSamples")
       useViewState.getState().setPaneSamples(ev.pane, ev.samples, ev.target);
+    else if (ev.type === "selectionCapability")
+      useViewState.getState().setSelectionCapability(ev.tools, ev.transformParams);
     else if (ev.type === "gpuFault") {
       // The full message goes to console.error, which the crash reporter
       // captures as context for its next report; the toast is the short

@@ -4309,9 +4309,17 @@ body.reduce-motion .cook-arc {
     color var(--motion-fast) var(--ease-out-quad);
 }
 
-.tool-btn:hover {
+.tool-btn:hover:not(:disabled) {
   color: var(--text-primary);
   background: var(--hover-bg);
+}
+
+/* A tool the selection cannot use. Same treatment as a disabled context-menu
+   row, so "unavailable" looks the same wherever it appears. */
+.tool-btn:disabled {
+  color: var(--text-quaternary);
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .tool-btn.active {

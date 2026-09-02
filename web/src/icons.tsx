@@ -248,6 +248,19 @@ export function IconToolScale(p: IconProps) {
   );
 }
 
+export function IconToolAim(p: IconProps) {
+  // A reticle: a ring with four tick marks and a centre dot. The tool moves
+  // the point a light points AT, so the glyph is the point rather than the
+  // light, and reads as "aim here" beside the three transform tools.
+  return (
+    <Svg {...p}>
+      <circle cx="8" cy="8" r="4.4" />
+      <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+      <path d="M8 1.4V3.6M8 12.4V14.6M1.4 8H3.6M12.4 8H14.6" />
+    </Svg>
+  );
+}
+
 export function IconAttrLabels(p: IconProps) {
   // A value tag beside its anchor point: the labels viz mode.
   return (

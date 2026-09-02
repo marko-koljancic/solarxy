@@ -50,6 +50,29 @@ pub struct TransformParams {
     pub aim: Option<&'static str>,
 }
 
+impl TransformParams {
+    /// Every parameter this target's transform is made of, in a stable order.
+    ///
+    /// What "reset this transform" means, and what a shell tells its frontend
+    /// the selection's transform consists of. One definition, so resetting a
+    /// panel resets exactly the params its handles write and no others.
+    #[must_use]
+    pub fn names(self) -> Vec<&'static str> {
+        let mut names: Vec<&'static str> = Vec::new();
+        names.extend(self.translate);
+        names.extend(self.rotate);
+        names.extend(self.rotate_order);
+        match self.scale {
+            ScaleParams::None => {}
+            ScaleParams::Vec3 { scale, uniform } => names.extend([scale, uniform]),
+            ScaleParams::Extent2 { x, z } => names.extend([x, z]),
+        }
+        names.extend(self.pivot);
+        names.extend(self.aim);
+        names
+    }
+}
+
 /// How a node says how big it is.
 ///
 /// Two shapes rather than one because they are genuinely different writes,

@@ -38,6 +38,12 @@ interface ViewStateStore {
   paneSamples: (readonly [number, number] | null)[];
   /** Both backends' capabilities, read once at boot. Null until then. */
   backendCaps: BackendCapsSet | null;
+  /** Which tools apply to the current selection, and which params its
+   * transform is made of. Empty when nothing manipulable is selected, which
+   * every consumer reads as "do not narrow anything": arming a tool with no
+   * selection is harmless and becomes live the moment you select something. */
+  selectionTools: ToolMode[];
+  selectionTransformParams: string[];
   setView: (view: ViewStateDto) => void;
   setPaneRects: (rects: PaneRectDto[]) => void;
   setActivePaneMirror: (pane: number) => void;
@@ -49,6 +55,7 @@ interface ViewStateStore {
   setGizmoReadout: (text: string | null) => void;
   setPaneSamples: (pane: number, samples: number, target: number) => void;
   setBackendCaps: (caps: BackendCapsSet) => void;
+  setSelectionCapability: (tools: ToolMode[], transformParams: string[]) => void;
 }
 
 export const useViewState = create<ViewStateStore>((set) => ({
@@ -62,6 +69,8 @@ export const useViewState = create<ViewStateStore>((set) => ({
   gizmoReadout: null,
   paneSamples: [null, null, null, null],
   backendCaps: null,
+  selectionTools: [],
+  selectionTransformParams: [],
   setView: (view) => set({ view }),
   setPaneRects: (rects) =>
     set((s) => (s.view ? { view: { ...s.view, paneRects: rects } } : s)),
@@ -84,4 +93,19 @@ export const useViewState = create<ViewStateStore>((set) => ({
       return { paneSamples: next };
     }),
   setBackendCaps: (caps) => set({ backendCaps: caps }),
+  // No equality guard: the host already pushes this event on change only.
+  setSelectionCapability: (tools, transformParams) =>
+    set({ selectionTools: tools, selectionTransformParams: transformParams }),
 }));
+
+/** Whether a tool can act on what is selected.
+ *
+ * With nothing manipulable selected the host reports an empty set, and every
+ * tool stays available: arming one then is harmless, draws nothing, and goes
+ * live as soon as something is selected. A tool only greys out when there IS a
+ * target and it genuinely cannot use it.
+ *
+ * Exported for tests and for the two components that ask. */
+export function toolApplies(tool: ToolMode, available: ToolMode[]): boolean {
+  return available.length === 0 || available.includes(tool);
+}

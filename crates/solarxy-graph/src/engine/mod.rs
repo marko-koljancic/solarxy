@@ -635,6 +635,13 @@ pub struct GizmoTarget {
     /// [`GizmoTarget::params`] rather than this field is what says whether a
     /// size handle has anything to write.
     pub extent: [f32; 2],
+    /// The point this target points AT, in its own parent space. Zero on a
+    /// target that aims at nothing.
+    pub aim: [f32; 3],
+    /// Where an aim manipulator sits: on the aim point, carried out into the
+    /// world. Its own frame because it is a different PLACE from `anchor`,
+    /// not a different orientation of the same one.
+    pub aim_anchor: [[f32; 4]; 4],
     /// The target's local pivot. Zero on a `geo` (its pivot is its origin).
     pub pivot: [f32; 3],
     /// World matrix placing the manipulator, **pivot included**: rotation and
@@ -678,6 +685,8 @@ struct NodeTransform {
     uniform_scale: f32,
     /// Edge lengths in metres for a target sized by extent; zero otherwise.
     extent: [f32; 2],
+    /// The point the node aims at; zero when it aims at nothing.
+    aim: [f32; 3],
     /// Zero on a `geo`, which has no pivot param and rotates about its origin.
     pivot: [f32; 3],
 }
@@ -715,6 +724,7 @@ impl NodeTransform {
             scale,
             uniform_scale,
             extent,
+            aim: params.aim.map_or([0.0; 3], |k| p.vec3_f32(k)),
             pivot: params.pivot.map_or([0.0; 3], |k| p.vec3_f32(k)),
         }
     }
@@ -3103,8 +3113,12 @@ impl Engine {
                     scale: xf.scale,
                     uniform_scale: xf.uniform_scale,
                     extent: xf.extent,
+                    aim: xf.aim,
                     pivot: xf.pivot,
                     anchor: gizmo_frame(xf.pivot_point(), xf.basis()).into(),
+                    // At root the aim point IS a world point, and it carries
+                    // no orientation of its own.
+                    aim_anchor: gizmo_frame(Point3::from(xf.aim), Matrix3::identity()).into(),
                     basis: mat3_to_array(xf.basis()),
                     // A root node has no parent frame: world IS its parent.
                     parent_basis: mat3_to_array(Matrix3::identity()),
@@ -3141,6 +3155,7 @@ impl Engine {
                         scale: [1.0; 3],
                         uniform_scale: 1.0,
                         extent: [0.0; 2],
+                        aim: [0.0; 3],
                         pivot: [0.0; 3],
                     }
                 };
@@ -3161,8 +3176,12 @@ impl Engine {
                     scale: xf.scale,
                     uniform_scale: xf.uniform_scale,
                     extent: xf.extent,
+                    // A `transform` aims at nothing, so the aim tool never
+                    // applies here and this frame is never read.
+                    aim: xf.aim,
                     pivot: xf.pivot,
                     anchor: gizmo_frame(center, basis).into(),
+                    aim_anchor: Matrix4::identity().into(),
                     basis: mat3_to_array(basis),
                     parent_basis: mat3_to_array(geo_xf.basis()),
                     parent: geo_matrix.into(),
