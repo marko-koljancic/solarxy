@@ -10,14 +10,23 @@
 //! lives in the engine (`Engine::gizmo_target`); this module does routing and
 //! arithmetic only.
 //!
-//! Every drag writes exactly ONE param, named by its [`DragParam`]. That is not
-//! incidental: preview, commit, no-op rollback and Escape-cancel all ask the
-//! same `DragParam` for the key, so none of them can forget a param another one
-//! touched. The translate-only version of this module hardcoded `"translate"`
-//! at four separate call sites, which was one careless copy-paste away from a
-//! cancel that left a rotation stranded in the preview lane.
+//! A drag writes exactly the params its target names for the handle being
+//! dragged, asked once. That is not incidental: preview, commit, no-op
+//! rollback and Escape-cancel all resolve from the same place, so none of them
+//! can forget a param another one touched. The translate-only version of this
+//! module hardcoded `"translate"` at four separate call sites, which was one
+//! careless copy-paste away from a cancel that left a rotation stranded in the
+//! preview lane.
+//!
+//! It is "the params" rather than "the param" because a target sized by two
+//! edge lengths writes both when its size is dragged uniformly. Everything
+//! else writes one. The names themselves are never chosen here: they come from
+//! the target's own [`solarxy_core::gizmo::TransformParams`], because a
+//! parameter's role and its name are different facts and only the node knows
+//! the second one.
 
 use cgmath::{InnerSpace, Matrix, Matrix3, Matrix4, Point3, Rad, SquareMatrix, Vector3, Vector4};
+use solarxy_core::gizmo::{ScaleParams, TransformParams};
 use solarxy_core::raycast::{
     Ray, closest_point_ray_line, closest_points_ray_segment, intersect_obb, intersect_plane,
     intersect_quad, intersect_ring_band,
@@ -50,10 +59,17 @@ pub struct GizmoPose {
     /// The order the target composes its rotation in, so a rotate drag can
     /// decompose its result back into the angles this node actually means.
     pub rotate_order: RotateOrder,
-    /// The current per-axis scale.
+    /// The current per-axis scale. Identity on a target sized by extent.
     pub scale: [f32; 3],
     /// The current uniform-scale factor (the centre handle's param).
     pub uniform_scale: f32,
+    /// The current edge lengths, in metres, of a target sized by extent
+    /// rather than by scale. Zero on every other kind.
+    pub extent: [f32; 2],
+    /// What the target declares and what it calls it. The solver asks this
+    /// which param a handle writes rather than deciding, which is the whole
+    /// reason a light can be dragged at all.
+    pub params: TransformParams,
     /// World matrix placing the manipulator, pivot included.
     pub anchor: [[f32; 4]; 4],
     /// The target's own orthonormal orientation basis, for local-space handles.
@@ -165,8 +181,11 @@ impl Default for GizmoSettings {
 /// shift-for-precision can land later without changing the wasm signature.
 pub const MOD_SNAP: u8 = 1 << 0;
 
-/// Which param a drag writes. Stored on the [`Drag`] so preview, commit,
-/// rollback and cancel all resolve the same key from the same place.
+/// Which role a drag writes. Stored on the [`Drag`] so preview, commit,
+/// rollback and cancel all resolve from the same place.
+///
+/// A role, not a name: what the target actually calls it is
+/// [`DragParam::keys`]' answer, read off the target's own declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DragParam {
     Translate,
@@ -176,17 +195,38 @@ pub enum DragParam {
 }
 
 impl DragParam {
+    /// The params this drag writes on this target, or `None` when the target
+    /// declares nothing for this role, in which case the handle must neither
+    /// draw nor grab.
+    ///
+    /// The single authority on which key a drag touches. Writing a key a
+    /// descriptor never declared is not a benign miss: the parameter write
+    /// refuses it, and the resolver would have debug-asserted on the way
+    /// there, so guessing panics a debug build rather than doing nothing.
     #[must_use]
-    pub fn key(self) -> &'static str {
+    pub fn keys(self, params: &TransformParams) -> Option<ParamKeys> {
         match self {
-            DragParam::Translate => "translate",
-            DragParam::Rotate => "rotate",
-            DragParam::Scale => "scale",
-            DragParam::UniformScale => "uniform_scale",
+            DragParam::Translate => params.translate.map(ParamKeys::one),
+            DragParam::Rotate => params.rotate.map(ParamKeys::one),
+            DragParam::Scale => match params.scale {
+                ScaleParams::Vec3 { scale, .. } => Some(ParamKeys::one(scale)),
+                // An extent is written one edge at a time by its own handles,
+                // which arrive with the per-axis mask; the three-lane scale
+                // this role means does not exist on such a target.
+                ScaleParams::None | ScaleParams::Extent2 { .. } => None,
+            },
+            DragParam::UniformScale => match params.scale {
+                ScaleParams::Vec3 { uniform, .. } => Some(ParamKeys::one(uniform)),
+                // The one drag that writes two: scaling a panel uniformly
+                // moves both of its edge lengths together.
+                ScaleParams::Extent2 { x, z } => Some(ParamKeys::two(x, z)),
+                ScaleParams::None => None,
+            },
         }
     }
 
-    /// The handle's param. Every handle writes exactly one.
+    /// The handle's role. Every handle drives exactly one, though a role may
+    /// resolve to more than one param on a given target.
     #[must_use]
     pub fn for_handle(handle: Handle) -> Self {
         match handle {
@@ -210,8 +250,42 @@ impl DragParam {
             DragParam::Translate => DragValue::Translate(t.translate),
             DragParam::Rotate => DragValue::Rotate(t.rotate),
             DragParam::Scale => DragValue::Scale(t.scale),
-            DragParam::UniformScale => DragValue::UniformScale(t.uniform_scale),
+            // A panel's uniform size is its two edges, so that is what the
+            // drag scales and what the commit reads back.
+            DragParam::UniformScale => match t.params.scale {
+                ScaleParams::Extent2 { .. } => DragValue::Extent(t.extent),
+                ScaleParams::None | ScaleParams::Vec3 { .. } => {
+                    DragValue::UniformScale(t.uniform_scale)
+                }
+            },
         }
+    }
+}
+
+/// The one or two params a single drag writes.
+///
+/// Two only when a target's size is a pair of edge lengths and the drag scales
+/// both. Deliberately not a `Vec`: the count is bounded by the design, and an
+/// allocation per pointer move on the zero-JS hot path would be a poor trade
+/// for generality nothing asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParamKeys([Option<&'static str>; 2]);
+
+impl ParamKeys {
+    #[must_use]
+    fn one(key: &'static str) -> Self {
+        Self([Some(key), None])
+    }
+
+    #[must_use]
+    fn two(first: &'static str, second: &'static str) -> Self {
+        Self([Some(first), Some(second)])
+    }
+
+    /// The keys, in the order the matching values come out of
+    /// [`DragValue::values`].
+    pub fn iter(self) -> impl Iterator<Item = &'static str> {
+        self.0.into_iter().flatten()
     }
 }
 
@@ -223,6 +297,10 @@ pub enum DragValue {
     Rotate([f32; 3]),
     Scale([f32; 3]),
     UniformScale(f32),
+    /// Two edge lengths in metres, for a target whose size is an extent
+    /// rather than a scale. Absolute lengths rather than a factor, because
+    /// that is what the params store.
+    Extent([f32; 2]),
 }
 
 impl DragValue {
@@ -232,7 +310,28 @@ impl DragValue {
             DragValue::Translate(_) => DragParam::Translate,
             DragValue::Rotate(_) => DragParam::Rotate,
             DragValue::Scale(_) => DragParam::Scale,
-            DragValue::UniformScale(_) => DragParam::UniformScale,
+            DragValue::UniformScale(_) | DragValue::Extent(_) => DragParam::UniformScale,
+        }
+    }
+
+    /// The values this drag writes, positionally matching the keys
+    /// [`DragParam::keys`] hands back for the same target.
+    ///
+    /// Every value is either three floats or one, which is why this returns
+    /// the pair rather than a typed union: the caller lowers each into the
+    /// parameter source its own crate owns. A vec3 lane carries `None` for
+    /// its scalar and vice versa, so a caller cannot read the wrong one.
+    #[must_use]
+    pub fn values(self) -> [Option<DragScalarOrVec3>; 2] {
+        match self {
+            DragValue::Translate(v) | DragValue::Rotate(v) | DragValue::Scale(v) => {
+                [Some(DragScalarOrVec3::Vec3(v)), None]
+            }
+            DragValue::UniformScale(f) => [Some(DragScalarOrVec3::Scalar(f)), None],
+            DragValue::Extent([x, z]) => [
+                Some(DragScalarOrVec3::Scalar(x)),
+                Some(DragScalarOrVec3::Scalar(z)),
+            ],
         }
     }
 
@@ -247,6 +346,9 @@ impl DragValue {
             (DragValue::Translate(a), DragValue::Translate(b))
             | (DragValue::Rotate(a), DragValue::Rotate(b))
             | (DragValue::Scale(a), DragValue::Scale(b)) => {
+                a.iter().zip(b).any(|(x, y)| (x - y).abs() > EPS)
+            }
+            (DragValue::Extent(a), DragValue::Extent(b)) => {
                 a.iter().zip(b).any(|(x, y)| (x - y).abs() > EPS)
             }
             (DragValue::UniformScale(a), DragValue::UniformScale(b)) => (a - b).abs() > EPS,
@@ -284,9 +386,23 @@ impl DragValue {
                 let ratio = if was.abs() > 1e-9 { now / was } else { 1.0 };
                 Some(format!("{ratio:.3}x"))
             }
+            // Metres, not a ratio: an extent is a length, and a panel is
+            // authored by the size you want it to be.
+            (DragValue::Extent(now), DragValue::Extent(_)) => {
+                Some(format!("{:.3} x {:.3} m", now[0], now[1]))
+            }
             _ => None,
         }
     }
+}
+
+/// One value a drag writes: a vec3 lane or a single float. Named rather than a
+/// bare tuple because the two are not interchangeable at the parameter write,
+/// and mixing them up would store a length in a rotation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DragScalarOrVec3 {
+    Vec3([f32; 3]),
+    Scalar(f32),
 }
 
 /// Formats only the lanes that actually moved, so an X drag reads "X +1.250 m"
@@ -645,6 +761,19 @@ pub fn solve_scale(
             }
             Some(DragValue::UniformScale(next))
         }
+        // Both edges together, in metres. Snapping is on the LENGTHS rather
+        // than on the factor, because that is the number a person is trying
+        // to land on when they size a panel.
+        DragValue::Extent(start) => {
+            let mut next = [start[0] * factor, start[1] * factor];
+            if mods & MOD_SNAP != 0 && settings.snap_translate > 0.0 {
+                next = [
+                    snap_to(next[0], settings.snap_translate),
+                    snap_to(next[1], settings.snap_translate),
+                ];
+            }
+            Some(DragValue::Extent(next))
+        }
         _ => None,
     }
 }
@@ -720,6 +849,11 @@ pub fn begin_drag(
     handle: Handle,
 ) -> Option<Drag> {
     let param = DragParam::for_handle(handle);
+    // A handle whose role this target does not declare grabs nothing, so the
+    // press falls through to the camera rather than opening a drag that would
+    // have nowhere to write. This is what keeps an armed tool honest on a
+    // target that cannot use it.
+    param.keys(&target.params)?;
     let start = param.read(&target);
 
     let grab = if handle.axis().is_some() || handle.plane_axes().is_some() {
@@ -806,13 +940,34 @@ mod tests {
         }
     }
 
+    /// The full transform vocabulary, which is what a `geo` and a `transform`
+    /// declare. Named for what it is so the light-shaped cases below read as
+    /// the deliberate contrast they are.
+    const FULL_TRS: TransformParams = TransformParams {
+        translate: Some("translate"),
+        rotate: Some("rotate"),
+        rotate_order: Some("rotate_order"),
+        scale: ScaleParams::Vec3 {
+            scale: "scale",
+            uniform: "uniform_scale",
+        },
+        pivot: None,
+        aim: None,
+    };
+
     fn target(parent: Matrix4<f32>) -> GizmoPose {
+        target_with(parent, FULL_TRS)
+    }
+
+    fn target_with(parent: Matrix4<f32>, params: TransformParams) -> GizmoPose {
         GizmoPose {
             translate: [0.0; 3],
             rotate: [0.0; 3],
             rotate_order: RotateOrder::Xyz,
             scale: [1.0; 3],
             uniform_scale: 1.0,
+            extent: [0.0; 2],
+            params,
             anchor: Matrix4::identity().into(),
             basis: mat3(Matrix3::identity()),
             parent_basis: mat3(Matrix3::identity()),
@@ -1084,14 +1239,15 @@ mod tests {
         assert!(v[0] >= 0.0, "never negative, got {v:?}");
     }
 
-    // ---- the one-param contract ----
+    // ---- the declared-param contract ----
 
-    /// The structural guarantee: every handle names exactly one param, and the
-    /// value a drag produces writes that same param. This is what makes preview,
-    /// commit, rollback and cancel agree by construction rather than by four
-    /// copies of the same string literal.
+    /// The structural guarantee: every handle names one role, that role
+    /// resolves to the names the TARGET declares, and the value a drag
+    /// produces writes that same role. This is what makes preview, commit,
+    /// rollback and cancel agree by construction rather than by four copies of
+    /// the same string literal.
     #[test]
-    fn every_handle_writes_exactly_one_param_and_the_value_agrees() {
+    fn every_handle_writes_the_params_its_target_declares() {
         let cases = [
             (Handle::AxisX, DragParam::Translate, "translate"),
             (Handle::PlaneYZ, DragParam::Translate, "translate"),
@@ -1107,10 +1263,118 @@ mod tests {
         let t = target(Matrix4::identity());
         for (handle, param, key) in cases {
             assert_eq!(DragParam::for_handle(handle), param, "{handle:?}");
-            assert_eq!(param.key(), key);
+            let keys: Vec<&str> = param.keys(&t.params).expect("declared").iter().collect();
+            assert_eq!(keys, vec![key]);
             // And the value the target reports for that param round-trips back to
             // the same param, so a commit cannot write the wrong key.
             assert_eq!(param.read(&t).param(), param);
+        }
+    }
+
+    /// The same handles against a target that names its position differently
+    /// and declares no rotation or scale at all. Nothing about the handle
+    /// changed; the answer did, which is the whole point of asking the target.
+    #[test]
+    fn a_position_only_target_writes_its_own_name_and_refuses_the_rest() {
+        let point_light = TransformParams {
+            translate: Some("position"),
+            ..TransformParams::default()
+        };
+        let t = target_with(Matrix4::identity(), point_light);
+
+        let keys: Vec<&str> = DragParam::Translate
+            .keys(&t.params)
+            .expect("a position is declared")
+            .iter()
+            .collect();
+        assert_eq!(keys, vec!["position"]);
+
+        for role in [DragParam::Rotate, DragParam::Scale, DragParam::UniformScale] {
+            assert!(
+                role.keys(&t.params).is_none(),
+                "{role:?} must write nothing on a target that declares none"
+            );
+        }
+    }
+
+    /// A panel is sized by two edge lengths, so its three-lane scale role has
+    /// nothing to write while its uniform one writes both edges together.
+    #[test]
+    fn an_extent_sized_target_writes_both_edges_from_one_uniform_drag() {
+        let rect_area = TransformParams {
+            translate: Some("translate"),
+            rotate: Some("rotate"),
+            rotate_order: None,
+            scale: ScaleParams::Extent2 {
+                x: "width",
+                z: "height",
+            },
+            pivot: None,
+            aim: None,
+        };
+        let mut t = target_with(Matrix4::identity(), rect_area);
+        t.extent = [4.0, 2.0];
+
+        assert!(
+            DragParam::Scale.keys(&t.params).is_none(),
+            "a panel has no scale lanes"
+        );
+        let keys: Vec<&str> = DragParam::UniformScale
+            .keys(&t.params)
+            .expect("a size is declared")
+            .iter()
+            .collect();
+        assert_eq!(keys, vec!["width", "height"]);
+
+        // And the value read back carries both edges, positionally matching.
+        let value = DragParam::UniformScale.read(&t);
+        assert_eq!(value, DragValue::Extent([4.0, 2.0]));
+        let values = value.values();
+        assert_eq!(values[0], Some(DragScalarOrVec3::Scalar(4.0)));
+        assert_eq!(values[1], Some(DragScalarOrVec3::Scalar(2.0)));
+    }
+
+    /// The keys and the values must always be the same length, or a commit
+    /// would pair a name with the wrong number. Checked over every role
+    /// against every shape a target can take.
+    #[test]
+    fn the_keys_and_the_values_of_a_drag_are_always_the_same_length() {
+        let shapes = [
+            FULL_TRS,
+            TransformParams {
+                translate: Some("position"),
+                ..TransformParams::default()
+            },
+            TransformParams {
+                translate: Some("translate"),
+                rotate: Some("rotate"),
+                scale: ScaleParams::Extent2 {
+                    x: "width",
+                    z: "height",
+                },
+                ..TransformParams::default()
+            },
+            TransformParams::default(),
+        ];
+        for shape in shapes {
+            let mut t = target_with(Matrix4::identity(), shape);
+            t.extent = [3.0, 5.0];
+            for role in [
+                DragParam::Translate,
+                DragParam::Rotate,
+                DragParam::Scale,
+                DragParam::UniformScale,
+            ] {
+                let Some(keys) = role.keys(&t.params) else {
+                    continue;
+                };
+                let values = role.read(&t).values();
+                assert_eq!(
+                    keys.iter().count(),
+                    values.iter().flatten().count(),
+                    "{role:?} on {shape:?}"
+                );
+            }
         }
     }
 

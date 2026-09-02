@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cgmath::{Matrix3, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use serde::{Deserialize, Serialize};
+use solarxy_core::gizmo::{ScaleParams, TransformParams};
 use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
 use solarxy_kernel::transform::{RotateOrder, rotation_matrix};
 
@@ -590,6 +591,12 @@ pub struct ActionResult {
 /// has to decompose back into the target's own `rotate_order`, and a scale drag
 /// writes two different params depending on the handle.
 ///
+/// It also carries the NAMES of those params rather than leaving the host to
+/// assume them, which is what lets a node other than a `geo` be manipulated at
+/// all: a point light names its position `position`, and a host that wrote
+/// `translate` would be refused by the parameter write and would have already
+/// tripped the resolver's debug assert on the way there.
+///
 /// Not `Serialize`: this never crosses the wasm boundary. The drag loop runs
 /// entirely in the host and streams into the preview lane, so the only thing JS
 /// ever sees of a gizmo is the `EventBatch` on commit.
@@ -613,10 +620,16 @@ pub struct GizmoTarget {
     /// The order the target composes its rotation in, so a rotate drag can
     /// decompose its result back into the angles this node actually means.
     pub rotate_order: RotateOrder,
-    /// The current per-axis scale.
+    /// The current per-axis scale. Identity on a target whose size is an
+    /// extent rather than a scale, which has no such lanes to report.
     pub scale: [f32; 3],
     /// The current uniform-scale factor (the centre handle's param).
     pub uniform_scale: f32,
+    /// The current edge lengths, in metres, of a target sized by extent
+    /// rather than by scale. Zero on every other kind, which is why
+    /// [`GizmoTarget::params`] rather than this field is what says whether a
+    /// size handle has anything to write.
+    pub extent: [f32; 2],
     /// The target's local pivot. Zero on a `geo` (its pivot is its origin).
     pub pivot: [f32; 3],
     /// World matrix placing the manipulator, **pivot included**: rotation and
@@ -638,6 +651,10 @@ pub struct GizmoTarget {
     /// True when the subflow's tail is not a usable `transform`, so the drag
     /// must append one before it can preview anything.
     pub append_pending: bool,
+    /// What this target declares, and under what names. The host asks this
+    /// which param a handle writes rather than deciding for itself, so a
+    /// handle whose role the target does not declare grabs nothing.
+    pub params: TransformParams,
 }
 
 /// A node's transform params, preview-resolved, in **document units**.
@@ -654,25 +671,46 @@ struct NodeTransform {
     order: RotateOrder,
     scale: [f32; 3],
     uniform_scale: f32,
+    /// Edge lengths in metres for a target sized by extent; zero otherwise.
+    extent: [f32; 2],
     /// Zero on a `geo`, which has no pivot param and rotates about its origin.
     pivot: [f32; 3],
 }
 
 impl NodeTransform {
-    /// `has_pivot` is the caller's job because `ResolvedParams` debug-asserts on
-    /// a key the descriptor never declared, and only `transform` declares one.
-    fn read(p: &ResolvedParams, has_pivot: bool) -> Self {
+    /// Reads only the keys `params` names, because `ResolvedParams`
+    /// debug-asserts on a key the descriptor never declared. An undeclared
+    /// role reads as its identity (no offset, no rotation, unit scale), which
+    /// is what makes the composed matrix correct for a node that carries only
+    /// a position; whether a HANDLE for that role exists is `params`' answer,
+    /// not this one's.
+    ///
+    /// This used to take a `has_pivot` bool for the same reason, threaded by
+    /// hand for one key. The whole set travels together now, so a node that
+    /// declares a different subset costs nothing to add.
+    fn read(p: &ResolvedParams, params: &TransformParams) -> Self {
+        let (scale, uniform_scale) = match params.scale {
+            ScaleParams::Vec3 { scale, uniform } => (p.vec3_f32(scale), p.f32(uniform)),
+            ScaleParams::None | ScaleParams::Extent2 { .. } => ([1.0; 3], 1.0),
+        };
+        let extent = match params.scale {
+            ScaleParams::Extent2 { x, z } => [p.f32(x), p.f32(z)],
+            ScaleParams::None | ScaleParams::Vec3 { .. } => [0.0; 2],
+        };
         Self {
-            translate: p.vec3_f32("translate"),
-            rotate_deg: p.vec3_f32("rotate").map(f32::to_degrees),
-            order: rotate_order_from_key(p.enum_key("rotate_order")),
-            scale: p.vec3_f32("scale"),
-            uniform_scale: p.f32("uniform_scale"),
-            pivot: if has_pivot {
-                p.vec3_f32("pivot")
-            } else {
-                [0.0; 3]
-            },
+            translate: params.translate.map_or([0.0; 3], |k| p.vec3_f32(k)),
+            // Degrees out, radians in: `resolve_params` owns the conversion the
+            // other way, and a `SetParam` writes what this field carries.
+            rotate_deg: params
+                .rotate
+                .map_or([0.0; 3], |k| p.vec3_f32(k).map(f32::to_degrees)),
+            order: params.rotate_order.map_or_else(RotateOrder::default, |k| {
+                rotate_order_from_key(p.enum_key(k))
+            }),
+            scale,
+            uniform_scale,
+            extent,
+            pivot: params.pivot.map_or([0.0; 3], |k| p.vec3_f32(k)),
         }
     }
 
@@ -705,6 +743,67 @@ fn gizmo_frame(center: Point3<f32>, basis: Matrix3<f32>) -> Matrix4<f32> {
 
 fn mat3_to_array(m: Matrix3<f32>) -> [[f32; 3]; 3] {
     [m.x.into(), m.y.into(), m.z.into()]
+}
+
+/// Which transform roles a node type declares, and what it calls them.
+/// `None` for a type that declares none, which is how a node that cannot be
+/// manipulated produces no target rather than an empty one.
+///
+/// A table rather than something derived, because a param's ROLE cannot be
+/// recovered from its name: `translate` and `position` are the same role under
+/// two names, and `width` is a size while `radius` is not. What CAN be checked
+/// is that every name here is really declared by that type's descriptor, and
+/// `every_transform_param_is_declared_by_its_descriptor` checks exactly that,
+/// so the table cannot name a param into existence.
+///
+/// Ambient and hemisphere lights are absent on purpose. They have no position,
+/// no direction and no size, so there is nothing for a handle to write.
+fn transform_params_for(type_id: &str) -> Option<TransformParams> {
+    const TRS: TransformParams = TransformParams {
+        translate: Some("translate"),
+        rotate: Some("rotate"),
+        rotate_order: Some("rotate_order"),
+        scale: ScaleParams::Vec3 {
+            scale: "scale",
+            uniform: "uniform_scale",
+        },
+        pivot: None,
+        aim: None,
+    };
+    let params = match type_id {
+        "geo" => TRS,
+        // The one type with a pivot of its own.
+        "transform" => TransformParams {
+            pivot: Some("pivot"),
+            ..TRS
+        },
+        "point_light" => TransformParams {
+            translate: Some("position"),
+            ..TransformParams::default()
+        },
+        // Both aim by moving a second point rather than by carrying an
+        // orientation, so `target` is an aim and not a rotation.
+        "directional_light" | "spot_light" => TransformParams {
+            translate: Some("position"),
+            aim: Some("target"),
+            ..TransformParams::default()
+        },
+        // Its angles are always XYZ, so it exposes no order to compose in,
+        // and its size is two edge lengths rather than three scale lanes.
+        "rect_area_light" => TransformParams {
+            translate: Some("translate"),
+            rotate: Some("rotate"),
+            rotate_order: None,
+            scale: ScaleParams::Extent2 {
+                x: "width",
+                z: "height",
+            },
+            pivot: None,
+            aim: None,
+        },
+        _ => return None,
+    };
+    Some(params)
 }
 
 /// The engine.
@@ -2958,17 +3057,20 @@ impl Engine {
     /// matrix inside a subflow (where the transform node's translate is local to
     /// the container).
     /// Reads a transform-carrying node's params, previews included so the gizmo
-    /// tracks the object mid-drag. Only `transform` declares a `pivot`.
+    /// tracks the object mid-drag. What counts as a transform param is
+    /// [`transform_params_for`]'s answer, so a node reads only what it
+    /// declares.
     fn node_transform(
         &self,
         node: NodeId,
         params: &BTreeMap<String, ParamSource>,
         type_id: &str,
-    ) -> Option<NodeTransform> {
+    ) -> Option<(NodeTransform, TransformParams)> {
         let desc = self.registry.get(type_id)?;
+        let declared = transform_params_for(type_id)?;
         let effective = crate::previews::effective_params(&self.previews, node, params);
         let resolved = crate::registry::resolve::resolve_params(&effective, &desc.params).ok()?;
-        Some(NodeTransform::read(&resolved, type_id == "transform"))
+        Some((NodeTransform::read(&resolved, &declared), declared))
     }
 
     #[must_use]
@@ -2976,17 +3078,16 @@ impl Engine {
         match ctx {
             GraphContext::Root => {
                 let root = self.doc.graph(GraphContext::Root).ok()?;
-                // Exactly one selected node, and it must be a geo.
+                // Exactly one selected node, and it must declare something to
+                // manipulate. Which node types those are is the registry's
+                // business rather than a list kept here.
                 let &[selected] = root.selection.as_slice() else {
                     return None;
                 };
                 let node = root.node(selected)?;
-                if node.type_id != "geo" {
-                    return None;
-                }
-                let xf = self.node_transform(selected, &node.params, "geo")?;
+                let (xf, params) = self.node_transform(selected, &node.params, &node.type_id)?;
 
-                // A geo IS its own parent frame at root, so a world drag delta
+                // A root node IS its own parent frame, so a world drag delta
                 // lands 1:1 on its translate.
                 Some(GizmoTarget {
                     ctx: GraphContext::Root,
@@ -2996,13 +3097,15 @@ impl Engine {
                     rotate_order: xf.order,
                     scale: xf.scale,
                     uniform_scale: xf.uniform_scale,
+                    extent: xf.extent,
                     pivot: xf.pivot,
                     anchor: gizmo_frame(xf.pivot_point(), xf.basis()).into(),
                     basis: mat3_to_array(xf.basis()),
-                    // A geo has no parent frame: world IS its parent.
+                    // A root node has no parent frame: world IS its parent.
                     parent_basis: mat3_to_array(Matrix3::identity()),
                     parent: Matrix4::identity().into(),
                     append_pending: false,
+                    params,
                 })
             }
             GraphContext::Subflow(geo) => {
@@ -3011,15 +3114,19 @@ impl Engine {
                 let tail = sub.node(display)?;
 
                 let geo_node = self.doc.graph(GraphContext::Root).ok()?.node(geo)?;
-                let geo_xf = self.node_transform(geo, &geo_node.params, "geo")?;
+                let (geo_xf, _) = self.node_transform(geo, &geo_node.params, "geo")?;
                 let geo_matrix =
                     scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, geo);
 
                 // A bypassed transform passes geometry straight through, so it
                 // moves nothing: treat it as absent and append a live one.
                 let reusable = tail.type_id == "transform" && !tail.bypassed;
+                // Either way the drag writes a `transform`: the reuse path
+                // writes the tail, and the append path writes the one minted at
+                // drag start, so the names are the same in both.
+                let params = transform_params_for("transform")?;
                 let xf = if reusable {
-                    self.node_transform(display, &tail.params, "transform")?
+                    self.node_transform(display, &tail.params, "transform")?.0
                 } else {
                     // Nothing to read yet: the node is minted at drag start.
                     NodeTransform {
@@ -3028,6 +3135,7 @@ impl Engine {
                         order: RotateOrder::default(),
                         scale: [1.0; 3],
                         uniform_scale: 1.0,
+                        extent: [0.0; 2],
                         pivot: [0.0; 3],
                     }
                 };
@@ -3047,12 +3155,14 @@ impl Engine {
                     rotate_order: xf.order,
                     scale: xf.scale,
                     uniform_scale: xf.uniform_scale,
+                    extent: xf.extent,
                     pivot: xf.pivot,
                     anchor: gizmo_frame(center, basis).into(),
                     basis: mat3_to_array(basis),
                     parent_basis: mat3_to_array(geo_xf.basis()),
                     parent: geo_matrix.into(),
                     append_pending: !reusable,
+                    params,
                 })
             }
         }

@@ -3475,15 +3475,27 @@ fn gizmo_target_at_root_drives_the_geo_itself() {
 }
 
 #[test]
-fn gizmo_target_at_root_needs_exactly_one_geo() {
+fn gizmo_target_at_root_needs_exactly_one_node_that_declares_a_transform() {
     let (mut e, geo, sub, box_id) = displayed_box();
 
     // Nothing selected.
     assert!(e.gizmo_target(GraphContext::Root).is_none());
 
-    // A light is not a geo.
+    // A light IS manipulable, and names its position `position` rather than
+    // `translate`. This assertion used to say the opposite in as many words;
+    // it is the specification that changed, not a test routed around.
     let light = add(&mut e, GraphContext::Root, "point_light");
     select(&mut e, GraphContext::Root, vec![light]);
+    let t = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a point light declares a position");
+    assert_eq!(t.node, light);
+    assert_eq!(t.params.translate, Some("position"));
+
+    // A light with no position at all still is not: there is nothing for a
+    // handle to write.
+    let ambient = add(&mut e, GraphContext::Root, "ambient_light");
+    select(&mut e, GraphContext::Root, vec![ambient]);
     assert!(e.gizmo_target(GraphContext::Root).is_none());
 
     // Multi-select is ambiguous in v1.
@@ -3494,6 +3506,191 @@ fn gizmo_target_at_root_needs_exactly_one_geo() {
     select(&mut e, sub, vec![box_id]);
     assert!(e.gizmo_target(sub).is_some());
 }
+
+#[test]
+fn every_light_type_reports_the_transform_params_it_declares() {
+    use solarxy_core::gizmo::ScaleParams;
+
+    let mut e = engine();
+    let cases: &[(&str, Option<&str>, Option<&str>, Option<&str>)] = &[
+        // type id, translate, rotate, aim
+        ("point_light", Some("position"), None, None),
+        ("directional_light", Some("position"), None, Some("target")),
+        ("spot_light", Some("position"), None, Some("target")),
+        ("rect_area_light", Some("translate"), Some("rotate"), None),
+    ];
+    for &(type_id, translate, rotate, aim) in cases {
+        let node = add(&mut e, GraphContext::Root, type_id);
+        select(&mut e, GraphContext::Root, vec![node]);
+        let t = e
+            .gizmo_target(GraphContext::Root)
+            .unwrap_or_else(|| panic!("{type_id} declares a transform"));
+        assert_eq!(t.params.translate, translate, "{type_id} translate");
+        assert_eq!(t.params.rotate, rotate, "{type_id} rotate");
+        assert_eq!(t.params.aim, aim, "{type_id} aim");
+        // No light carries a pivot or a rotate order of its own.
+        assert_eq!(t.params.pivot, None, "{type_id} pivot");
+        assert_eq!(t.params.rotate_order, None, "{type_id} rotate order");
+    }
+
+    // Only the panel has a size, and it is two edge lengths rather than
+    // three scale lanes.
+    let panel = add(&mut e, GraphContext::Root, "rect_area_light");
+    select(&mut e, GraphContext::Root, vec![panel]);
+    let t = e.gizmo_target(GraphContext::Root).expect("a panel");
+    assert_eq!(
+        t.params.scale,
+        ScaleParams::Extent2 {
+            x: "width",
+            z: "height",
+        }
+    );
+    // Its defaults, read through the same path a drag reads them.
+    assert!((t.extent[0] - 10.0).abs() < 1e-5, "width {}", t.extent[0]);
+    assert!((t.extent[1] - 10.0).abs() < 1e-5, "height {}", t.extent[1]);
+
+    let point = add(&mut e, GraphContext::Root, "point_light");
+    select(&mut e, GraphContext::Root, vec![point]);
+    let t = e.gizmo_target(GraphContext::Root).expect("a point light");
+    assert_eq!(t.params.scale, ScaleParams::None, "a point has no size");
+}
+
+/// The guard that keeps the role table honest: it can name a param, but it
+/// cannot name one into existence. Every key the table hands a drag has to be
+/// declared by that type's own descriptor, because the parameter write refuses
+/// an undeclared key and the resolver debug-asserts on one before that.
+#[test]
+fn every_transform_param_is_declared_by_its_descriptor() {
+    use solarxy_core::gizmo::ScaleParams;
+
+    let registry = crate::registry::Registry::with_descriptors(crate::nodes::builtin_descriptors())
+        .expect("the builtin registry is valid");
+    for type_id in ["geo", "transform"]
+        .into_iter()
+        .chain(LIGHT_TYPE_IDS.iter().copied())
+    {
+        let Some(params) = crate::engine::transform_params_for(type_id) else {
+            continue;
+        };
+        let desc = registry
+            .get(type_id)
+            .unwrap_or_else(|| panic!("{type_id} is registered"));
+        let declared = |key: &str| desc.param(key).is_some();
+
+        let mut named: Vec<&str> = Vec::new();
+        named.extend(params.translate);
+        named.extend(params.rotate);
+        named.extend(params.rotate_order);
+        named.extend(params.pivot);
+        named.extend(params.aim);
+        match params.scale {
+            ScaleParams::None => {}
+            ScaleParams::Vec3 { scale, uniform } => named.extend([scale, uniform]),
+            ScaleParams::Extent2 { x, z } => named.extend([x, z]),
+        }
+        assert!(
+            !named.is_empty(),
+            "{type_id} is in the table but names nothing"
+        );
+        for key in named {
+            assert!(
+                declared(key),
+                "{type_id} does not declare `{key}`, which the gizmo would write"
+            );
+        }
+    }
+}
+
+/// The realtime half of a light drag: a preview on the param the target names
+/// has to reach the scene delta, or the shadow falls where the light used to
+/// be until the pointer is released, which is the whole activity this work
+/// exists to restore.
+#[test]
+fn previewing_a_lights_declared_param_relights_the_scene_before_the_commit() {
+    use solarxy_core::scene::SceneOp;
+
+    let mut e = engine();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    select(&mut e, GraphContext::Root, vec![light]);
+    e.cook(&mut || true);
+    let _ = e.take_scene_delta();
+
+    let key = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a point light is a target")
+        .params
+        .translate
+        .expect("it declares a position");
+
+    // Exactly what a drag streams: no command, no document write, no undo.
+    e.preview_param(
+        GraphContext::Root,
+        light,
+        key,
+        ParamSource::Literal(ParamValue::Vec3([1.0, 2.0, 3.0])),
+    );
+
+    let delta = e.take_scene_delta();
+    let lights = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            SceneOp::SetLights { lights } => Some(lights),
+            _ => None,
+        })
+        .expect("SetLights op present");
+    assert_eq!(lights.len(), 1);
+    assert!(
+        (lights[0].position[0] - 1.0).abs() < 1e-5
+            && (lights[0].position[1] - 2.0).abs() < 1e-5
+            && (lights[0].position[2] - 3.0).abs() < 1e-5,
+        "the previewed position must reach the renderer, got {:?}",
+        lights[0].position
+    );
+
+    // And the gizmo tracks it, so the handle stays under the cursor.
+    let t = e.gizmo_target(GraphContext::Root).expect("still a target");
+    assert!((t.translate[0] - 1.0).abs() < 1e-5);
+
+    // Abandoning restores the light exactly, with nothing stranded.
+    e.clear_preview(GraphContext::Root, light, key);
+    let delta = e.take_scene_delta();
+    let lights = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            SceneOp::SetLights { lights } => Some(lights),
+            _ => None,
+        })
+        .expect("SetLights op present");
+    assert!(
+        (lights[0].position[0] - 10.0).abs() < 1e-5,
+        "back to the authored position, got {:?}",
+        lights[0].position
+    );
+}
+
+/// The two lights with no position, no direction and no size are absent from
+/// the table on purpose: there is nothing honest for a handle to write.
+#[test]
+fn the_scene_wide_lights_declare_no_transform() {
+    for type_id in ["ambient_light", "hemisphere_light"] {
+        assert!(
+            crate::engine::transform_params_for(type_id).is_none(),
+            "{type_id} has no position to manipulate"
+        );
+    }
+}
+
+/// The six light node types, so a test that means "every light" says so once.
+const LIGHT_TYPE_IDS: [&str; 6] = [
+    "point_light",
+    "directional_light",
+    "spot_light",
+    "ambient_light",
+    "hemisphere_light",
+    "rect_area_light",
+];
 
 #[test]
 fn gizmo_target_in_a_subflow_reports_append_pending_over_a_box() {

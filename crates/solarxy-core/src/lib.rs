@@ -61,6 +61,7 @@
 
 pub mod aabb;
 pub mod geometry;
+pub mod gizmo;
 #[cfg(feature = "fs")]
 pub mod install_source;
 #[cfg(feature = "serialization")]

@@ -45,6 +45,7 @@ use solarxy_renderer::manipulator::{self, ManipulatorState};
 use solarxy_host::{HostViewState, RasterBackend};
 use solarxy_host::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
 use solarxy_host::display_defaults::{self, DisplayDefaults};
+use solarxy_core::gizmo::TransformParams;
 use solarxy_host::gizmo::{self, GizmoPose, GizmoState, ToolMode};
 use solarxy_renderer::camera::{turntable_up, Camera};
 use solarxy_renderer::camera_state::CameraState;
@@ -792,6 +793,8 @@ fn gizmo_pose(t: &GizmoTarget) -> GizmoPose {
         rotate_order: t.rotate_order,
         scale: t.scale,
         uniform_scale: t.uniform_scale,
+        extent: t.extent,
+        params: t.params,
         anchor: t.anchor,
         basis: t.basis,
         parent_basis: t.parent_basis,
@@ -799,20 +802,34 @@ fn gizmo_pose(t: &GizmoTarget) -> GizmoPose {
     }
 }
 
-/// Lower a solved drag value into the param source a `SetParam` carries.
+/// The parameter writes one solved drag value makes on one target: each key
+/// the target declares for that drag, paired with the value for it.
 ///
 /// Lives here rather than on `DragValue` because `ParamSource` is an engine
-/// type and the solver's crate has no engine dependency.
-fn drag_param_source(value: gizmo::DragValue) -> ParamSource {
-    let v = match value {
-        gizmo::DragValue::Translate(v)
-        | gizmo::DragValue::Rotate(v)
-        | gizmo::DragValue::Scale(v) => {
-            ParamValue::Vec3([f64::from(v[0]), f64::from(v[1]), f64::from(v[2])])
-        }
-        gizmo::DragValue::UniformScale(f) => ParamValue::Float(f64::from(f)),
+/// type and the solver's crate has no engine dependency. Pairing happens in
+/// one place so preview, commit and rollback cannot disagree about which key
+/// gets which number; the two sides are positional, and
+/// `the_keys_and_the_values_of_a_drag_are_always_the_same_length` in the
+/// solver keeps them the same length.
+fn drag_writes(
+    value: gizmo::DragValue,
+    params: &TransformParams,
+) -> Vec<(&'static str, ParamSource)> {
+    let Some(keys) = value.param().keys(params) else {
+        return Vec::new();
     };
-    ParamSource::Literal(v)
+    keys.iter()
+        .zip(value.values().into_iter().flatten())
+        .map(|(key, v)| {
+            let value = match v {
+                gizmo::DragScalarOrVec3::Vec3(v) => {
+                    ParamValue::Vec3([f64::from(v[0]), f64::from(v[1]), f64::from(v[2])])
+                }
+                gizmo::DragScalarOrVec3::Scalar(f) => ParamValue::Float(f64::from(f)),
+            };
+            (key, ParamSource::Literal(value))
+        })
+        .collect()
 }
 
 /// Identity of the loaded HDRI (its bytes live in the engine asset table).
@@ -4026,18 +4043,19 @@ impl SolarxyApp {
         self.gizmo_readout = value.readout(drag.start);
 
         if let Some(addr) = self.gizmo_addr {
-            self.engine.preview_param(
-                addr.ctx,
-                addr.node,
-                drag.param.key(),
-                drag_param_source(value),
-            );
+            for (key, source) in drag_writes(value, &drag.target.params) {
+                self.engine.preview_param(addr.ctx, addr.node, key, source);
+            }
         }
     }
 
-    /// Release: commit the dragged value as ONE authoritative `SetParam` inside the
-    /// open transaction, then close it. That is the whole "one undo step per
-    /// drag" contract -- the `SetParam` also clears the preview.
+    /// Release: commit the dragged value as authoritative `SetParam`s inside
+    /// the open transaction, then close it. That is the whole "one undo step
+    /// per drag" contract -- the transaction is what makes it one step, and
+    /// each `SetParam` also clears its own preview.
+    ///
+    /// Plural because a target sized by two edge lengths writes both when its
+    /// size is dragged; everything else writes one.
     fn commit_gizmo_drag(&mut self) -> Result<JsValue, JsError> {
         let Some((drag, addr)) = self.take_gizmo_drag() else {
             return Ok(JsValue::NULL);
@@ -4061,16 +4079,18 @@ impl SolarxyApp {
             return self.rollback_gizmo_drag(&drag, addr);
         }
 
-        let set = self
-            .engine
-            .apply(Command::SetParam {
-                ctx: addr.ctx,
-                node: addr.node,
-                key: drag.param.key().to_string(),
-                value: drag_param_source(final_value),
-            })
-            .map_err(|e| JsError::new(&format!("{e}")))?;
-        events.extend(set.events);
+        for (key, value) in drag_writes(final_value, &drag.target.params) {
+            let set = self
+                .engine
+                .apply(Command::SetParam {
+                    ctx: addr.ctx,
+                    node: addr.node,
+                    key: key.to_string(),
+                    value,
+                })
+                .map_err(|e| JsError::new(&format!("{e}")))?;
+            events.extend(set.events);
+        }
 
         let end = self
             .engine
@@ -4089,16 +4109,20 @@ impl SolarxyApp {
     /// document (an appended transform node); clearing the preview releases the
     /// transient value the drag was streaming. Skip the second and the viewport
     /// would keep asserting the dragged pose forever, disagreeing with the
-    /// parameter panel. The key comes from the drag's own `DragParam`, so a
-    /// rotate cancel can never clear a translate.
+    /// parameter panel. The keys come from the drag's own `DragParam` resolved
+    /// against its own target, so a rotate cancel can never clear a translate
+    /// and a two-edge cancel cannot leave one of them stranded.
     fn rollback_gizmo_drag(
         &mut self,
         drag: &gizmo::Drag,
         addr: GizmoAddr,
     ) -> Result<JsValue, JsError> {
         self.gizmo_readout = None;
-        self.engine
-            .clear_preview(addr.ctx, addr.node, drag.param.key());
+        if let Some(keys) = drag.param.keys(&drag.target.params) {
+            for key in keys.iter() {
+                self.engine.clear_preview(addr.ctx, addr.node, key);
+            }
+        }
         let batch = self
             .engine
             .apply(Command::CancelTransaction)
