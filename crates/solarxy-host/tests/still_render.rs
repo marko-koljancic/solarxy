@@ -728,11 +728,15 @@ fn a_transparent_raster_still_mattes_the_sky_and_lights_the_subject_identically(
         "the environment lights a covered pixel identically"
     );
     assert!(
-        matte.chunks_exact(4).any(|p| p[3] > 0 && p[3] < 255),
+        matte
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|p| p[3] > 0 && p[3] < 255),
         "a silhouette pixel is fractional rather than staircased"
     );
     assert!(
-        opaque.chunks_exact(4).all(|p| p[3] == 255),
+        opaque.as_chunks::<4>().0.iter().all(|p| p[3] == 255),
         "an ordinary opaque render stays opaque in every pixel"
     );
 }
@@ -765,7 +769,13 @@ fn a_grade_leaves_the_matte_alone() {
         },
     );
 
-    let alphas = |img: &[u8]| img.chunks_exact(4).map(|p| p[3]).collect::<Vec<u8>>();
+    let alphas = |img: &[u8]| {
+        img.as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| p[3])
+            .collect::<Vec<u8>>()
+    };
     assert_eq!(
         alphas(&plain),
         alphas(&graded),

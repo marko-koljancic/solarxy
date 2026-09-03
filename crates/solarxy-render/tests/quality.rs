@@ -314,7 +314,7 @@ impl RenderSink for MeanBrightness {
         );
         let mut sum = 0.0;
         let mut count = 0u64;
-        for px in image.pixels.chunks_exact(4) {
+        for px in image.pixels.as_chunks::<4>().0 {
             sum += f64::from(px[0]) + f64::from(px[1]) + f64::from(px[2]);
             count += 3;
         }
@@ -820,7 +820,11 @@ fn the_transparent_background_reaches_both_files() {
         "the subject is fully covered"
     );
     assert!(
-        sink.pixels.chunks_exact(4).any(|p| p[3] > 0 && p[3] < 255),
+        sink.pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|p| p[3] > 0 && p[3] < 255),
         "a silhouette pixel is fractional"
     );
 
