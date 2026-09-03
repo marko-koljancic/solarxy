@@ -3842,6 +3842,111 @@ fn resetting_a_targets_declared_params_restores_its_own_defaults() {
     assert_eq!(panel_keys, vec!["translate", "rotate", "width", "height"]);
 }
 
+/// A drag that writes TWO params is still one undo step.
+///
+/// This is the only branch the manipulation work introduced where the count
+/// could split: a rect-area light is sized by `width` and `height`, so its
+/// uniform handle writes both, and the module's one-param-per-drag rule was
+/// weakened to allow it. The transaction is what keeps it one step, and
+/// nothing else asserts that for a two-key write; the existing coverage is a
+/// geometry append, which writes one.
+#[test]
+fn a_two_param_light_drag_is_still_exactly_one_undo_step() {
+    let mut e = engine();
+    let panel = add(&mut e, GraphContext::Root, "rect_area_light");
+    select(&mut e, GraphContext::Root, vec![panel]);
+
+    let keys = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a panel is a target")
+        .params
+        .names();
+    assert!(
+        keys.contains(&"width") && keys.contains(&"height"),
+        "the case this test exists for: {keys:?}"
+    );
+
+    let before = fingerprint(&e, GraphContext::Root);
+
+    // What a uniform size drag does: both edges, inside one transaction.
+    e.apply(Command::BeginTransaction {
+        label: "scale".into(),
+    })
+    .unwrap();
+    for (key, v) in [("width", 7.0_f64), ("height", 5.0)] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: panel,
+            key: key.to_string(),
+            value: ParamSource::Literal(ParamValue::Float(v)),
+        })
+        .unwrap();
+    }
+    e.apply(Command::EndTransaction).unwrap();
+    e.cook(&mut || true);
+
+    let after = fingerprint(&e, GraphContext::Root);
+    assert_ne!(after, before, "the drag has to have changed something");
+
+    e.apply(Command::Undo).unwrap();
+    e.cook(&mut || true);
+    assert_eq!(
+        fingerprint(&e, GraphContext::Root),
+        before,
+        "one undo must put BOTH edges back, not just the last one written"
+    );
+
+    // And redo restores both together, for the same reason.
+    e.apply(Command::Redo).unwrap();
+    e.cook(&mut || true);
+    assert_eq!(fingerprint(&e, GraphContext::Root), after);
+}
+
+/// Escape part way through a two-param drag leaves nothing half-written.
+///
+/// The preview lane is the mid-drag state, so cancelling has to clear both
+/// keys. Clearing one would leave a panel that is 7 by its authored height,
+/// which is a shape the user never saw and never asked for.
+#[test]
+fn cancelling_a_two_param_light_drag_restores_both_edges() {
+    let mut e = engine();
+    let panel = add(&mut e, GraphContext::Root, "rect_area_light");
+    select(&mut e, GraphContext::Root, vec![panel]);
+    e.cook(&mut || true);
+    let before = fingerprint(&e, GraphContext::Root);
+
+    e.apply(Command::BeginTransaction {
+        label: "scale".into(),
+    })
+    .unwrap();
+    for (key, v) in [("width", 7.0_f64), ("height", 5.0)] {
+        e.preview_param(
+            GraphContext::Root,
+            panel,
+            key,
+            ParamSource::Literal(ParamValue::Float(v)),
+        );
+    }
+    assert!(e.has_active_previews(), "the drag is in flight");
+
+    e.apply(Command::CancelTransaction).unwrap();
+    for key in ["width", "height"] {
+        e.clear_preview(GraphContext::Root, panel, key);
+    }
+    e.cook(&mut || true);
+
+    assert!(
+        !e.has_active_previews(),
+        "an abandoned drag strands no preview"
+    );
+
+    assert_eq!(
+        fingerprint(&e, GraphContext::Root),
+        before,
+        "an abandoned drag leaves the panel exactly as it was"
+    );
+}
+
 /// The two lights with no position, no direction and no size are absent from
 /// the table on purpose: there is nothing honest for a handle to write.
 #[test]

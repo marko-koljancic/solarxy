@@ -698,4 +698,183 @@ mod tests {
         assert!(both.len() > only_b.len(), "dropping one drops its lines");
         assert!(!only_b.is_empty(), "and keeps the other's");
     }
+
+    /// One world unit per pixel, so a marker's radius is `MARKER_PX` in world
+    /// units and the arithmetic below is readable.
+    fn unit_scale(_: Point3<f32>) -> f32 {
+        1.0
+    }
+
+    fn markers(l: &LightDef) -> Vec<GizmoVertex> {
+        build_light_markers(
+            std::slice::from_ref(l),
+            Vector3::unit_x(),
+            Vector3::unit_y(),
+            unit_scale,
+            None,
+        )
+    }
+
+    /// Every kind marks itself, including the two that draw no helper.
+    ///
+    /// This is the difference between the two channels stated as a test: a
+    /// helper describes an extent, so ambient has none, while a marker says
+    /// only that a light is here, which is true of all six.
+    #[test]
+    fn every_light_kind_draws_a_marker() {
+        for kind in [
+            LightKind::Point,
+            LightKind::Directional,
+            LightKind::Spot,
+            LightKind::RectArea,
+            LightKind::Ambient,
+            LightKind::Hemisphere,
+        ] {
+            let lines = markers(&light(kind));
+            assert!(!lines.is_empty(), "{kind:?} must draw a marker");
+            assert_eq!(lines.len() % 2, 0, "{kind:?}: lines come in pairs");
+        }
+    }
+
+    /// The six are distinguishable, which is what lets you tell at a glance
+    /// which light you are about to click. Compared by the glyph each adds on
+    /// top of the shared ring rather than by eye.
+    #[test]
+    fn the_six_marker_glyphs_differ_from_each_other() {
+        let mut seen: Vec<(LightKind, usize)> = Vec::new();
+        for kind in [
+            LightKind::Point,
+            LightKind::Directional,
+            LightKind::Spot,
+            LightKind::RectArea,
+            LightKind::Ambient,
+            LightKind::Hemisphere,
+        ] {
+            let n = markers(&light(kind)).len();
+            if let Some((other, _)) = seen.iter().find(|(_, m)| *m == n) {
+                panic!("{kind:?} and {other:?} draw the same {n} vertices");
+            }
+            seen.push((kind, n));
+        }
+    }
+
+    /// The two scene-wide kinds have no position, so they mark the origin
+    /// rather than wherever their unused position field happens to hold.
+    #[test]
+    fn a_scene_wide_lights_marker_sits_at_the_world_origin() {
+        for kind in [LightKind::Ambient, LightKind::Hemisphere] {
+            let mut l = light(kind);
+            l.position = [50.0, 60.0, 70.0];
+            let lines = markers(&l);
+            let far = lines
+                .iter()
+                .any(|v| v.position.iter().any(|c| c.abs() > 40.0));
+            assert!(!far, "{kind:?} must mark the origin, not its position");
+        }
+
+        // A positional light does the opposite: it marks where it is.
+        let l = light(LightKind::Point);
+        let lines = markers(&l);
+        assert!(
+            lines
+                .iter()
+                .all(|v| (v.position[0] - l.position[0]).abs() < 40.0),
+            "a point light marks its own position"
+        );
+    }
+
+    /// An invisible light is not in the scene, so it cannot be clicked, for
+    /// the same reason it draws no helper.
+    #[test]
+    fn an_invisible_light_draws_no_marker() {
+        let mut l = light(LightKind::Point);
+        l.visible = false;
+        assert!(markers(&l).is_empty());
+        // And `show_helper` is the other channel's switch, not this one's.
+        let mut on = light(LightKind::Point);
+        on.show_helper = false;
+        assert!(!markers(&on).is_empty(), "a marker is not a helper");
+    }
+
+    /// Screen-constant sizing lives in the caller's `world_per_px`, so a
+    /// marker twice as far away is drawn twice as large in world units and
+    /// therefore the same size on screen.
+    #[test]
+    fn a_markers_world_size_follows_the_pixel_scale_it_is_given() {
+        let l = light(LightKind::Point);
+        let near = build_light_markers(
+            std::slice::from_ref(&l),
+            Vector3::unit_x(),
+            Vector3::unit_y(),
+            |_| 1.0,
+            None,
+        );
+        let far = build_light_markers(
+            std::slice::from_ref(&l),
+            Vector3::unit_x(),
+            Vector3::unit_y(),
+            |_| 2.0,
+            None,
+        );
+        assert_eq!(near.len(), far.len(), "same glyph, different size");
+
+        let spread = |vs: &[GizmoVertex]| {
+            vs.iter()
+                .map(|v| (v.position[0] - l.position[0]).abs())
+                .fold(0.0_f32, f32::max)
+        };
+        let (a, b) = (spread(&near), spread(&far));
+        assert!(
+            (b - a * 2.0).abs() < 1e-3,
+            "doubling the scale should double the world size, got {a} then {b}"
+        );
+
+        // A degenerate scale draws nothing rather than a NaN-sized ring.
+        for bad in [0.0_f32, f32::NAN, f32::INFINITY] {
+            let out = build_light_markers(
+                std::slice::from_ref(&l),
+                Vector3::unit_x(),
+                Vector3::unit_y(),
+                |_| bad,
+                None,
+            );
+            assert!(out.is_empty(), "scale {bad} must draw nothing");
+        }
+    }
+
+    /// Markers accumulate, and a selected one is drawn differently so you can
+    /// see which light the parameter panel is showing.
+    #[test]
+    fn markers_accumulate_and_the_selected_one_is_distinct() {
+        let mut a = light(LightKind::Point);
+        a.id = SceneObjectId(1);
+        let mut b = light(LightKind::Spot);
+        b.id = SceneObjectId(2);
+        let lights = [a, b];
+
+        let none = build_light_markers(
+            &lights,
+            Vector3::unit_x(),
+            Vector3::unit_y(),
+            unit_scale,
+            None,
+        );
+        let picked = build_light_markers(
+            &lights,
+            Vector3::unit_x(),
+            Vector3::unit_y(),
+            unit_scale,
+            Some(SceneObjectId(1)),
+        );
+        assert!(!none.is_empty());
+        assert_eq!(
+            none.len(),
+            picked.len(),
+            "selection changes colour, not shape"
+        );
+        assert!(
+            none.iter().zip(&picked).any(|(x, y)| x.color != y.color),
+            "the selected light's marker must look different"
+        );
+    }
 }

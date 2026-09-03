@@ -187,6 +187,63 @@ fn capacity_overflow_rebuilds_and_preserves_transform() {
     assert!((obj.transform.w.y - 4.0).abs() < 1e-6);
 }
 
+/// Framing one object has to put the camera around where that object actually
+/// is, not around the origin its geometry was authored about.
+///
+/// The same composition `visible_bounds` makes, for one object rather than all
+/// of them, which is what "Frame selection" reads. Written because that action
+/// is otherwise the only way to recover something dragged out of view, so a
+/// silent identity transform here is a camera that goes nowhere useful.
+#[test]
+fn one_objects_world_bounds_follow_its_transform() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    scene
+        .apply(&g.device, &g.queue, &g.layouts, &upsert(1, tri(1.0)))
+        .expect("apply");
+
+    let local = scene
+        .object_world_bounds(SceneObjectId(1))
+        .expect("an object that exists has bounds");
+    assert!(local.max.x.abs() < 10.0, "authored about the origin");
+
+    let translate = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [100.0, 0.0, 0.0, 1.0],
+    ];
+    scene
+        .apply(
+            &g.device,
+            &g.queue,
+            &g.layouts,
+            &SceneDelta {
+                ops: vec![SceneOp::SetTransform {
+                    id: SceneObjectId(1),
+                    transform: translate,
+                }],
+            },
+        )
+        .expect("transform");
+
+    let moved = scene
+        .object_world_bounds(SceneObjectId(1))
+        .expect("still exists");
+    assert!(
+        (moved.center().x - (local.center().x + 100.0)).abs() < 1e-4,
+        "world bounds must follow the transform, got {:?}",
+        moved.center()
+    );
+    // The size is unchanged by a pure translation, which is what says the
+    // transform was composed rather than the box replaced.
+    assert!((moved.size().x - local.size().x).abs() < 1e-4);
+
+    // An object that is not there cannot be framed, and says so rather than
+    // handing back an empty box at the origin.
+    assert!(scene.object_world_bounds(SceneObjectId(99)).is_none());
+}
+
 #[test]
 fn visibility_remove_and_clear() {
     let g = require_gpu!();
