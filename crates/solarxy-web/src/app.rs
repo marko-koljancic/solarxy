@@ -3230,11 +3230,18 @@ impl SolarxyApp {
         let cmd: CameraCommandDto = serde_wasm_bindgen::from_value(cmd)
             .map_err(|e| JsError::new(&format!("bad camera command: {e}")))?;
         let bounds = self.scene_bounds();
+        // Resolved before the camera is borrowed mutably, and unconditionally
+        // rather than inside the arm, because both reads want `&self`.
+        let selection = self.selection_bounds().unwrap_or(bounds);
         let Some(cam) = self.view.cameras.get_mut(pane).and_then(|c| c.as_mut()) else {
             return self.view_state();
         };
         match cmd.kind.as_str() {
             "fit" => cam.reset_to_bounds(&bounds),
+            // Falls back to the whole scene when nothing is selected or the
+            // selection has no place in the world, which is the same thing
+            // `fit` does and never a camera that goes nowhere.
+            "fitSelection" => cam.reset_to_bounds(&selection),
             "view" => {
                 let (dir, up) = match cmd.axis.as_str() {
                     "top" => (Vector3::unit_y(), -Vector3::unit_z()),
@@ -4591,6 +4598,36 @@ impl SolarxyApp {
             .scene()
             .visible_bounds()
             .unwrap_or(self.env_bounds)
+    }
+
+    /// What "frame the selection" should put the camera around, or `None` when
+    /// the selection has no place in the world.
+    ///
+    /// Two kinds of answer, because there are two kinds of thing to frame. An
+    /// object has real bounds. A light has a position and no size at all, so
+    /// it gets a box scaled to the scene: framing a point would put the camera
+    /// arbitrarily close to it, and a fraction of the scene is the only
+    /// measure available that means anything.
+    fn selection_bounds(&self) -> Option<AABB> {
+        let id = self.selected_object?;
+        if let Some(b) = self.raster.scene().object_world_bounds(id) {
+            return Some(b);
+        }
+        // Not an object, so it may be a light. Its marker anchor rather than
+        // its raw position, so framing an ambient or hemisphere light goes
+        // where its marker is drawn rather than where it is not.
+        let light = self
+            .raster
+            .scene()
+            .lights()?
+            .iter()
+            .find(|l| l.id == id && l.visible)?;
+        let at = solarxy_renderer::helpers::marker_anchor(light);
+        let half = (self.scene_bounds().diagonal() * 0.05).max(0.25);
+        Some(AABB {
+            min: cgmath::Point3::new(at.x - half, at.y - half, at.z - half),
+            max: cgmath::Point3::new(at.x + half, at.y + half, at.z + half),
+        })
     }
 
     /// Keeps the UV pane's source current: the selected node's committed

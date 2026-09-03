@@ -918,5 +918,9 @@ export type ViewAxis = "top" | "bottom" | "front" | "back" | "left" | "right";
 
 export type CameraCommand =
   | { kind: "fit" }
+  /** Frame what is selected rather than the whole scene. A light has no size,
+   * so it is framed with a box scaled to the scene; an unframeable selection
+   * falls back to fitting everything rather than sending the camera nowhere. */
+  | { kind: "fitSelection" }
   | { kind: "view"; axis: ViewAxis }
   | { kind: "projection"; mode: "perspective" | "orthographic" };

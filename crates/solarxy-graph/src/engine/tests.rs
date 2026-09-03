@@ -3786,6 +3786,62 @@ fn previewing_a_lights_declared_param_relights_the_scene_before_the_commit() {
     );
 }
 
+/// "Reset transform" on a light resets what a LIGHT has, which is not the set
+/// geometry has. The menu resets exactly the params the target declares, so
+/// there is one definition of what a target's transform is rather than a table
+/// of per-type defaults living in the frontend.
+#[test]
+fn resetting_a_targets_declared_params_restores_its_own_defaults() {
+    let mut e = engine();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    select(&mut e, GraphContext::Root, vec![light]);
+
+    let keys = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a point light is a target")
+        .params
+        .names();
+    assert_eq!(keys, vec!["position"], "one param, not geometry's four");
+
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: light,
+        key: "position".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([9.0, 9.0, 9.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let moved = e.gizmo_target(GraphContext::Root).expect("still a target");
+    assert!((moved.translate[0] - 9.0).abs() < 1e-5);
+
+    e.apply(Command::ResetParams {
+        ctx: GraphContext::Root,
+        node: light,
+        keys: Some(keys.iter().map(|k| (*k).to_string()).collect()),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let back = e.gizmo_target(GraphContext::Root).expect("still a target");
+    // The descriptor's own default, which is what removing the override
+    // falls back to; nothing here had to know the number.
+    assert!(
+        (back.translate[0] - 10.0).abs() < 1e-5 && (back.translate[2] - 5.0).abs() < 1e-5,
+        "back to the authored default, got {:?}",
+        back.translate
+    );
+
+    // A panel's transform includes the two edges its size handles write, the
+    // same way geometry's includes the scale lanes its cubes write.
+    let panel = add(&mut e, GraphContext::Root, "rect_area_light");
+    select(&mut e, GraphContext::Root, vec![panel]);
+    let panel_keys = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a panel")
+        .params
+        .names();
+    assert_eq!(panel_keys, vec!["translate", "rotate", "width", "height"]);
+}
+
 /// The two lights with no position, no direction and no size are absent from
 /// the table on purpose: there is nothing honest for a handle to write.
 #[test]

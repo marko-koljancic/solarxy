@@ -1,7 +1,14 @@
 // The viewport right-click context menu. Right-click always opens it
 // (the camera never used the right button; orbit is LMB, pan is MMB, zoom is
-// scroll). Tool switches mirror the tool column; object actions apply to the
-// selected root geo and are disabled when the selection can't take them.
+// scroll). Tool switches mirror the tool column; object actions are disabled
+// when the selection can't take them.
+//
+// Nothing here narrows the selection to a `geo`. It used to, in one
+// comparison, which made right-clicking a light a menu of disabled entries the
+// moment lights became selectable. What each action needs is asked instead:
+// the host says which params the selection's transform is made of, and the
+// registry says whether it declares a `visible`. Replacing the geo check with
+// a light check would have been the same mistake in a new place.
 //
 // Pure interpreter of the mirror + view state; every action goes through the
 // session (Rust owns the truth). Positioned fixed at the click point.
@@ -22,12 +29,6 @@ const TOOLS: [ToolMode, string, string][] = [
   ["aim", "Aim", ""],
 ];
 
-const vec3 = (value: [number, number, number]): ParamSource => ({
-  kind: "literal",
-  type: "vec3",
-  value,
-});
-const floatSrc = (value: number): ParamSource => ({ kind: "literal", type: "float", value });
 const boolSrc = (value: boolean): ParamSource => ({ kind: "literal", type: "bool", value });
 
 export function ViewportContextMenu({
@@ -42,6 +43,8 @@ export function ViewportContextMenu({
   const rootGraph = useMirror((s) => selectGraph(s, "root"));
   const tool = useViewState((s) => s.toolMode);
   const availableTools = useViewState((s) => s.selectionTools);
+  const transformParams = useViewState((s) => s.selectionTransformParams);
+  const registry = useMirror((s) => s.registry);
   const activePane = useViewState((s) => s.view?.activePane ?? 0);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -63,10 +66,24 @@ export function ViewportContextMenu({
   const sel = rootGraph.selection;
   const hasSel = sel.length > 0;
   const selNode = sel.length === 1 ? rootGraph.nodes.find((n) => n.id === sel[0]) : undefined;
-  // Transform / visibility actions only make sense on a geo container.
-  const geo = selNode?.typeId === "geo" ? selNode : undefined;
-  const visP = geo?.params.visible;
+
+  // Hiding asks the registry whether this node type declares a `visible`,
+  // which a geo and every light do. Registry-driven like the palette and the
+  // parameter panel, so a node type that gains one needs no change here.
+  const declaresVisible =
+    selNode !== undefined &&
+    (registry?.nodes
+      .find((n) => n.typeId === selNode.typeId)
+      ?.params.some((p) => p.key === "visible") ??
+      false);
+  const visP = declaresVisible ? selNode?.params.visible : undefined;
   const visible = visP?.kind === "literal" && visP.type === "bool" ? visP.value : true;
+
+  // Resetting asks the host which params this selection's transform is made
+  // of, which is the same answer the manipulator writes through, so a reset
+  // undoes exactly what the handles do. A point light's is one param; a geo's
+  // is four.
+  const canReset = selNode !== undefined && transformParams.length > 0;
 
   const run = (fn: () => void) => {
     fn();
@@ -74,19 +91,28 @@ export function ViewportContextMenu({
   };
 
   const toggleVisible = () => {
-    if (!geo) return;
-    dispatch({ type: "setParam", ctx: "root", node: geo.id, key: "visible", value: boolSrc(!visible) });
+    if (!selNode || !declaresVisible) return;
+    dispatch({
+      type: "setParam",
+      ctx: "root",
+      node: selNode.id,
+      key: "visible",
+      value: boolSrc(!visible),
+    });
   };
 
+  // One command, one undo step, and it REMOVES the overrides rather than
+  // writing the defaults back as literals: the document is left honestly
+  // unset, and the values it falls back to are the descriptor's own, so this
+  // needs no table of what a default is per node type.
   const resetTransform = () => {
-    if (!geo) return;
-    // One undo step for the whole reset.
-    dispatch({ type: "beginTransaction", label: "Reset Transform" });
-    dispatch({ type: "setParam", ctx: "root", node: geo.id, key: "translate", value: vec3([0, 0, 0]) });
-    dispatch({ type: "setParam", ctx: "root", node: geo.id, key: "rotate", value: vec3([0, 0, 0]) });
-    dispatch({ type: "setParam", ctx: "root", node: geo.id, key: "scale", value: vec3([1, 1, 1]) });
-    dispatch({ type: "setParam", ctx: "root", node: geo.id, key: "uniform_scale", value: floatSrc(1) });
-    dispatch({ type: "endTransaction" });
+    if (!selNode || !canReset) return;
+    dispatch({
+      type: "resetParams",
+      ctx: "root",
+      node: selNode.id,
+      keys: transformParams,
+    });
   };
 
   return (
@@ -121,7 +147,19 @@ export function ViewportContextMenu({
         onClick={() => run(() => cameraCommand(activePane, { kind: "fit" }))}
       >
         <span>Frame view</span>
-        <span className="ctx-key">F</span>
+        {/* Z, not F: over the viewport F is the Front view, and this chip has
+            been naming the wrong key since Fit moved off it. */}
+        <span className="ctx-key">Z</span>
+      </button>
+      {/* The action for a light dragged out of frame, which is otherwise hard
+          to recover. No key of its own: Z keeps framing the whole scene. */}
+      <button
+        type="button"
+        className="ctx-item"
+        disabled={!hasSel}
+        onClick={() => run(() => cameraCommand(activePane, { kind: "fitSelection" }))}
+      >
+        Frame selection
       </button>
       <div className="ctx-sep" />
       <button type="button" className="ctx-item" disabled={!hasSel} onClick={() => run(duplicateSelection)}>
@@ -136,10 +174,20 @@ export function ViewportContextMenu({
         Delete
       </button>
       <div className="ctx-sep" />
-      <button type="button" className="ctx-item" disabled={!geo} onClick={() => run(toggleVisible)}>
+      <button
+        type="button"
+        className="ctx-item"
+        disabled={!declaresVisible}
+        onClick={() => run(toggleVisible)}
+      >
         {visible ? "Hide" : "Show"}
       </button>
-      <button type="button" className="ctx-item" disabled={!geo} onClick={() => run(resetTransform)}>
+      <button
+        type="button"
+        className="ctx-item"
+        disabled={!canReset}
+        onClick={() => run(resetTransform)}
+      >
         Reset transform
       </button>
     </div>

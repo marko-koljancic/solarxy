@@ -186,3 +186,42 @@ distinguishable shapes.
 - [ ] A light's own Show Helper still draws its world-scaled wireframe, and
       still grows and shrinks with the camera, which is what tells it apart
       from the marker.
+
+## 9. Transforming a light in the viewport
+
+Browser only: the desktop shell draws no light marker channel and has no gizmo,
+so none of this applies there until that shell gets its canvas.
+
+Section 8 covers the markers themselves. This covers manipulating what they
+point at. Use a scene with several light types; the look-dev sample carries an
+area light and a hemisphere, and adding a point and a spot to it exercises the
+rest in one place.
+
+- [ ] Selecting a light and arming Move draws a manipulator on it, and dragging
+      moves the light **with the scene relighting continuously**, shadows
+      included, rather than on release.
+- [ ] A drag is one undo step: one Ctrl+Z puts the light back where it was.
+- [ ] Escape mid-drag restores the light exactly, and leaves nothing stranded
+      (the parameter panel and the viewport agree afterwards).
+- [ ] Each light type offers exactly what it can use, checked by selecting each
+      in turn and reading the tool column: a point light offers Move; a
+      directional and a spot offer Move and Aim; a rect area offers Move,
+      Rotate and Scale; an ambient and a hemisphere offer none of them.
+- [ ] **The Aim tool moves the point a light points at**, not the light: arm it
+      on a spot, and the handles sit out at its target while the cone swings to
+      follow.
+- [ ] A rect area's Scale tool shows two edge cubes and the centre cube and
+      **no third axis cube**, and dragging each changes the panel's Width and
+      Height in metres.
+- [ ] Select a mesh, arm Scale, then select a point light: the manipulator
+      disappears and the Scale button greys out. Select the mesh again and
+      Scale is live and still armed.
+- [ ] Geometry is unchanged throughout: a mesh still moves, rotates and scales
+      exactly as it did, including dragging inside a container's subflow where
+      the drag mints a transform node.
+- [ ] Right-clicking each light type offers actions that apply to it rather
+      than a menu of disabled entries, and **Frame selection** finds a light
+      dragged far out of frame.
+- [ ] Reset transform on a light resets what that light has. On a rect area it
+      also resets Width and Height, which is deliberate: those are what its
+      size handles write.

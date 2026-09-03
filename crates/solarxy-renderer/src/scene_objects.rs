@@ -369,6 +369,19 @@ impl SceneObjects {
         acc
     }
 
+    /// One object's world bounds, or `None` if it is absent.
+    ///
+    /// The same composition [`SceneObjects::visible_bounds`] makes, for one
+    /// object rather than all of them: framing a selection has to put the
+    /// camera around where the object actually is, not around the origin its
+    /// geometry was authored about.
+    #[must_use]
+    pub fn object_world_bounds(&self, id: SceneObjectId) -> Option<AABB> {
+        self.objects
+            .get(&id)
+            .map(|o| o.model.bounds.transformed(&o.transform))
+    }
+
     /// Apply one delta batch in order.
     pub fn apply(
         &mut self,
