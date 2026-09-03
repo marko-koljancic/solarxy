@@ -1605,7 +1605,6 @@ mod tests {
         assert_eq!(job.progress().samples, 1);
     }
 
-    #[test]
     /// An estimate appears only when there is something to estimate from, and
     /// says nothing rather than something wrong.
     #[test]

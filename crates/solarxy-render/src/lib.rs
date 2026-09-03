@@ -327,6 +327,7 @@ impl RenderSink for Silent {
 /// take effect should not have to start a GPU to find out. That is not a
 /// detail: it is the difference between a mistyped command exiting one
 /// immediately and exiting four on a machine with no adapter.
+#[must_use]
 pub fn caps_of(engine: RenderEngine) -> solarxy_renderer::backend::BackendCaps {
     match engine {
         RenderEngine::Raster => RasterBackend::CAPS,
@@ -741,12 +742,20 @@ fn report(
 /// A bare model has none, and demanding one would mean the simplest possible
 /// invocation could not work. The defaults are the node's own, so the two
 /// answers agree.
-/// What a cooked document renders at, before any command-line override.
 ///
 /// Public so the desktop shell's own resolution can be pinned against it: the
 /// two shells read one document and must read it the same way, and the only
 /// thing that could prove that was a comparison neither of them could make
 /// alone.
+///
+/// # Errors
+///
+/// [`RenderError::RenderNode`] when the root graph cannot be read, or when the
+/// chosen node's parameters do not resolve. [`RenderError::NoRenderNode`] when
+/// a name was given and no render node carries it, which is a typo rather than
+/// an empty scene, so it is refused instead of falling back to the defaults.
+/// [`RenderError::AmbiguousRenderNode`] when the document carries several and
+/// none was named.
 pub fn resolve_settings(
     engine: &solarxy_graph::engine::Engine,
     opts: &RenderOptions,
@@ -1125,6 +1134,7 @@ fn drive(
         });
         host.renderer
             .resize_targets(device, tile.render.width, tile.render.height);
+        #[allow(clippy::cast_possible_truncation)]
         let step = {
             let mut ctx = StillCtx {
                 device,
