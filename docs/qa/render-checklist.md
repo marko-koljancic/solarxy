@@ -96,6 +96,11 @@ should be treated as a defect.
       `solarxy-cli render <scene> --watch --aov albedo,normal,depth`.
 - [ ] A render with no passes requested shows no selector and is otherwise
       unchanged.
+- [ ] **The pane Display menu still offers Path Traced** on this machine. The
+      offer now asks the device whether it can host the tracer rather than
+      answering from a constant, so a bug here removes the entry entirely
+      instead of failing at pipeline creation. Any WebGPU device the app will
+      run on should say yes; the check is that the answer did not become no.
 
 ## 5. The render window
 

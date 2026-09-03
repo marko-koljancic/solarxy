@@ -30,8 +30,8 @@ describe("backendCaps", () => {
     useViewState.setState({ backendCaps: null });
     expect(useViewState.getState().backendCaps).toBeNull();
     const caps = {
-      raster: { progressive: false, supportsInstancing: true, writesAovs: false },
-      traced: { progressive: true, supportsInstancing: true, writesAovs: true },
+      raster: { progressive: false, supportsInstancing: true, writesAovs: false, available: true },
+      traced: { progressive: true, supportsInstancing: true, writesAovs: true, available: true },
     };
     useViewState.getState().setBackendCaps(caps);
     expect(useViewState.getState().backendCaps?.traced.progressive).toBe(true);

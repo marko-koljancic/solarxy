@@ -55,6 +55,36 @@ pub const MATERIAL_SOURCE: &str = include_str!("../shaders/pathtrace/material.wg
 /// atlas.
 pub const RAND_SOURCE: &str = include_str!("../shaders/pathtrace/rand.wgsl");
 
+/// Storage buffers the tracer binds in one compute stage.
+///
+/// Seven in the scene group plus the coverage count in the target group. Core
+/// WebGPU grants exactly eight, so this is the whole budget rather than a
+/// comfortable margin, which is why it is stated as a number a device can be
+/// asked about rather than left implicit in four layout definitions.
+const REQUIRED_STORAGE_BUFFERS: u32 = 8;
+
+/// Storage textures the tracer binds in one compute stage.
+const REQUIRED_STORAGE_TEXTURES: u32 = 4;
+
+/// Whether a device can host the path tracer at all.
+///
+/// The tracer spends core WebGPU's per-stage budget exactly, and
+/// [`wgpu::Limits::downlevel_defaults`] grants four storage buffers where it
+/// needs eight. A device at those limits cannot build
+/// [`crate::bind_groups::PathtraceLayouts`], so offering it a traced mode
+/// promises something that fails at pipeline creation.
+///
+/// Asked of the limits rather than of a built tracer, because the caller is a
+/// menu deciding whether to offer the mode and should not have to construct a
+/// tracer to find out. That was the shape of the original answer too; what was
+/// wrong with it was that it was a compile-time constant, so it said yes on a
+/// device that could not have run it.
+#[must_use]
+pub fn device_supports_tracing(limits: &wgpu::Limits) -> bool {
+    limits.max_storage_buffers_per_shader_stage >= REQUIRED_STORAGE_BUFFERS
+        && limits.max_storage_textures_per_shader_stage >= REQUIRED_STORAGE_TEXTURES
+}
+
 /// The camera fragment: the per-dispatch uniforms and the ray through a pixel.
 /// No entry point, and composed after the traversal, whose `Ray` it returns,
 /// and after the sampler, whose constants its aperture reads.
@@ -1643,5 +1673,43 @@ impl GrowBuffer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The gate has to answer no for the limits it was written for.
+    ///
+    /// Downlevel grants four storage buffers where the tracer binds eight, and
+    /// the browser's menu reads this to decide whether to offer the mode. When
+    /// it was a compile-time constant it said yes on every device, which is the
+    /// defect this test exists to stop coming back.
+    #[test]
+    fn downlevel_limits_cannot_host_the_tracer() {
+        assert!(!device_supports_tracing(&wgpu::Limits::downlevel_defaults()));
+        assert!(!device_supports_tracing(
+            &wgpu::Limits::downlevel_webgl2_defaults()
+        ));
+    }
+
+    /// And yes for the feature set the whole renderer already holds itself to.
+    #[test]
+    fn core_webgpu_limits_can_host_the_tracer() {
+        assert!(device_supports_tracing(&wgpu::Limits::default()));
+    }
+
+    /// Each requirement is load-bearing on its own, so dropping either one
+    /// below the budget is refused rather than averaged away.
+    #[test]
+    fn either_budget_alone_is_enough_to_refuse() {
+        let mut buffers_short = wgpu::Limits::default();
+        buffers_short.max_storage_buffers_per_shader_stage = REQUIRED_STORAGE_BUFFERS - 1;
+        assert!(!device_supports_tracing(&buffers_short));
+
+        let mut textures_short = wgpu::Limits::default();
+        textures_short.max_storage_textures_per_shader_stage = REQUIRED_STORAGE_TEXTURES - 1;
+        assert!(!device_supports_tracing(&textures_short));
     }
 }

@@ -348,7 +348,10 @@ function PaneControls({ pane, settings, projection, active }: {
             onPick={() => patch({ viewMode: v, paneEngine: "raster" })}
           />
         ))}
-        {backendCaps?.traced && (
+        {/* `available`, not the presence of the object: `traced` is always
+            there, so testing it offered the mode unconditionally, including on
+            a device whose limits cannot build the tracer's layouts. */}
+        {backendCaps?.traced.available && (
           <GhostItem
             label="Path Traced"
             checked={settings.paneEngine === "traced"}

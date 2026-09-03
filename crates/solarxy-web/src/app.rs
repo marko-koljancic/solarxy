@@ -3162,17 +3162,27 @@ impl SolarxyApp {
 
     /// What each render backend can do, for the frontend's menu gating.
     ///
-    /// Constants, so the answer needs no device and cannot fail: a menu
-    /// deciding whether to offer the traced mode should not have to build
-    /// a tracer to ask.
+    /// The capability fields are constants, so the answer needs no device: a
+    /// menu deciding what a backend produces should not have to build one to
+    /// ask. **Availability is not a constant**, and used to be treated as one.
+    /// The tracer spends core WebGPU's per-stage budget exactly, so a device at
+    /// downlevel limits cannot build its layouts, and answering from a constant
+    /// offered the mode on a device where it would have failed at pipeline
+    /// creation. `available` asks the real device's limits.
     #[wasm_bindgen(js_name = backendCaps)]
     pub fn backend_caps(&self) -> Result<JsValue, JsError> {
+        // Four independent yes-or-no facts about a backend, which is what the
+        // wire shape is; grouping them to satisfy the lint would invent a
+        // structure the TypeScript mirror would then have to invent too.
+        #[allow(clippy::struct_excessive_bools)]
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct CapsDto {
             progressive: bool,
             supports_instancing: bool,
             writes_aovs: bool,
+            /// Whether this device can run the backend at all.
+            available: bool,
         }
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -3180,16 +3190,22 @@ impl SolarxyApp {
             raster: CapsDto,
             traced: CapsDto,
         }
-        fn dto(c: solarxy_renderer::backend::BackendCaps) -> CapsDto {
+        fn dto(c: solarxy_renderer::backend::BackendCaps, available: bool) -> CapsDto {
             CapsDto {
                 progressive: c.progressive,
                 supports_instancing: c.supports_instancing,
                 writes_aovs: c.writes_aovs,
+                available,
             }
         }
+        // The rasterizer is what the surface is already drawing with, so its
+        // availability is not in question by the time anything can ask.
         to_js(&BackendCapsDto {
-            raster: dto(solarxy_host::RasterBackend::CAPS),
-            traced: dto(PathBackend::CAPS),
+            raster: dto(solarxy_host::RasterBackend::CAPS, true),
+            traced: dto(
+                PathBackend::CAPS,
+                solarxy_renderer::pathtrace::device_supports_tracing(&self.device.limits()),
+            ),
         })
     }
 

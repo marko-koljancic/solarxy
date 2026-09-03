@@ -805,6 +805,11 @@ export interface BackendCaps {
   progressive: boolean;
   supportsInstancing: boolean;
   writesAovs: boolean;
+  /** Whether THIS device can run the backend, as opposed to what the backend
+   * can do. Not a constant: the tracer spends core WebGPU's per-stage storage
+   * budget exactly, so a device at downlevel limits cannot build its layouts.
+   * Gate offering a mode on this, never on the capability fields above. */
+  available: boolean;
 }
 
 /** Both backends' capabilities, for menu gating. */
