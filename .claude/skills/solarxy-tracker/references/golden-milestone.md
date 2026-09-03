@@ -92,11 +92,6 @@ parameter behaves exactly as it did.
 - [ ] #<n> Runtime and play model
 - [ ] #<n> Standalone web export
 - [ ] #<n> Physically based area lights
-
-## Links
-
-Specification: `Docs/SOLARXY-MILESTONE-0.8.1.md`
-Changelog and release notes: <wiki release notes URL>
 ```
 
 ## Notes on the shape
@@ -114,3 +109,11 @@ Changelog and release notes: <wiki release notes URL>
   stayed stable, and what is opt-in.
 - The epic checklist uses issue references, so GitHub renders live status and the milestone
   shows its own progress without anyone maintaining a percentage by hand.
+- **There is no Links section, and that is deliberate.** A tracking issue used to end with one
+  naming the milestone specification, and the specifications live in the private
+  workspace-root repository rather than in this one, so nineteen public items spent months
+  telling readers to open a file they cannot reach. The board is the public record; the
+  specification is internal. Do not reintroduce the section, and do not name a path under
+  `Docs/` anywhere in an item's body, including in prose. If a reader needs more than the item
+  carries, the item is too thin, which is a reason to write more Summary rather than to link
+  away.

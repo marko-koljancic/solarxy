@@ -111,7 +111,7 @@ Paths are relative to this repository's root. The workspace root is one level ab
 | `../../Docs/SOLARXY-ROADMAP.md` | The living plan. Part I: product snapshot (A), architecture (B), shipped history (C), active milestone (D), release program to 1.0 (E), personas and journeys (F). Part II: the long-range roadmap cards. |
 | `../../Docs/SOLARXY-MILESTONE-PROGRAM.md` | The release ladder and how work is assigned to releases. |
 | `../../Docs/SOLARXY-MILESTONE-<version>.md` | The build-ready spec for one release, with its decision log and amendments. |
-| `../../Docs/Archive/SOLARXY-NODE-CATALOG.md` | The node-system contract: types, ports, coercion, params, versioning, registry. |
+| `../../Docs/SOLARXY-NODE-CATALOG.md` | The living per-context node catalog: what ships, what is planned, the naming and port rules. The node-system contract itself lives in `CLAUDE.md` and the code; the archived catalog of the same name is superseded. |
 | `../../Docs/Archive/SOLARXY-UX-SPEC.md` | Personas, journeys, interaction model, keymap policy, the realtime UX contract. |
 | `../../Docs/Archive/SOLARXY-WEB-INTEGRATION-PLAN.md` | Milestone architecture, the decision log, the wasm boundary, the scene format. |
 | `../../Docs/Archive/SOLARXY-WEB-INTEGRATION-IMPLEMENTATION-LOG.md` | What actually happened per phase: deviations, measurements, continuation notes. |
