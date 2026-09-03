@@ -4,10 +4,21 @@
 //! deliberately:
 //!
 //! ```text
-//! cargo test --release -p solarxy-renderer --test pathtrace_perf -- --ignored --nocapture
+//! cargo test --release -p solarxy-renderer --test pathtrace_perf -- \
+//!     --ignored --nocapture --test-threads=1
 //! SOLARXY_PT_DEBUG_PNG=/tmp/pt.png cargo test --release -p solarxy-renderer \
-//!     --test pathtrace_perf -- --ignored --nocapture
+//!     --test pathtrace_perf -- --ignored --nocapture --test-threads=1
 //! ```
+//!
+//! One thread is part of the measurement rather than a preference. This file holds
+//! two tests, each builds its own GPU device, and cargo runs them on two threads by
+//! default, so each times the other's dispatches. Run in parallel before the 0.9.0
+//! tag, primary-ray throughput read 152.6 to 195.7 Mrays/s; run serially on the same
+//! machine minutes later and hotter, 406.4 to 407.3, which is where the figure had
+//! sat since the tracer landed. The incoherent figure barely moves either way, and
+//! the asymmetry is the explanation: it takes the best of three and its dispatches
+//! are long enough to win their minimum anyway, while the primary figure reports
+//! every run raw at five milliseconds each and absorbs the contention whole.
 //!
 //! Two reasons it is not in CI. Runner GPUs are software rasterizers, so the
 //! number would describe the runner. And the number that matters is the one
