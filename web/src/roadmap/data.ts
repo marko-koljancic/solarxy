@@ -324,6 +324,118 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    v: "v0.9.0",
+    code: "Path-traced rendering",
+    date: "September 2026",
+    status: "live",
+    statusLabel: "Released",
+    open: true,
+    summary:
+      "Solarxy grows a second renderer. The viewport draws each pixel once and approximates where the light came from; the new one follows light through the scene and lets it bounce, so colour bleeds off a wall onto a floor, a small light casts a soft-edged shadow, and glass bends what is behind it. The command line becomes a first-class render surface at the same time, with exit codes a build system can branch on. A still can also leave with nothing behind it, as an element to composite rather than a finished picture, and lights stop being reachable only through the parameter panel: they are drawn in the viewport, and you can grab them.",
+    groups: [
+      {
+        h: "A second renderer",
+        items: [
+          {
+            lead: "Global illumination, computed rather than approximated.",
+            text: "Light that bounced off something else before reaching a surface is followed rather than guessed at. That is what produces colour bleeding, and it is the difference the bundled Cornell Box sample exists to show.",
+          },
+          {
+            lead: "Soft shadows with the right shape, and traced depth of field.",
+            text: "A shadow's softness comes from the size of the light that cast it, so a rect area light is the one to reach for. Set a camera's F-Stop above zero and the aperture is integrated properly; a Focus Distance of zero focuses on whatever the camera is aimed at, so aiming also focuses.",
+          },
+          {
+            lead: "Every light in the scene, and an edge-aware denoiser.",
+            text: "The viewport binds eight lights; a traced render reads them all. The denoiser steers by the albedo and normal recorded while tracing, so it removes noise without smearing across the edge between two surfaces.",
+          },
+        ],
+      },
+      {
+        h: "Rendering a still",
+        items: [
+          {
+            lead: "The picture refines while it renders.",
+            text: "It arrives in tiles and improves from the first few chunks rather than appearing at the end, so you can tell early whether the shot is the one you wanted. Pan and zoom it while it converges; the tiles keep landing in the right places underneath.",
+          },
+          {
+            lead: "Albedo, normal and depth are selectable in the browser.",
+            text: "Switch pass while the render is still running. A pass nobody asked for says what would produce it, and a rasterized render offers the beauty alone rather than three empty rows, because it has nothing else to give.",
+          },
+          {
+            lead: "PNG or 32-bit float EXR, from every shell.",
+            text: "In either the scene-linear or the display-referred space. The format is chosen before the render starts, because it decides what the renderer reads back.",
+          },
+        ],
+      },
+      {
+        h: "Rendering with nothing behind it",
+        items: [
+          {
+            lead: "A real matte, not a colour key.",
+            text: "Opaque where the camera found a surface, clear where it found sky, fractional along every silhouette so an edge antialiases instead of staircasing. A mirror against the sky is opaque, because the camera did find a surface there. Both renderers honour it, and it survives exposure, the tone map and the grade.",
+          },
+          {
+            lead: "Each format carries its own stated convention.",
+            text: "Floating-point files carry premultiplied alpha and eight-bit files carry straight alpha, so a compositor that honours each composites both identically over the same plate. A matte whose convention is unstated is one somebody composites wrong.",
+          },
+        ],
+      },
+      {
+        h: "Lights in the viewport",
+        items: [
+          {
+            lead: "Every light draws a marker you can click.",
+            text: "Screen-constant, so one across the scene is no harder to hit than one in front of you, with a shape that says which of the six kinds it is. Selecting it is the same selection the rest of the application means. Markers switch off per pane and never appear in a rendered still.",
+          },
+          {
+            lead: "A light takes the transform tools, and offers only what it can use.",
+            text: "The scene relights continuously as you drag, and a drag is one undo step. A fifth tool, Aim, moves the point a light points at rather than the light. A point light offers Move; a rect-area panel offers Move, Rotate and Scale, its size handles writing Width and Height in metres; the two lights with no position offer none.",
+          },
+        ],
+      },
+      {
+        h: "Controls for the shot you are making",
+        items: [
+          {
+            lead: "Named output sizes, and an exact sample count.",
+            text: "HD, UHD 4K and 8K, the DCI sizes, square and 5:4, and A4, A3 and Letter at 300 dpi, with an orientation that turns them. Every entry states its own pixel size. The four quality presets keep the wide steps most shots want, with an exact count beside them for the scene that is not there.",
+          },
+          {
+            lead: "A bright sample limit, a seed, and a steerable denoiser.",
+            text: "The limit clamps the rare very bright indirect sample that arrives as a lone white speckle. The seed makes a render repeat exactly on the surface that produced it. Six steering values let the filter be tuned to a scene rather than accepted as it comes.",
+          },
+        ],
+      },
+      {
+        h: "The command line renders",
+        items: [
+          {
+            lead: "A render becomes a pipeline step rather than something a person does.",
+            text: "Everything the render needs comes from the scene's own render node, with flags overriding one value at a time. Eight meaningful exit codes, and a flag that cannot take effect is refused rather than ignored.",
+          },
+          {
+            lead: "Standard output is data.",
+            text: "Progress goes to standard error, so the image can go down a pipe and a machine-readable result can be read by the next step. Watch it converge on a terminal dashboard, or in a window.",
+          },
+        ],
+      },
+      {
+        h: "A licence change",
+        items: [
+          {
+            lead: "From this release Solarxy is GPL-3.0-or-later.",
+            text: "Releases through v0.8.2 were published under MIT and stay MIT for anyone holding them: that grant cannot be withdrawn, so this is a boundary rather than a retroactive change. An additional permission under section 7 covers the graph-layout library and the bundled fonts, so no feature was removed to reach compatibility.",
+          },
+        ],
+      },
+    ],
+    meta: [
+      ["Registry", "stays 77"],
+      ["Schema", "stays 1"],
+      ["Licence", "MIT to GPL-3.0-or-later"],
+    ],
+  },
+  {
     v: "v0.8.2",
     code: "Rendering foundations",
     date: "August 2026",
