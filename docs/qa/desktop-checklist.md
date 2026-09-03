@@ -4,15 +4,15 @@ The manual gate for the desktop viewer (`solarxy`). Run it before any release ta
 and whenever a shared crate (`solarxy-core`, `solarxy-renderer`, `solarxy-kernel`,
 `solarxy-formats`) changes in a way the golden captures cannot see.
 
-The automated half is `crates/solarxy-renderer/examples/golden.rs` (see
+The automated half is `crates/solarxy-host/examples/golden.rs` (see
 "Golden captures" below). This file covers what goldens cannot: interaction,
 input, dialogs, and anything that needs a window.
 
 Rendering has its own gate, `docs/qa/render-checklist.md`, because it spans all
 three shells and half of what it checks is not on this one.
 
-Record the run in `SOLARXY-WEB-INTEGRATION-IMPLEMENTATION-LOG.md`: date, commit,
-platform, and any box left unticked with the reason.
+Record the run in the milestone spec's amendments: date, commit, platform, and
+any box left unticked with the reason.
 
 ## Launch
 
