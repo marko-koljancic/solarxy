@@ -872,8 +872,13 @@ mod tests {
             picked.len(),
             "selection changes colour, not shape"
         );
+        // Bit patterns rather than values: the builder writes a different palette
+        // entry, so what is asserted is that it wrote a different one at all, and a
+        // tolerance here would only invent a threshold nothing depends on.
         assert!(
-            none.iter().zip(&picked).any(|(x, y)| x.color != y.color),
+            none.iter()
+                .zip(&picked)
+                .any(|(x, y)| x.color.map(f32::to_bits) != y.color.map(f32::to_bits)),
             "the selected light's marker must look different"
         );
     }

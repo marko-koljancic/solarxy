@@ -1114,9 +1114,15 @@ mod parity {
             );
             assert_eq!(desktop.denoise, headless.denoise, "{name}: denoise");
             assert_eq!(desktop.seed, headless.seed, "{name}: seed");
-            assert_eq!(
-                desktop.firefly_clamp, headless.firefly_clamp,
-                "{name}: firefly clamp"
+            // Bit patterns, because this is a parity assertion: both shells resolve
+            // the field from one document, so anything short of identical is the
+            // divergence the test exists to catch. The values are printed rather
+            // than the bits so a failure is still readable.
+            assert!(
+                desktop.firefly_clamp.to_bits() == headless.firefly_clamp.to_bits(),
+                "{name}: firefly clamp {} vs {}",
+                desktop.firefly_clamp,
+                headless.firefly_clamp
             );
             assert_eq!(desktop.camera, headless.camera, "{name}: camera");
             assert_eq!(

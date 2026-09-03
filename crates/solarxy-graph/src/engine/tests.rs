@@ -3627,9 +3627,12 @@ fn gizmo_target_at_root_needs_exactly_one_node_that_declares_a_transform() {
 fn every_light_type_reports_the_transform_params_it_declares() {
     use solarxy_core::gizmo::ScaleParams;
 
+    /// One light type and the three transform roles it may declare, in the order
+    /// translate, rotate, aim. `None` where the type does not offer that role.
+    type Case<'a> = (&'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>);
+
     let mut e = engine();
-    let cases: &[(&str, Option<&str>, Option<&str>, Option<&str>)] = &[
-        // type id, translate, rotate, aim
+    let cases: &[Case] = &[
         ("point_light", Some("position"), None, None),
         ("directional_light", Some("position"), None, Some("target")),
         ("spot_light", Some("position"), None, Some("target")),

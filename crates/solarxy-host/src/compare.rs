@@ -90,7 +90,9 @@ mod tests {
     fn identical_images_differ_by_nothing() {
         let a = vec![7u8; 64];
         let d = compare_rgba8(&a, &a, 0);
-        assert_eq!(d.mean_abs, 0.0);
+        // Bit-exact zero rather than nearly zero: a sum of no differences over a
+        // count is exact, and a tolerance here would pass an image that moved.
+        assert_eq!(d.mean_abs.to_bits(), 0.0f64.to_bits());
         assert_eq!(d.max_channel, 0);
         assert_eq!(d.differing, 0);
         assert_eq!(d.total, 16);
@@ -106,7 +108,11 @@ mod tests {
         let a = [10u8, 10, 10, 255];
         let b = [10u8, 10, 10, 0];
         let d = compare_rgba8(&a, &b, 0);
-        assert_eq!(d.mean_abs, 0.0, "alpha reached the colour mean");
+        assert_eq!(
+            d.mean_abs.to_bits(),
+            0.0f64.to_bits(),
+            "alpha reached the colour mean"
+        );
         assert_eq!(d.max_channel, 255);
         assert_eq!(d.differing, 1);
     }

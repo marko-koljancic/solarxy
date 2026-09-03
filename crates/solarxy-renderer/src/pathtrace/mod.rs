@@ -1704,12 +1704,16 @@ mod tests {
     /// below the budget is refused rather than averaged away.
     #[test]
     fn either_budget_alone_is_enough_to_refuse() {
-        let mut buffers_short = wgpu::Limits::default();
-        buffers_short.max_storage_buffers_per_shader_stage = REQUIRED_STORAGE_BUFFERS - 1;
+        let buffers_short = wgpu::Limits {
+            max_storage_buffers_per_shader_stage: REQUIRED_STORAGE_BUFFERS - 1,
+            ..Default::default()
+        };
         assert!(!device_supports_tracing(&buffers_short));
 
-        let mut textures_short = wgpu::Limits::default();
-        textures_short.max_storage_textures_per_shader_stage = REQUIRED_STORAGE_TEXTURES - 1;
+        let textures_short = wgpu::Limits {
+            max_storage_textures_per_shader_stage: REQUIRED_STORAGE_TEXTURES - 1,
+            ..Default::default()
+        };
         assert!(!device_supports_tracing(&textures_short));
     }
 }
