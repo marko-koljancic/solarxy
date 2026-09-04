@@ -561,8 +561,15 @@ fn an_interrupt_exits_six_and_leaves_no_partial_file() {
         // else, a flag this no longer accepts above all, would otherwise make
         // the test pass by never running, which is how it first went green
         // against an argument the command does not have.
+        //
+        // The stage word has to be the one a missing adapter actually produces.
+        // `NoAdapter` and a device that will not open both report "starting the
+        // GPU" (`solarxy_render::RenderError::stage`); "loading" is the *input*
+        // stage, so the escape hatch this comment describes could never fire for
+        // the case it was written for, and would instead have let an unreadable
+        // model file skip the test silently, which is the very hole above.
         assert!(
-            seen.contains("failed while loading"),
+            seen.contains("failed while starting the GPU"),
             "the render never reached drawing, and not for want of an adapter: {seen}"
         );
         eprintln!("skipping: no GPU adapter");
