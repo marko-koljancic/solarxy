@@ -11,13 +11,15 @@
 // could drift from the source. At export time the running app fetches its
 // own built player page, reads the asset URLs out of it, and fetches those.
 //
-// **The one rewrite.** A built page references `/assets/x` from the origin
+// **The two rewrites.** A built page references `/assets/x` from the origin
 // root, which breaks the moment somebody uploads the folder to a
-// subdirectory. Every such reference is made document-relative by dropping
-// the leading slash. That is the whole transform: it applies to the HTML's
-// src/href attributes and to exactly one string literal in the engine glue
-// (the wasm URL), which is the only absolute asset reference the player's
-// JS contains. It is verified by a test rather than assumed.
+// subdirectory. There are two rewrites, not one transform applied to two
+// file kinds, because the two resolve against different bases: the HTML's
+// src/href resolve against the document URL, so dropping the leading slash
+// is right there, while the engine glue's `new URL(..., import.meta.url)`
+// resolves against the script's own URL inside `assets/`, so its reference
+// must be relative to the script's directory. Both are verified by tests
+// rather than assumed.
 
 import { zipSync } from "fflate";
 import { DEFAULT_PLAYER_CONFIG, bundleReadme, type PlayerConfig } from "./playerConfig";
@@ -72,17 +74,75 @@ export function rewriteHtml(html: string): string {
   );
 }
 
-/** Makes a built script's absolute asset references document-relative.
+/** The reference that reaches `target` from a file inside `fromDir`.
+ *
+ * Both are bundle-relative with no leading slash; `fromDir` is `""` for the
+ * root. Kept general rather than special-cased to the one layout Vite emits
+ * today, so a moved chunk cannot silently ship a broken reference.
+ */
+function relativeReference(fromDir: string, target: string): string {
+  const from = fromDir === "" ? [] : fromDir.split("/");
+  const to = target.split("/");
+  let common = 0;
+  while (common < from.length && common < to.length - 1 && from[common] === to[common]) {
+    common += 1;
+  }
+  const up = "../".repeat(from.length - common);
+  const rest = to.slice(common).join("/");
+  return up === "" ? `./${rest}` : `${up}${rest}`;
+}
+
+/** Makes a built script's absolute asset references relative to the script's
+ * OWN directory, which is NOT the base the HTML rewrite targets.
+ *
+ * The two rewrites differ because the two file kinds resolve against
+ * different bases: a page's `src` and `href` resolve against the document
+ * URL, so dropping the leading slash is right there, while the engine glue's
+ * `new URL(..., import.meta.url)` resolves against the SCRIPT's URL, and the
+ * script itself sits inside `assets/`. Dropping the slash alone turns
+ * `/assets/x.wasm` into a request for `assets/assets/x.wasm`.
  *
  * In practice this is the wasm URL and nothing else, but the rewrite is
  * written generally so a future asset import does not silently ship a broken
  * bundle. Only quoted `/assets/...` literals are touched.
  */
-export function rewriteScript(js: string): string {
+export function rewriteScript(js: string, scriptDir: string): string {
   return js.replace(
-    /"(\/assets\/[^"]+)"/g,
-    (_all, url: string) => `"${toRelativeAssetPath(url)}"`,
+    /"\/assets\/([^"]+)"/g,
+    (_all, rest: string) => `"${relativeReference(scriptDir, `assets/${rest}`)}"`,
   );
+}
+
+/** Injects the notice a file:// open reveals.
+ *
+ * A page opened from disk never runs the player at all: the browser refuses
+ * the module script cross-origin before any of its code executes, so nothing
+ * shipped in the player can explain the blank page. The one thing that CAN
+ * run from a file address is a classic inline script in the page itself, so
+ * the export injects one plus the note it reveals. Served over HTTP the note
+ * stays hidden and weighs nothing.
+ */
+export function injectFileAddressNote(html: string): string {
+  const note =
+    `<div id="solarxy-file-note" hidden style="position:fixed;inset:0;overflow:auto;` +
+    `background:#101014;color:#e8e8ea;padding:48px 24px;` +
+    `font:15px/1.6 system-ui,sans-serif;z-index:9">` +
+    `<div style="max-width:560px;margin:0 auto">` +
+    `<h1 style="font-size:20px;margin:0 0 12px">This page needs to be served, ` +
+    `not opened from disk</h1>` +
+    `<p>The browser refused to load the Solarxy engine from a file address. ` +
+    `That is a browser security rule, not a fault in the bundle.</p>` +
+    `<p>From inside this folder, run:</p>` +
+    `<pre style="background:#1a1a20;padding:12px;border-radius:4px">` +
+    `python3 -m http.server 8000</pre>` +
+    `<p>then open <a href="http://localhost:8000" style="color:#8ab4f8">` +
+    `http://localhost:8000</a>. README.txt has the details, and any static ` +
+    `host works the same way.</p></div></div>` +
+    `<script>if(location.protocol==="file:")` +
+    `document.getElementById("solarxy-file-note").hidden=false;</script>`;
+  return html.includes("</body>")
+    ? html.replace("</body>", `${note}</body>`)
+    : html + note;
 }
 
 async function fetchBytes(url: string): Promise<Uint8Array> {
@@ -129,7 +189,7 @@ export async function buildWebBundle(opts: BundleOptions): Promise<BundleResult>
   }
 
   const files: Record<string, Uint8Array> = {
-    "index.html": encoder.encode(rewriteHtml(html)),
+    "index.html": encoder.encode(injectFileAddressNote(rewriteHtml(html))),
     [SCENE_NAME]: opts.scene,
     "solarxy-player.json": encoder.encode(`${JSON.stringify(config, null, 2)}\n`),
     "README.txt": encoder.encode(bundleReadme(SCENE_NAME)),
@@ -145,7 +205,10 @@ export async function buildWebBundle(opts: BundleOptions): Promise<BundleResult>
     if (url.endsWith(".js")) {
       const js = await fetchText(url);
       for (const m of js.matchAll(/"(\/assets\/[^"]+\.wasm)"/g)) wasmUrls.add(m[1]);
-      files[name] = encoder.encode(rewriteScript(js));
+      // The rewrite base is the script's own directory in the archive,
+      // because that is what `import.meta.url` resolves against.
+      const dir = name.includes("/") ? name.slice(0, name.lastIndexOf("/")) : "";
+      files[name] = encoder.encode(rewriteScript(js, dir));
     } else {
       files[name] = await fetchBytes(url);
     }

@@ -1,10 +1,22 @@
 # Homebrew tap files
 
-These two files belong in a separate tap repo —
-[`marko-koljancic/homebrew-solarxy`](https://github.com/marko-koljancic/homebrew-solarxy) — not this
-repo. They live here as the source of truth so changes to the tap go
-through the same review process as the rest of the project, and the
-`homebrew-bump.yml` workflow copies them into the tap repo on release.
+These two files belong in a separate tap repo,
+[`marko-koljancic/homebrew-solarxy`](https://github.com/marko-koljancic/homebrew-solarxy), not this
+repo. They live here as the reviewed copy, so a structural change to the cask
+or the formula goes through the same review as the rest of the project, and so
+the one-time tap setup below has something to copy from.
+
+**They are not what ships, and nothing copies them automatically.**
+`homebrew-bump.yml` checks out the tap repo into `tap/` and edits the files
+*there* in place, seding `version` and each `sha256` from the release
+artifacts. It never reads this directory. So:
+
+- The `version` here tracks the release it was last refreshed for. The tap is
+  authoritative for the live one.
+- The hashes here are placeholders (`sha256 :no_check` in the cask,
+  `REPLACE_WITH_*` in the formula). Real values only ever exist in the tap.
+- A change to the *shape* of either file has to be carried into the tap by
+  hand. Only version and hashes are automated.
 
 ## Files
 

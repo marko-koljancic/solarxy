@@ -7,6 +7,16 @@ use solarxy_validate::adapter::{AdapterFormat, AdapterName, FailOn};
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
+    /// The subcommand, when one is given.
+    ///
+    /// Optional, and beside the flat arguments rather than replacing them: the
+    /// analyze and view modes are a shipped surface with users, and turning
+    /// them into subcommands would break every invocation in every pipeline
+    /// that already runs them. New surfaces are subcommands; the old ones stay
+    /// where they are.
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
     #[clap(short = 'm',
     long = "model",
     help = "Path to the model file (optional in view mode — drop a file onto the window)",
@@ -68,11 +78,13 @@ pub struct Args {
     #[clap(
         long = "tui-theme",
         value_name = "NAME",
-        help = "Terminal theme for analyze mode; applies at 256-colour and truecolor terminals"
+        global = true,
+        help = "Terminal theme for the analyze surface and the render dashboard; applies at 256-colour and truecolor terminals"
     )]
     pub tui_theme: Option<String>,
     #[clap(
         long = "list-tui-themes",
+        global = true,
         help = "List the terminal themes this build can find, with a swatch of each"
     )]
     pub list_tui_themes: bool,
@@ -111,4 +123,124 @@ impl std::fmt::Debug for OperationMode {
             Self::Analyze => write!(f, "Analyze"),
         }
     }
+}
+
+/// The subcommands. One so far.
+#[derive(clap::Subcommand, Debug)]
+pub enum Command {
+    /// Render a scene or a model to an image file.
+    Render(RenderArgs),
+}
+
+/// `solarxy-cli render`.
+///
+/// Every option that has a counterpart on the render node is optional and
+/// overrides it. The node stays authoritative and the flags are a convenience,
+/// which is what stops a scene and a command line becoming two descriptions of
+/// one render that disagree.
+// A command line is made of flags, and a flag is a bool. Grouping them into
+// sub-structs to satisfy a count would change what `--help` prints and what a
+// caller writes, which is the wrong way round: the lint is about a struct
+// nobody types, and this is one everybody does.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(clap::Args, Debug)]
+pub struct RenderArgs {
+    /// A `.slxy` scene, or a model file.
+    #[arg(value_parser = crate::validators::is_valid_render_input)]
+    pub input: PathBuf,
+
+    /// Where the image goes. `-` writes it to standard output.
+    #[arg(short, long)]
+    pub out: PathBuf,
+
+    /// The render node to use, by name, when a scene has more than one.
+    #[arg(long)]
+    pub render_node: Option<String>,
+
+    /// Output size as `WIDTHxHEIGHT`.
+    #[arg(long, value_name = "WxH")]
+    pub res: Option<String>,
+
+    /// Samples per pixel. Path-traced renders only.
+    #[arg(long)]
+    pub spp: Option<u32>,
+
+    /// Light bounces per path. Path-traced renders only.
+    #[arg(long)]
+    pub bounces: Option<u32>,
+
+    /// Which renderer draws it.
+    #[arg(long, value_enum)]
+    pub engine: Option<RenderEngineArg>,
+
+    /// Filter the image after rendering. Path-traced renders only.
+    #[arg(long)]
+    pub denoise: bool,
+
+    /// Turn the filter off, overriding the scene.
+    #[arg(long, conflicts_with = "denoise")]
+    pub no_denoise: bool,
+
+    /// Fix the sampling sequence, so two runs of the same scene on the same
+    /// device produce the same image.
+    #[arg(long)]
+    pub seed: Option<u32>,
+
+    /// Auxiliary passes to write beside the image, as 32-bit float EXR.
+    ///
+    /// Path-traced renders only, and refused rather than ignored when the
+    /// engine cannot produce them.
+    #[arg(long, value_enum, value_delimiter = ',', value_name = "LIST")]
+    pub aov: Vec<AovArg>,
+
+    /// Which space a floating-point image is written in. `.exr` output only.
+    #[arg(long, value_enum)]
+    pub exr_space: Option<ExrSpaceArg>,
+
+    /// Write a machine-readable result to standard output.
+    #[arg(long)]
+    pub json: bool,
+
+    /// Show the render on a terminal dashboard instead of one line.
+    ///
+    /// Paints on standard error, so this and `--json` can be given together.
+    /// Falls back to the plain line when standard error is not a terminal or
+    /// is too small for the surface.
+    #[arg(long)]
+    pub tui: bool,
+
+    /// Show the render in a window as it converges.
+    ///
+    /// A build feature, off by default. A build without it says so rather than
+    /// refusing to parse the flag.
+    #[arg(long)]
+    pub watch: bool,
+}
+
+/// An auxiliary pass, as a flag value.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[clap(rename_all = "kebab-case")]
+pub enum AovArg {
+    Albedo,
+    Normal,
+    Depth,
+}
+
+/// Which floats a float image carries.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[clap(rename_all = "kebab-case")]
+pub enum ExrSpaceArg {
+    /// Light as the scene has it, with no exposure, tone map or grade applied.
+    SceneLinear,
+    /// The finished look, without the quantization a screen would impose.
+    Display,
+}
+
+/// The engine choice as a flag. Mirrors what the render node declares, spelled
+/// the way a command line spells things.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[clap(rename_all = "kebab-case")]
+pub enum RenderEngineArg {
+    Raster,
+    PathTraced,
 }

@@ -1,0 +1,822 @@
+//! The still render end to end: does an image assembled from tiles match the
+//! one rendered in a single pass, and does it survive being run repeatedly.
+//!
+//! The comparison is the whole test. A tiled render has three chances to be
+//! subtly wrong and none of them looks like a crash: the camera can be windowed
+//! incorrectly, so each tile is a slightly different shot and the seams step;
+//! the tracer's dispatch offset can disagree with its storage coordinate, so a
+//! tile draws the wrong part of the picture; and the apron can be cropped from
+//! the wrong corner, so every tile is offset by a constant. Against a
+//! single-pass render of the same scene, all three are immediately visible.
+//!
+//! Both engines are driven, because they tile by entirely different mechanisms
+//! and share only the job that paces them.
+
+mod common;
+
+use common::{
+    Harness, SKY_DOWN, SKY_UP, display_settings, harness, pane_settings, skip_or, sphere_delta,
+};
+use solarxy_core::preferences::BackgroundMode;
+use solarxy_host::still::{
+    PREVIEW_INTERVAL_MS, StillEngine, StillPreview, StillRenderJob, StillSpec, StillStep,
+    StillTile, TILE_BUDGET_PIXELS, TilePlan,
+};
+use solarxy_host::{RasterBackend, StillCtx};
+use solarxy_core::AABB;
+use solarxy_core::preferences::ResolvedBackground;
+use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings};
+use solarxy_renderer::backend::RenderBackend;
+use solarxy_renderer::composite::CompositeLook;
+use solarxy_renderer::environment::placeholder_bounds;
+use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
+
+/// Small enough that a whole run is seconds, large enough that the forced tile
+/// budget below cuts it into a grid rather than a single tile.
+const W: u32 = 96;
+const H: u32 = 72;
+
+/// A budget that forces tiling at a testable size.
+///
+/// The shipped budget is four megapixels, which would make any image a test can
+/// afford to render a single tile and would exercise none of this. The plan is
+/// built by hand here for that reason; everything downstream of it is the
+/// shipped code.
+const TEST_BUDGET: u32 = 32 * 32;
+
+/// A budget that forces a grid **and** leaves room for the apron.
+///
+/// The apron is a fixed 128 pixels on every side, so the owned edge is the
+/// budget's square root less 256. Below 256 that saturates to one-pixel tiles
+/// and the plan explodes; this is chosen to land the owned edge at 44, which
+/// gives a three-by-two grid of an image this size with every tile rendering
+/// more than it keeps.
+const APRONED_BUDGET: u32 = 300 * 300;
+
+fn spec(engine: StillEngine, samples: u32, budget: u32) -> StillSpec {
+    StillSpec {
+        width: W,
+        height: H,
+        engine,
+        samples,
+        screen_space_post: false,
+        tile_budget: budget,
+        readback: solarxy_host::still::StillReadback::Display8,
+        aux: false,
+        depth: false,
+        preview_interval_ms: 0,
+        transparent: false,
+    }
+}
+
+/// A budget that leaves the whole image in one tile, so a tiled render has
+/// something to be compared against.
+///
+/// The square of the *longer* edge: the plan derives a square tile edge from
+/// the budget's square root, so a budget of exactly the pixel count of a
+/// non-square image gives an edge shorter than its long side and two tiles.
+const WHOLE: u32 = W * W;
+
+/// How long a whole job may take before the test calls it stuck.
+///
+/// **A wall-clock budget rather than an iteration count, and the difference is
+/// the whole reason this constant exists.** The loop below spent most of its
+/// life bounded by a hundred thousand iterations, which reads like a generous
+/// number and is not one: an iteration that finds the readback still pending
+/// costs about a microsecond in a release build, so the guard was worth a tenth
+/// of a second there while the same suite takes tens of seconds in a debug one.
+/// It passed in debug and failed in release, for a job that completes either
+/// way. Time is what "stuck" means; iterations are what the machine happens to
+/// afford in it.
+const JOB_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Runs a job to completion, resizing the targets per tile the way a shell
+/// does, and returns the assembled image as RGBA8.
+///
+/// A shell drives this from a frame callback and so is paced by the display; a
+/// test has nothing pacing it, so it yields between polls rather than spinning
+/// against the device it is waiting for.
+fn run(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBackend) -> Vec<u8> {
+    run_with_look(h, job, backend, CompositeLook::default())
+}
+
+/// The same drive under a non-default look, for the tests that assert what a
+/// grade may and may not touch.
+fn run_with_look(
+    h: &mut Harness,
+    job: &mut StillRenderJob,
+    backend: &mut dyn RenderBackend,
+    look: CompositeLook,
+) -> Vec<u8> {
+    let mut image = vec![0u8; (W * H * 4) as usize];
+    for tile in run_tiles_with(h, job, backend, look).tiles {
+        blit(&mut image, &tile);
+    }
+    image
+}
+
+/// What driving a job to completion produced.
+struct Run {
+    tiles: Vec<StillTile>,
+    previews: Vec<StillPreview>,
+}
+
+/// The same drive, handing back what the job emitted rather than the picture,
+/// for a test that is about what a tile carries or how often the job publishes.
+fn run_tiles(h: &mut Harness, job: &mut StillRenderJob, backend: &mut dyn RenderBackend) -> Run {
+    run_tiles_with(h, job, backend, CompositeLook::default())
+}
+
+fn run_tiles_with(
+    h: &mut Harness,
+    job: &mut StillRenderJob,
+    backend: &mut dyn RenderBackend,
+    look: CompositeLook,
+) -> Run {
+    let pds: PaneDisplaySettings = pane_settings();
+    let display: DisplaySettings = display_settings();
+    let background: ResolvedBackground = BackgroundMode::GRADIENT.resolve(&[]);
+    let bounds: AABB = placeholder_bounds();
+    let format = h.format;
+
+    let mut tiles = Vec::new();
+    let mut previews = Vec::new();
+    let started = std::time::Instant::now();
+    loop {
+        assert!(
+            started.elapsed() < JOB_BUDGET,
+            "the job did not finish inside {JOB_BUDGET:?}"
+        );
+        let Some(tile) = job.current() else {
+            break;
+        };
+        // The shell's job: size the shared targets to the tile before the job
+        // renders into them.
+        h.renderer
+            .resize_targets(&h.device, tile.render.width, tile.render.height);
+        let step = {
+            let mut ctx = StillCtx {
+                device: &h.device,
+                queue: &h.queue,
+                renderer: &mut h.renderer,
+                camera: &mut h.camera,
+                env: &h.env,
+                pds: &pds,
+                display: &display,
+                background,
+                bounds: Some(&bounds),
+                look,
+                format,
+                scene_present: true,
+                now_ms: started.elapsed().as_millis() as u64,
+            };
+            job.advance(&mut ctx, backend)
+        };
+        match step {
+            // Either a chunk was drawn or a readback is still in flight, and
+            // the two are indistinguishable from here. Yielding costs nothing
+            // in the first case and is the whole point in the second.
+            StillStep::Working => std::thread::yield_now(),
+            StillStep::Tile => tiles.extend(std::iter::from_fn(|| job.take_tile())),
+            StillStep::Preview => previews.extend(job.take_preview()),
+            StillStep::Done => break,
+            StillStep::Failed => panic!("a tile readback failed"),
+        }
+    }
+    tiles.extend(std::iter::from_fn(|| job.take_tile()));
+    Run { tiles, previews }
+}
+
+fn blit(image: &mut [u8], tile: &StillTile) {
+    let row = tile.rect.width as usize * 4;
+    for y in 0..tile.rect.height as usize {
+        let dst = ((tile.rect.y as usize + y) * W as usize + tile.rect.x as usize) * 4;
+        let src = y * row;
+        image[dst..dst + row].copy_from_slice(&tile.pixels[src..src + row]);
+    }
+}
+
+fn traced(h: &Harness, samples: u32) -> PathBackend {
+    let mut backend = PathBackend::new(&h.device, &h.queue);
+    backend.apply(&h.device, &h.queue, &sphere_delta());
+    backend.set_sky(SKY_UP, SKY_DOWN);
+    backend.set_settings(TraceSettings {
+        samples,
+        // Everything in one call, so the test is about tiling rather than about
+        // pacing; the pacing is the shell's and is measured by the endurance
+        // run.
+        chunk: samples,
+        ..TraceSettings::default()
+    });
+    backend
+}
+
+/// The same tracer, paced in chunks the way a shell paces one.
+///
+/// The helper above draws a whole tile in one call, which is right for a test
+/// about tiling and wrong for one about publishing: a tile that completes on
+/// its first encode never converges, and a preview is only ever armed while a
+/// tile is converging. Both graphical shells pace in chunks for their own
+/// reasons, so this is the shape the mechanism actually runs in.
+fn traced_chunked(h: &Harness, samples: u32, chunk: u32) -> PathBackend {
+    let mut backend = PathBackend::new(&h.device, &h.queue);
+    backend.apply(&h.device, &h.queue, &sphere_delta());
+    backend.set_sky(SKY_UP, SKY_DOWN);
+    backend.set_settings(TraceSettings {
+        samples,
+        chunk,
+        ..TraceSettings::default()
+    });
+    backend
+}
+
+fn raster(h: &Harness) -> RasterBackend {
+    let mut backend = RasterBackend::new(std::sync::Arc::clone(&h.renderer.layouts));
+    backend.apply(&h.device, &h.queue, &sphere_delta());
+    backend
+}
+
+/// Mean absolute difference between two RGBA8 images, over the colour lanes.
+///
+/// The shared comparator's own reading. Kept as a one-line helper because every
+/// caller here wants the mean and none of them wants the count.
+fn difference(a: &[u8], b: &[u8]) -> f64 {
+    solarxy_host::compare_rgba8(a, b, 0).mean_abs
+}
+
+#[test]
+fn a_tiled_raster_still_matches_the_same_image_rendered_in_one_pass() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = raster(&h);
+
+    let mut whole = StillRenderJob::new(spec(StillEngine::Raster, 1, WHOLE));
+    let one_pass = run(&mut h, &mut whole, &mut backend);
+    assert_eq!(whole.plan().len(), 1, "the whole image should be one tile");
+
+    let mut tiled = StillRenderJob::new(spec(StillEngine::Raster, 1, TEST_BUDGET));
+    assert!(
+        tiled.plan().len() >= 4,
+        "the forced budget should cut this into a grid, not {} tile(s)",
+        tiled.plan().len()
+    );
+    let assembled = run(&mut h, &mut tiled, &mut backend);
+
+    // Rasterizing the same geometry through two different projections is not
+    // bit-exact: the triangles are rasterized against different pixel centres
+    // and an edge lands on one side or the other. What must not happen is a
+    // step at a tile boundary, which is a whole-tile shift and shows up here as
+    // an average an order of magnitude larger than this.
+    let diff = difference(&one_pass, &assembled);
+    eprintln!("raster tiled against one pass: {diff:.3} of 255");
+    // Measures exactly zero here, which is stronger than the comment above
+    // expected: the windowed frustum is the same frustum, so the rasterizer
+    // lands on the same pixel centres and the multisample resolve sees the same
+    // coverage. The tolerance is kept small rather than zero because that is a
+    // property of this hardware's rasterization rules and not of the design.
+    assert!(
+        diff < 0.5,
+        "a tiled raster still differs from a single-pass one by {diff:.3} of 255"
+    );
+}
+
+#[test]
+fn a_tiled_traced_still_matches_the_same_image_rendered_in_one_pass() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    // Enough samples that the estimator's own noise is below the difference a
+    // tiling mistake would produce.
+    const SPP: u32 = 64;
+
+    let mut backend = traced(&h, SPP);
+    let mut whole = StillRenderJob::new(spec(StillEngine::PathTraced, SPP, WHOLE));
+    let one_pass = run(&mut h, &mut whole, &mut backend);
+    assert_eq!(whole.plan().len(), 1);
+
+    backend.invalidate();
+    let mut tiled = StillRenderJob::new(spec(StillEngine::PathTraced, SPP, TEST_BUDGET));
+    assert!(tiled.plan().len() >= 4);
+    let assembled = run(&mut h, &mut tiled, &mut backend);
+
+    // A traced tile draws the same rays the untiled render would have drawn for
+    // those pixels, because the sampler is seeded from the pixel's place in the
+    // whole image rather than in the tile. So this is far tighter than the
+    // raster comparison: what is left is float reassociation.
+    let diff = difference(&one_pass, &assembled);
+    eprintln!("traced tiled against one pass: {diff:.4} of 255");
+    assert!(
+        diff < 0.5,
+        "a tiled traced still differs from a single-pass one by {diff:.4} of 255; \
+         the tiles are not drawing the samples their pixels would have drawn"
+    );
+}
+
+/// A job asked to publish while it works does, and the picture it finally
+/// produces is byte-for-byte the one it produces when nobody is watching.
+///
+/// The second half is the one worth having. A preview that perturbed the render
+/// would be a defect rather than a trade, and the ways it could are all
+/// plausible: it composites into a target of its own, it submits its own
+/// encoder between the chunks, and it holds a second buffer mapped while the
+/// sampling carries on. None of that may reach the picture.
+#[test]
+fn publishing_the_picture_so_far_does_not_change_the_picture() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    // Enough samples that the job spends real time converging, so the interval
+    // has something to elapse against.
+    const SPP: u32 = 64;
+
+    // Paced, because an unpaced tile completes on its first encode and never
+    // converges, and a preview only exists while a tile is converging.
+    let mut backend = traced_chunked(&h, SPP, 1);
+    let mut quiet = StillRenderJob::new(spec(StillEngine::PathTraced, SPP, WHOLE));
+    let unwatched = run(&mut h, &mut quiet, &mut backend);
+
+    backend.invalidate();
+    let watched_spec = StillSpec {
+        preview_interval_ms: PREVIEW_INTERVAL_MS,
+        ..spec(StillEngine::PathTraced, SPP, WHOLE)
+    };
+    let mut watched = StillRenderJob::new(watched_spec);
+    let run = run_tiles(&mut h, &mut watched, &mut backend);
+
+    let mut assembled = vec![0u8; (W * H * 4) as usize];
+    for tile in &run.tiles {
+        blit(&mut assembled, tile);
+    }
+    assert_eq!(
+        unwatched, assembled,
+        "the picture changed when something watched it render"
+    );
+
+    assert!(
+        !run.previews.is_empty(),
+        "a job asked to publish every {PREVIEW_INTERVAL_MS}ms published nothing"
+    );
+    for p in &run.previews {
+        assert_eq!(
+            p.rect, run.tiles[0].rect,
+            "a preview covered a rect no tile owns"
+        );
+        assert_eq!(
+            p.pixels.len(),
+            (p.rect.width * p.rect.height * 4) as usize,
+            "a preview is not four bytes a pixel over its own rect"
+        );
+    }
+}
+
+/// A rasterized still pays nothing for the preview mechanism.
+///
+/// It completes on its first encode of every tile, so it never reaches the
+/// place a preview is armed. Asking for one anyway must therefore produce none,
+/// which is what makes the exemption structural rather than a flag somebody has
+/// to remember to clear.
+#[test]
+fn a_rasterized_still_publishes_nothing_between_tiles() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = raster(&h);
+    let asked = StillSpec {
+        preview_interval_ms: PREVIEW_INTERVAL_MS,
+        ..spec(StillEngine::Raster, 1, TEST_BUDGET)
+    };
+    let mut job = StillRenderJob::new(asked);
+    let run = run_tiles(&mut h, &mut job, &mut backend);
+
+    assert!(!run.tiles.is_empty(), "the raster job produced no tiles");
+    assert!(
+        run.previews.is_empty(),
+        "a rasterized still published {} previews; it has nothing to refine",
+        run.previews.len()
+    );
+}
+
+/// Every tile carries its auxiliary planes, cropped to the part it owns.
+///
+/// The sizes are the assertion, and they are not a formality: the planes are
+/// read out of tile-sized targets and cropped by a width the plane's own kind
+/// states, so a plane cropped at the colour's width would come back plausible
+/// and wrong, and the picture assembled from it would shear.
+#[test]
+fn a_traced_tile_carries_the_passes_that_were_asked_for() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    const SPP: u32 = 4;
+    let mut backend = traced(&h, SPP);
+
+    // With an apron, deliberately. Without one a tile's rendered rect equals
+    // the part it owns, the crop returns the plane untouched, and the size
+    // assertion below would hold whatever width the crop used. An apron is what
+    // makes the width load-bearing: get it wrong and the plane shears.
+    let mut asked = spec(StillEngine::PathTraced, SPP, APRONED_BUDGET);
+    asked.screen_space_post = true;
+    asked.aux = true;
+    asked.depth = true;
+    let mut job = StillRenderJob::new(asked);
+    assert!(job.plan().len() >= 4, "this wants a grid to crop");
+    assert!(
+        job.plan()
+            .tiles
+            .iter()
+            .any(|t| t.render.width > t.image.width),
+        "the plan has no apron, so nothing here is cropped"
+    );
+    let tiles = run_tiles(&mut h, &mut job, &mut backend).tiles;
+
+    for tile in &tiles {
+        let pixels = (tile.rect.width * tile.rect.height) as usize;
+        let aux = tile.aux.as_ref().expect("the auxiliary plane");
+        let depth = tile.depth.as_ref().expect("the depth plane");
+        assert_eq!(aux.len(), pixels * 16, "four floats per pixel");
+        assert_eq!(depth.len(), pixels * 4, "one float per pixel");
+    }
+
+    // And a depth that describes something. The sphere is in front of the
+    // camera and the sky is not, so a pass that came back as one constant, or
+    // as the miss value everywhere, would mean the dispatch never ran.
+    let depths: Vec<f32> = tiles
+        .iter()
+        .filter_map(|t| t.depth.as_ref())
+        .flat_map(|d| {
+            d.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        })
+        .collect();
+    let hits = depths
+        .iter()
+        .filter(|d| d.is_finite() && **d < 1e29)
+        .count();
+    assert!(
+        hits > 0 && hits < depths.len(),
+        "the depth pass found {hits} surfaces out of {}, which describes no scene",
+        depths.len()
+    );
+}
+
+/// And a job that asked for neither carries neither, rather than paying for a
+/// copy nobody wanted.
+#[test]
+fn a_still_that_asked_for_no_passes_gets_none() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = traced(&h, 2);
+    let mut job = StillRenderJob::new(spec(StillEngine::PathTraced, 2, WHOLE));
+    let tiles = run_tiles(&mut h, &mut job, &mut backend).tiles;
+    assert!(!tiles.is_empty());
+    for tile in &tiles {
+        assert!(tile.aux.is_none(), "an auxiliary plane nobody asked for");
+        assert!(tile.depth.is_none(), "a depth plane nobody asked for");
+    }
+}
+
+/// The seam test, on a field with nothing in it to hide one.
+///
+/// A background gradient is the adversarial case: it varies smoothly down the
+/// picture with no detail to mask a discontinuity, so a tile that drew its own
+/// sweep instead of its slice of the image's shows up as a hard band at every
+/// horizontal boundary.
+///
+/// **The horizontal boundaries are the ones that matter here**, and saying so
+/// is the point: the gradient is constant along a row, so a test that only
+/// checked vertical boundaries would compare zero against zero and pass no
+/// matter what the tiling did. It is checked in both directions below, with
+/// that asymmetry stated rather than left for a reader to notice.
+#[test]
+fn a_flat_field_assembles_without_a_seam() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    // No geometry at all: every pixel is the background.
+    let mut backend = RasterBackend::new(std::sync::Arc::clone(&h.renderer.layouts));
+
+    let mut job = StillRenderJob::new(spec(StillEngine::Raster, 1, TEST_BUDGET));
+    let columns: Vec<u32> = job
+        .plan()
+        .tiles
+        .iter()
+        .map(|t| t.image.x)
+        .filter(|x| *x > 0)
+        .collect();
+    let rows: Vec<u32> = job
+        .plan()
+        .tiles
+        .iter()
+        .map(|t| t.image.y)
+        .filter(|y| *y > 0)
+        .collect();
+    assert!(
+        !rows.is_empty(),
+        "the plan has no horizontal boundary, so this tests nothing"
+    );
+    let image = run(&mut h, &mut job, &mut backend);
+
+    let at = |x: usize, y: usize| ((y * W as usize) + x) * 4;
+    let step = |a: usize, b: usize| {
+        (0..3)
+            .map(|c| f64::from(i32::from(image[a + c]) - i32::from(image[b + c])).abs())
+            .sum::<f64>()
+            / 3.0
+    };
+    let row_step = |y: u32| {
+        (0..W as usize)
+            .map(|x| step(at(x, y as usize - 1), at(x, y as usize)))
+            .sum::<f64>()
+            / f64::from(W)
+    };
+    let column_step = |x: u32| {
+        (0..H as usize)
+            .map(|y| step(at(x as usize - 1, y), at(x as usize, y)))
+            .sum::<f64>()
+            / f64::from(H)
+    };
+
+    // The gradient varies down the picture, so an ordinary neighbouring row
+    // already differs a little. A seam is a step much larger than that.
+    let ordinary_rows: f64 = (1..H)
+        .filter(|y| !rows.contains(y))
+        .map(row_step)
+        .sum::<f64>()
+        / f64::from(H - 1 - rows.len() as u32);
+    for y in &rows {
+        let seam = row_step(*y);
+        eprintln!("horizontal seam at y={y}: {seam:.3} against an ordinary {ordinary_rows:.3}");
+        assert!(
+            seam <= ordinary_rows + 1.0,
+            "the step across the tile boundary at y={y} is {seam:.3}, against \
+             {ordinary_rows:.3} between ordinary rows"
+        );
+    }
+    for x in &columns {
+        let seam = column_step(*x);
+        eprintln!("vertical seam at x={x}: {seam:.3}");
+        assert!(seam <= 1.0, "a vertical seam at x={x} of {seam:.3}");
+    }
+}
+
+/// The seam test again, with the screen-space post the apron exists for.
+///
+/// The flat-field test above runs post-free, so its plan carries an apron
+/// of zero and it proves only the unaproned path; the whole harness runs
+/// bloom off, so before this test nothing anywhere composited a tiled
+/// still with a screen-space effect enabled. Bloom pulls from
+/// neighbouring pixels, and a tile that blurred only what it owns halos
+/// differently at its edge than the assembled picture's interior does,
+/// which is exactly the seam the apron pays for. Remove the apron and
+/// this fails; the post-free test would not notice.
+///
+/// The threshold is dropped to zero because the gradient sits below the
+/// shipped one: a bloom that contributed nothing would make this pass
+/// with the apron gone, which is the vacuous form of the test.
+#[test]
+fn a_bloomed_flat_field_assembles_without_a_seam() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    h.renderer.post.bloom_enabled = true;
+    h.renderer
+        .post
+        .set_strengths(solarxy_core::view_config::PostStrengths {
+            bloom_strength: 1.5,
+            bloom_threshold: 0.0,
+            ssao_strength: 0.0,
+        });
+    let mut backend = RasterBackend::new(std::sync::Arc::clone(&h.renderer.layouts));
+
+    let mut post_spec = spec(StillEngine::Raster, 1, APRONED_BUDGET);
+    post_spec.screen_space_post = true;
+    let mut job = StillRenderJob::new(post_spec);
+    let columns: Vec<u32> = job
+        .plan()
+        .tiles
+        .iter()
+        .map(|t| t.image.x)
+        .filter(|x| *x > 0)
+        .collect();
+    let rows: Vec<u32> = job
+        .plan()
+        .tiles
+        .iter()
+        .map(|t| t.image.y)
+        .filter(|y| *y > 0)
+        .collect();
+    assert!(
+        !rows.is_empty() && !columns.is_empty(),
+        "the plan has no interior boundary, so this tests nothing"
+    );
+    assert!(
+        job.plan()
+            .tiles
+            .iter()
+            .any(|t| t.render.width > t.image.width),
+        "no tile renders more than it keeps, so the apron is not in play"
+    );
+    let image = run(&mut h, &mut job, &mut backend);
+
+    let at = |x: usize, y: usize| ((y * W as usize) + x) * 4;
+    let step = |a: usize, b: usize| {
+        (0..3)
+            .map(|c| f64::from(i32::from(image[a + c]) - i32::from(image[b + c])).abs())
+            .sum::<f64>()
+            / 3.0
+    };
+    let row_step = |y: u32| {
+        (0..W as usize)
+            .map(|x| step(at(x, y as usize - 1), at(x, y as usize)))
+            .sum::<f64>()
+            / f64::from(W)
+    };
+    let column_step = |x: u32| {
+        (0..H as usize)
+            .map(|y| step(at(x as usize - 1, y), at(x as usize, y)))
+            .sum::<f64>()
+            / f64::from(H)
+    };
+
+    let ordinary_rows: f64 = (1..H)
+        .filter(|y| !rows.contains(y))
+        .map(row_step)
+        .sum::<f64>()
+        / f64::from(H - 1 - rows.len() as u32);
+    for y in &rows {
+        let seam = row_step(*y);
+        eprintln!("bloomed horizontal seam at y={y}: {seam:.3} against {ordinary_rows:.3}");
+        assert!(
+            seam <= ordinary_rows + 1.0,
+            "the step across the tile boundary at y={y} is {seam:.3}, against \
+             {ordinary_rows:.3} between ordinary rows"
+        );
+    }
+    for x in &columns {
+        let seam = column_step(*x);
+        eprintln!("bloomed vertical seam at x={x}: {seam:.3}");
+        assert!(seam <= 1.0, "a vertical seam at x={x} of {seam:.3}");
+    }
+}
+
+#[test]
+fn the_shipped_budget_leaves_a_four_megapixel_still_in_whole_tiles() {
+    // Not a GPU test: the arithmetic that decides how a real still is cut,
+    // pinned against the size Chain B names.
+    let plan = TilePlan::new(4096, 2304, TILE_BUDGET_PIXELS, 0);
+    assert!(plan.len() > 1, "a 4096x2304 still should tile");
+    for tile in &plan.tiles {
+        assert!(tile.render.area() <= u64::from(TILE_BUDGET_PIXELS));
+    }
+}
+
+/// One pixel of an assembled RGBA8 image.
+fn px(image: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let at = ((y * W + x) * 4) as usize;
+    [image[at], image[at + 1], image[at + 2], image[at + 3]]
+}
+
+/// The tracer with the transparent film back authored into its settings, the
+/// way every shell's mapping now sets it.
+fn traced_transparent(h: &Harness, samples: u32) -> PathBackend {
+    let mut backend = PathBackend::new(&h.device, &h.queue);
+    backend.apply(&h.device, &h.queue, &sphere_delta());
+    backend.set_sky(SKY_UP, SKY_DOWN);
+    backend.set_settings(TraceSettings {
+        samples,
+        chunk: samples,
+        transparent_background: true,
+        ..TraceSettings::default()
+    });
+    backend
+}
+
+/// The rasterized film back: the sky leaves the frame entirely, the silhouette
+/// antialiases through the multisample resolve, and the subject is lit byte
+/// for byte as an opaque render lights it, because withholding the photograph
+/// of the environment is not the same as removing the environment.
+#[test]
+fn a_transparent_raster_still_mattes_the_sky_and_lights_the_subject_identically() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = raster(&h);
+
+    let mut opaque_job = StillRenderJob::new(spec(StillEngine::Raster, 1, WHOLE));
+    let opaque = run(&mut h, &mut opaque_job, &mut backend);
+
+    let mut matte_job = StillRenderJob::new(StillSpec {
+        transparent: true,
+        ..spec(StillEngine::Raster, 1, WHOLE)
+    });
+    let matte = run(&mut h, &mut matte_job, &mut backend);
+
+    assert_eq!(
+        px(&matte, 1, 1),
+        [0, 0, 0, 0],
+        "the sky is nothing at all, in every lane"
+    );
+    let center = px(&matte, W / 2, H / 2);
+    assert_eq!(center[3], 255, "the subject is fully covered");
+    assert_eq!(
+        center[..3],
+        px(&opaque, W / 2, H / 2)[..3],
+        "the environment lights a covered pixel identically"
+    );
+    assert!(
+        matte
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|p| p[3] > 0 && p[3] < 255),
+        "a silhouette pixel is fractional rather than staircased"
+    );
+    assert!(
+        opaque.as_chunks::<4>().0.iter().all(|p| p[3] == 255),
+        "an ordinary opaque render stays opaque in every pixel"
+    );
+}
+
+/// The look shapes light and coverage is not light: a graded transparent
+/// render is transparent in exactly the places an ungraded one is.
+#[test]
+fn a_grade_leaves_the_matte_alone() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = raster(&h);
+    let transparent_spec = || StillSpec {
+        transparent: true,
+        ..spec(StillEngine::Raster, 1, WHOLE)
+    };
+
+    let mut plain_job = StillRenderJob::new(transparent_spec());
+    let plain = run(&mut h, &mut plain_job, &mut backend);
+
+    let mut graded_job = StillRenderJob::new(transparent_spec());
+    let graded = run_with_look(
+        &mut h,
+        &mut graded_job,
+        &mut backend,
+        CompositeLook {
+            exposure: 0.5,
+            lift: [0.2, 0.0, 0.0],
+            ..CompositeLook::default()
+        },
+    );
+
+    let alphas = |img: &[u8]| {
+        img.as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| p[3])
+            .collect::<Vec<u8>>()
+    };
+    assert_eq!(
+        alphas(&plain),
+        alphas(&graded),
+        "exposure and the grade left the alpha lane alone"
+    );
+    assert_ne!(
+        plain, graded,
+        "the grade did reach the colour, or this proves nothing"
+    );
+}
+
+/// The traced film back through the shared job: the same shape the raster test
+/// pins, with the matte coming out of the kernel's own coverage counts.
+#[test]
+fn a_transparent_traced_still_mattes_the_sky_and_keeps_the_subject_lit() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let samples = 4;
+
+    let mut opaque_backend = traced(&h, samples);
+    let mut opaque_job = StillRenderJob::new(spec(StillEngine::PathTraced, samples, WHOLE));
+    let opaque = run(&mut h, &mut opaque_job, &mut opaque_backend);
+
+    let mut backend = traced_transparent(&h, samples);
+    let mut job = StillRenderJob::new(StillSpec {
+        transparent: true,
+        ..spec(StillEngine::PathTraced, samples, WHOLE)
+    });
+    let matte = run(&mut h, &mut job, &mut backend);
+
+    assert_eq!(
+        px(&matte, 1, 1),
+        [0, 0, 0, 0],
+        "a camera ray that left into the sky contributed nothing"
+    );
+    let center = px(&matte, W / 2, H / 2);
+    assert_eq!(center[3], 255, "the subject is fully covered");
+    assert_eq!(
+        center[..3],
+        px(&opaque, W / 2, H / 2)[..3],
+        "a fully covered pixel is lit byte for byte as the opaque render lit it"
+    );
+}

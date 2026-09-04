@@ -5,6 +5,7 @@ members = [
     "crates/solarxy-formats",
     "crates/solarxy-imaging",
     "crates/solarxy-kernel",
+    "crates/solarxy-bvh",
     "crates/solarxy-graph",
     "crates/solarxy-scenefile",
     "crates/solarxy-web",
@@ -13,14 +14,15 @@ members = [
     "crates/solarxy-app",
     "crates/solarxy-cli",
     "crates/solarxy-validate",
+    "crates/solarxy-render",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.8.2"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.92"
-license = "MIT"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/marko-koljancic/solarxy"
 authors = ["Marko Koljancic <marko.koljancic@gmail.com>"]
 

@@ -30,6 +30,8 @@ pub(super) struct StatusBarData<'a> {
     pub avg_ms: f32,
     pub fps: u32,
     pub backend: &'a str,
+    /// A running still render's `(tile, tiles, sample, samples)`.
+    pub still: Option<(u32, u32, u32, u32)>,
 }
 
 /// Clicks the caller must act on after drawing.
@@ -67,6 +69,31 @@ pub(super) fn draw(ctx: &egui::Context, data: &StatusBarData, theme: Theme) -> S
                     if draw_review_badge(ui, theme) {
                         response.review_badge_clicked = true;
                     }
+                    drew_left = true;
+                }
+                // A running render is the most important thing happening,
+                // so its readout is always present; only its detail joins
+                // the collapse order.
+                if let Some((tile, tiles, sample, samples)) = data.still {
+                    if drew_left {
+                        ui.separator();
+                    }
+                    let text = if width >= COLLAPSE_PANE {
+                        if samples > 1 {
+                            format!(
+                                "Rendering \u{00b7} tile {}/{tiles} \u{00b7} {sample}/{samples} spp",
+                                (tile + 1).min(tiles.max(1))
+                            )
+                        } else {
+                            format!(
+                                "Rendering \u{00b7} tile {}/{tiles}",
+                                (tile + 1).min(tiles.max(1))
+                            )
+                        }
+                    } else {
+                        "Rendering".to_owned()
+                    };
+                    label(ui, &text, theme.accent);
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -75,10 +102,16 @@ pub(super) fn draw(ctx: &egui::Context, data: &StatusBarData, theme: Theme) -> S
                         ui.separator();
                     }
                     if width >= COLLAPSE_PERF {
-                        label(
-                            ui,
-                            &format!("{:.1} ms \u{00b7} {} fps", data.avg_ms, data.fps),
-                            theme.muted,
+                        // Monospaced deliberately, at Small's size: these
+                        // digits change every frame, and in a proportional
+                        // face the segment's width would breathe with them.
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{:.1} ms \u{00b7} {} fps",
+                                data.avg_ms, data.fps
+                            ))
+                            .font(egui::FontId::new(10.0, egui::FontFamily::Monospace))
+                            .color(theme.muted),
                         );
                         ui.separator();
                     }

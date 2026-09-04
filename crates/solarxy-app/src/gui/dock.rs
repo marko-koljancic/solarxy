@@ -240,6 +240,23 @@ impl TabViewer for SolarxyTabViewer<'_> {
         !matches!(tab, SolarxyTab::Viewport)
     }
 
+    /// The tab-body margin every panel puts around its content is wrong
+    /// for the one tab that paints with a GPU surface instead of with
+    /// egui: nothing paints the leftover ring, so the composite's black
+    /// clear showed through on all four sides. Zeroed for the Viewport
+    /// alone; every other panel keeps its padding.
+    fn tab_style_override(
+        &self,
+        tab: &Self::Tab,
+        global_style: &egui_dock::TabStyle,
+    ) -> Option<egui_dock::TabStyle> {
+        matches!(tab, SolarxyTab::Viewport).then(|| {
+            let mut style = global_style.clone();
+            style.tab_body.inner_margin = egui::Margin::ZERO;
+            style
+        })
+    }
+
     /// The wgpu surface shows through the Viewport tab, so it must never
     /// scroll. `egui_dock` wraps every tab body in a `ScrollArea` whose
     /// `scroll_bars` default to `[true, true]`; in a narrow quad pane the

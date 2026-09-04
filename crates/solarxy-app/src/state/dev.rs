@@ -21,7 +21,7 @@ impl State {
     /// loaded, since an engine-only scene is the state this harness exists to
     /// exercise on hardware.
     pub(super) fn toggle_dev_objects(&mut self) {
-        if self.scene_objects.get(DEV_CUBE_A).is_some() {
+        if self.raster.scene().get(DEV_CUBE_A).is_some() {
             self.pending_scene_deltas.push(SceneDelta {
                 ops: vec![
                     SceneOp::Remove { id: DEV_CUBE_A },

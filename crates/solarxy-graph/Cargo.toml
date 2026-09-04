@@ -1,6 +1,6 @@
 [package]
 name = "solarxy-graph"
-description = "The Solarxy studio core: node-graph document, topology, cook engine, node registry, the 23 MVP node types, undo, and the engine facade."
+description = "The Solarxy studio core: node-graph document, topology, cook engine, node registry, typed contexts, undo, and the engine facade."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -6,6 +6,7 @@
 
 use serde::Serialize;
 
+use crate::project_config::AssetCategory;
 use crate::report::{
     AnalysisReport, BoundsSummary, IssueScope, MaterialSummary, MeshSummary, Severity,
     TextureEntry, ValidationIssue, ValidationReport,
@@ -70,6 +71,9 @@ impl From<&BoundsSummary> for JsonBounds {
 #[derive(Debug, Serialize)]
 pub struct JsonMesh {
     pub index: usize,
+    /// The name the file gave this mesh, empty when the format carries none.
+    /// Schema version 2.
+    pub name: String,
     pub vertex_count: usize,
     pub index_count: usize,
     pub triangle_count: usize,
@@ -77,12 +81,16 @@ pub struct JsonMesh {
     pub texcoord_count: usize,
     pub material_name: Option<String>,
     pub material_id: Option<usize>,
+    /// Indices of this mesh's degenerate faces, empty when it has none.
+    /// Schema version 2.
+    pub degenerate_faces: Vec<u32>,
 }
 
 impl From<&MeshSummary> for JsonMesh {
     fn from(m: &MeshSummary) -> Self {
         Self {
             index: m.index,
+            name: m.name.clone(),
             vertex_count: m.vertex_count,
             index_count: m.index_count,
             triangle_count: m.triangle_count,
@@ -90,8 +98,17 @@ impl From<&MeshSummary> for JsonMesh {
             texcoord_count: m.texcoord_count,
             material_name: m.material_name.clone(),
             material_id: m.material_id,
+            degenerate_faces: m.degenerate_faces.clone(),
         }
     }
+}
+
+/// Pixel dimensions of a texture, as an object rather than a bare pair so a
+/// consumer reads `width` by name instead of by position.
+#[derive(Debug, Serialize)]
+pub struct JsonTextureDimensions {
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -99,6 +116,10 @@ pub struct JsonTexture {
     pub slot: String,
     pub path: String,
     pub exists: bool,
+    /// Pixel dimensions where knowable; `null` when the file is missing, is
+    /// not an image, or is in a format this build cannot read. Schema
+    /// version 2.
+    pub dimensions: Option<JsonTextureDimensions>,
 }
 
 impl From<&TextureEntry> for JsonTexture {
@@ -107,6 +128,9 @@ impl From<&TextureEntry> for JsonTexture {
             slot: t.slot.clone(),
             path: t.path.clone(),
             exists: t.exists,
+            dimensions: t
+                .dimensions
+                .map(|(width, height)| JsonTextureDimensions { width, height }),
         }
     }
 }
@@ -203,12 +227,33 @@ impl From<&ValidationReport> for JsonValidation {
 
 /// JSON `schema_version` written by this build. Bump when the on-disk shape
 /// changes incompatibly; new optional fields don't require a bump.
-pub const JSON_REPORT_SCHEMA_VERSION: u32 = 1;
+///
+/// Version 2 lifted the deliberate v0.8.2 holdout: the report gained
+/// `source_format`, `file_size_bytes`, `asset_category` and `triangle_budget`
+/// at the top level, `name` and `degenerate_faces` per mesh, and `dimensions`
+/// per texture. The facts had reached the text report and the terminal
+/// workspace one release earlier; the wire format waited for this bump so a
+/// consumer's parser could not change shape underneath it.
+pub const JSON_REPORT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize)]
 pub struct JsonReport {
     pub schema_version: u32,
     pub model_name: String,
+    /// The lowercased extension the model was loaded as, empty when the path
+    /// had none. Schema version 2.
+    pub source_format: String,
+    /// Size of the model file itself, excluding companions; `null` when the
+    /// file could not be measured. Schema version 2.
+    pub file_size_bytes: Option<u64>,
+    /// What the project's filename rules classified this model as, in the
+    /// same casing `solarxy.toml` uses; `null` when nothing classified it,
+    /// which is not the same as `"default"` (classified, matched no rule).
+    /// Schema version 2.
+    pub asset_category: Option<AssetCategory>,
+    /// The triangle budget for that category; `null` when the project's
+    /// budget check is switched off. Schema version 2.
+    pub triangle_budget: Option<u32>,
     pub mesh_count: usize,
     pub material_count: usize,
     pub total_vertices: usize,
@@ -225,6 +270,10 @@ impl From<&AnalysisReport> for JsonReport {
         Self {
             schema_version: JSON_REPORT_SCHEMA_VERSION,
             model_name: r.model_name.clone(),
+            source_format: r.source_format.clone(),
+            file_size_bytes: r.file_size_bytes,
+            asset_category: r.asset_category,
+            triangle_budget: r.triangle_budget,
             mesh_count: r.mesh_count,
             material_count: r.material_count,
             total_vertices: r.total_vertices,
@@ -297,6 +346,7 @@ mod tests {
         };
         let jm = JsonMesh::from(&m);
         assert_eq!(jm.index, 2);
+        assert_eq!(jm.name, "trunk");
         assert_eq!(jm.vertex_count, 100);
         assert_eq!(jm.index_count, 300);
         assert_eq!(jm.triangle_count, 100);
@@ -304,6 +354,7 @@ mod tests {
         assert_eq!(jm.texcoord_count, 50);
         assert_eq!(jm.material_name.as_deref(), Some("wood"));
         assert_eq!(jm.material_id, Some(1));
+        assert_eq!(jm.degenerate_faces, vec![4, 9]);
     }
 
     #[test]
@@ -335,6 +386,11 @@ mod tests {
         assert_eq!(jm.textures.len(), 1);
         assert_eq!(jm.textures[0].slot, "normal");
         assert!(!jm.textures[0].exists);
+        let dims = jm.textures[0]
+            .dimensions
+            .as_ref()
+            .expect("the entry carries dimensions");
+        assert_eq!((dims.width, dims.height), (2048, 2048));
     }
 
     #[test]
@@ -430,16 +486,15 @@ mod tests {
         assert_eq!(parsed["validation"]["error_count"], 0);
     }
 
-    /// This wire format is a deliberate holdout: the text report and the
-    /// terminal shell gained the recovered analysis facts and this did not,
-    /// so a consumer's parser cannot change shape without a
-    /// `schema_version` bump.
+    /// This wire format is pinned: a parser is written against exactly this
+    /// key set, so a field cannot reach the JSON report without failing here
+    /// first and taking a deliberate `schema_version` bump with it.
     ///
-    /// The holdout previously held only by construction, because every
-    /// conversion reads fields by name and simply never named the new ones.
-    /// Nothing failed if one were added. This pins it.
+    /// Version 2 lifted the v0.8.2 holdout and added the four recovered
+    /// top-level facts. The pin stays, now guarding the version-2 set the
+    /// same way it guarded version 1.
     #[test]
-    fn the_json_report_key_set_is_unchanged() {
+    fn the_json_report_key_set_is_pinned_to_the_schema_version() {
         let json_str = report_to_json(&empty_report()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         let mut keys: Vec<&str> = parsed
@@ -452,28 +507,36 @@ mod tests {
         assert_eq!(
             keys,
             [
+                "asset_category",
                 "bounds",
+                "file_size_bytes",
                 "material_count",
                 "materials",
                 "mesh_count",
                 "meshes",
                 "model_name",
                 "schema_version",
+                "source_format",
                 "total_indices",
                 "total_triangles",
                 "total_vertices",
+                "triangle_budget",
                 "validation",
             ],
             "a field reached the JSON report without a schema_version bump"
         );
         assert_eq!(parsed["schema_version"], JSON_REPORT_SCHEMA_VERSION);
+        assert_eq!(parsed["schema_version"], 2);
     }
 
-    /// The fixture deliberately carries a source format, a file size, a
-    /// category, a budget, a mesh name and a degenerate face. None of them
-    /// may reach the wire until the holdout is deliberately lifted.
+    /// The v0.8.2 holdout, lifted behind the version-2 bump: the facts the
+    /// analyzer recovered for the text report and the terminal workspace now
+    /// reach the wire too, with the values the report carried rather than
+    /// defaults. The nested key sets are pinned here the way the top level is
+    /// pinned above, so a mesh or texture field cannot drift in silently
+    /// either.
     #[test]
-    fn the_recovered_facts_stay_out_of_the_json() {
+    fn the_recovered_facts_reach_the_json_under_version_two() {
         let mut report = empty_report();
         report.meshes.push(MeshSummary {
             index: 0,
@@ -487,20 +550,128 @@ mod tests {
             material_id: None,
             degenerate_faces: vec![4, 9],
         });
+        report.materials.push(MaterialSummary {
+            index: 0,
+            name: "bark".to_owned(),
+            ambient: [0.1; 3],
+            diffuse: [0.8; 3],
+            specular: [1.0; 3],
+            shininess: None,
+            dissolve: None,
+            optical_density: None,
+            textures: vec![TextureEntry {
+                slot: "albedo".to_owned(),
+                path: "bark.png".to_owned(),
+                exists: true,
+                dimensions: Some((2048, 1024)),
+            }],
+        });
         let json_str = report_to_json(&report).unwrap();
-        for absent in [
-            "source_format",
-            "file_size",
-            "asset_category",
-            "triangle_budget",
-            "degenerate_faces",
-            "trunk",
-        ] {
-            assert!(
-                !json_str.contains(absent),
-                "`{absent}` leaked into the JSON report, which is a holdout until its \
-                 schema version is bumped"
-            );
-        }
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["source_format"], "obj");
+        assert_eq!(parsed["file_size_bytes"], 1024);
+        assert_eq!(parsed["asset_category"], "hero");
+        assert_eq!(parsed["triangle_budget"], 100_000);
+        assert_eq!(parsed["meshes"][0]["name"], "trunk");
+        assert_eq!(
+            parsed["meshes"][0]["degenerate_faces"],
+            serde_json::json!([4, 9])
+        );
+        let dims = &parsed["materials"][0]["textures"][0]["dimensions"];
+        assert_eq!(dims["width"], 2048);
+        assert_eq!(dims["height"], 1024);
+
+        let keys_of = |v: &serde_json::Value| -> Vec<String> {
+            let mut keys: Vec<String> = v
+                .as_object()
+                .expect("a JSON object")
+                .keys()
+                .cloned()
+                .collect();
+            keys.sort_unstable();
+            keys
+        };
+        assert_eq!(
+            keys_of(&parsed["meshes"][0]),
+            [
+                "degenerate_faces",
+                "index",
+                "index_count",
+                "material_id",
+                "material_name",
+                "name",
+                "normal_count",
+                "texcoord_count",
+                "triangle_count",
+                "vertex_count",
+            ],
+            "a mesh field reached the JSON report without a schema_version bump"
+        );
+        assert_eq!(
+            keys_of(&parsed["materials"][0]["textures"][0]),
+            ["dimensions", "exists", "path", "slot"],
+            "a texture field reached the JSON report without a schema_version bump"
+        );
+    }
+
+    /// The issue entry and its kind strings, pinned the way the mesh and
+    /// texture entries are.
+    ///
+    /// The exhaustive match in [`JsonIssue::from`] only forces a NEW kind to
+    /// choose a wire string; a renamed string still compiles and changes the
+    /// published format silently, which is the expensive kind of change
+    /// because build systems match on these. Every kind runs through the
+    /// real serialization here, so either movement fails this test and takes
+    /// a deliberate `schema_version` bump with it.
+    #[test]
+    fn the_issue_entry_and_its_kind_strings_are_pinned() {
+        let mut report = empty_report();
+        report.validation = ValidationReport {
+            issues: IssueKind::ALL
+                .iter()
+                .map(|kind| make_issue(Severity::Warning, IssueScope::Model, *kind))
+                .collect(),
+        };
+        let parsed: serde_json::Value =
+            serde_json::from_str(&report_to_json(&report).unwrap()).unwrap();
+        let issues = parsed["validation"]["issues"]
+            .as_array()
+            .expect("issues is a JSON array");
+
+        let kinds: Vec<&str> = issues
+            .iter()
+            .map(|i| i["kind"].as_str().expect("kind is a string"))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "NormalMismatch",
+                "FlippedNormals",
+                "UvMismatch",
+                "MissingUvs",
+                "NonTriangulated",
+                "EmptyIndices",
+                "InvalidMaterialRef",
+                "DegenerateTriangles",
+                "MissingTexture",
+                "NonManifoldEdge",
+                "TriangleBudgetExceeded",
+            ],
+            "an issue kind's wire string moved without a schema_version bump"
+        );
+
+        let mut keys: Vec<&str> = issues[0]
+            .as_object()
+            .expect("an issue is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["kind", "message", "scope", "scope_index", "severity"],
+            "an issue field reached the JSON report without a schema_version bump"
+        );
     }
 }

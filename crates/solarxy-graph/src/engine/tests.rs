@@ -1,6 +1,8 @@
 //! Engine facade tests: command application, event emission, cook
 //! integration, preview non-leakage, and serde round-trips.
 
+#![allow(clippy::float_cmp)] // exact literals stored and read back through the document
+
 use super::*;
 use crate::document::ContextKind;
 use crate::params::ParamValue;
@@ -2198,6 +2200,8 @@ fn scene_delta_lowers_the_cameras_look() {
 /// does: stage bytes, cook, and read the lowered scene op.
 #[test]
 fn a_staged_cube_reaches_the_camera_look() {
+    use std::fmt::Write as _;
+
     use solarxy_core::scene::SceneOp;
     let mut e = engine();
     let cam = add(&mut e, GraphContext::Root, "camera");
@@ -2207,7 +2211,7 @@ fn a_staged_cube_reaches_the_camera_look() {
     for b in 0..2 {
         for g in 0..2 {
             for r in 0..2 {
-                src.push_str(&format!("{r}.0 {g}.0 {b}.0\n"));
+                let _ = writeln!(src, "{r}.0 {g}.0 {b}.0");
             }
         }
     }
@@ -2421,7 +2425,8 @@ fn a_camera_saved_before_the_look_opens_neutral() {
 fn physical_camera_derives_fov_from_focal_and_sensor() {
     let mut e = engine();
     let cam = add(&mut e, GraphContext::Root, "camera");
-    for (key, val) in [("kind", ParamValue::Enum("physical".to_string()))] {
+    {
+        let (key, val) = ("kind", ParamValue::Enum("physical".to_string()));
         e.apply(Command::SetParam {
             ctx: GraphContext::Root,
             node: cam,
@@ -2702,19 +2707,135 @@ fn geo_cast_shadow_toggle_reaches_the_delta_and_spares_the_lights() {
     let _ = light;
 }
 
+// ---- light marker picking ----
+
+/// A camera looking down -Z from z = 10 at the origin, and the screen context
+/// a pick from its centre would carry. 200 by 200 pixels, so a marker at the
+/// world origin projects to (100, 100).
+fn marker_context(cursor_px: [f32; 2]) -> (solarxy_core::gizmo::TransformParams, MarkerPick) {
+    let view = cgmath::Matrix4::look_at_rh(
+        cgmath::Point3::new(0.0, 0.0, 10.0),
+        cgmath::Point3::new(0.0, 0.0, 0.0),
+        cgmath::Vector3::unit_y(),
+    );
+    let proj = cgmath::perspective(cgmath::Deg(45.0), 1.0, 0.1, 100.0);
+    let vp: cgmath::Matrix4<f32> = proj * view;
+    (
+        solarxy_core::gizmo::TransformParams::default(),
+        MarkerPick {
+            view_proj: vp.into(),
+            viewport_px: [200.0, 200.0],
+            cursor_px,
+            radius_px: 11.0,
+        },
+    )
+}
+
+#[test]
+fn a_click_on_a_lights_marker_selects_that_light() {
+    let mut e = engine();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    // Park it where the camera is looking, so its marker lands mid-screen.
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: light,
+        key: "position".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([0.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let (_, hit) = marker_context([100.0, 100.0]);
+    let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
+    assert_eq!(e.pick(origin, dir, Some(hit)), Some(light));
+
+    // Well outside the marker's radius: nothing, rather than the light.
+    let (_, miss) = marker_context([160.0, 100.0]);
+    assert_eq!(e.pick(origin, dir, Some(miss)), None);
+
+    // And with no marker context the pick is exactly what it always was.
+    assert_eq!(e.pick(origin, dir, None), None);
+}
+
+/// The precedence the criteria name: a marker drawn over geometry takes the
+/// click, because it is drawn on top and a person clicking what they can see
+/// expects to get it.
+#[test]
+fn a_marker_over_geometry_takes_the_click() {
+    let (mut e, geo, ..) = displayed_box();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: light,
+        key: "position".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([0.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
+    // The ray alone finds the box, which is what the geometry walk answers.
+    assert_eq!(e.pick(origin, dir, None), Some(geo));
+
+    // With the marker in play, the same click takes the light instead.
+    let (_, hit) = marker_context([100.0, 100.0]);
+    assert_eq!(e.pick(origin, dir, Some(hit)), Some(light));
+
+    // A click away from the marker still falls through to the geometry.
+    let (_, off) = marker_context([100.0, 160.0]);
+    assert_eq!(e.pick(origin, dir, Some(off)), Some(geo));
+}
+
+#[test]
+fn an_invisible_light_catches_no_clicks() {
+    let mut e = engine();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: light,
+        key: "position".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([0.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
+    let (_, hit) = marker_context([100.0, 100.0]);
+    assert_eq!(e.pick(origin, dir, Some(hit)), Some(light));
+
+    set_root_bool(&mut e, light, "visible", false);
+    assert_eq!(
+        e.pick(origin, dir, Some(hit)),
+        None,
+        "an invisible light draws no marker, so it has nothing to click"
+    );
+}
+
+/// The two lights with no position mark the world origin, which is where the
+/// hemisphere light's helper dome has always drawn.
+#[test]
+fn a_scene_wide_light_marks_the_world_origin() {
+    let mut e = engine();
+    let ambient = add(&mut e, GraphContext::Root, "ambient_light");
+    e.cook(&mut || true);
+
+    let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
+    let (_, hit) = marker_context([100.0, 100.0]);
+    assert_eq!(e.pick(origin, dir, Some(hit)), Some(ambient));
+}
+
 #[test]
 fn hidden_geo_is_not_pickable() {
     let (mut e, geo, ..) = displayed_box();
     let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
-    assert_eq!(e.pick(origin, dir), Some(geo));
+    assert_eq!(e.pick(origin, dir, None), Some(geo));
     assert!(e.pick_detailed(origin, dir).is_some());
 
     set_root_bool(&mut e, geo, "visible", false);
-    assert_eq!(e.pick(origin, dir), None);
+    assert_eq!(e.pick(origin, dir, None), None);
     assert!(e.pick_detailed(origin, dir).is_none());
 
     set_root_bool(&mut e, geo, "visible", true);
-    assert_eq!(e.pick(origin, dir), Some(geo));
+    assert_eq!(e.pick(origin, dir, None), Some(geo));
 }
 
 #[test]
@@ -2827,13 +2948,13 @@ fn pick_returns_the_geo_container_under_the_ray() {
     e.cook(&mut || true);
 
     // A ray down the +Z axis toward the origin hits the box's geo.
-    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0]), Some(geo));
+    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0], None), Some(geo));
     // The same ray reversed points away: no hit.
-    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 1.0]), None);
+    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 1.0], None), None);
     // A ray that misses the box entirely.
-    assert_eq!(e.pick([100.0, 100.0, 100.0], [1.0, 0.0, 0.0]), None);
+    assert_eq!(e.pick([100.0, 100.0, 100.0], [1.0, 0.0, 0.0], None), None);
     // A degenerate (zero-length) direction is rejected.
-    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 0.0]), None);
+    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 0.0], None), None);
 }
 
 #[test]
@@ -2892,7 +3013,7 @@ fn save_and_load_document_round_trips_and_emits_replaced() {
 
     // The loaded document cooks and picks like the original.
     e2.cook(&mut || true);
-    assert_eq!(e2.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0]), Some(geo));
+    assert_eq!(e2.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0], None), Some(geo));
 
     // A freshly minted node gets a brand-new id (the mint resumed past the
     // loaded ids), so it is distinct from the loaded box.
@@ -3470,15 +3591,27 @@ fn gizmo_target_at_root_drives_the_geo_itself() {
 }
 
 #[test]
-fn gizmo_target_at_root_needs_exactly_one_geo() {
+fn gizmo_target_at_root_needs_exactly_one_node_that_declares_a_transform() {
     let (mut e, geo, sub, box_id) = displayed_box();
 
     // Nothing selected.
     assert!(e.gizmo_target(GraphContext::Root).is_none());
 
-    // A light is not a geo.
+    // A light IS manipulable, and names its position `position` rather than
+    // `translate`. This assertion used to say the opposite in as many words;
+    // it is the specification that changed, not a test routed around.
     let light = add(&mut e, GraphContext::Root, "point_light");
     select(&mut e, GraphContext::Root, vec![light]);
+    let t = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a point light declares a position");
+    assert_eq!(t.node, light);
+    assert_eq!(t.params.translate, Some("position"));
+
+    // A light with no position at all still is not: there is nothing for a
+    // handle to write.
+    let ambient = add(&mut e, GraphContext::Root, "ambient_light");
+    select(&mut e, GraphContext::Root, vec![ambient]);
     assert!(e.gizmo_target(GraphContext::Root).is_none());
 
     // Multi-select is ambiguous in v1.
@@ -3489,6 +3622,355 @@ fn gizmo_target_at_root_needs_exactly_one_geo() {
     select(&mut e, sub, vec![box_id]);
     assert!(e.gizmo_target(sub).is_some());
 }
+
+#[test]
+fn every_light_type_reports_the_transform_params_it_declares() {
+    use solarxy_core::gizmo::ScaleParams;
+
+    /// One light type and the three transform roles it may declare, in the order
+    /// translate, rotate, aim. `None` where the type does not offer that role.
+    type Case<'a> = (&'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>);
+
+    let mut e = engine();
+    let cases: &[Case] = &[
+        ("point_light", Some("position"), None, None),
+        ("directional_light", Some("position"), None, Some("target")),
+        ("spot_light", Some("position"), None, Some("target")),
+        ("rect_area_light", Some("translate"), Some("rotate"), None),
+    ];
+    for &(type_id, translate, rotate, aim) in cases {
+        let node = add(&mut e, GraphContext::Root, type_id);
+        select(&mut e, GraphContext::Root, vec![node]);
+        let t = e
+            .gizmo_target(GraphContext::Root)
+            .unwrap_or_else(|| panic!("{type_id} declares a transform"));
+        assert_eq!(t.params.translate, translate, "{type_id} translate");
+        assert_eq!(t.params.rotate, rotate, "{type_id} rotate");
+        assert_eq!(t.params.aim, aim, "{type_id} aim");
+        // No light carries a pivot or a rotate order of its own.
+        assert_eq!(t.params.pivot, None, "{type_id} pivot");
+        assert_eq!(t.params.rotate_order, None, "{type_id} rotate order");
+    }
+
+    // Only the panel has a size, and it is two edge lengths rather than
+    // three scale lanes.
+    let panel = add(&mut e, GraphContext::Root, "rect_area_light");
+    select(&mut e, GraphContext::Root, vec![panel]);
+    let t = e.gizmo_target(GraphContext::Root).expect("a panel");
+    assert_eq!(
+        t.params.scale,
+        ScaleParams::Extent2 {
+            x: "width",
+            z: "height",
+        }
+    );
+    // Its defaults, read through the same path a drag reads them.
+    assert!((t.extent[0] - 10.0).abs() < 1e-5, "width {}", t.extent[0]);
+    assert!((t.extent[1] - 10.0).abs() < 1e-5, "height {}", t.extent[1]);
+
+    let point = add(&mut e, GraphContext::Root, "point_light");
+    select(&mut e, GraphContext::Root, vec![point]);
+    let t = e.gizmo_target(GraphContext::Root).expect("a point light");
+    assert_eq!(t.params.scale, ScaleParams::None, "a point has no size");
+}
+
+/// The guard that keeps the role table honest: it can name a param, but it
+/// cannot name one into existence. Every key the table hands a drag has to be
+/// declared by that type's own descriptor, because the parameter write refuses
+/// an undeclared key and the resolver debug-asserts on one before that.
+#[test]
+fn every_transform_param_is_declared_by_its_descriptor() {
+    use solarxy_core::gizmo::ScaleParams;
+
+    let registry = crate::registry::Registry::with_descriptors(crate::nodes::builtin_descriptors())
+        .expect("the builtin registry is valid");
+    for type_id in ["geo", "transform"]
+        .into_iter()
+        .chain(LIGHT_TYPE_IDS.iter().copied())
+    {
+        let Some(params) = crate::engine::transform_params_for(type_id) else {
+            continue;
+        };
+        let desc = registry
+            .get(type_id)
+            .unwrap_or_else(|| panic!("{type_id} is registered"));
+        let declared = |key: &str| desc.param(key).is_some();
+
+        let mut named: Vec<&str> = Vec::new();
+        named.extend(params.translate);
+        named.extend(params.rotate);
+        named.extend(params.rotate_order);
+        named.extend(params.pivot);
+        named.extend(params.aim);
+        match params.scale {
+            ScaleParams::None => {}
+            ScaleParams::Vec3 { scale, uniform } => named.extend([scale, uniform]),
+            ScaleParams::Extent2 { x, z } => named.extend([x, z]),
+        }
+        assert!(
+            !named.is_empty(),
+            "{type_id} is in the table but names nothing"
+        );
+        for key in named {
+            assert!(
+                declared(key),
+                "{type_id} does not declare `{key}`, which the gizmo would write"
+            );
+        }
+    }
+}
+
+/// The realtime half of a light drag: a preview on the param the target names
+/// has to reach the scene delta, or the shadow falls where the light used to
+/// be until the pointer is released, which is the whole activity this work
+/// exists to restore.
+#[test]
+fn previewing_a_lights_declared_param_relights_the_scene_before_the_commit() {
+    use solarxy_core::scene::SceneOp;
+
+    let mut e = engine();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    select(&mut e, GraphContext::Root, vec![light]);
+    e.cook(&mut || true);
+    let _ = e.take_scene_delta();
+
+    let key = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a point light is a target")
+        .params
+        .translate
+        .expect("it declares a position");
+
+    // Exactly what a drag streams: no command, no document write, no undo.
+    e.preview_param(
+        GraphContext::Root,
+        light,
+        key,
+        ParamSource::Literal(ParamValue::Vec3([1.0, 2.0, 3.0])),
+    );
+
+    let delta = e.take_scene_delta();
+    let lights = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            SceneOp::SetLights { lights } => Some(lights),
+            _ => None,
+        })
+        .expect("SetLights op present");
+    assert_eq!(lights.len(), 1);
+    assert!(
+        (lights[0].position[0] - 1.0).abs() < 1e-5
+            && (lights[0].position[1] - 2.0).abs() < 1e-5
+            && (lights[0].position[2] - 3.0).abs() < 1e-5,
+        "the previewed position must reach the renderer, got {:?}",
+        lights[0].position
+    );
+
+    // And the gizmo tracks it, so the handle stays under the cursor.
+    let t = e.gizmo_target(GraphContext::Root).expect("still a target");
+    assert!((t.translate[0] - 1.0).abs() < 1e-5);
+
+    // Abandoning restores the light exactly, with nothing stranded.
+    e.clear_preview(GraphContext::Root, light, key);
+    let delta = e.take_scene_delta();
+    let lights = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            SceneOp::SetLights { lights } => Some(lights),
+            _ => None,
+        })
+        .expect("SetLights op present");
+    assert!(
+        (lights[0].position[0] - 10.0).abs() < 1e-5,
+        "back to the authored position, got {:?}",
+        lights[0].position
+    );
+}
+
+/// "Reset transform" on a light resets what a LIGHT has, which is not the set
+/// geometry has. The menu resets exactly the params the target declares, so
+/// there is one definition of what a target's transform is rather than a table
+/// of per-type defaults living in the frontend.
+#[test]
+fn resetting_a_targets_declared_params_restores_its_own_defaults() {
+    let mut e = engine();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    select(&mut e, GraphContext::Root, vec![light]);
+
+    let keys = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a point light is a target")
+        .params
+        .names();
+    assert_eq!(keys, vec!["position"], "one param, not geometry's four");
+
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: light,
+        key: "position".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([9.0, 9.0, 9.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let moved = e.gizmo_target(GraphContext::Root).expect("still a target");
+    assert!((moved.translate[0] - 9.0).abs() < 1e-5);
+
+    e.apply(Command::ResetParams {
+        ctx: GraphContext::Root,
+        node: light,
+        keys: Some(keys.iter().map(|k| (*k).to_string()).collect()),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let back = e.gizmo_target(GraphContext::Root).expect("still a target");
+    // The descriptor's own default, which is what removing the override
+    // falls back to; nothing here had to know the number.
+    assert!(
+        (back.translate[0] - 10.0).abs() < 1e-5 && (back.translate[2] - 5.0).abs() < 1e-5,
+        "back to the authored default, got {:?}",
+        back.translate
+    );
+
+    // A panel's transform includes the two edges its size handles write, the
+    // same way geometry's includes the scale lanes its cubes write.
+    let panel = add(&mut e, GraphContext::Root, "rect_area_light");
+    select(&mut e, GraphContext::Root, vec![panel]);
+    let panel_keys = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a panel")
+        .params
+        .names();
+    assert_eq!(panel_keys, vec!["translate", "rotate", "width", "height"]);
+}
+
+/// A drag that writes TWO params is still one undo step.
+///
+/// This is the only branch the manipulation work introduced where the count
+/// could split: a rect-area light is sized by `width` and `height`, so its
+/// uniform handle writes both, and the module's one-param-per-drag rule was
+/// weakened to allow it. The transaction is what keeps it one step, and
+/// nothing else asserts that for a two-key write; the existing coverage is a
+/// geometry append, which writes one.
+#[test]
+fn a_two_param_light_drag_is_still_exactly_one_undo_step() {
+    let mut e = engine();
+    let panel = add(&mut e, GraphContext::Root, "rect_area_light");
+    select(&mut e, GraphContext::Root, vec![panel]);
+
+    let keys = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a panel is a target")
+        .params
+        .names();
+    assert!(
+        keys.contains(&"width") && keys.contains(&"height"),
+        "the case this test exists for: {keys:?}"
+    );
+
+    let before = fingerprint(&e, GraphContext::Root);
+
+    // What a uniform size drag does: both edges, inside one transaction.
+    e.apply(Command::BeginTransaction {
+        label: "scale".into(),
+    })
+    .unwrap();
+    for (key, v) in [("width", 7.0_f64), ("height", 5.0)] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: panel,
+            key: key.to_string(),
+            value: ParamSource::Literal(ParamValue::Float(v)),
+        })
+        .unwrap();
+    }
+    e.apply(Command::EndTransaction).unwrap();
+    e.cook(&mut || true);
+
+    let after = fingerprint(&e, GraphContext::Root);
+    assert_ne!(after, before, "the drag has to have changed something");
+
+    e.apply(Command::Undo).unwrap();
+    e.cook(&mut || true);
+    assert_eq!(
+        fingerprint(&e, GraphContext::Root),
+        before,
+        "one undo must put BOTH edges back, not just the last one written"
+    );
+
+    // And redo restores both together, for the same reason.
+    e.apply(Command::Redo).unwrap();
+    e.cook(&mut || true);
+    assert_eq!(fingerprint(&e, GraphContext::Root), after);
+}
+
+/// Escape part way through a two-param drag leaves nothing half-written.
+///
+/// The preview lane is the mid-drag state, so cancelling has to clear both
+/// keys. Clearing one would leave a panel that is 7 by its authored height,
+/// which is a shape the user never saw and never asked for.
+#[test]
+fn cancelling_a_two_param_light_drag_restores_both_edges() {
+    let mut e = engine();
+    let panel = add(&mut e, GraphContext::Root, "rect_area_light");
+    select(&mut e, GraphContext::Root, vec![panel]);
+    e.cook(&mut || true);
+    let before = fingerprint(&e, GraphContext::Root);
+
+    e.apply(Command::BeginTransaction {
+        label: "scale".into(),
+    })
+    .unwrap();
+    for (key, v) in [("width", 7.0_f64), ("height", 5.0)] {
+        e.preview_param(
+            GraphContext::Root,
+            panel,
+            key,
+            ParamSource::Literal(ParamValue::Float(v)),
+        );
+    }
+    assert!(e.has_active_previews(), "the drag is in flight");
+
+    e.apply(Command::CancelTransaction).unwrap();
+    for key in ["width", "height"] {
+        e.clear_preview(GraphContext::Root, panel, key);
+    }
+    e.cook(&mut || true);
+
+    assert!(
+        !e.has_active_previews(),
+        "an abandoned drag strands no preview"
+    );
+
+    assert_eq!(
+        fingerprint(&e, GraphContext::Root),
+        before,
+        "an abandoned drag leaves the panel exactly as it was"
+    );
+}
+
+/// The two lights with no position, no direction and no size are absent from
+/// the table on purpose: there is nothing honest for a handle to write.
+#[test]
+fn the_scene_wide_lights_declare_no_transform() {
+    for type_id in ["ambient_light", "hemisphere_light"] {
+        assert!(
+            crate::engine::transform_params_for(type_id).is_none(),
+            "{type_id} has no position to manipulate"
+        );
+    }
+}
+
+/// The six light node types, so a test that means "every light" says so once.
+const LIGHT_TYPE_IDS: [&str; 6] = [
+    "point_light",
+    "directional_light",
+    "spot_light",
+    "ambient_light",
+    "hemisphere_light",
+    "rect_area_light",
+];
 
 #[test]
 fn gizmo_target_in_a_subflow_reports_append_pending_over_a_box() {
@@ -4474,6 +4956,24 @@ fn materials_survive_array_and_mirror() {
 /// instead of asserting on the hook.
 #[test]
 fn a_document_saved_before_the_copy_mode_split_opens_still_baked() {
+    /// Everything about the output a wrong migration would move: how the
+    /// copies are partitioned, whether they are placements or geometry, and
+    /// where the points actually are.
+    fn shape(e: &Engine, node: NodeId) -> (u32, Option<usize>, Vec<[f32; 3]>) {
+        let set = e
+            .cook
+            .outputs(node)
+            .expect("cooked")
+            .get("geometry")
+            .and_then(crate::registry::coerce::Value::as_geometry)
+            .expect("geometry out");
+        (
+            set.mesh_count(),
+            set.meshes[0].instances.as_ref().map(|i| i.len()),
+            set.meshes[0].positions.to_vec(),
+        )
+    }
+
     let (mut e, ctx) = subflow_engine();
     let prim = add(&mut e, ctx, "box");
     let arr = add(&mut e, ctx, "array");
@@ -4511,23 +5011,6 @@ fn a_document_saved_before_the_copy_mode_split_opens_still_baked() {
     .unwrap();
     e.cook(&mut || true);
 
-    /// Everything about the output a wrong migration would move: how the
-    /// copies are partitioned, whether they are placements or geometry, and
-    /// where the points actually are.
-    fn shape(e: &Engine, node: NodeId) -> (u32, Option<usize>, Vec<[f32; 3]>) {
-        let set = e
-            .cook
-            .outputs(node)
-            .expect("cooked")
-            .get("geometry")
-            .and_then(crate::registry::coerce::Value::as_geometry)
-            .expect("geometry out");
-        (
-            set.mesh_count(),
-            set.meshes[0].instances.as_ref().map(|i| i.len()),
-            set.meshes[0].positions.to_vec(),
-        )
-    }
     let want = shape(&e, arr);
     assert_eq!(want.0, 4, "the reference cook baked four copies");
     assert_eq!(want.1, None, "baked output carries no placement list");
@@ -4694,47 +5177,211 @@ fn a_geo_saved_before_the_rotate_order_split_opens_facing_the_same_way() {
 /// whatever survives. `carries` records which side of the contract the node
 /// is on, so a node silently changing sides fails here rather than in
 /// someone's scene.
+/// How one node type is driven by the sweep, when the defaults are not
+/// enough to drive it at all or not enough to make it do anything.
+struct SweepCase {
+    /// The geometry input the instanced set is wired into. Defaults to the
+    /// node's default input port.
+    port: Option<&'static str>,
+    /// Params applied to the node under test.
+    params: Vec<(&'static str, ParamValue)>,
+    /// A second primitive wired into another of the node's geometry inputs,
+    /// for the nodes that require one.
+    companion: Option<(&'static str, &'static str)>,
+    /// Overrides whether the output is expected to be instanced. `None`
+    /// reads the answer off the port's declaration, which is the normal
+    /// case; a node that creates placements of its own says so here.
+    output_instanced: Option<bool>,
+}
+
+impl SweepCase {
+    fn new() -> Self {
+        Self {
+            port: None,
+            params: Vec::new(),
+            companion: None,
+            output_instanced: None,
+        }
+    }
+}
+
+/// The nodes the default wiring cannot drive, or drives into a no-op.
+///
+/// Everything absent from here is wired into its default geometry input at
+/// registry-default params, which is the great majority.
+fn sweep_wiring(type_id: &str) -> Option<SweepCase> {
+    let case = match type_id {
+        // Registry defaults leave these three doing nothing at all: an
+        // identity transform, and two attribute ops with an empty name that
+        // warn and pass through. They would sail past both assertions while
+        // testing neither.
+        "transform" => SweepCase {
+            params: vec![("translate", ParamValue::Vec3([1.0, 2.0, 3.0]))],
+            ..SweepCase::new()
+        },
+        "attribute_copy" => SweepCase {
+            params: vec![
+                ("source", ParamValue::Text("N".into())),
+                ("dest", ParamValue::Text("myN".into())),
+            ],
+            ..SweepCase::new()
+        },
+        "attribute_promote" => SweepCase {
+            params: vec![("attr_name", ParamValue::Text("N".into()))],
+            ..SweepCase::new()
+        },
+        // Variadic, and the port is not called "geometry".
+        "merge" | "switch" => SweepCase {
+            port: Some("inputs"),
+            ..SweepCase::new()
+        },
+        // Two geometry inputs. `template` is required, so leaving it
+        // unconnected is a hard `InputRequired` rather than an empty cook.
+        // It also creates placements of its own in the default copy mode.
+        "copy_to_points" => SweepCase {
+            port: Some("points"),
+            companion: Some(("template", "box")),
+            output_instanced: Some(true),
+            ..SweepCase::new()
+        },
+        // Bakes its input and then emits its own placements, so its output
+        // says nothing about which side of the contract the input is on.
+        "array" => SweepCase {
+            output_instanced: Some(true),
+            ..SweepCase::new()
+        },
+        _ => return None,
+    };
+    Some(case)
+}
+
+/// Types this sweep cannot judge, each with the reason.
+///
+/// Being here is a claim that the agreement property is meaningless for the
+/// type, not that the type is untested: both of these have their own
+/// coverage elsewhere.
+fn sweep_exemption(type_id: &str) -> Option<&'static str> {
+    match type_id {
+        "attribute_from_image" => Some(
+            "its image input is optional, so without one it warns and passes \
+             through; driving it means staging an image asset and wiring an \
+             import node into a sweep whose subject is geometry. Covered by \
+             the image-chain tests instead.",
+        ),
+        "line" => Some(
+            "its endpoint ports are optional and it has no default input; \
+             its output is a freshly generated two-point polyline rather \
+             than a transformation of what arrived, so the agreement \
+             property holds trivially and proves nothing. Its placement \
+             reading is covered by a unit test in the node's own module.",
+        ),
+        _ => None,
+    }
+}
+
+/// Every registered type with a geometry input is either driven by this
+/// sweep or exempted by name, and a new one that is neither fails here.
+///
+/// This is the half of the contract that cannot be enforced by the cook
+/// driver. The driver guarantees a node that says nothing gets baked input,
+/// which makes silence safe; it cannot tell whether a node that *claims* to
+/// carry actually does. Only cooking it both ways can, so the case list is
+/// derived from the registry rather than maintained by hand, and forgetting
+/// to consider a new node is a failing build rather than a scene that
+/// quietly loses copies.
+#[test]
+fn every_geometry_consuming_node_is_swept_or_exempted() {
+    let registry = crate::nodes::builtin_registry().unwrap();
+    let mut unconsidered = Vec::new();
+    for desc in registry.descriptors() {
+        if !desc
+            .inputs
+            .iter()
+            .any(|p| p.data_type == crate::registry::coerce::DataType::Geometry)
+        {
+            continue;
+        }
+        let considered = sweep_exemption(desc.type_id).is_some()
+            || sweep_wiring(desc.type_id).is_some()
+            || desc
+                .default_input()
+                .is_some_and(|p| p.data_type == crate::registry::coerce::DataType::Geometry);
+        if !considered {
+            unconsidered.push(desc.type_id);
+        }
+    }
+    assert!(
+        unconsidered.is_empty(),
+        "these node types take geometry but the carry-or-bake sweep cannot \
+         reach them: {unconsidered:?}. Give each one a `sweep_wiring` entry \
+         naming the port and any params it needs, or a `sweep_exemption` \
+         entry saying why the agreement property is meaningless for it."
+    );
+}
+
 #[test]
 fn every_downstream_node_agrees_with_its_baked_equivalent() {
-    // (node type, params, whether it carries placements through)
-    let cases: &[(&str, &[(&str, ParamValue)], bool)] = &[
-        // Carry: each works in the prototype's own space with a result
-        // identical for every copy.
-        ("subdivide", &[("iterations", ParamValue::Int(1))], true),
-        ("uv_project", &[], true),
-        ("compute_normals", &[], true),
-        ("material", &[], true),
-        // Bake: the meaning is per copy, or real geometry is needed.
-        (
-            "transform",
-            &[("translate", ParamValue::Vec3([1.0, 2.0, 3.0]))],
-            false,
-        ),
-        ("delete", &[], false),
-        ("mirror", &[], false),
-        ("bounds", &[], false),
-        ("attribute_create", &[], false),
-        ("points_from_geo", &[], false),
-        ("scatter", &[("count", ParamValue::Int(8))], false),
-    ];
+    let registry = crate::nodes::builtin_registry().unwrap();
+    let mut swept = 0usize;
 
-    for (node_type, params, carries) in cases {
+    for desc in registry.descriptors() {
+        if sweep_exemption(desc.type_id).is_some() {
+            continue;
+        }
+        let case = sweep_wiring(desc.type_id).unwrap_or_else(SweepCase::new);
+        let port = match case.port {
+            Some(port) => port,
+            None => match desc.default_input() {
+                Some(p) if p.data_type == crate::registry::coerce::DataType::Geometry => &p.key,
+                _ => continue,
+            },
+        };
+        let node_type = desc.type_id;
+        // Read off the declaration rather than a hand-kept bool, so the
+        // descriptor is the single statement of which side a node is on and
+        // this test is the thing that holds it to it.
+        let carries = desc
+            .inputs
+            .iter()
+            .find(|p| p.key == port)
+            .is_some_and(|p| p.carries_placements);
+        let expect_instanced = case.output_instanced.unwrap_or(carries);
+        swept += 1;
+
         let mut shapes = Vec::new();
         for mode in ["instance", "bake"] {
             let (mut e, ctx) = subflow_engine();
             let prim = add(&mut e, ctx, "box");
             let arr = add(&mut e, ctx, "array");
             let sink = add(&mut e, ctx, node_type);
-            for (from, to) in [(prim, arr), (arr, sink)] {
+            for (from, from_port, to, to_port) in [
+                (prim, "geometry", arr, "geometry"),
+                (arr, "geometry", sink, port),
+            ] {
                 e.apply(Command::Connect {
                     ctx,
                     from: PortRefDto {
                         node: from,
-                        port: "geometry".into(),
+                        port: from_port.into(),
                     },
                     to: PortRefDto {
                         node: to,
+                        port: to_port.into(),
+                    },
+                })
+                .unwrap();
+            }
+            if let Some((companion_port, companion_type)) = case.companion {
+                let companion = add(&mut e, ctx, companion_type);
+                e.apply(Command::Connect {
+                    ctx,
+                    from: PortRefDto {
+                        node: companion,
                         port: "geometry".into(),
+                    },
+                    to: PortRefDto {
+                        node: sink,
+                        port: companion_port.into(),
                     },
                 })
                 .unwrap();
@@ -4753,7 +5400,7 @@ fn every_downstream_node_agrees_with_its_baked_equivalent() {
                 value: ParamSource::Literal(ParamValue::Int(4)),
             })
             .unwrap();
-            for (key, value) in *params {
+            for (key, value) in &case.params {
                 e.apply(Command::SetParam {
                     ctx,
                     node: sink,
@@ -4772,7 +5419,12 @@ fn every_downstream_node_agrees_with_its_baked_equivalent() {
             let set = e
                 .cook
                 .outputs(sink)
-                .unwrap_or_else(|| panic!("{node_type} ({mode}) cooked"))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{node_type} ({mode}) cooked: {:?}",
+                        e.cook.status(sink).cloned()
+                    )
+                })
                 .get("geometry")
                 .and_then(crate::registry::coerce::Value::as_geometry)
                 .unwrap_or_else(|| panic!("{node_type} ({mode}) output geometry"));
@@ -4780,7 +5432,7 @@ fn every_downstream_node_agrees_with_its_baked_equivalent() {
             if mode == "instance" {
                 assert_eq!(
                     set.is_instanced(),
-                    *carries,
+                    expect_instanced,
                     "{node_type} changed which side of the carry-or-bake \
                      contract it is on"
                 );
@@ -4811,6 +5463,156 @@ fn every_downstream_node_agrees_with_its_baked_equivalent() {
             }
         }
     }
+
+    // A floor rather than an equality, so adding a node does not fail here
+    // as well as in the completeness test above. It catches the failure that
+    // test cannot: a filter change that quietly stops sweeping most of them.
+    assert!(
+        swept >= 24,
+        "the sweep only reached {swept} node types; it should reach every \
+         geometry consumer that is not exempted"
+    );
+}
+
+/// A node type written with no awareness of instancing whatsoever: a
+/// geometry input, a geometry output, and a body that reads one and returns
+/// the other. Nothing here mentions placements, and that is the point.
+fn carry_unaware_probe() -> crate::registry::NodeTypeDescriptor {
+    // Signature matches CookFn.
+    #[allow(clippy::unnecessary_wraps)]
+    fn cook(
+        _p: &crate::registry::resolve::ResolvedParams,
+        inputs: &crate::cook::Inputs,
+        _cx: &mut crate::cook::CookCtx,
+    ) -> Result<crate::cook::CookOutcome, crate::cook::CookError> {
+        let Some(input) = inputs.geometry("geometry") else {
+            return Ok(crate::cook::CookOutcome::Done(
+                crate::cook::Outputs::geometry(solarxy_kernel::GeometrySet::empty()),
+            ));
+        };
+        Ok(crate::cook::CookOutcome::Done(
+            crate::cook::Outputs::single(
+                "geometry",
+                crate::registry::coerce::Value::Geometry(std::sync::Arc::clone(input)),
+            ),
+        ))
+    }
+
+    crate::registry::NodeTypeDescriptor {
+        type_id: "carry_unaware_probe",
+        version: 1,
+        display_name: "Carry Unaware Probe",
+        category: crate::registry::Category::Utility,
+        contexts: crate::registry::ContextSet::GEO,
+        opens: None,
+        inputs: vec![
+            crate::registry::PortSpec::single(
+                "geometry",
+                "Geometry",
+                crate::registry::coerce::DataType::Geometry,
+                true,
+            )
+            .default_port(),
+        ],
+        outputs: vec![crate::nodes::common::geometry_output()],
+        params: crate::nodes::common::params_with("Probe", vec![]),
+        bypass: crate::registry::BypassBehavior::PassThrough {
+            input: "geometry".to_string(),
+        },
+        doc: "A test fixture, never registered in the builtin set.",
+        search_aliases: &[],
+        glyph: "null",
+        role: crate::registry::NodeRole::Standard,
+        cook,
+        migrate: None,
+    }
+}
+
+/// A new node needs no instancing awareness to be correct on instanced
+/// input, because the driver resolves it before the body runs.
+///
+/// This is the claim the whole change is for. The per-node call it replaced
+/// made a new node wrong by default and right only if its author happened to
+/// know the convention; here silence is the safe answer, and the node above
+/// is the proof: it says nothing about placements and still sees the four
+/// real copies rather than the one prototype.
+#[test]
+fn a_node_with_no_instancing_awareness_cooks_correctly_on_instanced_input() {
+    let mut descriptors = crate::nodes::builtin_descriptors();
+    descriptors.push(carry_unaware_probe());
+    let registry = crate::registry::Registry::with_descriptors(descriptors)
+        .expect("the probe descriptor holds the registry invariants");
+
+    let mut e = Engine::with_registry(registry);
+    let geo = e.doc.mint_node_id();
+    e.doc.create_subflow(geo, ContextKind::Geo);
+    let ctx = GraphContext::Subflow(geo);
+
+    let prim = add(&mut e, ctx, "box");
+    let arr = add(&mut e, ctx, "array");
+    let sink = add(&mut e, ctx, "carry_unaware_probe");
+    for (from, to) in [(prim, arr), (arr, sink)] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: "geometry".into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx,
+        node: arr,
+        key: "count".into(),
+        value: ParamSource::Literal(ParamValue::Int(4)),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(sink),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let prototype = e
+        .cook
+        .outputs(prim)
+        .expect("box cooked")
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .expect("box geometry")
+        .point_count();
+    let set = e
+        .cook
+        .outputs(sink)
+        .expect("the probe cooked")
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .expect("the probe output geometry");
+
+    assert!(
+        !set.is_instanced(),
+        "the driver should have resolved the placements before the body ran"
+    );
+    assert_eq!(
+        set.point_count(),
+        prototype * 4,
+        "the probe saw one prototype instead of the four copies the user placed"
+    );
+
+    let warnings = e.cook.warnings(sink);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("Carry Unaware Probe")
+            && warnings[0].contains('4')
+            && warnings[0].contains("Geometry"),
+        "the bake should name the node, the count and the port: {warnings:?}"
+    );
 }
 
 /// Merge is the node the placement level was moved for, so it gets its own
@@ -4870,7 +5672,11 @@ fn merging_a_scatter_with_its_surface_keeps_the_copies_instanced() {
     // One instanced prototype plus one plain surface, not one of each
     // baked and not a surface replicated forty times.
     assert!(set.is_instanced(), "the copies survived the merge");
-    let placed: Vec<usize> = set.meshes.iter().map(|m| m.instance_count()).collect();
+    let placed: Vec<usize> = set
+        .meshes
+        .iter()
+        .map(solarxy_kernel::KernelMesh::instance_count)
+        .collect();
     assert!(
         placed.contains(&40),
         "the prototype keeps its forty placements: {placed:?}"
@@ -5227,6 +6033,7 @@ fn cross_context_references_propagate_and_refuse_cycles() {
 #[test]
 fn context_kinds_and_node_refs_survive_a_slxy_round_trip() {
     use crate::engine::scenefile::SceneSidecar;
+    use crate::registry::param_spec::{NodePathAccept, ParamType};
 
     let mut e = engine();
     // A real geo container through the command path (kind from `opens`).
@@ -5247,7 +6054,6 @@ fn context_kinds_and_node_refs_survive_a_slxy_round_trip() {
 
     // The plain JSON form of a NodeRef is the raw id (or null): pin the
     // schema-v1 shape directly.
-    use crate::registry::param_spec::{NodePathAccept, ParamType};
     let ty = ParamType::NodePath {
         accept: NodePathAccept::TypeIs("camera".to_string()),
     };
@@ -5331,7 +6137,7 @@ fn texture_network_cooks_and_publishes_its_display_image() {
 }
 
 /// The 0.8.0 procedural chain cooks end to end and recooks on reseed:
-/// box -> scatter -> copy_to_points with a plane template. This is the
+/// box -> scatter -> `copy_to_points` with a plane template. This is the
 /// milestone's keep-last-good proof on a real graph: a reseeded scatter is
 /// a changed Points payload flowing through a downstream copy, and the
 /// recook must reach the output rather than being swallowed.
@@ -5552,7 +6358,7 @@ fn material_network_references_flow_across_three_contexts() {
     );
 }
 
-/// The export nodes: a geo_export taps the chain, its Save
+/// The export nodes: a `geo_export` taps the chain, its Save
 /// action encodes the committed geometry, and the bytes reimport through
 /// this workspace's own loaders (the round-trip acceptance criterion).
 #[test]
@@ -7790,7 +8596,7 @@ fn only_the_first_environment_node_wins() {
 /// the network it references has drained. The driver's forward-progress
 /// rule cooks a context's first eligible node without consulting the
 /// budget, so without the engine's deferral gate an interrupted pass
-/// cooked a tex_ref ahead of its source, and the resulting
+/// cooked a `tex_ref` ahead of its source, and the resulting
 /// unresolved-reference error was terminal: nothing re-dirtied the node,
 /// and the scene wedged. Driven at a budget of one extra node per pass,
 /// the worst case.
@@ -7873,5 +8679,617 @@ fn budgeted_cook_defers_cross_network_references() {
     assert!(
         e.geometry_output(sample).is_some(),
         "the reference-consuming display cooked to geometry"
+    );
+}
+
+/// A render node written before the still render existed opens with the whole
+/// new set filled from defaults, and round-trips.
+///
+/// The v1-to-v2 bump carries no migration hook for the same reason the camera's
+/// two bumps did not: every added parameter fills from its registry default.
+/// That is a claim about the defaults rather than about the loader, so it is
+/// checked against a document that genuinely lacks the keys and is stamped back
+/// to v1, which is what a pre-0.9.0 scene holds on disk.
+#[test]
+fn a_render_node_saved_before_the_still_opens_with_the_new_defaults() {
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node,
+        key: "width".to_string(),
+        value: ParamSource::Literal(ParamValue::Int(1280)),
+    })
+    .unwrap();
+
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    let mut aged = 0;
+    for n in &mut scene.graph.nodes {
+        if n.type_id == "render" {
+            n.type_version = 1;
+            for key in [
+                // What v2 added.
+                "engine",
+                "quality",
+                "bounces",
+                "transmissive_bounces",
+                "denoise",
+                // What v3 added.
+                "resolution_preset",
+                "orientation",
+                "samples",
+                "firefly_clamp",
+                "seed",
+                "denoise_strength",
+                "denoise_until_samples",
+                "denoise_sigma_color",
+                "denoise_normal_power",
+                "denoise_sigma_albedo",
+                "denoise_level_falloff",
+                "transparent_background",
+                "aov_albedo",
+                "aov_normal",
+                "aov_depth",
+            ] {
+                n.params.remove(key);
+            }
+            aged += 1;
+        }
+    }
+    assert_eq!(aged, 1, "the render node was found and aged");
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "filling from defaults must not warn: {warnings:?}"
+    );
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+
+    let g = reopened.doc.graph(GraphContext::Root).unwrap();
+    let n = g
+        .nodes()
+        .find(|n| n.type_id == "render")
+        .expect("the render node survived the round trip");
+    assert_eq!(n.type_version, 3, "reopening stamps the current version");
+    let id = n.id;
+
+    let value = |key: &str| {
+        reopened
+            .resolved_param(GraphContext::Root, id, key)
+            .unwrap_or_else(|e| panic!("{key} resolves: {e}"))
+    };
+    // What the author set is what the author set.
+    assert_eq!(value("width"), ParamValue::Int(1280));
+    // And everything v2 added arrives at its default rather than at zero, which
+    // is the whole claim: an engine of "" would render nothing and a bounce
+    // budget of 0 would end every path before it started.
+    assert_eq!(value("engine"), ParamValue::Enum("raster".to_string()));
+    assert_eq!(value("quality"), ParamValue::Enum("good".to_string()));
+    assert_eq!(value("bounces"), ParamValue::Int(6));
+    assert_eq!(value("transmissive_bounces"), ParamValue::Int(4));
+    // Off, which is the still's default: a converged render has little grain
+    // left and a filter can only take detail away.
+    assert_eq!(value("denoise"), ParamValue::Bool(false));
+
+    // Everything v3 added, the same way. The size preset is the one that would
+    // change this document's picture if it landed wrong: any default but custom
+    // would resize a shot that carries an explicit width.
+    assert_eq!(
+        value("resolution_preset"),
+        ParamValue::Enum("custom".to_string())
+    );
+    assert_eq!(
+        value("orientation"),
+        ParamValue::Enum("landscape".to_string())
+    );
+    assert_eq!(value("samples"), ParamValue::Int(64));
+    assert_eq!(value("firefly_clamp"), ParamValue::Float(16.0));
+    // The tracer's own constant, not a substituted zero: a seed of zero is a
+    // different sampling sequence, so the picture would move.
+    assert_eq!(value("seed"), ParamValue::Int(2_654_435_769));
+    assert_eq!(value("denoise_strength"), ParamValue::Float(1.0));
+    assert_eq!(value("denoise_until_samples"), ParamValue::Int(0));
+    // The measured steering values, which is what keeps an existing render
+    // unchanged by a control that did not exist when it was authored.
+    assert_eq!(value("denoise_sigma_color"), ParamValue::Float(1.2));
+    assert_eq!(value("denoise_normal_power"), ParamValue::Float(128.0));
+    assert_eq!(value("denoise_sigma_albedo"), ParamValue::Float(0.08));
+    assert_eq!(value("denoise_level_falloff"), ParamValue::Float(2.0));
+    assert_eq!(value("transparent_background"), ParamValue::Bool(false));
+    assert_eq!(value("aov_albedo"), ParamValue::Bool(false));
+    assert_eq!(value("aov_normal"), ParamValue::Bool(false));
+    assert_eq!(value("aov_depth"), ParamValue::Bool(false));
+}
+
+/// Every quality preset the `render` node declares has a sample count, and the
+/// one that does not has the field it takes its count from instead.
+///
+/// The case list is derived from the registry rather than written out, so a
+/// preset added to the node without a count fails the build instead of quietly
+/// rendering at the fallback. That is the failure this guards: the table lived
+/// in the frontend until this release, where nothing could compare it against
+/// the node at all.
+///
+/// The exact-count preset is the single exemption, and it is not a hole: it is
+/// exempt only while the `samples` param exists and is revealed by exactly this
+/// preset, which is checked below. A preset with neither a count nor a field
+/// would render at the fallback and say nothing, which is what the exemption
+/// has to keep impossible.
+#[test]
+fn every_quality_preset_the_render_node_declares_has_a_sample_count() {
+    use crate::registry::param_spec::{ParamType, Pred};
+
+    let e = engine();
+    let desc = e
+        .registry
+        .get("render")
+        .expect("the render node is registered");
+    let spec = desc
+        .param("quality")
+        .expect("the render node declares a quality");
+    let ParamType::Enum { variants } = &spec.ty else {
+        panic!("quality stopped being an enum, which this test reads through");
+    };
+    assert!(!variants.is_empty(), "a preset list with no presets");
+
+    for variant in variants {
+        if variant.key == crate::nodes::CUSTOM_QUALITY {
+            continue;
+        }
+        assert!(
+            crate::nodes::quality_samples(&variant.key).is_some(),
+            "the quality preset {:?} has no sample count; add one beside the enum \
+             that declares it",
+            variant.key
+        );
+    }
+    // The fallback has to be one of them, or an unknown preset falls back to
+    // something the node does not offer.
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.key == crate::nodes::DEFAULT_QUALITY),
+        "the default quality preset is not among the ones the node declares"
+    );
+    assert!(
+        crate::nodes::quality_samples(crate::nodes::DEFAULT_QUALITY).is_some(),
+        "the fallback preset has no count of its own, so an unknown preset \
+         would resolve to nothing"
+    );
+
+    // What buys the exemption above.
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.key == crate::nodes::CUSTOM_QUALITY),
+        "the exact-count preset is not declared, so the exemption above is \
+         excusing a preset that does not exist"
+    );
+    assert!(
+        crate::nodes::quality_samples(crate::nodes::CUSTOM_QUALITY).is_none(),
+        "the exact-count preset gained a table entry, which would silently \
+         override the count somebody typed"
+    );
+    let samples = desc
+        .param("samples")
+        .expect("the exact-count preset has a sample count to read");
+    assert_eq!(
+        samples.show_if.len(),
+        1,
+        "the sample count is revealed by exactly one condition"
+    );
+    assert_eq!(samples.show_if[0].param, "quality");
+    assert_eq!(
+        samples.show_if[0].pred,
+        Pred::Eq(ParamValue::Enum(crate::nodes::CUSTOM_QUALITY.to_string())),
+        "the sample count is revealed by a preset other than the exact one, so \
+         it is either unreachable or offered when it is not read"
+    );
+}
+
+/// A `render` node saved before its second version resolves to the current
+/// defaults rather than to zeroes.
+///
+/// The distinction is not cosmetic. An engine of nothing renders nothing and a
+/// bounce budget of zero ends every path before it starts, so a reader that
+/// answered "absent" with "zero" would turn an old document into a black
+/// picture rather than into a default one.
+///
+/// A sibling test already checks that the aged *params* arrive at their
+/// defaults. This checks the resolver over them, which is a different unit and
+/// covers the one value no param carries: the sample count, which comes from
+/// the quality preset's table rather than from the node.
+#[test]
+fn a_render_node_saved_before_its_second_version_resolves_to_the_current_defaults() {
+    use crate::nodes::RenderEngine;
+
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+
+    // Age the file the way one written before this release holds it: version 1,
+    // and none of the keys that version never had.
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    // The root graph, not a subflow: a render node is an object-level node.
+    let mut aged = 0;
+    {
+        for stored in &mut scene.graph.nodes {
+            if stored.type_id == "render" {
+                stored.type_version = 1;
+                for key in [
+                    "engine",
+                    "quality",
+                    "bounces",
+                    "transmissive_bounces",
+                    "denoise",
+                    "resolution_preset",
+                    "orientation",
+                    "samples",
+                    "firefly_clamp",
+                    "seed",
+                    "denoise_strength",
+                    "denoise_until_samples",
+                    "denoise_sigma_color",
+                    "denoise_normal_power",
+                    "denoise_sigma_albedo",
+                    "denoise_level_falloff",
+                    "transparent_background",
+                    "aov_albedo",
+                    "aov_normal",
+                    "aov_depth",
+                ] {
+                    stored.params.remove(key);
+                }
+                aged += 1;
+            }
+        }
+    }
+    assert_eq!(aged, 1, "the render node was found and aged");
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "a pure addition must not warn on reopen: {warnings:?}"
+    );
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+
+    let settings = reopened
+        .render_settings(GraphContext::Root, node)
+        .expect("an aged render node still resolves");
+    assert_eq!(settings.engine, RenderEngine::Raster);
+    assert_eq!(settings.samples, 64, "the Good preset, not no samples");
+    assert_eq!(settings.bounces, 6, "the node's default, not zero bounces");
+    assert_eq!(
+        settings.transmissive_bounces, 4,
+        "the node's default, not zero glass bounces"
+    );
+    assert!(!settings.denoise);
+    assert_eq!(settings.width, 1920);
+    assert_eq!(settings.height, 1080);
+    assert_eq!(settings.camera, None);
+    // Field by field above for the values worth naming a reason for, and then
+    // whole. Comparing the struct is what makes this test cover a field added
+    // to the settings after it was written, which is the failure a list of
+    // named assertions cannot catch.
+    assert_eq!(
+        settings,
+        crate::nodes::RenderSettings::defaults(),
+        "an aged document resolves to something other than the node type's own \
+         defaults"
+    );
+}
+
+/// The no-render-node defaults are the node type's own, and are not zeroes.
+///
+/// `RenderSettings::defaults` resolves the descriptor through the registry's
+/// chokepoint and answers with the type's zero value if that ever fails, which
+/// is the right thing to do in a reader that cannot return an error and the
+/// wrong thing to ship unnoticed: a size of nothing, no samples and a bounce
+/// budget of zero is not a degraded picture but no picture. Both graphical
+/// shells and the headless command render at these when a scene has no render
+/// node.
+#[test]
+fn the_no_render_node_defaults_are_the_node_types_own() {
+    let d = crate::nodes::RenderSettings::defaults();
+
+    assert_eq!((d.width, d.height), (1920, 1080));
+    assert_eq!(d.engine, crate::nodes::RenderEngine::Raster);
+    assert_eq!((d.samples, d.bounces, d.transmissive_bounces), (64, 6, 4));
+    assert!(!d.denoise);
+    assert!(d.camera.is_none());
+    // The tracer's own constant rather than a substituted zero, which is a
+    // different sampling sequence and so a different picture.
+    assert_eq!(d.seed, 2_654_435_769);
+    assert!((d.firefly_clamp - 16.0).abs() < f32::EPSILON);
+    assert!((d.denoise_strength - 1.0).abs() < f32::EPSILON);
+    assert_eq!(d.denoise_until_samples, 0, "zero means never stop");
+    // The measured steering values.
+    assert!((d.denoise_sigma_color - 1.2).abs() < 1e-6);
+    assert!((d.denoise_normal_power - 128.0).abs() < 1e-3);
+    assert!((d.denoise_sigma_albedo - 0.08).abs() < 1e-6);
+    assert!((d.denoise_level_falloff - 2.0).abs() < f32::EPSILON);
+    // Nothing this release added is on by default. Exposing a control is not
+    // licence to change what it was set to, and a render that started writing
+    // three extra files would be a behaviour change nobody asked for.
+    assert!(!d.transparent_background);
+    assert!(!d.aov_albedo);
+    assert!(!d.aov_normal);
+    assert!(!d.aov_depth);
+}
+
+/// Every output-size preset the node offers resolves to a size the node itself
+/// would accept.
+///
+/// The case list comes from the registry and the bounds come from the node's
+/// own width and height ranges, so neither side is restated here: a preset
+/// added above the clamp fails the build rather than being offered and then
+/// refused, and raising or lowering the clamp re-checks every preset for free.
+#[test]
+fn every_output_size_preset_resolves_inside_the_nodes_own_edge_range() {
+    use crate::registry::param_spec::ParamType;
+
+    let e = engine();
+    let desc = e
+        .registry
+        .get("render")
+        .expect("the render node is registered");
+    let spec = desc
+        .param("resolution_preset")
+        .expect("the render node declares an output size preset");
+    let ParamType::Enum { variants } = &spec.ty else {
+        panic!("the output size preset stopped being an enum");
+    };
+
+    let edge_range = |key: &str| {
+        desc.param(key)
+            .and_then(|p| p.range)
+            .unwrap_or_else(|| panic!("{key} declares a hard range"))
+            .hard
+    };
+    let (min_w, max_w) = edge_range("width");
+    let (min_h, max_h) = edge_range("height");
+
+    let mut resolved = 0;
+    for variant in variants {
+        let Some((w, h)) = crate::nodes::resolution_preset_size(&variant.key) else {
+            assert_eq!(
+                variant.key,
+                crate::nodes::DEFAULT_RESOLUTION_PRESET,
+                "the output size preset {:?} resolves to no size; add one beside \
+                 the enum that declares it",
+                variant.key
+            );
+            continue;
+        };
+        resolved += 1;
+        assert!(
+            f64::from(w) >= min_w && f64::from(w) <= max_w,
+            "the preset {:?} is {w} wide, outside the {min_w}..{max_w} the node accepts",
+            variant.key
+        );
+        assert!(
+            f64::from(h) >= min_h && f64::from(h) <= max_h,
+            "the preset {:?} is {h} tall, outside the {min_h}..{max_h} the node accepts",
+            variant.key
+        );
+        // Stated wide edge first, because orientation is one rule applied to
+        // every entry rather than a property each one carries. An entry stated
+        // the other way round would come out landscape when it asked for
+        // portrait.
+        assert!(
+            w >= h,
+            "the preset {:?} is stated {w} by {h}, taller than it is wide; \
+             state it wide edge first and let Portrait turn it",
+            variant.key
+        );
+    }
+    assert!(resolved > 0, "a preset list with nothing but Custom in it");
+
+    // Custom has to be among them, or the default names a preset the node does
+    // not offer and every document opens on a missing entry.
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.key == crate::nodes::DEFAULT_RESOLUTION_PRESET),
+        "the default output size preset is not among the ones the node declares"
+    );
+    assert_eq!(
+        spec.default,
+        ParamValue::Enum(crate::nodes::DEFAULT_RESOLUTION_PRESET.to_string()),
+        "the output size preset defaults to something other than custom, which \
+         would resize every document that carries an explicit width and height"
+    );
+}
+
+/// Choosing a preset sets the size, and orientation turns it.
+///
+/// The pair that would otherwise only be checked by eye: a preset that merely
+/// described a size, or an orientation that did nothing, would both leave every
+/// other test passing.
+#[test]
+fn an_output_size_preset_sets_the_size_and_orientation_turns_it() {
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+    // An authored size that no preset matches, so anything below that reads
+    // through to it is visible rather than coincidentally right.
+    for (key, value) in [("width", 640), ("height", 480)] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node,
+            key: key.to_string(),
+            value: ParamSource::Literal(ParamValue::Int(value)),
+        })
+        .unwrap();
+    }
+    let set_enum = |e: &mut Engine, key: &str, value: &str| {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node,
+            key: key.to_string(),
+            value: ParamSource::Literal(ParamValue::Enum(value.to_string())),
+        })
+        .unwrap();
+    };
+    let size = |e: &Engine| {
+        let s = e
+            .render_settings(GraphContext::Root, node)
+            .expect("the render node resolves");
+        (s.width, s.height)
+    };
+
+    assert_eq!(size(&e), (640, 480), "custom renders what was authored");
+
+    set_enum(&mut e, "resolution_preset", "uhd_4k");
+    assert_eq!(
+        size(&e),
+        (3840, 2160),
+        "the preset describes a size without setting one"
+    );
+
+    set_enum(&mut e, "orientation", "portrait");
+    assert_eq!(size(&e), (2160, 3840), "portrait did not turn the preset");
+
+    // The vertical delivery sizes come from here rather than from entries of
+    // their own, which is the whole reason the list is stated wide edge first.
+    set_enum(&mut e, "resolution_preset", "hd");
+    assert_eq!(size(&e), (1080, 1920), "the story and reel size");
+
+    // Square is the one entry orientation cannot move.
+    set_enum(&mut e, "resolution_preset", "square");
+    assert_eq!(size(&e), (1080, 1080));
+
+    // And going back to custom returns the authored numbers untouched: a preset
+    // resolves, it does not overwrite.
+    set_enum(&mut e, "resolution_preset", "custom");
+    assert_eq!(
+        size(&e),
+        (640, 480),
+        "the authored size did not survive a trip through a preset"
+    );
+}
+
+/// An exact sample count is read only when it is the one being used.
+#[test]
+fn the_exact_sample_count_is_read_only_for_its_own_preset() {
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node,
+        key: "samples".to_string(),
+        value: ParamSource::Literal(ParamValue::Int(90)),
+    })
+    .unwrap();
+    let samples = |e: &Engine| {
+        e.render_settings(GraphContext::Root, node)
+            .expect("the render node resolves")
+            .samples
+    };
+
+    // The named presets still answer with their own counts, and a stored exact
+    // count sitting behind them changes nothing.
+    assert_eq!(samples(&e), 64, "the Good preset, not the stored 90");
+    for (preset, expected) in [
+        ("draft", 16),
+        ("good", 64),
+        ("high", 256),
+        ("reference", 1024),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node,
+            key: "quality".to_string(),
+            value: ParamSource::Literal(ParamValue::Enum(preset.to_string())),
+        })
+        .unwrap();
+        assert_eq!(
+            samples(&e),
+            expected,
+            "the {preset} preset stopped resolving to the count it always has"
+        );
+    }
+
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node,
+        key: "quality".to_string(),
+        value: ParamSource::Literal(ParamValue::Enum(crate::nodes::CUSTOM_QUALITY.to_string())),
+    })
+    .unwrap();
+    assert_eq!(samples(&e), 90, "the exact count is not being read");
+}
+
+/// A document carrying an explicit size keeps it, and keeps rendering at it.
+///
+/// The output-size preset defaults to custom for exactly this reason rather
+/// than for taste: every document written before the preset list existed holds
+/// a width and a height, and any other default would open one with a preset
+/// selected that may not match them, quietly reframing a finished shot.
+#[test]
+fn a_render_node_saved_with_an_explicit_size_still_renders_at_it() {
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+    for (key, value) in [("width", 1280), ("height", 720)] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node,
+            key: key.to_string(),
+            value: ParamSource::Literal(ParamValue::Int(value)),
+        })
+        .unwrap();
+    }
+
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    for stored in &mut scene.graph.nodes {
+        if stored.type_id == "render" {
+            stored.type_version = 2;
+            stored.params.remove("resolution_preset");
+            stored.params.remove("orientation");
+        }
+    }
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(warnings.is_empty(), "must not warn: {warnings:?}");
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+
+    let settings = reopened
+        .render_settings(GraphContext::Root, node)
+        .expect("the reopened render node resolves");
+    assert_eq!(
+        (settings.width, settings.height),
+        (1280, 720),
+        "a preset the document never chose has overridden the authored size"
     );
 }

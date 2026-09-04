@@ -45,15 +45,26 @@ impl State {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: if cfg!(target_arch = "wasm32") {
-                    wgpu::Limits::downlevel_webgl2_defaults()
-                } else {
-                    wgpu::Limits::default()
-                },
+                // The desktop carried the same 256 MiB ceiling the browser
+                // did, so a large model working here has been a statement
+                // about which models were opened rather than about how this
+                // shell is configured. Both shells now raise the same size
+                // limits off the same helper.
+                //
+                // The branch that stood here selected WebGL2 downlevel
+                // limits under `cfg!(target_arch = "wasm32")`. It was dead:
+                // this crate is native-only and pulls winit, egui-wgpu and
+                // rfd. The web shell has its own device request.
+                required_limits: solarxy_renderer::limits::required_limits(&adapter.limits()),
                 memory_hints: Default::default(),
                 trace: wgpu::Trace::Off,
             })
             .await?;
+
+        // Before anything uses the device: without a handler, wgpu's
+        // default for an uncaptured error is a panic, so the process died
+        // on any validation error with nothing a user could read.
+        let gpu_faults = solarxy_renderer::faults::install(&device);
 
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
@@ -103,7 +114,17 @@ impl State {
             ibl_mode: preferences.display.ibl_mode,
             uv_checker_png: include_bytes!("../../../../res/textures/uv-checker_1k.png"),
         };
-        let renderer = Renderer::new(&device, &queue, &config, &renderer_init)?;
+        let mut renderer = Renderer::new(&device, &queue, &config, &renderer_init)?;
+        // Seeded through the setter rather than through `RendererInit`, because
+        // the setter is what keeps the two passes holding the value in step and
+        // nothing has composited yet: the first uniform write is a frame away.
+        renderer
+            .post
+            .set_strengths(preferences.display.post_strengths());
+        // Built before the renderer moves into `State`: the backend keeps its
+        // own handle on the layouts so it can upload without being handed the
+        // renderer back.
+        let raster = solarxy_host::RasterBackend::new(std::sync::Arc::clone(&renderer.layouts));
 
         // The viewport renders before any model is chosen, so the scene
         // environment exists from startup, fitted to a placeholder box.
@@ -147,7 +168,13 @@ impl State {
                         uv_zoom: 1.0,
                         show_uv_overlap: false,
                         show_validation: false,
+                        // Off on the desktop, and not a policy disagreement
+                        // with the browser: this shell draws no light marker
+                        // channel at all, because it has no viewport gizmo to
+                        // aim with yet. It turns on with that shell's canvas.
+                        show_light_markers: false,
                         turntable_active: false,
+                        pane_engine: solarxy_core::view_config::PaneEngine::Raster,
                     };
                     [pds; 4]
                 },
@@ -172,7 +199,13 @@ impl State {
             engine: None,
             engine_scene: None,
             selected_object: None,
-            scene_objects: solarxy_renderer::scene_objects::SceneObjects::new(),
+            cook_health: super::cook_health::CookHealth::default(),
+            still: None,
+            finished_float: None,
+            tracer: None,
+            traced_env_dirty: false,
+            look_through: [None; 4],
+            raster,
             env,
             env_bounds,
             pending_scene_deltas: Vec::new(),
@@ -185,6 +218,7 @@ impl State {
                 uv_left_pressed: false,
                 uv_middle_pressed: false,
                 modifiers: ModifiersState::empty(),
+                nav_button_down: false,
             },
             review: super::review::ReviewState {
                 author: preferences.review.author.clone(),
@@ -201,6 +235,7 @@ impl State {
             quit_requested: false,
             last_frame_time: Instant::now(),
             dt: 0.0,
+            gpu_faults,
             _backend_info: backend_info,
             preferences,
             window,
@@ -212,7 +247,7 @@ impl State {
         // a supported file look unsupported; a second extension check here
         // is how the three would drift apart again.
         if let Some(path) = model_path {
-            state.handle_dropped_file(std::path::PathBuf::from(path));
+            state.open_file(std::path::PathBuf::from(path));
         }
 
         Ok(state)

@@ -194,6 +194,14 @@ pub enum BgKind {
     Gradient,
     /// HDRI equirect skybox pass.
     Hdri,
+    /// Nothing at all: the pass clears to zero alpha and no background is
+    /// drawn, so what the render carries behind the subject is a matte.
+    ///
+    /// A render property rather than a user background: nothing resolves to
+    /// it from preferences, and no viewport pane ever carries it. The still
+    /// job substitutes it when a render asks for a transparent background;
+    /// see [`ResolvedBackground::TRANSPARENT`].
+    Transparent,
 }
 
 /// A background resolved to concrete colours — the registry-free form the
@@ -208,6 +216,20 @@ pub struct ResolvedBackground {
     pub sky_top: [f32; 3],
     /// Lower sky colour — gradient-pass bottom + IBL lower hemisphere.
     pub sky_bottom: [f32; 3],
+}
+
+impl ResolvedBackground {
+    /// The transparent film back: zero everywhere, nothing drawn behind the
+    /// subject. Substituted by the still job when a render asks for it; it is
+    /// deliberately not reachable from any background preference, because the
+    /// environment that lights the scene is unchanged and only the photograph
+    /// of it is withheld.
+    pub const TRANSPARENT: Self = Self {
+        kind: BgKind::Transparent,
+        clear: [0.0; 3],
+        sky_top: [0.0; 3],
+        sky_bottom: [0.0; 3],
+    };
 }
 
 impl BuiltinBg {
@@ -637,6 +659,51 @@ pub struct DisplayPrefs {
     pub inspection_mode: InspectionMode,
     #[serde(default = "default_texel_density_target")]
     pub texel_density_target: f32,
+    /// How much bloom is added back, how bright a pixel has to be to
+    /// contribute, and how far the composite blends towards the occlusion
+    /// buffer. Beside the two toggles because they are the same two effects
+    /// said in more detail.
+    ///
+    /// Defaulted rather than required: a configuration file written before
+    /// these existed must load and render exactly what it rendered before,
+    /// which is what the defaults being the old compiled-in constants buys.
+    #[serde(default = "default_bloom_strength")]
+    pub bloom_strength: f32,
+    #[serde(default = "default_bloom_threshold")]
+    pub bloom_threshold: f32,
+    #[serde(default = "default_ssao_strength")]
+    pub ssao_strength: f32,
+}
+
+impl DisplayPrefs {
+    /// The three intensities, as the renderer's own value.
+    #[must_use]
+    pub fn post_strengths(&self) -> crate::view_config::PostStrengths {
+        crate::view_config::PostStrengths {
+            bloom_strength: self.bloom_strength,
+            bloom_threshold: self.bloom_threshold,
+            ssao_strength: self.ssao_strength,
+        }
+    }
+
+    /// Store the three intensities back.
+    pub fn set_post_strengths(&mut self, s: crate::view_config::PostStrengths) {
+        self.bloom_strength = s.bloom_strength;
+        self.bloom_threshold = s.bloom_threshold;
+        self.ssao_strength = s.ssao_strength;
+    }
+}
+
+fn default_bloom_strength() -> f32 {
+    crate::view_config::DEFAULT_BLOOM_STRENGTH
+}
+
+fn default_bloom_threshold() -> f32 {
+    crate::view_config::DEFAULT_BLOOM_THRESHOLD
+}
+
+fn default_ssao_strength() -> f32 {
+    crate::view_config::DEFAULT_SSAO_STRENGTH
 }
 
 fn default_background() -> BackgroundMode {
@@ -809,6 +876,9 @@ impl Default for DisplayPrefs {
             turntable_rpm: 5.0,
             inspection_mode: InspectionMode::Shaded,
             texel_density_target: 1.0,
+            bloom_strength: crate::view_config::DEFAULT_BLOOM_STRENGTH,
+            bloom_threshold: crate::view_config::DEFAULT_BLOOM_THRESHOLD,
+            ssao_strength: crate::view_config::DEFAULT_SSAO_STRENGTH,
         }
     }
 }
@@ -951,6 +1021,9 @@ mod tests {
                 turntable_rpm: 30.0,
                 inspection_mode: InspectionMode::TexelDensity,
                 texel_density_target: 2.5,
+                bloom_strength: 1.25,
+                bloom_threshold: 0.4,
+                ssao_strength: 0.6,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,
@@ -1081,6 +1154,12 @@ mod tests {
         assert_eq!(parsed.history, HistoryPrefs::default());
         assert_eq!(parsed.ui, UiPrefs::default());
         assert_eq!(parsed.updater, UpdaterPrefs::default());
+        // This block predates the strength controls, which is the case that
+        // has to keep rendering what it always rendered.
+        assert_eq!(
+            parsed.display.post_strengths(),
+            crate::view_config::PostStrengths::default()
+        );
     }
 
     #[test]
@@ -1144,6 +1223,52 @@ mod tests {
         let ui = UiPrefs::default();
         assert!(ui.status_bar_visible);
         assert_eq!(ui.max_recent_files, 20);
+    }
+
+    #[test]
+    fn post_strength_defaults_are_the_values_the_effects_shipped_with() {
+        // The whole reason the controls can ship without re-baselining a
+        // golden capture: an untouched configuration composites with exactly
+        // the numbers that were compiled into the two passes before.
+        let d = DisplayPrefs::default();
+        assert!((d.bloom_strength - 0.8).abs() < f32::EPSILON);
+        assert!((d.bloom_threshold - 0.8).abs() < f32::EPSILON);
+        assert!((d.ssao_strength - 0.8).abs() < f32::EPSILON);
+        assert_eq!(
+            d.post_strengths(),
+            crate::view_config::PostStrengths::default()
+        );
+    }
+
+    #[test]
+    fn post_strengths_round_trip_through_display_prefs() {
+        let mut d = DisplayPrefs::default();
+        let s = crate::view_config::PostStrengths {
+            bloom_strength: 1.5,
+            bloom_threshold: 0.25,
+            ssao_strength: 0.4,
+        };
+        d.set_post_strengths(s);
+        assert_eq!(d.post_strengths(), s);
+    }
+
+    #[test]
+    fn post_strengths_clamp_into_their_usable_ranges() {
+        let over = crate::view_config::PostStrengths {
+            bloom_strength: 99.0,
+            bloom_threshold: -3.0,
+            ssao_strength: 4.0,
+        }
+        .clamped();
+        assert!(
+            (over.bloom_strength - crate::view_config::MAX_BLOOM_STRENGTH).abs() < f32::EPSILON
+        );
+        assert!(
+            (over.bloom_threshold - crate::view_config::MIN_BLOOM_THRESHOLD).abs() < f32::EPSILON
+        );
+        // Occlusion is a blend factor, so its ceiling is one rather than the
+        // bloom ceiling it would otherwise be mistaken for.
+        assert!((over.ssao_strength - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]

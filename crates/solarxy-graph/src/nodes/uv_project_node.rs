@@ -27,6 +27,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()
+                .carries_placements()
                 .doc(
                     "The geometry to unwrap. Every mesh in the set is projected, and any \
                      UVs a mesh already carried are overwritten rather than kept.",

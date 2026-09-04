@@ -88,6 +88,13 @@ fn count_with_source(drawn: usize, source: Option<usize>) -> String {
     }
 }
 
+/// A numeric value cell, monospaced: the grid's numbers are read down a
+/// column, and digit alignment is what makes two counts comparable at a
+/// glance. Labels and words stay in the interface face.
+fn value_label(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.label(egui::RichText::new(text.into()).monospace());
+}
+
 fn format_file_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = 1024 * 1024;
@@ -159,7 +166,7 @@ fn draw_model_section(ui: &mut egui::Ui, info: &ModelInfo) {
             ui.end_row();
 
             ui.label("Size");
-            ui.label(format_file_size(info.file_size));
+            value_label(ui, format_file_size(info.file_size));
             ui.end_row();
 
             ui.label("Format");
@@ -179,44 +186,44 @@ fn draw_model_section(ui: &mut egui::Ui, info: &ModelInfo) {
             // rather than shown as a duplicate or a zero.
             if info.scene.is_none() {
                 ui.label("Polygons");
-                ui.label(format_number(info.stats.polys));
+                value_label(ui, format_number(info.stats.polys));
                 ui.end_row();
             }
 
             ui.label("Triangles");
-            ui.label(count_with_source(
-                info.stats.tris,
-                info.scene.map(|s| s.unique_tris),
-            ));
+            value_label(
+                ui,
+                count_with_source(info.stats.tris, info.scene.map(|s| s.unique_tris)),
+            );
             ui.end_row();
 
             ui.label("Vertices");
-            ui.label(count_with_source(
-                info.stats.verts,
-                info.scene.map(|s| s.unique_verts),
-            ));
+            value_label(
+                ui,
+                count_with_source(info.stats.verts, info.scene.map(|s| s.unique_verts)),
+            );
             ui.end_row();
 
             if let Some(scene) = info.scene {
                 ui.label("Objects");
-                ui.label(scene.objects.to_string());
+                value_label(ui, scene.objects.to_string());
                 ui.end_row();
 
                 // Only worth a row when something is actually placed more
                 // than once; otherwise it just repeats the mesh count.
                 if scene.is_instanced() {
                     ui.label("Instances");
-                    ui.label(format_number(scene.instances));
+                    value_label(ui, format_number(scene.instances));
                     ui.end_row();
                 }
             }
 
             ui.label("Meshes");
-            ui.label(info.mesh_count.to_string());
+            value_label(ui, info.mesh_count.to_string());
             ui.end_row();
 
             ui.label("Materials");
-            ui.label(info.material_count.to_string());
+            value_label(ui, info.material_count.to_string());
             ui.end_row();
         });
 
@@ -229,7 +236,7 @@ fn draw_model_section(ui: &mut egui::Ui, info: &ModelInfo) {
         .spacing([8.0, 2.0])
         .show(ui, |ui| {
             ui.label("W \u{00d7} H \u{00d7} D");
-            ui.label(format!("{w:.3} \u{00d7} {h:.3} \u{00d7} {d:.3}"));
+            value_label(ui, format!("{w:.3} \u{00d7} {h:.3} \u{00d7} {d:.3}"));
             ui.end_row();
 
             ui.label("UV Mapping");
@@ -270,10 +277,10 @@ fn draw_hdri_section(
             ui.end_row();
 
             ui.label("Resolution");
-            ui.label(format!(
-                "{} \u{00d7} {}",
-                info.resolution.0, info.resolution.1
-            ));
+            value_label(
+                ui,
+                format!("{} \u{00d7} {}", info.resolution.0, info.resolution.1),
+            );
             ui.end_row();
 
             ui.label("Size");

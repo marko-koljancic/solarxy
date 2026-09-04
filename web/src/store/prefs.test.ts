@@ -95,6 +95,13 @@ describe("defaults", () => {
       // a white screen in every browser.
       ssaoEnabled: true,
       bloomEnabled: true,
+      // The three strengths were compiled into the two passes before they
+      // were adjustable, so these are not a taste: they are what keeps an
+      // untouched session rendering what the previous release rendered.
+      bloomStrength: 0.8,
+      bloomThreshold: 0.8,
+      ssaoStrength: 0.8,
+      previewDenoise: true,
     });
   });
 });
@@ -132,6 +139,36 @@ describe("rehydration backfill", () => {
     });
     expect(prefs.display.pointSize).toBe(6);
     expect(prefs.display.turntableRpm).toBe(12);
+  });
+
+  it("backfills the post strengths for a blob persisted before 0.9.0", () => {
+    // The upgrade path that matters most here: a missing strength becoming
+    // 0 would silently turn both effects off for every existing session
+    // while leaving their toggles reading as on.
+    const prefs = mergePersistedPrefs({
+      display: {
+        wireframeWeight: "Bold",
+        background: "Black",
+        turntableRpm: 12,
+        ssaoEnabled: true,
+        bloomEnabled: true,
+      },
+    });
+    expect(prefs.display.bloomStrength).toBe(0.8);
+    expect(prefs.display.bloomThreshold).toBe(0.8);
+    expect(prefs.display.ssaoStrength).toBe(0.8);
+    expect(prefs.display.previewDenoise).toBe(true);
+  });
+
+  it("a stored post strength survives the merge", () => {
+    const prefs = mergePersistedPrefs({
+      display: { bloomStrength: 2.5, ssaoStrength: 0.25, previewDenoise: false },
+    });
+    expect(prefs.display.bloomStrength).toBe(2.5);
+    expect(prefs.display.ssaoStrength).toBe(0.25);
+    expect(prefs.display.previewDenoise).toBe(false);
+    // Untouched siblings still backfill.
+    expect(prefs.display.bloomThreshold).toBe(0.8);
   });
 
   it("backfills the attribute-label defaults for a blob that predates them", () => {

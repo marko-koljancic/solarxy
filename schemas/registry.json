@@ -97,7 +97,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -136,7 +136,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A uniform fill: it adds the same light to every surface, whatever its position and whichever way it faces. No position, no direction, no shadow, no falloff.\n\nThe blunt instrument for lifting shadows that a key light left too dark. `hemisphere_light` is usually the better answer -- it costs the same and at least varies from sky to ground -- so reach for ambient when you specifically want flatness, or want a quick global lift while blocking out a scene.\n\nIt costs no light slot: ambient and hemisphere lights fold into the ambient term instead of competing for the 8 direct-light slots, so stack as many as you like. Two honest limits: it ADDS to the IBL environment rather than scaling it, so it cannot dim an HDRI, and ambient occlusion still darkens it, so it will not fully flatten creases. Show Helper and Helper Size do nothing here -- with no position and no direction there is no honest shape to draw.",
+      "doc": "A uniform fill: it adds the same light to every surface, whatever its position and whichever way it faces. No position, no direction, no shadow, no falloff.\n\nThe blunt instrument for lifting shadows that a key light left too dark. `hemisphere_light` is usually the better answer -- it costs the same and at least varies from sky to ground -- so reach for ambient when you specifically want flatness, or want a quick global lift while blocking out a scene.\n\nIt costs no light slot: ambient and hemisphere lights fold into the ambient term instead of competing for the interactive viewport's 8 direct-light slots, so stack as many as you like. Two honest limits: it ADDS to the IBL environment rather than scaling it, so it cannot dim an HDRI, and ambient occlusion still darkens it, so it will not fully flatten creases. Show Helper and Helper Size do nothing here -- with no position and no direction there is no honest shape to draw.",
       "searchAliases": [
         "light",
         "fill",
@@ -2401,7 +2401,7 @@
     },
     {
       "typeId": "camera",
-      "version": 2,
+      "version": 3,
       "displayName": "Camera",
       "category": "cameras",
       "categoryLabel": "Cameras",
@@ -2627,6 +2627,96 @@
             }
           ],
           "doc": "Half the visible height, in metres: at the default 5 the camera frames 10 metres top to bottom, and the width follows from the pane's shape. This is the orthographic stand-in for zoom. With no perspective, moving the camera closer changes nothing about the framing, so this is the only way to fit more or less in frame. Orthographic only."
+        },
+        {
+          "key": "f_stop",
+          "label": "F-Stop",
+          "group": "lens",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            128.0
+          ],
+          "soft": [
+            1.0,
+            22.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "neq",
+                "value": "orthographic"
+              }
+            }
+          ],
+          "doc": "How wide the aperture opens, as a photographer's f-number: the focal length divided by the opening's diameter. Smaller is wider, so f/1.4 throws almost everything out of focus and f/16 holds nearly all of it sharp.\n\n0, the default, is a pinhole: everything is sharp at every distance, which is what a computer-generated image does unless told otherwise and what every camera made before this control existed still does. Set anything above 0 and Focus Distance starts to matter.\n\nOn a physical camera the f-number works against Focal Length directly. On a perspective camera there is no focal length to work against, so one is derived back out of Field of View against the same 36mm the Sensor Width control describes, which is what makes the same f-number mean the same blur on both.\n\nRead by rendered output only: the interactive viewport draws through a pinhole whatever this says, because a rasterizer has one sample per pixel and no aperture to integrate over."
+        },
+        {
+          "key": "focus_distance",
+          "label": "Focus Distance",
+          "group": "lens",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            100000.0
+          ],
+          "soft": [
+            0.0,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "neq",
+                "value": "orthographic"
+              }
+            }
+          ],
+          "doc": "How far in front of the camera is sharp, in metres. Everything nearer or further blurs, and how fast it blurs is F-Stop's job.\n\n0, the default, focuses on Target, so aiming the camera also focuses it and opening the aperture does something sensible immediately. Set a number to override that and focus on a fixed distance instead, which is what you want when the subject is not what the camera is pointed at.\n\nIt does nothing while F-Stop is 0, because a pinhole has nothing to focus."
+        },
+        {
+          "key": "aperture_blades",
+          "label": "Aperture Blades",
+          "group": "lens",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0,
+          "hard": [
+            0.0,
+            16.0
+          ],
+          "soft": [
+            0.0,
+            12.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "neq",
+                "value": "orthographic"
+              }
+            }
+          ],
+          "doc": "How many blades the iris has, which is the shape an out-of-focus highlight takes: 6 blades give hexagonal bokeh, 8 octagonal. 0, the default, is a perfectly circular opening, which no real lens has and every one approaches wide open. Values of 1 and 2 are treated as circular, there being no polygon with fewer than three sides.\n\nIt does nothing while F-Stop is 0: a pinhole has no opening to shape."
         },
         {
           "key": "near",
@@ -4458,7 +4548,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -4497,7 +4587,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A parallel light, like the sun: every ray travels the same direction, so nothing is nearer to it and nothing falls off with distance. Only the direction from Position to Target matters.\n\nThe key light for most scenes -- sun, moon, a large window. Aim it by moving Target rather than Position, and pair it with a `hemisphere_light` or `ambient_light` to lift the shadow side, because a directional light on its own leaves every face turned away from it black.\n\nIts Position lights nothing. The shading uses only the Position-to-Target direction, and the shadow frustum auto-fits the scene bounds instead of sitting at Position, so moving the node in space moves nothing but its helper arrow. It spends one of the 8 direct-light slots, and Cast Shadow is exclusive: granting it here revokes it from every other light in a single undo step.",
+      "doc": "A parallel light, like the sun: every ray travels the same direction, so nothing is nearer to it and nothing falls off with distance. Only the direction from Position to Target matters.\n\nThe key light for most scenes -- sun, moon, a large window. Aim it by moving Target rather than Position, and pair it with a `hemisphere_light` or `ambient_light` to lift the shadow side, because a directional light on its own leaves every face turned away from it black.\n\nIts Position lights nothing. The shading uses only the Position-to-Target direction, and the shadow frustum auto-fits the scene bounds instead of sitting at Position, so moving the node in space moves nothing but its helper arrow. It spends one of the 8 direct-light slots the interactive viewport binds -- that ceiling is the viewport's, not the scene's -- and Cast Shadow is exclusive: granting it here revokes it from every other light in a single undo step.",
       "searchAliases": [
         "light",
         "sun",
@@ -5820,7 +5910,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -7706,7 +7796,7 @@
               }
             }
           ],
-          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer."
+          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the coat in the render."
         },
         {
           "key": "clearcoat_roughness",
@@ -7773,7 +7863,7 @@
               }
             }
           ],
-          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport."
+          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the sheen in the render."
         },
         {
           "key": "sheen_roughness",
@@ -7835,7 +7925,7 @@
               }
             }
           ],
-          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport."
+          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the film in the render."
         },
         {
           "key": "iridescence_ior",
@@ -8038,7 +8128,7 @@
               }
             }
           ],
-          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful."
+          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful. The interactive viewport and a traced render evaluate the stretched highlight by different methods, so the two will not match pixel for pixel. Judge the highlight in the render."
         },
         {
           "key": "anisotropy_rotation",
@@ -8105,7 +8195,7 @@
               }
             }
           ],
-          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it."
+          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it. A traced render does carry light through to what is behind, so the two differ by more than pixels here: judge glass in the render. The traced result is itself an approximation, close enough to light a shot by and not a physical prediction."
         },
         {
           "key": "ior",
@@ -9501,7 +9591,7 @@
     },
     {
       "typeId": "point_light",
-      "version": 2,
+      "version": 3,
       "displayName": "Point Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -9642,6 +9732,27 @@
           "doc": "Falloff exponent: brightness is divided by the distance raised to this power. The default 2 is physical inverse-square. 0 disables decay outright, so the light is equally bright at any distance -- handy for a flat fill, wrong for anything meant to read as a real source. Values between 0 and 2 give the gentler falloff that is often easier to light with than the physical answer."
         },
         {
+          "key": "radius",
+          "label": "Radius",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            5.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "How big the emitter is, in metres. 0, the default, is a mathematical point, which casts a shadow with a perfectly hard edge -- the giveaway that a light is not a real object. Give it a size and the shadow gains a penumbra that widens with distance from the surface, the way a real lamp's does, because part of the emitter is visible where the rest is hidden.\n\nThis is read by rendered output only; the interactive viewport draws hard-edged shadows whatever you set here. That is not an oversight to be fixed later: a shadow map answers one visibility question from one place, and blurring it would soften a contact shadow as much as a distant one."
+        },
+        {
           "key": "cast_shadow",
           "label": "Cast Shadow",
           "group": "light",
@@ -9731,7 +9842,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -9770,7 +9881,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "An omnidirectional light: it emits from Position equally in every direction, dimming with distance according to Range and Decay.\n\nThe workhorse for a local source -- a bulb, a candle, a muzzle flash. Drop it in the root graph beside your `geo` containers; it takes no wires, because the scene builder reads its params straight off the node rather than passing a light down a chain. Reach for `directional_light` when you want a sun instead, or `spot_light` when you want the same falloff inside a cone.\n\nTwo limits bite. Only 8 point, spot, directional, and rect-area lights reach the shader: the first 8 in document order win and the rest are dropped with no warning anywhere, so a scene that quietly stops responding to new lights is probably at the cap (ambient and hemisphere lights are free, and an invisible light gives its slot back). And shadow casting is exclusive -- switching Cast Shadow on here switches it off on every other light, in one undo step.",
+      "doc": "An omnidirectional light: it emits from Position equally in every direction, dimming with distance according to Range and Decay.\n\nThe workhorse for a local source -- a bulb, a candle, a muzzle flash. Drop it in the root graph beside your `geo` containers; it takes no wires, because the scene builder reads its params straight off the node rather than passing a light down a chain. Reach for `directional_light` when you want a sun instead, or `spot_light` when you want the same falloff inside a cone.\n\nTwo limits bite. It spends one of the 8 direct-light slots the interactive viewport binds, and past 8 the first 8 in document order win with the rest dropped silently, so a scene that quietly stops responding to new lights is probably at that cap (ambient and hemisphere lights are free, and an invisible light gives its slot back). That ceiling is the viewport's, not the scene's -- rendered output reads every light. And shadow casting is exclusive: switching Cast Shadow on here switches it off on every other light, in one undo step.",
       "searchAliases": [
         "light",
         "omni",
@@ -10127,7 +10238,7 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer."
+          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the coat in the render."
         },
         {
           "key": "clearcoat_roughness",
@@ -10178,7 +10289,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport."
+          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the sheen in the render."
         },
         {
           "key": "sheen_roughness",
@@ -10222,7 +10333,7 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport."
+          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport, and a traced render evaluates it by a different method, so the two will not match pixel for pixel. Judge the film in the render."
         },
         {
           "key": "iridescence_ior",
@@ -10377,7 +10488,7 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful."
+          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful. The interactive viewport and a traced render evaluate the stretched highlight by different methods, so the two will not match pixel for pixel. Judge the highlight in the render."
         },
         {
           "key": "anisotropy_rotation",
@@ -10428,7 +10539,7 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it."
+          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it. A traced render does carry light through to what is behind, so the two differ by more than pixels here: judge glass in the render. The traced result is itself an approximation, close enough to light a shot by and not a physical prediction."
         },
         {
           "key": "ior",
@@ -10915,7 +11026,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -10954,7 +11065,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A rectangular emitter -- the softbox of the light kit -- with a Width and Height, sitting at Translate and facing straight down until you rotate it.\n\nWhat you reach for it for: soft key and fill on a product or character shot, and the broad specular roll-off a panel gives that a pinpoint source cannot. Widen it and the highlight spreads and the terminator softens; turn it edge-on and it dims, because you are looking at less of it.\n\nThe shading integrates over the whole rectangle (linearly transformed cosines), so Width, Height and Rotate all reach the image rather than only the helper. Two caveats remain. It cannot cast shadows -- it has no Cast Shadow param, and the exclusive shadow caster stays with the punctual lights -- so it lights through geometry. And Helper Size is ignored, because the helper rectangle takes its size from Width and Height. It spends one of the 8 direct-light slots like any other.",
+      "doc": "A rectangular emitter -- the softbox of the light kit -- with a Width and Height, sitting at Translate and facing straight down until you rotate it.\n\nWhat you reach for it for: soft key and fill on a product or character shot, and the broad specular roll-off a panel gives that a pinpoint source cannot. Widen it and the highlight spreads and the terminator softens; turn it edge-on and it dims, because you are looking at less of it.\n\nThe shading integrates over the whole rectangle (linearly transformed cosines), so Width, Height and Rotate all reach the image rather than only the helper. Two caveats remain. It cannot cast shadows -- it has no Cast Shadow param, and the exclusive shadow caster stays with the punctual lights -- so it lights through geometry. And Helper Size is ignored, because the helper rectangle takes its size from Width and Height. It spends one of the 8 direct-light slots the interactive viewport binds, like any other.",
       "searchAliases": [
         "light",
         "area",
@@ -10966,7 +11077,7 @@
     },
     {
       "typeId": "render",
-      "version": 1,
+      "version": 3,
       "displayName": "Render",
       "category": "export",
       "categoryLabel": "Export",
@@ -11027,6 +11138,99 @@
           "doc": "Which camera to render through, picked by path from the cameras in the scene -- a reference, not a wire. Left unset the render comes from the current viewport view, wherever you last orbited it to, which is convenient but not repeatable. Point it at a camera to pin the shot down."
         },
         {
+          "key": "resolution_preset",
+          "label": "Output Size",
+          "group": "render",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "custom",
+              "Custom"
+            ],
+            [
+              "hd",
+              "HD (1920 x 1080)"
+            ],
+            [
+              "uhd_4k",
+              "UHD 4K (3840 x 2160)"
+            ],
+            [
+              "uhd_8k",
+              "UHD 8K (7680 x 4320)"
+            ],
+            [
+              "dci_2k",
+              "DCI 2K (2048 x 1080)"
+            ],
+            [
+              "dci_4k",
+              "DCI 4K (4096 x 2160)"
+            ],
+            [
+              "square",
+              "Square (1080 x 1080)"
+            ],
+            [
+              "social_5x4",
+              "Social 5:4 (1350 x 1080)"
+            ],
+            [
+              "a4_300",
+              "A4 at 300 dpi (3508 x 2480)"
+            ],
+            [
+              "a3_300",
+              "A3 at 300 dpi (4961 x 3508)"
+            ],
+            [
+              "letter_300",
+              "Letter at 300 dpi (3300 x 2550)"
+            ]
+          ],
+          "accept": [],
+          "default": "custom",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The output size, chosen by name. Custom is the default and reveals Width and Height for a size that is not on the list.\n\nChoosing a preset sets the size rather than describing it. Width and Height together fix the aspect the camera frames at, so a preset changes the composition, not just the file size.\n\nEvery entry states its pixel size, and the print entries state the density that size assumes, so nothing here depends on a dots-per-inch setting the renderer would ignore. Sizes are listed wide edge first; Orientation turns them."
+        },
+        {
+          "key": "orientation",
+          "label": "Orientation",
+          "group": "render",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "landscape",
+              "Landscape"
+            ],
+            [
+              "portrait",
+              "Portrait"
+            ]
+          ],
+          "accept": [],
+          "default": "landscape",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "resolution_preset",
+              "pred": {
+                "kind": "neq",
+                "value": "custom"
+              }
+            }
+          ],
+          "doc": "Which way round the chosen size is: Landscape puts the wide edge across, Portrait puts it up.\n\nIt turns the size, and the camera frames to whatever aspect that gives it, so switching orientation reframes what is in view rather than only rotating the file.\n\nThe vertical delivery sizes come from here rather than from entries of their own, which is what keeps the list short: HD in Portrait is 1080 x 1920, the story and reel size, and A4 in Portrait is 2480 x 3508."
+        },
+        {
           "key": "width",
           "label": "Width",
           "group": "render",
@@ -11036,13 +11240,22 @@
           "default": 1920,
           "hard": [
             16.0,
-            4096.0
+            8192.0
           ],
           "soft": null,
           "step": 1.0,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Output width in pixels. Together with Height it also fixes the aspect ratio the camera frames at, so changing it changes the composition, not just the file size."
+          "showIf": [
+            {
+              "param": "resolution_preset",
+              "pred": {
+                "kind": "eq",
+                "value": "custom"
+              }
+            }
+          ],
+          "doc": "Output width in pixels. Together with Height it also fixes the aspect ratio the camera frames at, so changing it changes the composition, not just the file size.\n\nRead only when Output Size is Custom, and hidden otherwise, since a preset states its own size in its name."
         },
         {
           "key": "height",
@@ -11054,17 +11267,50 @@
           "default": 1080,
           "hard": [
             16.0,
-            4096.0
+            8192.0
           ],
           "soft": null,
           "step": 1.0,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Output height in pixels. Note that width times height is capped at 4 megapixels on the way to the GPU: ask for more and the capture is scaled down to fit, keeping the aspect ratio, and reports the size it actually produced."
+          "showIf": [
+            {
+              "param": "resolution_preset",
+              "pred": {
+                "kind": "eq",
+                "value": "custom"
+              }
+            }
+          ],
+          "doc": "Output height in pixels. Large renders are drawn in tiles, each inside the four-megapixel budget a browser reliably survives, and assembled afterwards -- so the size you ask for is the size you get, however long it takes.\n\nRead only when Output Size is Custom, and hidden otherwise."
+        },
+        {
+          "key": "engine",
+          "label": "Engine",
+          "group": "render",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "raster",
+              "Rasterized"
+            ],
+            [
+              "traced",
+              "Path traced"
+            ]
+          ],
+          "accept": [],
+          "default": "raster",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Which renderer draws the still. Rasterized is the viewport's own renderer: fast, and its shadows, ambient occlusion and reflections are approximations. Path traced follows light through the scene instead, so shadows, bounced colour and soft reflections come out of the same calculation rather than being added on top -- and it takes as long as it takes.\n\nA traced still shows what the tracer integrates: the environment where a ray leaves the scene, and no grid, gizmo or overlay. It is a photograph of the scene rather than a screenshot of the viewport."
         },
         {
           "key": "render",
-          "label": "Render",
+          "label": "Render Still",
           "group": "render",
           "paramType": "action",
           "enumVariants": [],
@@ -11075,13 +11321,404 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Jumps the active viewport to the chosen camera and opens the screenshot dialog at this resolution. Nothing is written until you save from there."
+          "doc": "Renders the still and opens a dialog showing it arrive, tile by tile, with a running count and a cancel. Nothing is written until you save from there.\n\nThe viewport is left where it is. The shot comes from the camera above, not from what you happen to be looking at, so pressing this never moves your view."
+        },
+        {
+          "key": "quality",
+          "label": "Quality",
+          "group": "quality",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "draft",
+              "Draft (16 samples)"
+            ],
+            [
+              "good",
+              "Good (64 samples)"
+            ],
+            [
+              "high",
+              "High (256 samples)"
+            ],
+            [
+              "reference",
+              "Reference (1024 samples)"
+            ],
+            [
+              "custom",
+              "Exact count"
+            ]
+          ],
+          "accept": [],
+          "default": "good",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many samples each pixel averages, and so how much grain is left. Four times the samples is half the noise, not a quarter, which is why the steps are wide: Draft to Good is a visible improvement and Draft to Reference is sixty-four times the wait.\n\nExact count reveals a Samples field for a scene that is not where the presets are. The wide steps are worth keeping for everything else: most shots want one of four answers, not a number to pick.\n\nPath traced only. A rasterized still draws each pixel once."
+        },
+        {
+          "key": "samples",
+          "label": "Samples",
+          "group": "quality",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 64,
+          "hard": [
+            1.0,
+            8192.0
+          ],
+          "soft": [
+            1.0,
+            1024.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "quality",
+              "pred": {
+                "kind": "eq",
+                "value": "custom"
+              }
+            }
+          ],
+          "doc": "The exact number of samples each pixel averages. Read only when Quality is Exact count, and hidden otherwise, since the named presets carry their own counts.\n\nReach for it when a preset is not where your scene is: a shot that is clean at ninety would otherwise mean either shipping the grain at sixty-four or waiting four times as long for two hundred and fifty-six.\n\nPath traced only."
+        },
+        {
+          "key": "bounces",
+          "label": "Bounces",
+          "group": "quality",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 6,
+          "hard": [
+            1.0,
+            32.0
+          ],
+          "soft": null,
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many times light may scatter before a path is given up on. Higher opens up interiors and deep folds, where most of the light arrives after several bounces; an exterior on a bright day is usually finished by four.\n\nPath traced only."
+        },
+        {
+          "key": "transmissive_bounces",
+          "label": "Glass Bounces",
+          "group": "quality",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 4,
+          "hard": [
+            0.0,
+            32.0
+          ],
+          "soft": null,
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many of the bounces above may additionally pass through transmissive surfaces. Counted separately so a pane of glass does not spend a whole path's budget getting through it: a window is two surfaces, a tumbler is four, and running out ends the path rather than turning the glass opaque.\n\nPath traced only."
+        },
+        {
+          "key": "firefly_clamp",
+          "label": "Bright Sample Limit",
+          "group": "quality",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 16.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            64.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "A ceiling on how much light one sample may contribute after it has bounced. A rare path that finds a bright source through a mirror or a tight caustic comes back hundreds of times the average, and a single one of those leaves a lone bright pixel that thousands of ordinary samples cannot average away.\n\nWhat it costs is energy. Clamping discards the part above the ceiling rather than redistributing it, so the image gets darker exactly where the clamp acts, and a scene lit mostly through those rare paths gets darker overall. Lower it to suppress more of them, raise it to let brighter contributions through, and set it to zero to turn the clamp off and keep every last one.\n\nPath traced only."
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "group": "quality",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 2654435769,
+          "hard": [
+            0.0,
+            4294967295.0
+          ],
+          "soft": null,
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "What the sampling sequence is drawn from. The same seed gives the same image for the same scene, size and sample count on the same device, which is what makes a comparison between two settings a comparison rather than two different grain patterns.\n\nThe promise stops at the surface that rendered it. The browser and the command line accumulate in different chunk sizes, each for a reason sound on its own surface, and floating-point addition is not invariant to the grouping, so the same seed does not give the same bytes across them.\n\nChanging it changes the grain and not the answer: two seeds at a high sample count converge to the same image.\n\nPath traced only."
+        },
+        {
+          "key": "denoise",
+          "label": "Denoise",
+          "group": "denoise",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Smooths the remaining grain, steered by what each pixel's surface looks like so material boundaries survive.\n\nOff by default, and that is the right default for a finished still: at a high sample count there is little grain left to remove and a filter can only take detail away. Turn it on for a Draft, where the grain is the thing standing between you and seeing the shot.\n\nThis is the still's own setting. The viewport's traced preview keeps a separate one, in preferences, because a preview and a delivered frame want different answers."
+        },
+        {
+          "key": "denoise_strength",
+          "label": "Strength",
+          "group": "denoise",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            4.0
+          ],
+          "soft": [
+            0.0,
+            2.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "denoise",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "How hard the filter works, as a multiple of the colour tolerance it was measured at. One is that measured setting.\n\nBelow one the image keeps more grain and more detail, and material boundaries stay crisp. Above one it is smoother and softer, and fine texture starts to go with the noise. It steers the value that most changes the outcome rather than being a fifth independent number, so Colour Tolerance under Advanced remains the thing this multiplies."
+        },
+        {
+          "key": "denoise_until_samples",
+          "label": "Stop After",
+          "group": "denoise",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0,
+          "hard": [
+            0.0,
+            8192.0
+          ],
+          "soft": null,
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "denoise",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "The sample count past which the filter stops. Zero means it never stops.\n\nA still that starts noisy and converges does not need at the end the filtering it needed at the start, and a converged image still being smoothed is losing detail for grain that is no longer there. Set this where your scene stops looking noisy and the filter steps out of the way after it.\n\nThe filter already relaxes on its own as a render converges, because its colour tolerance is divided by the square root of the sample count. This sharpens a behaviour that exists rather than introducing one."
+        },
+        {
+          "key": "denoise_sigma_color",
+          "label": "Colour Tolerance",
+          "group": "denoise",
+          "subgroup": "Advanced",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.2,
+          "hard": [
+            0.01,
+            10.0
+          ],
+          "soft": [
+            0.1,
+            4.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "denoise",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "How different in brightness two neighbouring pixels may be and still be averaged together. Larger reaches across those differences and removes more noise; smaller keeps detail and leaves more grain.\n\nThe default is measured rather than chosen: it came from an error sweep against a reference, scored both for error and for how much of a material step survived. Strength above multiplies this value.\n\nDivided by the square root of the sample count inside the filter, so it tightens on its own as a render converges."
+        },
+        {
+          "key": "denoise_normal_power",
+          "label": "Normal Sharpness",
+          "group": "denoise",
+          "subgroup": "Advanced",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 128.0,
+          "hard": [
+            1.0,
+            1024.0
+          ],
+          "soft": [
+            8.0,
+            256.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "denoise",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "How closely two pixels' surface directions must agree before they are averaged together. The default corresponds to about ten degrees.\n\nHigher keeps creases and curvature crisp and filters less across them; lower lets the filter reach around a curve, which is smoother and takes the edge off a bevel. This is the value that stops geometry melting."
+        },
+        {
+          "key": "denoise_sigma_albedo",
+          "label": "Albedo Tolerance",
+          "group": "denoise",
+          "subgroup": "Advanced",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.08,
+          "hard": [
+            0.001,
+            1.0
+          ],
+          "soft": [
+            0.01,
+            0.5
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "denoise",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "How different two pixels' base colours may be before the filter treats them as different materials. Smaller keeps the boundary between two materials sharp; larger lets one bleed into the next.\n\nMuch tighter than the colour tolerance on purpose: base colour is noise-free where brightness is not, so it is the most reliable thing the filter has to steer by."
+        },
+        {
+          "key": "denoise_level_falloff",
+          "label": "Scale Falloff",
+          "group": "denoise",
+          "subgroup": "Advanced",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 2.0,
+          "hard": [
+            1.0,
+            8.0
+          ],
+          "soft": [
+            1.0,
+            4.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "denoise",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "How much the tolerances tighten at each coarser pass. The filter runs at five scales and each one divides its tolerances by this number.\n\nHigher makes the coarse passes conservative, keeping large-scale detail and removing less of the broad blotching; lower lets them reach further and flattens wide areas."
+        },
+        {
+          "key": "transparent_background",
+          "label": "Transparent Background",
+          "group": "output",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Renders with nothing behind the subject. The environment still lights the scene exactly as it did, but it is not photographed into the frame, and what comes out carries a matte: opaque where the camera found a surface, clear where it found sky, and fractional along every silhouette.\n\nThat is what makes a render an element rather than a picture. The alternative is rendering against a colour and keying it by hand, which fails the moment the subject is glossy, because the background is in its reflections."
+        },
+        {
+          "key": "aov_albedo",
+          "label": "Albedo Pass",
+          "group": "output",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Writes the base colour each pixel saw as a file beside the image: surface colour before any lighting, which is what a compositor re-grades or relights against.\n\nProducing a pass and displaying one are separate choices. This asks for the file; which pass the render window shows is chosen there, while it converges.\n\nPath traced only. A rasterized still writes no auxiliary passes."
+        },
+        {
+          "key": "aov_normal",
+          "label": "Normal Pass",
+          "group": "output",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Writes the surface direction each pixel saw as a file beside the image, encoded as colour. It is what a compositor relights with, and it is also what the denoiser steers by, so it is the pass to look at when a denoised result has lost an edge it should have kept.\n\nPath traced only."
+        },
+        {
+          "key": "aov_depth",
+          "label": "Depth Pass",
+          "group": "output",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Writes how far away each pixel is as a file beside the image. It is what depth of field, fog and atmospheric grading are built from in a compositor, and what tells you whether the shot has the depth separation you thought it had.\n\nPath traced only."
         }
       ],
       "bypass": {
         "mode": "notBypassable"
       },
-      "doc": "Holds a render setup: which camera to shoot through and at what resolution. It carries settings and nothing else -- no ports, no cook, no output. Pressing Render jumps the active viewport to the chosen camera and opens the screenshot dialog at this resolution, where you review the frame and choose whether to save it.\n\nIt lives at the object level beside the cameras and lights it refers to, and it is how a shot stops being something you re-find by orbiting. Point it at a `camera` node and the same framing comes back every session; keep several around, one per shot, each named for what it captures.\n\nA capture is capped at 4 megapixels. The width and height go up to 4096 each, but anything past the cap is scaled down to fit, preserving aspect -- so asking for 3840x2160 does not get you a 4K frame, and the result tells you the size it really made. The limit is deliberate: larger captures can lose the WebGPU device outright, and there is no recovery from that on the web yet.",
+      "doc": "Holds a render setup: which camera to shoot through, at what resolution, with which renderer and how much patience. It carries settings and nothing else -- no ports, no cook, no output. Pressing Render Still renders it and opens a dialog showing it arrive, where you review the frame and choose whether to save it.\n\nIt lives at the object level beside the cameras and lights it refers to, and it is how a shot stops being something you re-find by orbiting. Point it at a `camera` node and the same framing comes back every session; keep several around, one per shot, each named for what it captures.\n\nOutput size is either a named delivery size or your own two numbers, and an orientation turns a preset without retyping it. Up to 8192 pixels an edge. Anything larger than a browser draws in one pass is rendered in tiles and assembled, so the size you ask for is the size you get -- what changes with resolution is how long it takes, not whether it works.\n\nThe tabs are the decisions rather than the fields: Render is the shot, Quality is how long you are willing to wait and what the tracer is allowed to do while it waits, Denoise is what happens to the grain that is left, and Output is what leaves besides the picture. Everything under Quality and Denoise is path traced only; a rasterized still draws each pixel once.\n\nDepth of field belongs to the camera, not here: aperture, focus distance and blade count live on the `camera` node this points at, so the same lens applies wherever that camera is used.",
       "searchAliases": [
         "render",
         "rop",
@@ -11453,7 +12090,7 @@
     },
     {
       "typeId": "spot_light",
-      "version": 2,
+      "version": 3,
       "displayName": "Spot Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -11649,6 +12286,27 @@
           "doc": "How soft the cone edge is, 0 to 1. 0, the default, is a hard edge: full intensity right up to Angle, then nothing. Raising it shrinks the full-intensity inner cone toward the centre -- the inner half-angle is Angle * (1 - Penumbra) -- and fades across the gap, so 1 spreads the falloff over the whole cone and leaves no flat core at all."
         },
         {
+          "key": "radius",
+          "label": "Radius",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            5.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "How big the emitter is, in metres. 0, the default, is a mathematical point, which casts a shadow with a perfectly hard edge -- the giveaway that a light is not a real object. Give it a size and the shadow gains a penumbra that widens with distance from the surface, the way a real lamp's does, because part of the emitter is visible where the rest is hidden.\n\nThis is read by rendered output only; the interactive viewport draws hard-edged shadows whatever you set here. That is not an oversight to be fixed later: a shadow map answers one visibility question from one place, and blurring it would soften a contact shadow as much as a distant one."
+        },
+        {
           "key": "cast_shadow",
           "label": "Cast Shadow",
           "group": "light",
@@ -11738,7 +12396,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -11777,7 +12435,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A cone of light from Position toward Target: full intensity in the middle, nothing past the outer Angle, and a Penumbra that controls how abruptly it gets there.\n\nThe pick for a deliberate pool of light -- a lamp, a torch, a stage special. It falls off with distance exactly like a `point_light` and shares its Range and Decay, so think of it as a point light wearing a cone; use the point light when you do not need the cone.\n\nPenumbra defaults to 0, which gives a razor-hard cone edge -- the classic tell of a CG spotlight, and rarely what you want; a little goes a long way. Angle is the HALF-angle, so the default 45 spreads 90 degrees in total. The light spends one of the 8 direct-light slots, and Cast Shadow is exclusive: granting it here revokes it from every other light in a single undo step.",
+      "doc": "A cone of light from Position toward Target: full intensity in the middle, nothing past the outer Angle, and a Penumbra that controls how abruptly it gets there.\n\nThe pick for a deliberate pool of light -- a lamp, a torch, a stage special. It falls off with distance exactly like a `point_light` and shares its Range and Decay, so think of it as a point light wearing a cone; use the point light when you do not need the cone.\n\nPenumbra defaults to 0, which gives a razor-hard cone edge -- the classic tell of a CG spotlight, and rarely what you want; a little goes a long way. Angle is the HALF-angle, so the default 45 spreads 90 degrees in total. The light spends one of the 8 direct-light slots the interactive viewport binds -- that ceiling is the viewport's, not the scene's -- and Cast Shadow is exclusive: granting it here revokes it from every other light in a single undo step.",
       "searchAliases": [
         "light",
         "cone",

@@ -254,8 +254,10 @@ mod tests {
 
     #[test]
     fn an_explicit_cap_is_honored_and_clamped() {
-        let mut viz = AttrVizState::default();
-        viz.cap = 64;
+        let mut viz = AttrVizState {
+            cap: 64,
+            ..AttrVizState::default()
+        };
         assert_eq!(viz.effective_cap(1_000_000), 64);
         assert_eq!(
             viz.effective_cap(10),
@@ -279,8 +281,10 @@ mod tests {
 
     #[test]
     fn the_scale_multiplier_clamps_and_survives_non_finite_input() {
-        let mut viz = AttrVizState::default();
-        viz.vector_scale = 0.0;
+        let mut viz = AttrVizState {
+            vector_scale: 0.0,
+            ..AttrVizState::default()
+        };
         assert_eq!(viz.scale_multiplier(), 0.05);
         viz.vector_scale = 99.0;
         assert_eq!(viz.scale_multiplier(), 10.0);
@@ -375,7 +379,7 @@ mod tests {
         let close =
             |a: [f32; 3], b: [f32; 3]| a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-6);
         assert!(close(ramp_color(RampPreset::Ember, 1.0 / 3.0), stops[1]));
-        let mid: [f32; 3] = std::array::from_fn(|c| (stops[1][c] + stops[2][c]) / 2.0);
+        let mid: [f32; 3] = std::array::from_fn(|c| f32::midpoint(stops[1][c], stops[2][c]));
         assert!(close(ramp_color(RampPreset::Ember, 0.5), mid));
     }
 }

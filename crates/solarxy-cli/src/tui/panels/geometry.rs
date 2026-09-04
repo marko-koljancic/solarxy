@@ -13,7 +13,7 @@ use ratatui::widgets::Paragraph;
 use solarxy_core::format_number;
 
 use super::super::widgets;
-use super::{Ctx, Panel};
+use super::{Action, AnalyzeCtx, Analysis, Panel};
 
 /// The headline geometry counts: meshes, vertices, indices, triangles.
 pub struct Geometry;
@@ -21,9 +21,9 @@ pub struct Geometry;
 /// Wide enough for the longest label the panel uses.
 const LABEL: u16 = 10;
 
-impl Panel for Geometry {
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
-        let report = ctx.report;
+impl Panel<Analysis<'_>, Action> for Geometry {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
+        let report = ctx.subject.report;
         let mut lines: Vec<Line> = Vec::new();
 
         let format = if report.source_format.is_empty() {

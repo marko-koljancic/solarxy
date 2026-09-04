@@ -167,7 +167,6 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
-    let input = &super::common::baked_input(input, cx)?;
     let source = p.text("source").trim().to_string();
     let dest = p.text("dest").trim().to_string();
     if source.is_empty() || dest.is_empty() {
@@ -239,6 +238,8 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact values copied between lanes, not computed
+
     use super::*;
     use crate::cook::InputSlot;
     use crate::params::ParamSource;

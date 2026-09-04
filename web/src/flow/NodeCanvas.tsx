@@ -33,6 +33,7 @@ import { FlowNode, type FlowNodeData } from "./FlowNode";
 import { setFlowProjection } from "./flowProjection";
 import { NoteNode } from "./NoteNode";
 import { RadialMenu } from "./RadialMenu";
+import { reconcileNodes } from "./seedReconcile";
 
 const NODE_TYPES = { solarxy: FlowNode, note: NoteNode };
 
@@ -142,9 +143,15 @@ export function NodeCanvas() {
 
   // Re-seed local RF state whenever the mirror graph (or context) changes.
   // Structural/param edits and undo change the graph reference; cook-only
-  // batches do not, so this does not fire every frame or clobber a drag.
+  // batches do not - but selection and parameter edits do, so this fires far
+  // more often than "structural" suggests. Nodes are reconciled rather than
+  // replaced: the library writes its measurement bookkeeping onto the node
+  // objects it is given, and a wholesale replace dropped it, leaving every
+  // node unmeasured in the middle of the gesture about to read it (the
+  // library's "not initialized" drag warning). Edges are replaced as before:
+  // they carry no measurement, and the warning cannot arise from them.
   useEffect(() => {
-    setNodes(seed.nodes);
+    setNodes((prev) => reconcileNodes(prev, seed.nodes));
     setEdges(seed.edges);
   }, [seed, setNodes, setEdges]);
 

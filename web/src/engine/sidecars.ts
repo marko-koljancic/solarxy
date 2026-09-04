@@ -1,11 +1,19 @@
 // Sidecar preflight for multi-file model imports. The browser sandbox
 // means the app can only read files the user hands it, so a model that
 // references companions (glTF external buffers and images, OBJ material
-// libraries) imports correctly only when every companion is staged. These
-// pure functions detect what a primary file references and what is still
-// missing, so the import UI can prompt BEFORE the parse fails with
-// "missing external asset". Matching mirrors the Rust TableResolver:
-// percent-decoded URIs compared by trailing basename, case-sensitively.
+// libraries and their textures) imports correctly only when every
+// companion is staged. These pure functions detect what a primary file
+// references and what is still missing, so the import UI can prompt
+// BEFORE the parse fails with "missing external asset". Matching mirrors
+// the Rust TableResolver: percent-decoded URIs compared by trailing
+// basename, case-sensitively.
+//
+// The per-format rule is stated HERE because the engine publishes no
+// companion contract: the registry snapshot carries an importer's
+// accepted extensions but not what a format references. The rule's Rust
+// twin is `solarxy-formats::companions` (the render command's walk); a
+// format gaining an importer, or a walk learning a new directive, means
+// touching both.
 
 /** Companion files a primary model references, by basename. `required`
  * companions hard-fail the parse when missing (glTF external buffers);
@@ -85,6 +93,36 @@ export function referencedSidecars(name: string, bytes: Uint8Array): SidecarRefs
     return NONE;
   }
   return NONE;
+}
+
+/** The texture basenames an MTL references, mirroring the Rust walk's
+ * `mtl_maps`: every `map_*` directive plus the bump aliases that do not
+ * carry the prefix, with the filename taken as the LAST whitespace-separated
+ * token because a map line may carry options before it (`-bm 0.2`). All
+ * optional: a missing texture degrades to untextured, never to a failed
+ * parse. */
+export function mtlTextures(bytes: Uint8Array): string[] {
+  const names: string[] = [];
+  for (const raw of new TextDecoder().decode(bytes).split(/\r?\n/)) {
+    const line = raw.trim();
+    const space = line.search(/\s/);
+    if (space < 0) continue;
+    const head = line.slice(0, space).toLowerCase();
+    if (!(head.startsWith("map_") || head === "bump" || head === "disp" || head === "decal")) {
+      continue;
+    }
+    const file = line.slice(space).trim().split(/\s+/).pop();
+    if (file) names.push(basename(percentDecode(file)));
+  }
+  return dedupe(names);
+}
+
+/** Two reference sets, joined and deduped. */
+export function mergeRefs(a: SidecarRefs, b: SidecarRefs): SidecarRefs {
+  return {
+    required: dedupe([...a.required, ...b.required]),
+    optional: dedupe([...a.optional, ...b.optional]),
+  };
 }
 
 /** The referenced companions not present in the staged set (staged names

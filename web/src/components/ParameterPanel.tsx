@@ -14,21 +14,19 @@ import {
   flyToIssue,
   getClient,
   previewParam,
+  refsWithMtlTextures,
   stagedManifestNames,
   stageFile,
 } from "../engine/session";
 import { saveExportToFile } from "../persistence/opfs";
 import { pushToast } from "../store/toasts";
-import { useViewState } from "../store/viewState";
 import { hasMissing, missingSidecars, referencedSidecars } from "../engine/sidecars";
 import { useUi } from "../store/ui";
-import { DIRECTORY_PICKER } from "./directoryPicker";
 import type {
   GraphContext,
   NodeMirror,
   ParamSnapshot,
   ParamSource,
-  RegistrySnapshot,
   ValidationIssue,
 } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
@@ -404,25 +402,26 @@ function SnippetRow({
 
 /** An Action param: a button whose press is routed by node
  * type. Export nodes run the engine's encoder and save the bytes through
- * the File System Access flow; the render node is HOST-interpreted (jump
- * the active pane to its camera, then open the screenshot modal with its
- * resolution preset). */
+ * the File System Access flow; the render node is HOST-interpreted: the engine
+ * resolves what the node asks for and the still dialog opens on it, without
+ * moving any pane. */
 function ActionField({ ctx, node, spec, label }: FieldProps & { label: ReactNode }) {
-  const registry = useMirror((s) => s.registry);
   const run = async () => {
     if (node.typeId === "render") {
-      const camSrc = node.params.camera_path;
-      const cam =
-        camSrc && camSrc.kind === "literal" ? ((camSrc as { value: number | null }).value) : null;
-      const width = numberParam(node, registry, "width", 1920);
-      const height = numberParam(node, registry, "height", 1080);
-      if (cam != null) {
-        const pane = useViewState.getState().view?.activePane ?? 0;
-        const view = getClient().jumpToCamera(pane, cam);
-        useViewState.getState().setView(view);
+      // The engine answers what the node says. This side used to work it out
+      // from the node's params, which is how two of them came to be authored
+      // and read by nothing, and it is not a rule two implementations can hold
+      // in step.
+      //
+      // The viewport is deliberately left alone. A shot is a property of the
+      // scene and the pane is where someone happens to be looking, so the job
+      // builds its own camera from the node's and nothing moves.
+      try {
+        const settings = getClient().renderSettings(ctx, node.id);
+        useUi.getState().setStillRequest({ ctx, node: node.id, settings });
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : String(e), "error");
       }
-      useUi.getState().setScreenshotPreset({ width, height });
-      useUi.getState().setScreenshotOpen(true);
       return;
     }
     try {
@@ -441,19 +440,6 @@ function ActionField({ ctx, node, spec, label }: FieldProps & { label: ReactNode
       </button>
     </div>
   );
-}
-
-/** A numeric param's effective value (literal else registry default). */
-function numberParam(
-  node: NodeMirror,
-  registry: RegistrySnapshot | null,
-  key: string,
-  fallback: number,
-): number {
-  const src = node.params[key];
-  if (src && src.kind === "literal") return Number((src as { value: unknown }).value) || fallback;
-  const spec = descriptorFor(registry, node.typeId)?.params.find((p) => p.key === key);
-  return Number(spec?.default) || fallback;
 }
 
 /** The cross-context reference picker: candidates come from
@@ -505,7 +491,6 @@ function NodePathField({ ctx, node, spec, label }: FieldProps & { label: ReactNo
 function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode }) {
   const [pending, setPending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const folderRef = useRef<HTMLInputElement>(null);
   const current = String(paramValue(node, spec) ?? "");
 
   // Multi-file staging: a multi-file model (gltf + bin + textures) selects
@@ -527,7 +512,8 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
         if (file === primary) primaryHash = hash;
       }
       if (!primaryHash) return;
-      const refs = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+      const shallow = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+      const refs = await refsWithMtlTextures(shallow, files);
       const missing = missingSidecars(refs, stagedManifestNames());
       if (hasMissing(missing)) {
         useUi.getState().setSidecarPrompt({
@@ -568,15 +554,6 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
         >
           {pending ? "Staging…" : current ? "Change" : "Select File"}
         </button>
-        <button
-          type="button"
-          className="param-asset-btn"
-          disabled={pending}
-          title="Import a whole model folder (gltf + bin + textures)"
-          onClick={() => folderRef.current?.click()}
-        >
-          Folder…
-        </button>
         <span className="param-asset-name" title={current}>
           {display}
         </span>
@@ -591,14 +568,6 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
           multiple
           style={{ display: "none" }}
           onChange={onInputChange}
-        />
-        <input
-          ref={folderRef}
-          type="file"
-          multiple
-          style={{ display: "none" }}
-          onChange={onInputChange}
-          {...DIRECTORY_PICKER}
         />
       </div>
     </div>

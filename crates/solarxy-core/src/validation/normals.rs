@@ -46,7 +46,7 @@ pub(super) fn check_flipped_normals(
     }
     let mut flipped = 0_u32;
     let mut total = 0_u32;
-    for tri in mesh.indices.chunks_exact(3) {
+    for tri in mesh.indices.as_chunks::<3>().0 {
         let i0 = tri[0] as usize;
         let i1 = tri[1] as usize;
         let i2 = tri[2] as usize;

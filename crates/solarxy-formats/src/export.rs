@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use solarxy_core::RawImageData;
-use solarxy_core::geometry::{MeshTopology, RawMaterialData, linear_to_srgb};
+use solarxy_core::geometry::{MeshTopology, RawImageHdr, RawMaterialData, linear_to_srgb};
 
 use crate::FormatsError;
 
@@ -91,12 +91,12 @@ fn obj_text(meshes: &[ExportMesh<'_>], mtl: Option<(&str, &[String])>) -> String
         };
         match mesh.topology {
             MeshTopology::Triangles => {
-                for tri in mesh.indices.chunks_exact(3) {
+                for tri in mesh.indices.as_chunks::<3>().0 {
                     let _ = writeln!(out, "f {} {} {}", f(tri[0]), f(tri[1]), f(tri[2]));
                 }
             }
             MeshTopology::Lines => {
-                for pair in mesh.indices.chunks_exact(2) {
+                for pair in mesh.indices.as_chunks::<2>().0 {
                     let _ = writeln!(out, "l {} {}", v_base + pair[0], v_base + pair[1]);
                 }
             }
@@ -242,7 +242,7 @@ pub fn write_stl_bytes(meshes: &[ExportMesh<'_>]) -> Result<Vec<u8>, FormatsErro
         if mesh.topology != MeshTopology::Triangles {
             continue;
         }
-        for tri in mesh.indices.chunks_exact(3) {
+        for tri in mesh.indices.as_chunks::<3>().0 {
             let p = |i: u32| mesh.positions[i as usize];
             let (a, b, c) = (p(tri[0]), p(tri[1]), p(tri[2]));
             let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -342,7 +342,7 @@ pub fn write_ply_bytes(meshes: &[ExportMesh<'_>]) -> Vec<u8> {
     let mut base = 0u32;
     for mesh in meshes {
         if mesh.topology == MeshTopology::Triangles {
-            for tri in mesh.indices.chunks_exact(3) {
+            for tri in mesh.indices.as_chunks::<3>().0 {
                 let _ = writeln!(
                     out,
                     "3 {} {} {}",
@@ -973,12 +973,144 @@ pub fn encode_png_bytes(img: &RawImageData) -> Result<Vec<u8>, FormatsError> {
     Ok(out.into_inner())
 }
 
+/// The encoding every EXR this writes carries: ZIP, lossless, scanline blocks.
+///
+/// Lossless is not negotiable for a pass a compositor does arithmetic on, and
+/// ZIP over the run-length default because a render is not the single-coloured
+/// matte run-length encoding is good at. Blocks are indexed and written in
+/// increasing line order, which is what keeps the bytes identical between two
+/// runs of the same render even though the crate compresses blocks in parallel.
+const EXR_ENCODING: exr::image::Encoding = exr::image::Encoding::SMALL_LOSSLESS;
+
+/// EXR-encodes a linear RGB float image.
+///
+/// Byte-first like every other writer here: the crate can write into anything
+/// that is `Write + Seek`, so a caller who wants a file still owns the file.
+///
+/// Three channels and no alpha, matching [`RawImageHdr`] exactly. A still has
+/// its background already in it, so an alpha lane would be a constant one
+/// pretending to be a matte.
+///
+/// # Errors
+/// The encode failing, which for a well-formed image it does not.
+pub fn encode_exr_rgb_bytes(img: &RawImageHdr) -> Result<Vec<u8>, FormatsError> {
+    let (width, height) = (img.width as usize, img.height as usize);
+    let pixels = exr::image::SpecificChannels::rgb(|position: exr::math::Vec2<usize>| {
+        let i = (position.1 * width + position.0) * 3;
+        // Clamped rather than indexed blind: a short buffer is a caller error,
+        // and returning black for it beats a panic inside a writer thread.
+        match img.pixels.get(i..i + 3) {
+            Some(p) => (p[0], p[1], p[2]),
+            None => (0.0, 0.0, 0.0),
+        }
+    });
+    write_exr(&exr::image::Image::from_encoded_channels(
+        (width, height),
+        EXR_ENCODING,
+        pixels,
+    ))
+}
+
+/// EXR-encodes a linear RGBA float image with a matte, **premultiplying on
+/// the way out**.
+///
+/// `pixels` is four floats per pixel, colour unassociated and alpha a plain
+/// coverage fraction; what leaves carries `rgb * a`, because premultiplied is
+/// what the floating-point format's ecosystem assumes and what a compositor
+/// will treat the file as whether or not anyone says so. The multiplication
+/// happens here and nowhere else: doing it earlier would mean the renderer
+/// knowing which file its pixels are destined for, and the eight-bit path
+/// deliberately does not do it, because that format's specification says
+/// straight. The two files therefore differ numerically at partially covered
+/// pixels, which is the documented consequence of each format getting its own
+/// convention rather than a defect.
+///
+/// A sibling of [`encode_exr_rgb_bytes`] rather than a flag on it: the two
+/// have different callers and different channel sets, and an opaque render
+/// keeps writing three channels, because its alpha would be a constant one
+/// pretending to be a matte.
+///
+/// # Errors
+/// The encode failing, which for a well-formed image it does not.
+pub fn encode_exr_rgba_bytes(
+    pixels: &[f32],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, FormatsError> {
+    let (w, h) = (width as usize, height as usize);
+    let sampler = exr::image::SpecificChannels::rgba(|position: exr::math::Vec2<usize>| {
+        let i = (position.1 * w + position.0) * 4;
+        // Clamped rather than indexed blind, like the three-channel writer:
+        // a short buffer is a caller error, and returning nothing at all for
+        // it beats a panic inside a writer thread.
+        match pixels.get(i..i + 4) {
+            Some(p) => (p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]),
+            None => (0.0, 0.0, 0.0, 0.0),
+        }
+    });
+    write_exr(&exr::image::Image::from_encoded_channels(
+        (w, h),
+        EXR_ENCODING,
+        sampler,
+    ))
+}
+
+/// EXR-encodes a single-channel depth pass as the channel named `Z`.
+///
+/// `Z` is what a compositing package looks for, and one channel rather than a
+/// grey triple because a depth is one number per pixel and writing it three
+/// times would say otherwise.
+///
+/// # Errors
+/// The encode failing.
+pub fn encode_exr_depth_bytes(
+    depth: &[f32],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, FormatsError> {
+    let (w, h) = (width as usize, height as usize);
+    let pixels = exr::image::SpecificChannels::build()
+        .with_channel("Z")
+        .with_pixel_fn(|position: exr::math::Vec2<usize>| {
+            (depth
+                .get(position.1 * w + position.0)
+                .copied()
+                .unwrap_or(0.0),)
+        });
+    write_exr(&exr::image::Image::from_encoded_channels(
+        (w, h),
+        EXR_ENCODING,
+        pixels,
+    ))
+}
+
+/// The half both encoders share: write the image into memory.
+fn write_exr<'a, C>(
+    image: &'a exr::image::Image<exr::image::Layer<C>>,
+) -> Result<Vec<u8>, FormatsError>
+where
+    exr::image::Layer<C>: exr::image::write::layers::WritableLayers<'a>,
+{
+    use exr::image::write::WritableImage;
+    let mut out = std::io::Cursor::new(Vec::new());
+    image
+        .write()
+        .to_buffered(&mut out)
+        .map_err(|e| FormatsError::Export {
+            format: "exr",
+            message: e.to_string(),
+        })?;
+    Ok(out.into_inner())
+}
+
 /// JPEG-encodes an RGBA8 image (alpha dropped), quality 1..100.
 pub fn encode_jpeg_bytes(img: &RawImageData, quality: u8) -> Result<Vec<u8>, FormatsError> {
     // JPEG has no alpha: flatten onto opaque.
     let rgb: Vec<u8> = img
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|c| [c[0], c[1], c[2]])
         .collect();
     let mut out = std::io::Cursor::new(Vec::new());
@@ -1000,9 +1132,14 @@ pub fn encode_jpeg_bytes(img: &RawImageData, quality: u8) -> Result<Vec<u8>, For
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact factors that round-trip through export and reload
+
     use super::*;
 
-    fn quad() -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>) {
+    /// Owned quad buffers: positions, normals, tex coords, indices.
+    type QuadData = (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>);
+
+    fn quad() -> QuadData {
         (
             vec![
                 [0.0, 0.0, 0.0],
@@ -1016,9 +1153,7 @@ mod tests {
         )
     }
 
-    fn export_quad<'a>(
-        d: &'a (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>),
-    ) -> ExportMesh<'a> {
+    fn export_quad(d: &QuadData) -> ExportMesh<'_> {
         ExportMesh {
             name: "quad",
             positions: &d.0,
@@ -1502,5 +1637,137 @@ mod tests {
         assert_eq!(&back.pixels[0..4], &[255, 0, 0, 255]);
         let jpg = encode_jpeg_bytes(&img, 90).expect("jpeg");
         assert!(jpg.starts_with(&[0xFF, 0xD8]), "JPEG SOI marker");
+    }
+
+    /// An image where each pixel encodes its own coordinates, so a transposed
+    /// or sheared write is a failure rather than a picture that looks fine.
+    fn coordinate_hdr(width: u32, height: u32) -> RawImageHdr {
+        let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                pixels.extend_from_slice(&[x as f32, y as f32, 0.5]);
+            }
+        }
+        RawImageHdr::new(pixels, width, height)
+    }
+
+    #[test]
+    fn exr_round_trips_through_our_decoder() {
+        let img = coordinate_hdr(7, 5);
+        let bytes = encode_exr_rgb_bytes(&img).expect("exr");
+        let back = crate::hdr::decode_exr_bytes(&bytes).expect("decode");
+        assert_eq!((back.width, back.height), (7, 5));
+        for y in 0..5 {
+            for x in 0..7 {
+                let i = (y * 7 + x) * 3;
+                assert!((back.pixels[i] - x as f32).abs() < 1e-3, "red at {x},{y}");
+                assert!(
+                    (back.pixels[i + 1] - y as f32).abs() < 1e-3,
+                    "green at {x},{y}"
+                );
+                assert!((back.pixels[i + 2] - 0.5).abs() < 1e-3, "blue at {x},{y}");
+            }
+        }
+    }
+
+    /// The property the seeded-render check downstream is built on.
+    ///
+    /// The crate compresses blocks on several threads, so "the same image
+    /// encodes to the same bytes" is a claim about block indexing and line
+    /// order rather than something a single-threaded reading of the code
+    /// proves. Asserted here, once, at the level that can actually see it.
+    #[test]
+    fn the_same_image_encodes_to_the_same_bytes() {
+        let img = coordinate_hdr(64, 48);
+        let a = encode_exr_rgb_bytes(&img).expect("exr");
+        let b = encode_exr_rgb_bytes(&img).expect("exr");
+        assert_eq!(a, b, "two encodes of one image differed");
+
+        let depth: Vec<f32> = (0..64 * 48).map(|i| i as f32 * 0.25).collect();
+        let c = encode_exr_depth_bytes(&depth, 64, 48).expect("exr");
+        let d = encode_exr_depth_bytes(&depth, 64, 48).expect("exr");
+        assert_eq!(c, d, "two encodes of one depth pass differed");
+    }
+
+    /// A depth pass is one channel, and it is the one a compositor looks for.
+    #[test]
+    fn a_depth_pass_carries_a_single_channel_named_z() {
+        use exr::prelude::{ReadChannels, ReadLayers};
+        let depth: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let bytes = encode_exr_depth_bytes(&depth, 4, 3).expect("exr");
+        let image = exr::prelude::read()
+            .no_deep_data()
+            .largest_resolution_level()
+            .all_channels()
+            .first_valid_layer()
+            .all_attributes()
+            .from_buffered(std::io::Cursor::new(bytes))
+            .expect("read back");
+        let names: Vec<String> = image
+            .layer_data
+            .channel_data
+            .list
+            .iter()
+            .map(|c| c.name.to_string())
+            .collect();
+        assert_eq!(names, vec!["Z".to_string()]);
+    }
+
+    /// The matte writer premultiplies, and only the matte writer.
+    ///
+    /// Unassociated colour with a fractional matte goes in; what the file
+    /// holds is `rgb * a` beside the untouched `a`, read back through the exr
+    /// crate itself rather than through this crate's own decoder, so a writer
+    /// that quietly stopped multiplying would fail here rather than in
+    /// somebody's compositor.
+    #[test]
+    fn the_matte_writer_premultiplies_on_the_way_out() {
+        use exr::prelude::{ReadChannels, ReadLayers};
+        // One opaque pixel, one half-covered, one uncovered with stray colour
+        // (which premultiplication is what clips), one quarter-covered.
+        let pixels: Vec<f32> = vec![
+            0.8, 0.6, 0.4, 1.0, //
+            0.8, 0.6, 0.4, 0.5, //
+            0.9, 0.9, 0.9, 0.0, //
+            0.4, 0.2, 0.1, 0.25,
+        ];
+        let bytes = encode_exr_rgba_bytes(&pixels, 4, 1).expect("exr");
+        let image = exr::prelude::read()
+            .no_deep_data()
+            .largest_resolution_level()
+            .rgba_channels(
+                |size, _| vec![[0.0f32; 4]; size.0 * size.1],
+                |px: &mut Vec<[f32; 4]>, pos, (r, g, b, a): (f32, f32, f32, f32)| {
+                    px[pos.1 * 4 + pos.0] = [r, g, b, a];
+                },
+            )
+            .first_valid_layer()
+            .all_attributes()
+            .from_buffered(std::io::Cursor::new(bytes))
+            .expect("read back");
+        let back = &image.layer_data.channel_data.pixels;
+        for (i, want_a) in [1.0f32, 0.5, 0.0, 0.25].iter().enumerate() {
+            let src = &pixels[i * 4..i * 4 + 4];
+            let got = back[i];
+            for c in 0..3 {
+                assert!(
+                    (got[c] - src[c] * want_a).abs() < 1e-6,
+                    "channel {c} of pixel {i} is premultiplied"
+                );
+            }
+            assert!(
+                (got[3] - want_a).abs() < 1e-6,
+                "the matte itself is untouched"
+            );
+        }
+    }
+
+    /// The matte writer is as deterministic as its siblings.
+    #[test]
+    fn the_matte_writer_encodes_to_the_same_bytes() {
+        let pixels: Vec<f32> = (0..64 * 48 * 4).map(|i| (i % 251) as f32 / 251.0).collect();
+        let a = encode_exr_rgba_bytes(&pixels, 64, 48).expect("exr");
+        let b = encode_exr_rgba_bytes(&pixels, 64, 48).expect("exr");
+        assert_eq!(a, b, "two encodes of one matte image differed");
     }
 }

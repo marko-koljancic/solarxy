@@ -19,6 +19,7 @@
 //! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
 
 mod capture;
+pub(crate) mod cook_health;
 #[cfg(debug_assertions)]
 mod dev;
 pub(crate) mod engine_scene;
@@ -30,15 +31,14 @@ mod panes;
 pub(crate) use solarxy_core::raycast;
 mod render;
 pub(crate) mod review;
+mod still;
 mod update;
 pub(crate) mod view_state;
 
 pub(super) use view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, ViewLayout, ViewState};
 
 pub(super) use solarxy_renderer::composite::CompositeLook;
-pub(super) use solarxy_renderer::frame::{
-    GradientUniform, Renderer, UvOverlapResources, WireframeParams,
-};
+pub(super) use solarxy_renderer::frame::Renderer;
 pub(super) use solarxy_renderer::scene::{
     BackgroundModeExt, LoadedModel, ModelScene, create_light_bind_group,
 };
@@ -49,7 +49,6 @@ pub(super) use solarxy_core::preferences::{
     ViewMode,
 };
 pub(super) use solarxy_renderer::ibl::{BrdfLut, IblState};
-pub(super) use solarxy_renderer::texture;
 
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
@@ -94,6 +93,10 @@ pub(super) struct InputState {
     pub(super) uv_last_mouse_pos: Option<(f32, f32)>,
     pub(super) uv_left_pressed: bool,
     pub(super) uv_middle_pressed: bool,
+    /// A camera button is held in a 3D pane. What tells a pointer move that
+    /// it is a navigation drag, which is the gesture that releases a
+    /// look-through binding; a plain click never does.
+    pub(super) nav_button_down: bool,
 }
 
 pub struct State {
@@ -130,11 +133,44 @@ pub struct State {
     /// selects engine-side and leaves the viewport alone, which is what
     /// the web shell does with the same gesture.
     pub(super) selected_object: Option<solarxy_core::scene::SceneObjectId>,
-    /// Multi-object dynamic scene drawn beside `scene`. Fed by
-    /// [`SceneDelta`] batches queued in `pending_scene_deltas` and applied at
-    /// the top of each frame. The engine above is the producer once a scene
-    /// file is open; the developer harness is the only other one.
-    pub(super) scene_objects: solarxy_renderer::scene_objects::SceneObjects,
+    /// Which nodes' cooks are failing, absorbed from the engine's event
+    /// stream each frame. Fresh failures toast; the standing map is what
+    /// the still render consults before reporting success.
+    pub(super) cook_health: cook_health::CookHealth,
+    /// The still render in flight, if any. While it runs it owns the
+    /// shared render targets, so panes are not rendered.
+    pub(super) still: Option<still::StillState>,
+    /// The finished floating-point picture, waiting for a save path.
+    ///
+    /// Beside the modal's eight-bit copy rather than inside it: the modal shows
+    /// a screen image, and this one is only ever written to a file.
+    pub(super) finished_float: Option<solarxy_host::still::FloatImage>,
+    /// The traced backend, built on the first traced still and kept for
+    /// the session. It sees no per-frame deltas (those feed the raster
+    /// backend alone), so every still start snapshots the scene into it.
+    pub(super) tracer: Option<solarxy_renderer::pathtrace::backend::PathBackend>,
+    /// Whether the tracer's environment lags the scene's. Set when an
+    /// HDRI is installed or cleared, or when the tracer is first built.
+    pub(super) traced_env_dirty: bool,
+    /// The scene camera each pane looks through, or `None` for a free view.
+    ///
+    /// Viewer-scoped look-through: a bound pane follows the camera node's
+    /// pose each frame and composites with the camera's look, and any local
+    /// navigation releases the pane back to a free view rather than writing
+    /// the pose back to the node the way the web's locked mode does. That
+    /// write-back is authoring machinery, and it waits for the desktop node
+    /// canvas. Session state, deliberately not persisted, matching the web.
+    pub(super) look_through: [Option<solarxy_core::scene::SceneObjectId>; 4],
+    /// The rasterizer, behind the render backend contract, owning the
+    /// multi-object dynamic scene drawn beside `scene`.
+    ///
+    /// That scene is fed by [`SceneDelta`] batches queued in
+    /// `pending_scene_deltas` and applied at the top of each frame; the engine
+    /// above is the producer once a scene file is open, and the developer
+    /// harness is the only other one. Everything this shell asks of the
+    /// document that is not rendering reads through `raster.scene()`, because
+    /// that is where the answer lives.
+    pub(super) raster: solarxy_host::RasterBackend,
     /// Scene-level GPU state every pane draws through: the light rig, the
     /// shadow map, the identity instance buffer bound for scene-level draws,
     /// and the grid/floor/axes buffers. Owned here rather than by `scene`, so
@@ -171,6 +207,9 @@ pub struct State {
     pub(super) quit_requested: bool,
     pub(super) last_frame_time: Instant,
     pub(super) dt: f32,
+    /// The uncaptured-error queue the shared device hook fills; drained
+    /// once per frame in `update` into the console log and a toast.
+    pub(super) gpu_faults: solarxy_renderer::faults::GpuFaults,
     pub(super) _backend_info: String,
     pub(super) preferences: Preferences,
     pub window: Arc<Window>,

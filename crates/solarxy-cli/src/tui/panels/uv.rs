@@ -17,7 +17,7 @@ use ratatui::widgets::Paragraph;
 use super::super::raster::{Point, Raster};
 use super::super::uv::{Coverage, Occupancy};
 use super::super::widgets;
-use super::{Action, Ctx, Panel};
+use super::{Action, AnalyzeCtx, Analysis, Panel};
 
 #[derive(Default)]
 pub struct Uv {
@@ -38,12 +38,12 @@ struct Cached {
     overlapping: Vec<String>,
 }
 
-impl Panel for Uv {
+impl Panel<Analysis<'_>, Action> for Uv {
     fn menu(&self) -> &'static [&'static str] {
         &["set", "zoom"]
     }
 
-    fn handle(&mut self, key: KeyEvent, _ctx: &Ctx<'_>) -> Action {
+    fn handle(&mut self, key: KeyEvent, _ctx: &AnalyzeCtx<'_>) -> Action {
         if matches!(key.code, KeyCode::Char('z') | KeyCode::Char('Z')) {
             self.zoomed = !self.zoomed;
             self.cached = None;
@@ -51,8 +51,8 @@ impl Panel for Uv {
         Action::None
     }
 
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
-        if !ctx.model.has_uvs() {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
+        if !ctx.subject.model.has_uvs() {
             let (line, rect) = widgets::empty_state("no uv coordinates", area, ctx.theme);
             frame.render_widget(Paragraph::new(line), rect);
             return;
@@ -70,7 +70,7 @@ impl Panel for Uv {
         // triangles on every drag of a window edge would not be.
         let coverage = self
             .coverage
-            .get_or_insert_with(|| Coverage::rasterise(ctx.model));
+            .get_or_insert_with(|| Coverage::rasterise(ctx.subject.model));
         if stale {
             let window = if zoomed {
                 coverage.used_bounds().unwrap_or((0.0, 0.0, 1.0, 1.0))
@@ -123,7 +123,7 @@ impl Panel for Uv {
         }
     }
 
-    fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
+    fn status(&self, ctx: &AnalyzeCtx<'_>) -> Option<String> {
         let occupancy = self.coverage.as_ref().map_or(
             Occupancy {
                 coverage: 0.0,
@@ -165,7 +165,7 @@ fn plot(
     coverage: &Coverage,
     window: (f32, f32, f32, f32),
     area: Rect,
-    ctx: &Ctx<'_>,
+    ctx: &AnalyzeCtx<'_>,
     least: u16,
 ) -> Vec<String> {
     let (lo_x, lo_y, hi_x, hi_y) = window;

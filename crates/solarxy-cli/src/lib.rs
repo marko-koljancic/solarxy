@@ -20,6 +20,15 @@
 #[cfg(feature = "analyzer")]
 pub mod calc;
 pub mod parser;
+#[cfg(feature = "render")]
+pub mod render_sink;
+/// The render dashboard. Needs both halves: the stream to report, and the
+/// terminal machinery to draw it on.
+#[cfg(all(feature = "render", feature = "tui"))]
+pub mod render_tui;
+/// The live window. Its own build feature, off by default.
+#[cfg(feature = "watch")]
+pub mod render_watch;
 #[cfg(feature = "tui")]
 pub mod tui;
 mod validators;

@@ -14,6 +14,19 @@ publish = false
 # the (mostly wasm-gated) crate as an ordinary library.
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# The traversal parity probe, off by default so neither it nor the corpus
+# generator it reaches for is in the shipped artifact. On for the smoke
+# harness, which is the only thing that drives it:
+#   bash crates/solarxy-web/build-wasm.sh crates/solarxy-web/smoke/pkg --features pt-probe
+pt-probe = ["dep:solarxy-bvh"]
+# Informational console output (the boot banner), off by default so a clean
+# boot of a shipped build is silent and carries none of the strings. Failure
+# reporting is deliberately NOT behind this; see the console policy on the
+# logging helpers in src/app.rs. Enable for a development build with:
+#   bash crates/solarxy-web/build-wasm.sh web/src/wasm/pkg --dev --features diagnostics
+diagnostics = []
+
 [dependencies]
 # Native-safe: these compile on every target, so `cargo build --workspace`
 # stays green. The wasm-only host lives behind cfg(target_arch = "wasm32").
@@ -29,6 +42,14 @@ solarxy-host = { path = "../solarxy-host" }
 # Likewise pure CPU math: the gizmo drag's rotate result is decomposed back into
 # Euler angles through the kernel at the point this shell commits it.
 solarxy-kernel = { path = "../solarxy-kernel" }
+# Already in this build's graph through the engine and the renderer, both of
+# which take it without default features so no filesystem comes with it. Named
+# directly because the still dialog's float save encodes through it, and a
+# transitive reach is not a dependency you can rely on.
+solarxy-formats = { path = "../solarxy-formats", default-features = false }
+# The hierarchy, for the traversal probe's CPU side only. Optional so the
+# shipped artifact does not carry the corpus generator.
+solarxy-bvh = { path = "../solarxy-bvh", optional = true }
 cgmath = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 

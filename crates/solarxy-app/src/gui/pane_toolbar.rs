@@ -81,6 +81,23 @@ pub(crate) struct PaneToolbarData<'a> {
     /// Latest UV-shell overlap percentage, shown in the UV `Display`
     /// label when overlap is on. `None` until a readback completes.
     pub uv_overlap_pct: Option<f32>,
+    /// The open scene's camera nodes, `(scene object id, node name)`.
+    /// Empty when no engine scene is open or the scene has no cameras, in
+    /// which case the Look Through submenu simply does not appear.
+    pub cameras: &'a [(u64, String)],
+    /// Which camera each pane looks through, mirroring the state field.
+    pub look_through: [Option<u64>; 4],
+    /// The look-through change a toolbar requested this frame; the state
+    /// layer applies it after `render_ui`, like a projection change.
+    pub look_through_change: &'a mut Option<(usize, LookThroughChange)>,
+}
+
+/// A toolbar's requested look-through change for one pane: bind to a
+/// camera node, or return to a free view.
+#[derive(Clone, Copy)]
+pub(crate) enum LookThroughChange {
+    Bind(u64),
+    Free,
 }
 
 /// Mutable handles to the per-pane fields a toolbar edits.
@@ -166,6 +183,8 @@ pub(super) fn draw_pane_toolbars(
 
         let projection = data.projections[i];
         let mut new_projection: Option<ProjectionMode> = None;
+        let mut new_look_through: Option<LookThroughChange> = None;
+        let bound_camera = data.look_through.get(i).copied().flatten();
         {
             let mut fields = if is_active {
                 PaneFields::from_snapshot(snap)
@@ -186,6 +205,9 @@ pub(super) fn draw_pane_toolbars(
                             customs,
                             hdri_available,
                             uv_overlap_pct,
+                            data.cameras,
+                            bound_camera,
+                            &mut new_look_through,
                         );
                     });
                 },
@@ -193,6 +215,9 @@ pub(super) fn draw_pane_toolbars(
         }
         if let Some(p) = new_projection {
             *data.projection_change = Some((i, p));
+        }
+        if let Some(binding) = new_look_through {
+            *data.look_through_change = Some((i, binding));
         }
 
         if is_active {
@@ -237,6 +262,9 @@ fn draw_controls(
     customs: &[CustomBackground],
     hdri_available: bool,
     uv_overlap_pct: Option<f32>,
+    cameras: &[(u64, String)],
+    bound_camera: Option<u64>,
+    new_look_through: &mut Option<LookThroughChange>,
 ) {
     // Label 1 — pane mode.
     let pane_mode = f.pane_mode.to_string();
@@ -266,14 +294,39 @@ fn draw_controls(
             });
         });
 
-        // Label 3 — view: projection + overlays + background.
-        label_menu(ui, (idx, "view"), &projection.to_string(), |ui| {
+        // Label 3 — view: projection + look-through + overlays + background.
+        // A bound pane's label is the camera's name, which is the visible
+        // cue that the pane is a shot rather than a free view.
+        let bound_name = bound_camera
+            .and_then(|id| cameras.iter().find(|(cid, _)| *cid == id))
+            .map(|(_, name)| name.as_str());
+        let view_label = bound_name.map_or_else(|| projection.to_string(), str::to_owned);
+        label_menu(ui, (idx, "view"), &view_label, |ui| {
             let mut proj = projection;
             for &p in &PROJECTIONS {
                 ui.radio_value(&mut proj, p, p.to_string());
             }
             if proj != projection {
                 *new_projection = Some(proj);
+            }
+            if !cameras.is_empty() {
+                ui.separator();
+                ui.menu_button("Look Through", |ui| {
+                    if ui.radio(bound_camera.is_none(), "Free View").clicked()
+                        && bound_camera.is_some()
+                    {
+                        *new_look_through = Some(LookThroughChange::Free);
+                        ui.close();
+                    }
+                    for (id, name) in cameras {
+                        if ui.radio(bound_camera == Some(*id), name).clicked()
+                            && bound_camera != Some(*id)
+                        {
+                            *new_look_through = Some(LookThroughChange::Bind(*id));
+                            ui.close();
+                        }
+                    }
+                });
             }
             ui.separator();
             ui.menu_button("Overlays", |ui| draw_overlays_menu(ui, f));

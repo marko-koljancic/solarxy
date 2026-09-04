@@ -17,14 +17,66 @@ use solarxy_validate::{
 };
 
 fn main() -> anyhow::Result<ExitCode> {
+    // Standard error, explicitly. The default writer is standard output, which
+    // put every log line in the same stream as the report and would put them in
+    // the same stream as an image. The rule this release establishes is that
+    // standard output is data and standard error is everything else.
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "solarxy=info,wgpu_hal=error,wgpu_core=error".into()),
         )
         .init();
 
-    let args = Args::parse();
+    // The theme listing is an action that prints and exits, like help, and it
+    // must win over a missing required argument the same way help does:
+    // `render --list-tui-themes` would otherwise be a usage error before any
+    // check of the parsed flag could run. clap has no such action for user
+    // flags, so the raw arguments are scanned before the parse; the flag's
+    // declaration on `Args` remains what lists it in both helps. The scan
+    // stops at `--`, past which the word is a value rather than a flag.
+    if std::env::args()
+        .skip(1)
+        .take_while(|a| a != "--")
+        .any(|a| a == "--list-tui-themes")
+    {
+        solarxy_cli::tui::theme::print_listing();
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    // Parsed rather than `parse()`, because clap exits 2 on a usage error and
+    // this command's taxonomy spends 2 on an input that could not be loaded.
+    // One is a mistake in the command line and the other is a mistake in the
+    // scene, and a build system branches on the difference.
+    let args = match Args::try_parse() {
+        Ok(args) => args,
+        Err(e) => {
+            // Help and version are not failures: they print to standard output
+            // and succeed, which is what every tool does.
+            let ok = matches!(
+                e.kind(),
+                clap::error::ErrorKind::DisplayHelp
+                    | clap::error::ErrorKind::DisplayVersion
+                    | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            );
+            let _ = e.print();
+            return Ok(if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            });
+        }
+    };
+
+    // A subcommand owns the run when one is given. The flat modes below are the
+    // shipped surface and keep working untouched.
+    if let Some(solarxy_cli::parser::Command::Render(render)) = args.command {
+        // The terminal theme is a global flag on the top-level arguments
+        // because it belongs to the reader's terminal rather than to one
+        // surface, and the dashboard is the second surface to want it.
+        return Ok(run_render(&render, args.tui_theme.as_deref()));
+    }
 
     if args.about {
         let version = env!("CARGO_PKG_VERSION");
@@ -38,11 +90,6 @@ fn main() -> anyhow::Result<ExitCode> {
         println!("Repository   {repository}");
         println!("License      {license}");
         println!("Contact      https://koljam.com");
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    if args.list_tui_themes {
-        solarxy_cli::tui::theme::print_listing();
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -115,7 +162,10 @@ fn exec_gui(model_path: Option<&str>) -> ExitCode {
             eprintln!("Failed to launch solarxy GUI: {e}");
             eprintln!();
             eprintln!("The Solarxy GUI is distributed separately from the CLI:");
-            eprintln!("  Linux:   flatpak install flathub dev.koljam.solarxy");
+            // Returns to `flatpak install flathub dev.koljam.solarxy` once
+            // the Flathub submission is accepted; until then that command
+            // fails on every machine it is offered to.
+            eprintln!("  Linux:   AppImage from the releases page below");
             eprintln!("  macOS:   brew install --cask koljam/solarxy/solarxy");
             eprintln!("  Windows: winget install Koljam.Solarxy");
             eprintln!();
@@ -178,7 +228,12 @@ fn run_analyze(
 #[cfg(feature = "analyzer")]
 fn terminal_too_small() -> Option<String> {
     let (width, height) = crossterm::terminal::size().ok()?;
-    solarxy_cli::tui::shell::below_floor(width, height)
+    solarxy_cli::tui::shell::below_floor(
+        width,
+        height,
+        "analyze",
+        "Printing the report instead; use --format text to ask for it directly.",
+    )
 }
 
 /// Assemble the analyze surface and hand it the terminal.
@@ -310,4 +365,377 @@ fn run_update() -> anyhow::Result<()> {
 #[cfg(not(feature = "updater"))]
 fn run_update() -> anyhow::Result<()> {
     anyhow::bail!("Updater not available: rebuild solarxy-cli with the 'updater' feature")
+}
+
+/// Renders, and turns the outcome into an exit code a build system can branch
+/// on.
+///
+/// The taxonomy is the point. A pipeline retries a device that was lost and
+/// gives up on a scene that will not parse, and it can only tell them apart if
+/// the difference survives all the way out here.
+/// Every surface this run reports to.
+///
+/// A composite rather than a choice, because the surfaces are independent: the
+/// dashboard owns the terminal, the window owns a window, and neither knows
+/// about the other. What they must not do is overlap, which is the one rule
+/// here: the plain line is present exactly when the dashboard is not, since
+/// both write to standard error and one of them owns the screen.
+#[cfg(feature = "render")]
+#[derive(Default)]
+struct Sinks {
+    plain: Option<solarxy_cli::render_sink::PlainSink<std::io::Stderr>>,
+    #[cfg(feature = "tui")]
+    dashboard: Option<solarxy_cli::render_tui::DashboardSink>,
+    #[cfg(feature = "watch")]
+    watch: Option<solarxy_cli::render_watch::WatchSink>,
+}
+
+#[cfg(feature = "render")]
+impl solarxy_render::RenderSink for Sinks {
+    fn report(&mut self, progress: &solarxy_render::RenderProgress) {
+        if let Some(plain) = self.plain.as_mut() {
+            plain.report(progress);
+        }
+        #[cfg(feature = "tui")]
+        if let Some(dashboard) = self.dashboard.as_mut() {
+            solarxy_render::RenderSink::report(dashboard, progress);
+        }
+        #[cfg(feature = "watch")]
+        if let Some(watch) = self.watch.as_mut() {
+            solarxy_render::RenderSink::report(watch, progress);
+        }
+    }
+
+    fn preview(&mut self, image: &solarxy_render::Preview<'_>) {
+        #[cfg(feature = "tui")]
+        if let Some(dashboard) = self.dashboard.as_mut() {
+            solarxy_render::RenderSink::preview(dashboard, image);
+        }
+        #[cfg(feature = "watch")]
+        if let Some(watch) = self.watch.as_mut() {
+            solarxy_render::RenderSink::preview(watch, image);
+        }
+        let _ = image;
+    }
+}
+
+#[cfg(feature = "render")]
+impl Sinks {
+    /// Whether any surface here shows the picture as it converges.
+    ///
+    /// What it decides is the tile budget: pixels reach a sink only when a tile
+    /// finishes, and an ordinary image is one tile, so a surface that shows the
+    /// picture would show nothing until the render ended.
+    fn wants_pixels(&self) -> bool {
+        let mut wants = false;
+        #[cfg(feature = "tui")]
+        {
+            wants |= self.dashboard.is_some();
+        }
+        #[cfg(feature = "watch")]
+        {
+            wants |= self.watch.is_some();
+        }
+        wants
+    }
+
+    /// Hold whatever a surface wants held after the render has ended.
+    ///
+    /// The window keeps the finished picture and the dashboard keeps its
+    /// completion state, each until dismissed, because the frame a person
+    /// waited for is the one that would otherwise vanish at the moment it
+    /// arrived. `error` is what the run returned, if it failed: the dashboard
+    /// states the reason on its held frame, which the progress stream cannot
+    /// carry because it names only the stage.
+    ///
+    /// The returned note, if any, is for the restored terminal: the caller
+    /// prints it after this composite is dropped, because a surface here may
+    /// still hold the screen it would land on.
+    fn linger(&mut self, error: Option<&solarxy_render::RenderError>) -> Option<String> {
+        #[cfg(not(feature = "tui"))]
+        let _ = error;
+        #[cfg(feature = "watch")]
+        let note = self.watch.as_mut().and_then(|watch| watch.hold());
+        #[cfg(not(feature = "watch"))]
+        let note = None;
+        #[cfg(feature = "tui")]
+        if let Some(dashboard) = self.dashboard.as_mut() {
+            use solarxy_cli::render_tui::Ending;
+            let ending = match error {
+                None => Ending::Rendered,
+                Some(solarxy_render::RenderError::Cancelled) => Ending::Cancelled,
+                Some(e) => Ending::Failed(e.to_string()),
+            };
+            dashboard.hold(ending);
+        }
+        note
+    }
+}
+
+/// What the reader asked for, in the words a surface shows.
+///
+/// Every override is optional here for the same reason it is optional in the
+/// render options: the node is authoritative, so before the cook the command
+/// line does not know what is about to be rendered and should not claim to.
+#[cfg(all(feature = "render", feature = "tui"))]
+fn dashboard_request(
+    args: &solarxy_cli::parser::RenderArgs,
+) -> solarxy_cli::render_tui::state::Request {
+    solarxy_cli::render_tui::state::Request {
+        input: args.input.display().to_string(),
+        output: args.out.display().to_string(),
+        engine: args.engine.map(|e| {
+            match e {
+                solarxy_cli::parser::RenderEngineArg::PathTraced => "path traced",
+                solarxy_cli::parser::RenderEngineArg::Raster => "rasterized",
+            }
+            .to_owned()
+        }),
+        size: None,
+        samples: args.spp,
+        bounces: args.bounces,
+        seed: args.seed,
+    }
+}
+
+#[cfg(feature = "render")]
+fn run_render(args: &solarxy_cli::parser::RenderArgs, theme: Option<&str>) -> ExitCode {
+    use solarxy_render::{Output, RenderOptions};
+
+    let output = Output::from_path(&args.out);
+    // One stream, one datum. Both of these want standard output, and a caller
+    // who wants both can redirect one of them.
+    if args.json && output == Output::Stdout {
+        eprintln!(
+            "error: --json and --out - both write to standard output; \
+             send one of them elsewhere"
+        );
+        return ExitCode::from(1);
+    }
+
+    let (width, height) = match args.res.as_deref().map(parse_resolution) {
+        Some(Ok(wh)) => (Some(wh.0), Some(wh.1)),
+        Some(Err(message)) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+        None => (None, None),
+    };
+
+    // The flag reaches the engine's own cancellation closure, so an interrupt
+    // stops between cook passes and between tiles rather than at the end.
+    // Nothing partial is left behind: the image is written in one call after
+    // the last tile, so a run that stops early never creates the file.
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let flag = std::sync::Arc::clone(&cancel);
+        if let Err(e) = ctrlc::set_handler(move || {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }) {
+            tracing::warn!("interrupt handling unavailable: {e}");
+        }
+    }
+
+    // Cloned before it moves into the options: the dashboard's quit key sets
+    // the same flag the interrupt handler does, so a render stops by one path
+    // whichever way it was asked to.
+    let cancel_for_sinks = std::sync::Arc::clone(&cancel);
+    let mut opts = RenderOptions {
+        output: Some(output),
+        render_node: args.render_node.clone(),
+        width,
+        height,
+        samples: args.spp,
+        bounces: args.bounces,
+        denoise: if args.denoise {
+            Some(true)
+        } else if args.no_denoise {
+            Some(false)
+        } else {
+            None
+        },
+        engine: args.engine.map(|e| match e {
+            solarxy_cli::parser::RenderEngineArg::PathTraced => {
+                solarxy_render::RenderEngine::PathTraced
+            }
+            solarxy_cli::parser::RenderEngineArg::Raster => solarxy_render::RenderEngine::Raster,
+        }),
+        seed: args.seed,
+        aovs: args
+            .aov
+            .iter()
+            .map(|a| match a {
+                solarxy_cli::parser::AovArg::Albedo => solarxy_render::AovKind::Albedo,
+                solarxy_cli::parser::AovArg::Normal => solarxy_render::AovKind::Normal,
+                solarxy_cli::parser::AovArg::Depth => solarxy_render::AovKind::Depth,
+            })
+            .collect(),
+        exr_space: args.exr_space.map(|s| match s {
+            solarxy_cli::parser::ExrSpaceArg::SceneLinear => solarxy_render::ExrSpace::SceneLinear,
+            solarxy_cli::parser::ExrSpaceArg::Display => solarxy_render::ExrSpace::Display,
+        }),
+        cancel: Some(cancel),
+        tile_budget: None,
+    };
+
+    let mut sinks = Sinks::default();
+    #[cfg(feature = "watch")]
+    if args.watch {
+        match solarxy_cli::render_watch::WatchSink::new(
+            std::sync::Arc::clone(&cancel_for_sinks),
+            &opts.aovs,
+        ) {
+            Ok(watch) => sinks.watch = Some(watch),
+            Err(why) => eprintln!("the render window could not open: {why}. The render continues."),
+        }
+    }
+    // Before the dashboard takes the screen, so anything the window says about
+    // failing to open lands on the reader's own terminal rather than on one
+    // that is about to be covered.
+    #[cfg(all(feature = "render", not(feature = "watch")))]
+    if args.watch {
+        eprintln!(
+            "the render window is not available: rebuild solarxy-cli with the \
+             'watch' feature. The render continues."
+        );
+    }
+    #[cfg(feature = "tui")]
+    if args.tui {
+        match solarxy_cli::render_tui::unavailable() {
+            Some(why) => eprintln!("{why}"),
+            None => {
+                let caps = solarxy_cli::tui::caps::Capabilities::detect();
+                let (resolved, notices) = solarxy_cli::render_tui::theme_for(caps, theme);
+                // Before the screen is taken, or they would be painted onto the
+                // surface that is about to cover them.
+                for notice in notices {
+                    eprintln!("{notice}");
+                }
+                match solarxy_cli::render_tui::DashboardSink::new(
+                    dashboard_request(args),
+                    resolved,
+                    caps,
+                    std::sync::Arc::clone(&cancel_for_sinks),
+                ) {
+                    Ok(dashboard) => sinks.dashboard = Some(dashboard),
+                    Err(e) => eprintln!(
+                        "the dashboard could not take the terminal: {e}. \
+                         Reporting progress as a plain line instead."
+                    ),
+                }
+            }
+        }
+    }
+    // Standard error, and one line: the sink a build system reads. It rewrites
+    // in place on a terminal and writes once per step anywhere else, which is
+    // the difference between a live readout and a log worth reading later.
+    // Absent only when the dashboard holds the screen it would write to. That
+    // suppression stays right now that the dashboard holds after the end: its
+    // held frame states the outcome and the output path, and the log line
+    // after the restore repeats the path, so nothing the plain line would
+    // have said is lost.
+    #[cfg(feature = "tui")]
+    let plain_wanted = sinks.dashboard.is_none();
+    #[cfg(not(feature = "tui"))]
+    let plain_wanted = true;
+    if plain_wanted {
+        sinks.plain = Some(solarxy_cli::render_sink::PlainSink::new(
+            std::io::stderr(),
+            std::io::IsTerminal::is_terminal(&std::io::stderr()),
+        ));
+    }
+    if sinks.wants_pixels() {
+        opts.tile_budget = Some(solarxy_render::PREVIEW_TILE_BUDGET);
+    }
+
+    let rendered = solarxy_render::run_render(&args.input, &opts, &mut sinks);
+    // The window holds the finished picture and the dashboard its completion
+    // state, each until dismissed. Before the terminal goes back, because the
+    // dashboard is still the thing on screen and a report printed over it
+    // would be printed onto a surface that is still being painted.
+    let note = sinks.linger(rendered.as_ref().err());
+    // The terminal goes back before anything else writes to it, so a warning or
+    // a report lands on the reader's own screen rather than on one being torn
+    // down underneath it.
+    drop(sinks);
+    if let Some(note) = note {
+        eprintln!("{note}");
+    }
+
+    match rendered {
+        Ok(outcome) => {
+            for warning in &outcome.report.warnings {
+                tracing::warn!("{warning}");
+            }
+            if args.json {
+                match outcome.report.to_json() {
+                    Ok(line) => println!("{line}"),
+                    Err(e) => {
+                        eprintln!("error: the result could not be serialized: {e}");
+                        return ExitCode::from(7);
+                    }
+                }
+            } else {
+                tracing::info!("rendered {}", outcome.report.output);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(exit_code_for(&e))
+        }
+    }
+}
+
+/// The exit taxonomy.
+///
+/// Eight codes, each naming a failure class rather than a place in the code.
+/// Zero and one are what every tool means by them; the rest exist because a
+/// render farm treats them differently.
+#[cfg(feature = "render")]
+fn exit_code_for(error: &solarxy_render::RenderError) -> u8 {
+    use solarxy_render::RenderError as E;
+    match error {
+        E::InputMissing(_)
+        | E::InputUnreadable { .. }
+        | E::InputInvalid { .. }
+        | E::InputUnsupported { .. } => 2,
+        // A flag that cannot take effect is a mistake in the invocation, which
+        // is what code one means, and it is decided before anything is read.
+        E::OptionIneffective(_) => 1,
+        E::Cook(_) | E::NoRenderNode | E::AmbiguousRenderNode(_) | E::RenderNode(_) => 3,
+        E::NoAdapter => 4,
+        E::Device(_) | E::DeviceLost => 5,
+        E::Cancelled => 6,
+        E::Encode(_) | E::OutputUnwritable { .. } => 7,
+    }
+}
+
+/// `WIDTHxHEIGHT`, as a command line spells a resolution.
+#[cfg(feature = "render")]
+fn parse_resolution(text: &str) -> Result<(u32, u32), String> {
+    let (w, h) = text
+        .split_once(['x', 'X'])
+        .ok_or_else(|| format!("--res wants WIDTHxHEIGHT, got '{text}'"))?;
+    let w = w
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| format!("--res width is not a number: '{w}'"))?;
+    let h = h
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| format!("--res height is not a number: '{h}'"))?;
+    Ok((w, h))
+}
+
+/// The stub arm, following the pattern the other optional surfaces use: a build
+/// without the feature explains itself rather than failing to parse an argument
+/// it does not know.
+#[cfg(not(feature = "render"))]
+fn run_render(_args: &solarxy_cli::parser::RenderArgs, _theme: Option<&str>) -> ExitCode {
+    eprintln!(
+        "error: rendering is not available: rebuild solarxy-cli with the \
+         'render' feature"
+    );
+    ExitCode::from(1)
 }

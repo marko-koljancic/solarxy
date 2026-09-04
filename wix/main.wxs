@@ -90,23 +90,10 @@
                 <Directory Id='APPLICATIONFOLDER' Name='solarxy'>
                     
                     <!--
-                      Enabling the license sidecar file in the installer is a four step process:
-
-                      1. Uncomment the `Component` tag and its contents.
-                      2. Change the value for the `Source` attribute in the `File` tag to a path
-                         to the file that should be included as the license sidecar file. The path
-                         can, and probably should be, relative to this file.
-                      3. Change the value for the `Name` attribute in the `File` tag to the
-                         desired name for the file when it is installed alongside the `bin` folder
-                         in the installation directory. This can be omitted if the desired name is
-                         the same as the file name.
-                      4. Uncomment the `ComponentRef` tag with the Id attribute value of "License"
-                         further down in this file.
-                    -->
-                    <!--
-                    <Component Id='License' Guid='*'>
-                        <File Id='LicenseFile' Name='ChangeMe' DiskId='1' Source='C:\Path\To\File' KeyPath='yes'/>
-                    </Component>
+                      The upstream template's commented-out license sidecar is
+                      gone: the real component sits beside the notices further
+                      down, installed into `bin` next to the executable rather
+                      than one level above it, so the two travel together.
                     -->
 
                     <Directory Id='Bin' Name='bin'>
@@ -139,6 +126,51 @@
                                 Name='solarxy.exe'
                                 DiskId='1'
                                 Source='$(var.CargoTargetBinDir)\solarxy.exe'
+                                KeyPath='yes'/>
+                        </Component>
+
+                        <!--
+                          The ported-source notices, beside the executable.
+                          Required rather than decorative: the renderer ports
+                          MIT-licensed work whose terms say the notice travels
+                          with every copy, and an installer is a copy.
+
+                          Source is repo-relative like the install-source
+                          marker below. This component is one of the reasons
+                          `allow-dirty = ["msi"]` is set in dist-workspace.toml:
+                          `dist` regenerates this file and would otherwise drop
+                          it, exactly as it would drop the product icon.
+                        -->
+                        <Component Id='notices' Guid='*'>
+                            <File
+                                Id='third_party_notices'
+                                Name='THIRD-PARTY-NOTICES.md'
+                                DiskId='1'
+                                Source='THIRD-PARTY-NOTICES.md'
+                                KeyPath='yes'/>
+                        </Component>
+
+                        <!--
+                          The license itself, on the same terms as the notices
+                          above: the GPL says the text travels with every copy,
+                          and an installer is a copy. Installed as a plain file
+                          and named `.txt` so Windows opens it in Notepad rather
+                          than asking what to open it with.
+
+                          Deliberately NOT wired to `WixUILicenseRtf`. The GPL is
+                          not an end-user agreement, and presenting it as
+                          click-to-accept misrepresents what it is: it grants
+                          permissions rather than taking them away, and it binds
+                          nobody who merely runs the program. That is why
+                          `[package.metadata.wix]` keeps `license = false` and
+                          `eula = false`.
+                        -->
+                        <Component Id='License' Guid='*'>
+                            <File
+                                Id='LicenseFile'
+                                Name='LICENSE.txt'
+                                DiskId='1'
+                                Source='LICENSE'
                                 KeyPath='yes'/>
                         </Component>
                     </Directory>
@@ -218,13 +250,9 @@
             Display='expand'
             Absent='disallow'>
             
-            <!--
-              Uncomment the following `ComponentRef` tag to add the license
-              sidecar file to the installer.
-            -->
-            <!--<ComponentRef Id='License'/>-->
-
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='notices'/>
+            <ComponentRef Id='License'/>
             <ComponentRef Id='InstallSourceMarker'/>
             <ComponentRef Id='ApplicationShortcut'/>
 

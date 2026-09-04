@@ -277,6 +277,7 @@ impl BindGroupLayouts {
             label: Some("outline_params_bind_group_layout"),
             entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
         });
+
         BindGroupLayouts {
             texture,
             camera,
@@ -307,6 +308,200 @@ impl BindGroupLayouts {
     }
 }
 
+/// The path tracer's four bind group layouts.
+///
+/// Declared here with every other layout, so this file stays the single source
+/// of truth, but built separately and only when a tracer exists. That is not
+/// tidiness: the scene group binds six storage buffers in the compute stage,
+/// which core WebGPU allows (eight per stage) and
+/// `Limits::downlevel_defaults()` does not (four). Building them inside
+/// [`BindGroupLayouts::new`] would impose the tracer's limits on every consumer
+/// of the registry, including the desktop shell, the golden harness, and any
+/// headless tool that never traces a ray. It is not a hypothetical: it broke
+/// the renderer's own smoke suite, which requests downlevel limits deliberately.
+///
+/// The numbering across the four groups is a budget rather than a convention.
+/// Core WebGPU grants four bind groups, eight storage buffers and four storage
+/// textures per stage, and the tracer's final shape spends all of them, so a
+/// ninth logical array is a design error rather than a refactor.
+pub struct PathtraceLayouts {
+    /// Group 0: the scene arena's storage buffers.
+    pub scene: wgpu::BindGroupLayout,
+    /// Group 1: the storage textures the kernel writes, plus the coverage
+    /// count buffer a transparent render's matte accumulates in.
+    pub target: wgpu::BindGroupLayout,
+    /// Group 2: sampled textures. The atlas and its two samplers; the
+    /// environment's equirect and lookup textures are reserved by number.
+    pub sampled: wgpu::BindGroupLayout,
+    /// Group 3: the camera and per-dispatch uniforms.
+    pub params: wgpu::BindGroupLayout,
+    /// Group 1 **for the depth pass only**: one single-channel storage
+    /// texture.
+    ///
+    /// The same number the accumulator takes in every other kernel, which is
+    /// free there because that pass binds no accumulator: depth cannot be
+    /// averaged and so is not one of the channels the accumulator holds. See
+    /// `pathtrace::depth`.
+    pub depth: wgpu::BindGroupLayout,
+}
+
+impl PathtraceLayouts {
+    /// Builds all four. Requires a device with core WebGPU limits.
+    #[must_use]
+    pub fn new(device: &wgpu::Device) -> Self {
+        // Seven of core WebGPU's eight compute-stage storage buffers, which is
+        // the whole budget the design set out to spend: 4 is the material pool
+        // and 5 the lights, both arriving with their consumers rather than as
+        // placeholders. Binding 7 stays unnumbered here, but the *count* it was
+        // reserving is now spent: the coverage buffer on the target group below
+        // is the stage's eighth storage buffer. A ninth logical array can no
+        // longer simply take a slot; it would have to move coverage into a
+        // replay kernel of its own (a primary-only kernel with its own
+        // `r32float` read-write texture, one of four in that stage), which is
+        // the recorded fallback and the price of the matte counting itself
+        // inside the path kernel rather than beside it.
+        let scene = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_scene_bind_group_layout"),
+            entries: &[
+                bgl_compute_storage_entry(0),
+                bgl_compute_storage_entry(1),
+                bgl_compute_storage_entry(2),
+                bgl_compute_storage_entry(3),
+                bgl_compute_storage_entry(4),
+                bgl_compute_storage_entry(5),
+                bgl_compute_storage_entry(6),
+            ],
+        });
+        // The accumulation group: the colour the kernel returns and the
+        // auxiliary channels that describe the surface it came from, each with
+        // a read side to average against.
+        //
+        // **Four of four, and there is no spare.** Core WebGPU grants four
+        // storage textures per stage and read-write on `Rgba32Float` is not
+        // portable -- it grants that for `r32uint`, `r32sint` and `r32float`
+        // only -- so the accumulator ping-pongs rather than accumulating in
+        // place, and a ping-pong needs a read side for each of the two written
+        // channels. That is the whole budget. A third auxiliary channel does
+        // not fit, which is why the world normal is folded into the albedo's
+        // alpha lane rather than taking a texture of its own.
+        //
+        // The write sides keep bindings 0 and 1, which they had before the
+        // read sides arrived, so every kernel that only writes -- the debug
+        // readout, every probe -- compiles unchanged. A pipeline may leave a
+        // layout entry unused; a bind *group* may not, which is why
+        // `TraceTarget` allocates both pairs whether or not anything reads
+        // them.
+        //
+        // Binding 4 is a storage *buffer*, not a fifth texture: the coverage
+        // count behind a transparent render's matte. It could not be a texture
+        // -- the four above are the stage's whole texture budget -- and it
+        // needs no ping-pong, because `u32` is one of the formats read-write
+        // access is portable for, buffer or texture alike. It is the compute
+        // stage's eighth and last storage buffer beside the scene group's
+        // seven, which is a deliberate spend of the reserved slot; the comment
+        // on the scene group says what a ninth array would now cost.
+        let target = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_target_bind_group_layout"),
+            entries: &[
+                bgl_storage_texture_entry(0, wgpu::StorageTextureAccess::WriteOnly),
+                bgl_storage_texture_entry(1, wgpu::StorageTextureAccess::WriteOnly),
+                bgl_storage_texture_entry(2, wgpu::StorageTextureAccess::ReadOnly),
+                bgl_storage_texture_entry(3, wgpu::StorageTextureAccess::ReadOnly),
+                bgl_compute_storage_rw_entry(4),
+            ],
+        });
+        // The sampled group: the atlas and its two samplers at 0 to 2, and the
+        // environment at 3 to 6, which are the numbers reserved for it two
+        // stages before it arrived. Nothing renumbered when it did.
+        //
+        // Two atlas samplers rather than one because a texture descriptor
+        // carries a filter bit and WGSL cannot index a sampler: the kernel
+        // branches, and both have to be bound for either branch to be legal.
+        // Their binding types differ because the platform ties them to the
+        // sampler's own filters -- an all-nearest sampler is a non-filtering
+        // sampler, and declaring it `Filtering` is rejected at bind group
+        // creation.
+        //
+        // The environment's two tables are declared **non-filterable** and are
+        // read with `textureLoad`. That is not a limitation worked around: a
+        // cumulative distribution is searched rather than interpolated, and
+        // `R32Float` is unfilterable on core WebGPU anyway, so the honest
+        // declaration and the useful one are the same one.
+        //
+        // Its image is non-filterable too, and that is a decision rather than a
+        // constraint: the sampling distribution is piecewise constant over
+        // texels, so a *filtered* radiance would describe a different
+        // environment from the one the density describes. See
+        // `pathtrace::environment`.
+        let sampled = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_sampled_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                bgl_compute_texture_entry(3, false),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                bgl_compute_texture_entry(5, false),
+                bgl_compute_texture_entry(6, false),
+            ],
+        });
+        let params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_params_bind_group_layout"),
+            entries: &[
+                bgl_uniform_entry(0, wgpu::ShaderStages::COMPUTE),
+                bgl_uniform_entry(1, wgpu::ShaderStages::COMPUTE),
+            ],
+        });
+        // One texture, single channel, and it is `R32Float` rather than the
+        // accumulator's four-channel format because a distance is one number
+        // and a compositing package reads it as one.
+        let depth = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_depth_bind_group_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::R32Float,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+                count: None,
+            }],
+        });
+        Self {
+            scene,
+            target,
+            sampled,
+            params,
+            depth,
+        }
+    }
+}
+
 fn bgl_uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
@@ -315,6 +510,85 @@ fn bgl_uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::Bind
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: false,
             min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A compute-stage read-only storage buffer entry.
+///
+/// Separate from [`bgl_storage_entry`] rather than taking a visibility, because
+/// every raster storage binding is vertex-stage and every tracer one is
+/// compute-stage; a shared parameter would be a parameter with two callers and
+/// one value each.
+/// A compute-stage sampled 2D float texture entry.
+///
+/// `filterable` is explicit at every call site because it is the thing the
+/// platform constrains and the thing a reader most wants stated: the
+/// environment's image is filtered and its two distribution tables are not,
+/// and declaring a table filterable would be rejected against the `R32Float`
+/// it is bound to.
+fn bgl_compute_texture_entry(binding: u32, filterable: bool) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Texture {
+            multisampled: false,
+            view_dimension: wgpu::TextureViewDimension::D2,
+            sample_type: wgpu::TextureSampleType::Float { filterable },
+        },
+        count: None,
+    }
+}
+
+fn bgl_compute_storage_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A compute-stage read-write storage buffer entry.
+///
+/// The accumulating kind: the coverage count loads what a chunk already wrote
+/// and adds to it inside one dispatch's own pixel, which a read-only entry
+/// cannot express and a second buffer plus a ping-pong would over-express.
+fn bgl_compute_storage_rw_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: false },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A compute-stage `Rgba32Float` 2D storage texture entry.
+///
+/// The access mode is explicit at every call site because it is the thing the
+/// platform constrains: `ReadWrite` is not available for this format on core
+/// WebGPU, and native wgpu only rejects it at bind *group* creation, so a probe
+/// that stops at the layout gets a false all-clear.
+fn bgl_storage_texture_entry(
+    binding: u32,
+    access: wgpu::StorageTextureAccess,
+) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::StorageTexture {
+            access,
+            format: wgpu::TextureFormat::Rgba32Float,
+            view_dimension: wgpu::TextureViewDimension::D2,
         },
         count: None,
     }

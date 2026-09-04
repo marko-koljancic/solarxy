@@ -40,14 +40,18 @@ impl State {
     /// Drop every cooked object through the ordinary delta path, so the
     /// removal is applied at the same commit point as everything else rather
     /// than reaching into the renderer's state from a dialog handler.
-    fn clear_scene_objects(&mut self) {
+    pub(crate) fn clear_scene_objects(&mut self) {
         self.pending_scene_deltas
             .push(solarxy_core::scene::SceneDelta {
                 ops: vec![solarxy_core::scene::SceneOp::Clear],
             });
     }
 
-    pub fn handle_dropped_file(&mut self, path: std::path::PathBuf) {
+    /// The one router for opening a file of any supported kind: HDRI,
+    /// scene, or model. The Open dialogs, a drag and drop, the startup
+    /// argument, and Recent Files all land here, so extension routing
+    /// exists exactly once.
+    pub fn open_file(&mut self, path: std::path::PathBuf) {
         if let Some(ext) = path.extension().and_then(|e| e.to_str())
             && (ext.eq_ignore_ascii_case("hdr") || ext.eq_ignore_ascii_case("exr"))
         {
@@ -102,8 +106,8 @@ impl State {
     /// One Open for both kinds of file. The first filter therefore lists
     /// scenes and models together, because a user who picks Open knows what
     /// they have rather than which of two dialogs the application wants.
-    /// `handle_dropped_file` routes on the extension, so this and a drag and
-    /// drop reach the same place.
+    /// `open_file` routes on the extension, so this and a drag and drop
+    /// reach the same place.
     pub fn open_model_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter(
@@ -115,7 +119,7 @@ impl State {
             .add_filter("All Files", &["*"])
             .pick_file()
         {
-            self.handle_dropped_file(path);
+            self.open_file(path);
         }
     }
 
@@ -171,6 +175,14 @@ impl State {
         }
         self.clear_scene_objects();
         self.environment.invalidate();
+        // Bindings name camera nodes of the previous document; a fresh scene
+        // starts on free views. The cook ledger describes the previous
+        // document too, and the new engine re-reports any failure. A still
+        // mid-render over the outgoing scene is cancelled rather than left
+        // rendering a document that no longer exists.
+        self.look_through = [None; 4];
+        self.cook_health.clear();
+        self.cancel_still_render();
 
         let warnings = loaded.warnings.len();
         let view = loaded.sidecar.view.clone();
@@ -194,6 +206,15 @@ impl State {
 
         self.apply_scene_view(&view);
         self.restore_scene_environment(&environment);
+
+        // After every failure return, so a scene that did not open leaves
+        // no entry. Canonicalized to the form the model loader records, so
+        // deduplication works across both kinds in the one list.
+        let recent = path.canonicalize().map_or_else(
+            |_| path.display().to_string(),
+            |p| p.to_string_lossy().to_string(),
+        );
+        solarxy_core::preferences::add_recent_file(&mut self.preferences, &recent);
 
         self.window.set_title(&format!("Solarxy - {filename}"));
         if warnings > 0 {
@@ -324,6 +345,9 @@ impl State {
     pub fn close_scene(&mut self) {
         self.engine = None;
         self.engine_scene = None;
+        self.look_through = [None; 4];
+        self.cook_health.clear();
+        self.cancel_still_render();
         self.clear_scene_objects();
         self.environment.invalidate();
         self.reset_env_for_empty_scene();
@@ -343,7 +367,7 @@ impl State {
             .add_filter("All Files", &["*"])
             .pick_file()
         {
-            self.handle_dropped_file(path);
+            self.open_file(path);
         }
     }
 
@@ -354,6 +378,11 @@ impl State {
             self.save_review_sidecar();
         }
         self.review.clear_for_new_model();
+        // The mode itself turns off too. `clear_for_new_model` deliberately
+        // preserves it so a model-to-model swap keeps review armed, but this
+        // path ends with no model open (File > Close, or a scene opening),
+        // where an armed mode would discard every click in silence.
+        self.review.active = false;
         self.scene = None;
         self.reset_env_for_empty_scene();
         // The pane cameras deliberately survive. Closing a model leaves a

@@ -14,6 +14,7 @@ import type { SerializedDockview } from "dockview-react";
 import { VIEWPORT_PANEL_ID, type LegacyArrangement } from "../dock/layouts";
 import type { SidecarRefs } from "../engine/sidecars";
 import type { GraphContext } from "../engine/types";
+import type { StillRenderRequest } from "../components/StillRenderModal";
 
 const FLOW_CHROME_KEY = "solarxy.ui.flowChrome";
 const EDGE_STYLE_KEY = "solarxy.ui.edgeStyle";
@@ -86,6 +87,10 @@ interface UiState {
   /** Resolution preset for the next screenshot-modal open (the render
    * node's Render button); consumed once by the modal. */
   screenshotPreset: { width: number; height: number } | null;
+  /** The still render a `render` node asked for, or null when the dialog is
+   * closed. Carries the whole request rather than a flag, because the dialog
+   * shows what it is about to render before it renders it. */
+  stillRequest: StillRenderRequest | null;
   /** The turntable-export modal (not persisted). */
   turntableOpen: boolean;
   /** The node palette (not persisted; Tab and the Add menu toggle it). */
@@ -129,6 +134,7 @@ interface UiState {
   setShortcutsOpen: (open: boolean) => void;
   setPrefsOpen: (open: boolean) => void;
   setScreenshotOpen: (open: boolean) => void;
+  setStillRequest: (request: StillRenderRequest | null) => void;
   setScreenshotPreset: (preset: { width: number; height: number } | null) => void;
   setTurntableOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
@@ -262,6 +268,7 @@ export const useUi = create<UiState>((set) => {
     prefsOpen: false,
     screenshotOpen: false,
     screenshotPreset: null,
+    stillRequest: null,
     turntableOpen: false,
     paletteOpen: false,
     bootError: null,
@@ -284,6 +291,7 @@ export const useUi = create<UiState>((set) => {
     setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
     setPrefsOpen: (open) => set({ prefsOpen: open }),
     setScreenshotOpen: (open) => set({ screenshotOpen: open }),
+    setStillRequest: (request) => set({ stillRequest: request }),
     setScreenshotPreset: (preset) => set({ screenshotPreset: preset }),
     setTurntableOpen: (open) => set({ turntableOpen: open }),
     setPaletteOpen: (open) => set({ paletteOpen: open }),

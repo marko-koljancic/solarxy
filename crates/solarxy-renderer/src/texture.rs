@@ -293,7 +293,12 @@ pub fn create_hdr_resolve_texture(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: Texture::HDR_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        // Copyable as well as drawable: a scene-referred still is read straight
+        // out of this, before the finishing chain has decided anything. The flag
+        // costs nothing at runtime and nothing is copied unless one is asked for.
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -317,7 +322,12 @@ pub fn create_bloom_texture(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: Texture::HDR_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        // Copyable as well as drawable: a scene-referred still is read straight
+        // out of this, before the finishing chain has decided anything. The flag
+        // costs nothing at runtime and nothing is copied unless one is asked for.
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());

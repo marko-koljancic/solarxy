@@ -132,7 +132,6 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
-    let input = &super::common::baked_input(input, cx)?;
 
     let density = p.text("density").trim().to_string();
     // Asked BEFORE scattering, because afterwards the two cases are

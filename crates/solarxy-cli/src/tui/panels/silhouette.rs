@@ -16,7 +16,7 @@ use ratatui::widgets::Paragraph;
 use super::super::geometry::Axis;
 use super::super::raster::{Point, Raster};
 use super::super::widgets;
-use super::{Action, Ctx, Panel};
+use super::{Action, AnalyzeCtx, Analysis, Panel};
 
 #[derive(Default)]
 pub struct Silhouette {
@@ -37,12 +37,12 @@ struct Cached {
     rows: Vec<String>,
 }
 
-impl Panel for Silhouette {
+impl Panel<Analysis<'_>, Action> for Silhouette {
     fn menu(&self) -> &'static [&'static str] {
         &["axis", "fit"]
     }
 
-    fn handle(&mut self, key: KeyEvent, _ctx: &Ctx<'_>) -> Action {
+    fn handle(&mut self, key: KeyEvent, _ctx: &AnalyzeCtx<'_>) -> Action {
         match key.code {
             KeyCode::Char('x') | KeyCode::Char('X') => self.axis = self.axis.next(),
             KeyCode::Char('f') | KeyCode::Char('F') => self.stretch = !self.stretch,
@@ -54,8 +54,8 @@ impl Panel for Silhouette {
         Action::None
     }
 
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
-        if ctx.model.is_empty() {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
+        if ctx.subject.model.is_empty() {
             let (line, rect) = widgets::empty_state("no vertices to project", area, ctx.theme);
             frame.render_widget(Paragraph::new(line), rect);
             return;
@@ -93,8 +93,8 @@ impl Panel for Silhouette {
         frame.render_widget(Paragraph::new(rows), area);
     }
 
-    fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
-        let size = ctx.model.bounds()?.size();
+    fn status(&self, ctx: &AnalyzeCtx<'_>) -> Option<String> {
+        let size = ctx.subject.model.bounds()?.size();
         Some(format!(
             "{} \u{b7} {:.2} x {:.2} x {:.2}",
             self.axis.name(),
@@ -106,8 +106,8 @@ impl Panel for Silhouette {
 }
 
 /// Project every vertex into the panel and encode it.
-fn project(panel: &Silhouette, ctx: &Ctx<'_>, area: Rect) -> Vec<String> {
-    let Some(bounds) = ctx.model.bounds() else {
+fn project(panel: &Silhouette, ctx: &AnalyzeCtx<'_>, area: Rect) -> Vec<String> {
+    let Some(bounds) = ctx.subject.model.bounds() else {
         return Vec::new();
     };
     let (right, down, away, invert) = panel.axis.axes();
@@ -132,9 +132,9 @@ fn project(panel: &Silhouette, ctx: &Ctx<'_>, area: Rect) -> Vec<String> {
     let (offset_x, offset_y) = ((1.0 - scale_x) / 2.0, (1.0 - scale_y) / 2.0);
 
     let mut raster = Raster::new(area.width, area.height);
-    let mut points = Vec::with_capacity(ctx.model.vertex_count());
-    for mesh in &ctx.model.meshes {
-        for xyz in mesh.positions.chunks_exact(3) {
+    let mut points = Vec::with_capacity(ctx.subject.model.vertex_count());
+    for mesh in &ctx.subject.model.meshes {
+        for xyz in mesh.positions.as_chunks::<3>().0 {
             let u = (xyz[right] - bounds.min[right]) / bounds.span(right);
             let mut v = (xyz[down] - bounds.min[down]) / bounds.span(down);
             if invert {

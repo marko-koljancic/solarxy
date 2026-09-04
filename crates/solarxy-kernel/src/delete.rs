@@ -113,7 +113,7 @@ fn filter_mesh(mesh: &KernelMesh, mode: DeleteMode, invert: bool) -> (Option<Ker
     let mut kept_tris: Vec<[u32; 3]> = Vec::with_capacity(tri_count);
     let mut removed = 0usize;
 
-    for tri in mesh.indices.chunks_exact(3) {
+    for tri in mesh.indices.as_chunks::<3>().0 {
         let (i0, i1, i2) = (tri[0], tri[1], tri[2]);
         let (a, b, c) = (
             mesh.positions[i0 as usize],

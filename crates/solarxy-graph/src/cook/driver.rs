@@ -392,7 +392,7 @@ impl CookEngine {
         }
 
         // Gather inputs (required-unconnected is the hard error).
-        let inputs = match self.gather(graph, desc, node) {
+        let mut inputs = match self.gather(graph, desc, node) {
             Ok(inputs) => inputs,
             Err(err) => {
                 self.commit_error(node, &err, report);
@@ -438,6 +438,26 @@ impl CookEngine {
         // it needs the context the resolver just used rather than a weaker
         // one it could build for itself.
         cx.set_eval(eval_ctx);
+
+        // Resolve instanced input for the ports that cannot carry it, so no
+        // compute body has to know instancing exists.
+        //
+        // The position is load-bearing and is the reason this is not a
+        // couple of lines higher. `InputGeo` above closed over `inputs` to
+        // answer `npoints()` and `bbox()` during param resolution, and it
+        // reads the geometry the wires delivered. Baking before that point
+        // would change what those expressions answer on instanced input,
+        // which is a semantic change to the expression language rather than
+        // the mechanical relocation this is. Baking here reproduces exactly
+        // where the per-node calls used to sit: first thing inside the body,
+        // after params.
+        if let Err(err) = bake_uncarried_geometry(desc, &mut inputs, &mut cx) {
+            self.set_warnings(node, cx.take_warnings());
+            self.commit_error(node, &err, report);
+            self.state.insert(node, CookState::Clean);
+            return;
+        }
+
         let start = self.now();
         let outcome = (desc.cook)(&resolved, &inputs, &mut cx);
         let elapsed = self.now() - start;
@@ -872,6 +892,93 @@ impl CookEngine {
             report.status_changed.push((node, status));
         }
     }
+}
+
+/// Bakes instanced geometry arriving on any port that has not declared it
+/// carries placements, before the cook body ever sees it.
+///
+/// This is the enforcement half of the contract `GeometrySet::instances`
+/// states: an operation that cannot carry placements must bake them rather
+/// than drop them, because silently losing the list deletes every copy but
+/// one with no error anywhere. It used to be a call each node made for
+/// itself, which meant a new node was wrong by default and only right if
+/// its author knew the convention. Here the default inverts: a node is
+/// correct with no awareness of instancing at all, and the ones that can
+/// genuinely carry say so on the port.
+///
+/// The bake is announced. It can turn a scene that ran on one prototype
+/// into one carrying ten thousand real copies, and a cliff that steep
+/// should not arrive without a word, so the warning names the node, the
+/// port, and the count. One warning per baked port, so a node with two
+/// geometry inputs says which of them it was.
+///
+/// Uninstanced input, which is almost all input, is left untouched and
+/// warns about nothing. A hole in a variadic port stays a hole: the slot
+/// order is load-bearing for a node that selects by index.
+///
+/// # Errors
+/// Propagates the bake's ceiling error, whose message already names the
+/// way out.
+fn bake_uncarried_geometry(
+    desc: &crate::registry::NodeTypeDescriptor,
+    inputs: &mut Inputs,
+    cx: &mut CookCtx,
+) -> Result<(), CookError> {
+    for port in &desc.inputs {
+        if port.data_type != crate::registry::coerce::DataType::Geometry || port.carries_placements
+        {
+            continue;
+        }
+        let Some(slot) = inputs.slot_mut(&port.key) else {
+            continue;
+        };
+        let mut baked = 0usize;
+        match slot {
+            InputSlot::Single(value) => baked += bake_one(value)?,
+            InputSlot::Variadic(values) => {
+                for value in values.iter_mut().flatten() {
+                    baked += bake_one(value)?;
+                }
+            }
+            InputSlot::Absent => continue,
+        }
+        warn_baked(cx, desc, port, baked);
+    }
+    Ok(())
+}
+
+/// Bakes one gathered value in place, returning the placement count it
+/// resolved (zero when there was nothing to do).
+fn bake_one(value: &mut Value) -> Result<usize, CookError> {
+    let Value::Geometry(set) = value else {
+        return Ok(0);
+    };
+    if !set.is_instanced() {
+        return Ok(0);
+    }
+    let count = set.instance_count();
+    let baked = set
+        .baked()
+        .map_err(|message| CookError::Failed { message })?
+        .into_owned();
+    *value = Value::Geometry(Arc::new(baked));
+    Ok(count)
+}
+
+fn warn_baked(
+    cx: &mut CookCtx,
+    desc: &crate::registry::NodeTypeDescriptor,
+    port: &crate::registry::PortSpec,
+    count: usize,
+) {
+    if count == 0 {
+        return;
+    }
+    cx.warn(format!(
+        "{} cannot carry instanced geometry, so the {count} placements arriving \
+         on {} were baked into real copies here",
+        desc.display_name, port.label
+    ));
 }
 
 /// Derives cook statistics from a node's committed outputs: geometry

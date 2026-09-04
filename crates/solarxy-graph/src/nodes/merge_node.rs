@@ -23,6 +23,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::variadic("inputs", "Inputs", DataType::Geometry, 0)
                 .default_port()
+                .carries_placements()
                 .doc(
                     "The geometry sets to concatenate. Wire as many as you like. Order \
                      matters in three ways: it fixes the mesh order of the result, it \

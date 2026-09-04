@@ -53,6 +53,15 @@ modules:
             /app/share/icons/hicolor/1024x1024/apps/dev.koljam.solarxy.png
       - install -Dm644 packaging/flatpak/dev.koljam.solarxy.metainfo.xml
             /app/share/metainfo/dev.koljam.solarxy.metainfo.xml
+
+      # The license and the ported-source notices. The GPL says its text
+      # travels with every copy, and a Flatpak is a copy; the notices carry
+      # the same obligation from the work they attribute. `share/licenses`
+      # is where distributions look for both.
+      - install -Dm644 LICENSE
+            /app/share/licenses/dev.koljam.solarxy/LICENSE
+      - install -Dm644 THIRD-PARTY-NOTICES.md
+            /app/share/licenses/dev.koljam.solarxy/THIRD-PARTY-NOTICES.md
     sources:
       # Source tree at the workspace root. Flathub will replace this with
       # an `archive` entry pointing at the GitHub release tarball + SHA256

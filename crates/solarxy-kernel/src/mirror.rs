@@ -79,7 +79,7 @@ fn reflect(set: &GeometrySet, axis: Axis, offset: f32) -> Result<GeometrySet, St
             continue;
         }
         let mut indices = (*mesh.indices).clone();
-        for tri in indices.chunks_exact_mut(3) {
+        for tri in indices.as_chunks_mut::<3>().0 {
             tri.swap(1, 2);
         }
         mesh.indices = Arc::new(indices);
@@ -140,7 +140,7 @@ mod tests {
         let mesh = &out.meshes[0];
         let normals = mesh.normals.as_ref().expect("box carries normals");
 
-        for tri in mesh.indices.chunks_exact(3) {
+        for tri in mesh.indices.as_chunks::<3>().0 {
             let (a, b, c) = (
                 mesh.positions[tri[0] as usize],
                 mesh.positions[tri[1] as usize],

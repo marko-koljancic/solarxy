@@ -145,6 +145,8 @@ pub fn load_hdr_image(path: &std::path::Path) -> Result<RawImageHdr, FormatsErro
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact values decoded from a flat fixture
+
     use super::*;
 
     /// A tiny synthetic 4x2 Radiance HDR file (RLE-free), enough to
@@ -181,7 +183,7 @@ mod tests {
         assert_eq!(img.pixels.len(), 4 * 2 * 3);
         // The fixture is flat, so every pixel carries the same triple.
         let first = &img.pixels[..3];
-        for px in img.pixels.chunks_exact(3) {
+        for px in img.pixels.as_chunks::<3>().0 {
             assert_eq!(px, first);
         }
     }

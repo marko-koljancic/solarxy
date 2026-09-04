@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractAssetUrls,
+  injectFileAddressNote,
   rewriteHtml,
   rewriteScript,
   toRelativeAssetPath,
@@ -59,7 +60,7 @@ describe("extractAssetUrls", () => {
 });
 
 describe("rewriteHtml", () => {
-  it("makes every asset reference document-relative", () => {
+  it("resolves against the document URL: dropping the slash is right for src and href", () => {
     const out = rewriteHtml(BUILT_HTML);
     expect(out).toContain('src="assets/player-9ly-yC9-.js"');
     expect(out).toContain('href="assets/client-CqIDWykD.js"');
@@ -79,19 +80,57 @@ describe("rewriteHtml", () => {
 });
 
 describe("rewriteScript", () => {
-  it("rewrites the wasm URL, which is the only absolute asset the glue holds", () => {
-    // The real shape, from the built client chunk.
+  it("resolves against the script's own URL, not the document's", () => {
+    // The real shape, from the built client chunk. The script sits inside
+    // assets/, so `import.meta.url` already ends in assets/, and merely
+    // dropping the slash would ask for assets/assets/<wasm>.
     const js = `const e=new URL("/assets/solarxy_web_bg-G_0nEwUd.wasm",import.meta.url);`;
-    expect(rewriteScript(js)).toBe(
-      `const e=new URL("assets/solarxy_web_bg-G_0nEwUd.wasm",import.meta.url);`,
+    expect(rewriteScript(js, "assets")).toBe(
+      `const e=new URL("./solarxy_web_bg-G_0nEwUd.wasm",import.meta.url);`,
     );
+  });
+
+  it("reaches the bundled wasm from a host root and from a subdirectory alike", () => {
+    // The subdirectory case is the one the rewrite exists to serve; resolve
+    // with real URL semantics rather than comparing strings.
+    const rewritten = rewriteScript(`new URL("/assets/engine.wasm",import.meta.url)`, "assets");
+    const literal = /"([^"]+)"/.exec(rewritten)?.[1] ?? "";
+    for (const scriptUrl of [
+      "https://host/assets/player.js",
+      "https://host/sub/dir/assets/player.js",
+    ]) {
+      expect(new URL(literal, scriptUrl).href).toBe(
+        scriptUrl.replace(/player\.js$/, "engine.wasm"),
+      );
+    }
   });
 
   it("leaves unrelated strings alone", () => {
     const js = `const a="/api/thing";const b="assets/already.js";const c="/assets/x.js";`;
-    expect(rewriteScript(js)).toBe(
-      `const a="/api/thing";const b="assets/already.js";const c="assets/x.js";`,
+    expect(rewriteScript(js, "assets")).toBe(
+      `const a="/api/thing";const b="assets/already.js";const c="./x.js";`,
     );
+  });
+
+  it("still reaches a sibling asset from a script at the archive root", () => {
+    expect(rewriteScript(`"/assets/x.js"`, "")).toBe(`"./assets/x.js"`);
+  });
+});
+
+describe("injectFileAddressNote", () => {
+  it("injects a hidden note and the classic script that reveals it on file:", () => {
+    const out = injectFileAddressNote(BUILT_HTML);
+    expect(out).toContain('id="solarxy-file-note" hidden');
+    expect(out).toContain('location.protocol==="file:"');
+    expect(out).toContain("python3 -m http.server");
+    // Before </body>, so the page parses it even though the module never runs.
+    expect(out.indexOf("solarxy-file-note")).toBeLessThan(out.indexOf("</body>"));
+  });
+
+  it("leaves the served page's content untouched", () => {
+    const out = injectFileAddressNote(BUILT_HTML);
+    expect(out).toContain('<canvas id="player-canvas">');
+    expect(out).toContain("<style>body { margin: 0 }</style>");
   });
 });
 

@@ -83,7 +83,10 @@ fn subdivide_mesh_once(mesh: &KernelMesh) -> KernelMesh {
                 });
             }
             if let Some(t) = uvs {
-                t.push([(t[ia][0] + t[ib][0]) * 0.5, (t[ia][1] + t[ib][1]) * 0.5]);
+                t.push([
+                    f32::midpoint(t[ia][0], t[ib][0]),
+                    f32::midpoint(t[ia][1], t[ib][1]),
+                ]);
             }
             for (_, lane) in attrs.iter_mut() {
                 lane.push_midpoint(ia, ib);
@@ -92,7 +95,7 @@ fn subdivide_mesh_once(mesh: &KernelMesh) -> KernelMesh {
             index
         };
 
-        for tri in mesh.indices.chunks_exact(3) {
+        for tri in mesh.indices.as_chunks::<3>().0 {
             let (a, b, c) = (tri[0], tri[1], tri[2]);
             let ab = midpoint(a, b, &mut positions, &mut normals, &mut uvs, &mut attrs);
             let bc = midpoint(b, c, &mut positions, &mut normals, &mut uvs, &mut attrs);
@@ -122,9 +125,9 @@ fn subdivide_mesh_once(mesh: &KernelMesh) -> KernelMesh {
 
 fn lerp3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [
-        (a[0] + b[0]) * 0.5,
-        (a[1] + b[1]) * 0.5,
-        (a[2] + b[2]) * 0.5,
+        f32::midpoint(a[0], b[0]),
+        f32::midpoint(a[1], b[1]),
+        f32::midpoint(a[2], b[2]),
     ]
 }
 
@@ -148,14 +151,17 @@ impl AttrLane {
 
     fn push_midpoint(&mut self, a: usize, b: usize) {
         match self {
-            AttrLane::Float(v) => v.push((v[a] + v[b]) * 0.5),
-            AttrLane::Vec2(v) => v.push([(v[a][0] + v[b][0]) * 0.5, (v[a][1] + v[b][1]) * 0.5]),
+            AttrLane::Float(v) => v.push(f32::midpoint(v[a], v[b])),
+            AttrLane::Vec2(v) => v.push([
+                f32::midpoint(v[a][0], v[b][0]),
+                f32::midpoint(v[a][1], v[b][1]),
+            ]),
             AttrLane::Vec3(v) => v.push(lerp3(v[a], v[b])),
             AttrLane::Vec4(v) => v.push([
-                (v[a][0] + v[b][0]) * 0.5,
-                (v[a][1] + v[b][1]) * 0.5,
-                (v[a][2] + v[b][2]) * 0.5,
-                (v[a][3] + v[b][3]) * 0.5,
+                f32::midpoint(v[a][0], v[b][0]),
+                f32::midpoint(v[a][1], v[b][1]),
+                f32::midpoint(v[a][2], v[b][2]),
+                f32::midpoint(v[a][3], v[b][3]),
             ]),
         }
     }

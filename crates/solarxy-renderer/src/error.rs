@@ -22,4 +22,21 @@ pub enum RendererError {
     /// Unsupported input (e.g. a malformed prepared-HDRI worker blob).
     #[error("{0}")]
     Unsupported(String),
+    /// A mesh's GPU buffers exceed what the device can allocate.
+    ///
+    /// `bytes` is the allocation rather than the payload: buffers are
+    /// created with growth headroom, so the figure a person needs to see
+    /// is the one that was actually refused. Raised before any buffer is
+    /// created, which is what leaves the previous scene intact.
+    #[error(
+        "mesh {mesh} needs {} for its {what}, and this device permits at most {}",
+        crate::limits::format_bytes(*bytes),
+        crate::limits::format_bytes(*limit)
+    )]
+    MeshTooLarge {
+        mesh: String,
+        what: &'static str,
+        bytes: u64,
+        limit: u64,
+    },
 }

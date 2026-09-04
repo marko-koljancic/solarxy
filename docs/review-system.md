@@ -192,7 +192,7 @@ The on-disk JSON shape (format version 1):
 
 | Field | Purpose |
 |---|---|
-| `format_version` | Schema version. Always `1` in 0.6.0. Future-additive fields will not bump this; field removals or shape changes will. |
+| `format_version` | Schema version. Still `1`. Future-additive fields will not bump this; field removals or shape changes will. |
 | `model_hash` | Stable hex hash of the model file at the time the review was first saved. Informational; not load-bearing for re-anchor logic. |
 | `mesh_hashes` | Per-mesh stable hash, **positionally indexed** (`mesh_hashes[N]` is the hash for mesh N). Used at load time to detect topology drift on a per-mesh basis (the contract check above). |
 | `annotations[].id` | ULID. Sortable, ~26 chars, no collisions in practice. Used by `reply_to`. |
@@ -253,15 +253,15 @@ Vendors / downstream tooling that read the JSON directly should:
 
 ## What this contract does NOT promise
 
-Out of scope for 0.6.0; flagged here so expectations are clear:
+Out of scope; flagged here so expectations are clear:
 
 - **Cross-tool round-tripping** (export from Blender, re-import via Maya,
   re-export). The contract holds only when the same exporter is used
   on the same source file across rounds. Cross-tool workflows almost
   always re-topologize en route.
 - **UV-space anchoring.** Annotations anchor in 3D space, not UV space.
-  A 0.7.0+ task tracks "pin annotation to UV island" as a separate
-  feature.
+  Pinning an annotation to a UV island is tracked as a separate feature
+  and is still unbuilt.
 - **Multi-user concurrent editing.** Two reviewers editing the same
   `.solarxy-review.json` simultaneously will produce merge conflicts
   via Git, same as any other text file. The official answer is "use

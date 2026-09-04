@@ -191,15 +191,18 @@ pub fn decode_cube_bytes(bytes: &[u8]) -> Result<LutCube, FormatsError> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact literals parsed from the table text
+
     use super::*;
 
     /// The smallest well-formed table: two entries per axis, identity.
     fn identity_2() -> String {
+        use std::fmt::Write as _;
         let mut s = String::from("TITLE \"tiny\"\nLUT_3D_SIZE 2\n");
         for b in 0..2 {
             for g in 0..2 {
                 for r in 0..2 {
-                    s.push_str(&format!("{r}.0 {g}.0 {b}.0\n"));
+                    let _ = writeln!(s, "{r}.0 {g}.0 {b}.0");
                 }
             }
         }
@@ -227,12 +230,11 @@ mod tests {
 
     #[test]
     fn comments_blank_lines_and_crlf_are_ignored() {
-        let src = "# a comment\r\n\r\nLUT_3D_SIZE 2 # trailing comment\r\n".to_string()
-            + &identity_2()
-                .lines()
-                .skip(2)
-                .map(|l| format!("{l}\r\n"))
-                .collect::<String>();
+        let mut src = "# a comment\r\n\r\nLUT_3D_SIZE 2 # trailing comment\r\n".to_string();
+        for l in identity_2().lines().skip(2) {
+            src.push_str(l);
+            src.push_str("\r\n");
+        }
         let lut = decode_cube_bytes(src.as_bytes()).expect("decode");
         assert_eq!(lut, LutCube::identity(2));
     }

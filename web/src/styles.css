@@ -1540,19 +1540,26 @@ body.precision-drag-active {
   border-color: var(--border-primary);
 }
 
-.tbtn.cook {
+/* The strip's emphasized action. Named for its role rather than for one
+   feature, because a second toolbar now has one: the render window's Render
+   button is to that strip what Cook is to the header's. Same declarations, so
+   no colour is introduced. */
+.tbtn.cook,
+.tbtn.accent {
   background: var(--accent-primary);
   color: var(--text-on-accent);
   border-color: var(--accent-primary);
   font-weight: 600;
 }
 
-.tbtn.cook:hover:not(:disabled) {
+.tbtn.cook:hover:not(:disabled),
+.tbtn.accent:hover:not(:disabled) {
   background: var(--accent-secondary);
   color: var(--text-on-accent);
 }
 
-.tbtn.cook:disabled {
+.tbtn.cook:disabled,
+.tbtn.accent:disabled {
   background: none;
   color: var(--text-secondary);
   border-color: var(--border-primary);
@@ -1713,16 +1720,35 @@ body.precision-drag-active {
   padding: 0 0.6rem;
 }
 
-/* Opt-in (Modal's `bodyLayout="column"`): dialogs with a fixed height that
- * pin a footer to the bottom. Without it a child's `flex: 1` is inert inside
- * the plain block above, and the footer floats wherever the content ends.
- * `overflow: visible` because in this mode the scrolling child owns its own
- * overflow; keeping `auto` here would nest two scroll containers. */
+/* Opt-in (Modal's `bodyLayout="column"`): dialogs whose body is itself a
+ * growing child (a preview, an editor). Without it a child's `flex: 1` is
+ * inert inside the plain block above. `overflow: visible` because in this
+ * mode the growing child owns its own overflow; keeping `auto` here would
+ * nest two scroll containers. Footer pinning is the `footer` slot's job. */
 .modal-body-column {
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: visible;
+}
+
+/* The shell-owned footer band (Modal's `footer` prop): a sibling of the
+ * scrolling body, so a dialog's actions cannot scroll out of reach at any
+ * size the grip allows. Bordered so a pinned footer reads as pinned rather
+ * than as content that happens to be last. */
+.modal-footer {
+  flex: 0 0 auto;
+  padding-top: 1rem;
+  margin-top: 1rem;
+  border-top: 1px solid var(--border-primary);
+}
+
+/* The About footer: the copyright and the action in one band. */
+.about-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
 }
 
 .modal-resize {
@@ -2556,6 +2582,120 @@ body.reduce-motion * {
 .screenshot-placeholder {
   color: var(--text-tertiary);
 }
+
+/* The still render's preview. The canvas is the real output size, so it is
+   scaled to fit rather than sized: one buffer serves both the preview and the
+   save, and a second scaled copy would double the memory of the one thing here
+   that can reach hundreds of megabytes. */
+/* The render window's control strip: one row that reads left to right, built
+   from the same toolbar primitives the application header uses. */
+.render-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  padding-bottom: 0.5rem;
+}
+.render-strip-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.2rem 0.2rem;
+  background: var(--border-primary);
+}
+.render-strip-field {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+.render-strip-label {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+.render-strip-view {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.render-strip-zoom {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  min-width: 3.2rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* Readings, not controls: what the render node decided. Pushed to the end so
+   the controls keep the left edge, where they are looked for. */
+.render-strip-readings {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The strip collapses in a stated order rather than wrapping arbitrarily.
+   Readings go first, because they are the only part a person can find
+   elsewhere: they are the render node's own parameters. Then the field labels,
+   whose controls carry their own accessible names and stay operable without
+   them. The render action, the pass selector and the view controls never go. */
+@media (max-width: 60rem) {
+  .render-strip-readings {
+    display: none;
+  }
+}
+@media (max-width: 44rem) {
+  .render-strip-label {
+    display: none;
+  }
+}
+
+/* The stage the picture sits on. Positioned rather than centred by flexbox,
+   because the view transform decides where the picture goes and a flex rule
+   would be a second opinion about it. */
+.render-stage {
+  position: relative;
+  flex: 1;
+  min-height: 14rem;
+  background: var(--background-quaternary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+.render-stage:active {
+  cursor: grabbing;
+}
+.render-canvas {
+  position: absolute;
+  /* This ground was ruled checkerboard-free when every still was opaque: a
+     transparent-looking backdrop would have read as alpha the render did not
+     have. That ruling was right, and the transparent film back is what made
+     it false; the matte variant below is the same reasoning pointed the
+     other way, and it appears only when the render was asked for with a
+     matte, so an opaque render still implies nothing. */
+  background: var(--background-tertiary);
+}
+/* The checker behind a transparent render, on the canvas element so it sits
+   exactly under the image and nowhere else. It paints behind the bitmap and
+   is sized in CSS pixels, so it holds its scale under zoom instead of
+   becoming a pattern in the picture; it rides with the element under pan,
+   attached to the image the way its transparency is. The same recipe the
+   asset preview uses, over the same ground the opaque canvas keeps. */
+.render-canvas-matte {
+  background:
+    repeating-conic-gradient(
+        color-mix(in srgb, var(--ink-primary) 7%, transparent) 0% 25%,
+        transparent 0% 50%
+      )
+      0 0 / 24px 24px,
+    var(--background-tertiary);
+}
 .modal-actions .prefs-unit {
   margin-right: auto;
 }
@@ -2737,6 +2877,14 @@ body.reduce-motion .cook-arc {
 .about-version {
   color: var(--text-secondary);
   font-size: 1.1rem;
+}
+/* The license sits above the copyright and reads with it as one block. Quiet,
+   but a step louder than the copyright: it grants the reader something, so it
+   is worth reading rather than merely worth having. */
+.about-license {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.6;
 }
 .about-copyright {
   color: var(--text-secondary);
@@ -4161,9 +4309,17 @@ body.reduce-motion .cook-arc {
     color var(--motion-fast) var(--ease-out-quad);
 }
 
-.tool-btn:hover {
+.tool-btn:hover:not(:disabled) {
   color: var(--text-primary);
   background: var(--hover-bg);
+}
+
+/* A tool the selection cannot use. Same treatment as a disabled context-menu
+   row, so "unavailable" looks the same wherever it appears. */
+.tool-btn:disabled {
+  color: var(--text-quaternary);
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .tool-btn.active {

@@ -58,7 +58,8 @@ part you are deferring and why.
 
 - Code: registry count assert, registry snapshot regenerated with the diff reviewed rather
   than blind, `type_version` bumped with a migration decision when the descriptor changed.
-- Docs: amend the node catalog. Update every place a node-type count appears.
+- Docs: amend the living node catalog, `../../Docs/SOLARXY-NODE-CATALOG.md`, moving the type
+  from a planned row to the shipped roster. Update every place a node-type count appears.
 - Roadmap page: the node-type count appears in more than one place in `data.ts` and those
   places have disagreed with each other before. Update all of them, and the landing page's
   stats band, which carries the same count.
@@ -68,8 +69,8 @@ part you are deferring and why.
 ### Scope changes, or a ratified decision is amended
 
 - Docs: a dated amendment in the milestone spec, newest first, plus the roadmap if the
-  release program moved. Node-spec changes also amend the catalog; interaction changes also
-  amend the UX spec.
+  release program moved. Node-spec changes also amend the living node catalog; interaction
+  changes also amend the UX spec.
 - Roadmap page: if a card was regraded, rescoped, deferred, or dropped, the corresponding
   data array in `web/src/roadmap/data.ts` changes. See the data-module table below.
 - GitHub: reflect the new scope in the affected items. An item deleted from scope is closed

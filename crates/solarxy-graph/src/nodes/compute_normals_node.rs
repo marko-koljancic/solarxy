@@ -24,6 +24,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()
+                .carries_placements()
                 .doc("The geometry whose normals to recompute."),
         ],
         outputs: vec![geometry_output()],
@@ -99,7 +100,7 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
         }
         if flip {
             let mut indices = (*mesh.indices).clone();
-            for tri in indices.chunks_exact_mut(3) {
+            for tri in indices.as_chunks_mut::<3>().0 {
                 tri.swap(1, 2);
             }
             mesh.indices = Arc::new(indices);
@@ -165,7 +166,7 @@ mod tests {
         assert!(n[2] < -0.99, "flipped triangle faces -Z, got {n:?}");
     }
 
-    /// A polyline through a flipping compute_normals must come out intact:
+    /// A polyline through a flipping `compute_normals` must come out intact:
     /// the triple-swap over a pair list would scramble segment order, and
     /// no normals should be invented for it.
     #[test]

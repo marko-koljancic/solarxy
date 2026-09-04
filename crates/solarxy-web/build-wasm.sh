@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Builds solarxy-web to wasm, runs wasm-bindgen, then wasm-opt.
 #
-# Usage: build-wasm.sh [OUT_DIR] [--dev | --dist]
+# Usage: build-wasm.sh [OUT_DIR] [--dev | --dist] [--features LIST]
 #   OUT_DIR  where the wasm-bindgen `--target web` output lands
 #            (default: crates/solarxy-web/smoke/pkg).
 #   --dev    debug build (fast compile, large wasm, no wasm-opt).
 #   --dist   the profile used for shipping: fat LTO, one codegen unit, symbols
 #            stripped (see [profile.dist] in the workspace Cargo.toml).
 #   default  the `release` profile (thin LTO), for local dev of the real app.
+#   --features  cargo features for solarxy-web. Nothing optional ships, so this
+#            is for diagnostics (`pt-probe`) and for measuring what an optional
+#            feature costs: the same script run twice on one toolchain is the
+#            compressed-size delta, with no second checkout to explain it away.
 #
 # On --dist and payload size, measured rather than assumed: fat LTO buys NOTHING
 # here. release vs dist, after wasm-opt -Oz, is 954,982 vs 955,247 bytes brotli --
@@ -29,16 +33,28 @@ cd "$(dirname "$0")/../.."   # workspace root (solarxy/)
 
 OUT_DIR=""
 PROFILE="release"
+FEATURES=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dev)  PROFILE="debug" ;;
         --dist) PROFILE="dist" ;;
+        --features)
+            shift
+            [[ $# -gt 0 ]] || { echo "error: --features needs a value" >&2; exit 1; }
+            FEATURES="$1"
+            ;;
         --*)    echo "error: unknown flag $1" >&2; exit 1 ;;
         *)      OUT_DIR="$1" ;;
     esac
     shift
 done
+
+# Feature pass-through, so the payload cost of anything optional is measurable
+# as the same script run twice on one toolchain rather than by hand-editing this
+# line. Off by default: the shipped artifact carries no optional feature.
+FEATURE_FLAG=""
+[[ -n "$FEATURES" ]] && FEATURE_FLAG="--features $FEATURES"
 OUT_DIR="${OUT_DIR:-crates/solarxy-web/smoke/pkg}"
 
 case "$PROFILE" in
@@ -80,8 +96,8 @@ if [[ "$HAVE_WASM_OPT" == "0" ]]; then
     fi
 fi
 
-echo "==> cargo build ($PROFILE) for wasm32"
-cargo build -p solarxy-web --target wasm32-unknown-unknown $PROFILE_FLAG
+echo "==> cargo build ($PROFILE${FEATURES:+, features: $FEATURES}) for wasm32"
+cargo build -p solarxy-web --target wasm32-unknown-unknown $PROFILE_FLAG $FEATURE_FLAG
 
 RAW="target/wasm32-unknown-unknown/$PROFILE/solarxy_web.wasm"
 [[ -f "$RAW" ]] || { echo "error: expected artifact missing: $RAW" >&2; exit 1; }

@@ -40,8 +40,58 @@ use crate::resources;
 use crate::validation::{build_mesh_category_map, build_mesh_edge_indices};
 
 /// Extra capacity factor for growable buffers (1.5x).
-fn with_headroom(bytes: u64) -> u64 {
+///
+/// Shared with the traced scene's arena buffers rather than restated there:
+/// "the established headroom policy" is a policy only while there is one
+/// copy of the number.
+pub(crate) fn with_headroom(bytes: u64) -> u64 {
     bytes + bytes / 2
+}
+
+/// The size a buffer holding `bytes` is actually created with: the growth
+/// headroom, then wgpu's four-byte buffer alignment.
+///
+/// Kept beside [`with_headroom`] and used by both the size check and
+/// nothing else, because `create_with_capacity` applies the same rounding
+/// itself. A check that compared the raw payload would pass a mesh at two
+/// thirds of the ceiling and let it die inside `create_buffer`.
+fn allocation_size(bytes: u64) -> u64 {
+    with_headroom(bytes).max(4).div_ceil(4) * 4
+}
+
+/// Refuse a mesh the device cannot hold, naming what did not fit, how large
+/// it was and what the device permits.
+///
+/// Called before any buffer is created, so a refusal leaves the previous
+/// scene intact and the viewport still drawing. Before this existed the
+/// allocation simply failed inside `create_buffer`, which on web produces a
+/// cascade of browser console messages and a viewport that stops drawing,
+/// with no Rust-side signal a shell could turn into a message.
+fn check_mesh_fits(b: &BuiltMesh, limits: &wgpu::Limits) -> Result<(), RendererError> {
+    let vertex = wgpu::BufferUsages::VERTEX.union(wgpu::BufferUsages::COPY_DST);
+    let index = wgpu::BufferUsages::INDEX.union(wgpu::BufferUsages::COPY_DST);
+    let storage = wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_DST);
+    // The UV position buffer is sized from `edge_pos_bytes` and is also
+    // STORAGE, so the edge-positions row already covers it.
+    for (what, bytes, usage) in [
+        ("vertex data", b.vertex_bytes(), vertex),
+        ("index data", b.index_bytes(), index),
+        ("edge positions", b.edge_pos_bytes(), storage),
+        ("edge indices", b.edge_idx_bytes(), storage),
+        ("vertex colors", b.color_bytes(), vertex),
+    ] {
+        let needed = allocation_size(bytes);
+        let ceiling = crate::limits::buffer_ceiling(limits, usage);
+        if needed > ceiling {
+            return Err(RendererError::MeshTooLarge {
+                mesh: b.name.clone(),
+                what,
+                bytes: needed,
+                limit: ceiling,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The object's per-instance GPU rows: its world transform composed with
@@ -262,10 +312,26 @@ impl SceneObjects {
     }
 
     /// The engine-provided light list; `None` means no `SetLights` has
-    /// arrived and the shell keeps its synthesized viewer rig.
+    /// arrived at all.
+    ///
+    /// Rarely the question a shell wants. See [`SceneObjects::authored_lights`].
     #[must_use]
     pub fn lights(&self) -> Option<&[LightDef]> {
         self.lights.as_deref()
+    }
+
+    /// The scene's own lights, when it has any.
+    ///
+    /// **This is the question every shell means when it asks about lights, and
+    /// [`SceneObjects::lights`] is not it.** The engine pushes `SetLights`
+    /// unconditionally, including for a document with no light nodes, because
+    /// absence has to be communicated too. So `lights()` answering `Some` says
+    /// only that a cook has happened, and an empty list read as "the scene
+    /// describes its own lighting" is how a cooked scene with no lights ended
+    /// up with the camera rig switched off in every shell that holds an engine.
+    #[must_use]
+    pub fn authored_lights(&self) -> Option<&[LightDef]> {
+        self.lights.as_deref().filter(|l| !l.is_empty())
     }
 
     /// True once after each `SetLights`, so the shell knows to rebuild
@@ -301,6 +367,19 @@ impl SceneObjects {
             });
         }
         acc
+    }
+
+    /// One object's world bounds, or `None` if it is absent.
+    ///
+    /// The same composition [`SceneObjects::visible_bounds`] makes, for one
+    /// object rather than all of them: framing a selection has to put the
+    /// camera around where the object actually is, not around the origin its
+    /// geometry was authored about.
+    #[must_use]
+    pub fn object_world_bounds(&self, id: SceneObjectId) -> Option<AABB> {
+        self.objects
+            .get(&id)
+            .map(|o| o.model.bounds.transformed(&o.transform))
     }
 
     /// Apply one delta batch in order.
@@ -400,6 +479,13 @@ impl SceneObjects {
         }
         let cooked: &CookedGeometry = &cooked_arc;
         let (built, raw_to_gpu) = build_meshes(cooked);
+
+        // Judged against the device that was actually created, so raising
+        // the requested limits raises this ceiling with them.
+        let limits = device.limits();
+        for b in &built {
+            check_mesh_fits(b, &limits)?;
+        }
 
         // In-place fast path: same mesh count, same material count, and
         // every new buffer fits its recorded capacity. A changed material
@@ -852,7 +938,12 @@ impl SceneObjects {
 /// Whether two cooked geometries are identical by attribute-buffer and
 /// material `Arc` identity (the engine's cook cache shares those `Arc`s
 /// across frames, so pointer equality means content equality).
-fn same_geometry(a: &CookedGeometry, b: &CookedGeometry) -> bool {
+///
+/// Shared with the traced scene, which keys its hierarchy cache on the same
+/// identity. Two consumers deciding "unchanged" two ways would eventually
+/// disagree about whether a re-seeded scatter needs rebuilding, and only one
+/// of them would be right.
+pub(crate) fn same_geometry(a: &CookedGeometry, b: &CookedGeometry) -> bool {
     fn same_opt<T>(x: Option<&Arc<T>>, y: Option<&Arc<T>>) -> bool {
         match (x, y) {
             (Some(x), Some(y)) => Arc::ptr_eq(x, y),
@@ -1168,6 +1259,88 @@ mod tests {
             vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             vec![0, 1, 2],
         )
+    }
+
+    /// A strip of `count` vertices, enough to give every buffer a real
+    /// size. Sizes are read back off the built mesh rather than computed
+    /// here, so the tests hold whatever `ModelVertex` currently weighs.
+    fn strip(count: usize) -> CookedGeometry {
+        let positions: Vec<[f32; 3]> = (0..count).map(|i| [i as f32, 0.0, 0.0]).collect();
+        let indices: Vec<u32> = (0..count as u32).collect();
+        CookedGeometry {
+            meshes: vec![cooked_mesh("strip", positions.clone(), indices)],
+            materials: Vec::new(),
+            bounds: compute_bounds(&positions),
+        }
+    }
+
+    #[test]
+    fn an_ordinary_mesh_fits_the_default_limits() {
+        let cooked = strip(99);
+        let (built, _) = build_meshes(&cooked);
+        assert!(check_mesh_fits(&built[0], &wgpu::Limits::default()).is_ok());
+    }
+
+    /// The defect this guards is a mesh whose data fits and whose
+    /// allocation does not. Buffers are created with 1.5x growth headroom,
+    /// so the usable ceiling is two thirds of the limit; a check written
+    /// against the payload would pass this mesh and let it die inside
+    /// `create_buffer`, which is the failure with no Rust-side signal.
+    #[test]
+    fn the_refusal_measures_the_allocation_not_the_payload() {
+        let cooked = strip(99);
+        let (built, _) = build_meshes(&cooked);
+        let payload = built[0].vertex_bytes();
+        let ceiling = payload + 1;
+        assert!(
+            allocation_size(payload) > ceiling,
+            "the fixture must be one the payload clears and the allocation does not"
+        );
+
+        let limits = wgpu::Limits {
+            max_buffer_size: ceiling,
+            ..wgpu::Limits::default()
+        };
+        let Err(RendererError::MeshTooLarge {
+            mesh,
+            what,
+            bytes,
+            limit,
+        }) = check_mesh_fits(&built[0], &limits)
+        else {
+            panic!("a mesh past the ceiling must be refused");
+        };
+        assert_eq!(mesh, "strip");
+        assert_eq!(what, "vertex data");
+        assert_eq!(bytes, allocation_size(payload));
+        assert_eq!(limit, ceiling);
+    }
+
+    /// Edge positions and edge indices are STORAGE, so they are bounded by
+    /// the binding limit, which is half the buffer ceiling at the defaults.
+    /// Raising `max_buffer_size` alone would move this failure rather than
+    /// fix it, which is why both fields are raised together.
+    #[test]
+    fn a_storage_buffer_is_judged_by_the_binding_limit() {
+        let cooked = strip(99);
+        let (built, _) = build_meshes(&cooked);
+        let payload = built[0].edge_pos_bytes();
+        assert!(payload > 0, "the fixture must have edge positions");
+
+        let limits = wgpu::Limits {
+            max_storage_buffer_binding_size: (payload + 1) as u32,
+            ..wgpu::Limits::default()
+        };
+        let Err(RendererError::MeshTooLarge { what, limit, .. }) =
+            check_mesh_fits(&built[0], &limits)
+        else {
+            panic!("a storage buffer past the binding limit must be refused");
+        };
+        assert_eq!(
+            what, "edge positions",
+            "the vertex and index buffers are not storage and must have passed"
+        );
+        assert_eq!(limit, payload + 1);
     }
 
     #[test]

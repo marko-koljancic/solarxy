@@ -20,7 +20,7 @@ import {
   runFrame,
 } from "../engine/session";
 import { adoptViewportCanvas, viewportCanvas } from "../engine/canvas";
-import { useMirror } from "../store/mirror";
+import { selectGraph, useMirror } from "../store/mirror";
 import { usePrefs } from "../store/prefs";
 import { useReview } from "../store/review";
 import { useViewState } from "../store/viewState";
@@ -224,11 +224,16 @@ export function Viewport() {
     };
 
     const onDoubleClick = (e: MouseEvent) => {
-      // Enter the picked geo's subflow.
+      // Enter the picked geo's subflow. Only a geo has one: picking now also
+      // returns lights, and diving into a light would leave the canvas
+      // showing a context that does not exist.
       try {
         const p = canvasPos(e);
         const hit = getClient().pick(p.x, p.y);
-        if (hit !== undefined) useMirror.getState().setCurrent({ subflow: hit });
+        if (hit === undefined) return;
+        const root = selectGraph(useMirror.getState(), "root");
+        if (root.nodes.find((n) => n.id === hit)?.typeId !== "geo") return;
+        useMirror.getState().setCurrent({ subflow: hit });
       } catch {
         /* not booted */
       }

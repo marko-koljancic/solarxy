@@ -14,6 +14,7 @@ use std::path::Path;
 
 use half::f16;
 
+use crate::env_dist::EnvDistribution;
 use crate::error::RendererError;
 use crate::skybox::EquirectTexture;
 
@@ -39,6 +40,18 @@ pub struct IblState {
     /// `None` for the procedural ([`IblState::fallback`] /
     /// [`IblState::from_sky_colors`]) constructors.
     pub equirect: Option<EquirectTexture>,
+    /// The sampling distribution built over the same pixels, retained for the
+    /// same reason `equirect` is: a consumer other than the light bind group
+    /// needs the source, and rebuilding it means a second full pass over the
+    /// largest asset in a scene.
+    ///
+    /// That consumer is the path tracer, which aims its escaping rays with it.
+    /// Both HDRI routes already build one and dropped it here until the tracer
+    /// had somewhere to read it from; the worker even ships it across the
+    /// boundary inside [`PreparedHdri`] precisely so the main thread does not
+    /// have to compute it. `None` alongside a `None` equirect, because a
+    /// procedural sky has no image to distribute over.
+    pub distribution: Option<EnvDistribution>,
 }
 
 const F16_MAX: f32 = 65504.0;
@@ -182,6 +195,7 @@ impl IblState {
             prefiltered_texture,
             [0.2, 0.2, 0.2],
             None,
+            None,
         )
     }
 
@@ -197,9 +211,9 @@ impl IblState {
         let irradiance_texture = generate_irradiance_sky(device, queue, top, bottom);
         let prefiltered_texture = generate_prefiltered_sky(device, queue, top, bottom);
         let irradiance_average = [
-            (top[0] + bottom[0]) * 0.5,
-            (top[1] + bottom[1]) * 0.5,
-            (top[2] + bottom[2]) * 0.5,
+            f32::midpoint(top[0], bottom[0]),
+            f32::midpoint(top[1], bottom[1]),
+            f32::midpoint(top[2], bottom[2]),
         ];
 
         Self::from_parts(
@@ -207,6 +221,7 @@ impl IblState {
             irradiance_texture,
             prefiltered_texture,
             irradiance_average,
+            None,
             None,
         )
     }
@@ -269,6 +284,9 @@ impl IblState {
 
         let irradiance_faces = convolve_equirect(width, height, rgb(&pixels));
         let irradiance_average = compute_irradiance_average(&irradiance_faces);
+        // Built here as well as in `prepare`, so the inline path and the worker
+        // path produce the same value rather than one of them producing none.
+        let distribution = EnvDistribution::build(width, height, &pixels);
         Self::from_prepared(
             device,
             queue,
@@ -278,6 +296,7 @@ impl IblState {
                 pixels: pixels.into_owned(),
                 irradiance_faces,
                 irradiance_average,
+                distribution,
             },
         )
     }
@@ -315,6 +334,7 @@ impl IblState {
             prefiltered_texture,
             prepared.irradiance_average,
             Some(equirect),
+            Some(prepared.distribution.clone()),
         )
     }
 
@@ -324,6 +344,7 @@ impl IblState {
         prefiltered_texture: wgpu::Texture,
         irradiance_average: [f32; 3],
         equirect: Option<EquirectTexture>,
+        distribution: Option<EnvDistribution>,
     ) -> Self {
         let irradiance_view = irradiance_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("IBL Irradiance View"),
@@ -367,6 +388,7 @@ impl IblState {
             prefiltered_sampler,
             irradiance_average,
             equirect,
+            distribution,
         }
     }
 }
@@ -387,6 +409,17 @@ pub struct PreparedHdri {
     /// The 32x32 convolved irradiance cubemap faces.
     pub irradiance_faces: [Vec<[f32; 3]>; 6],
     pub irradiance_average: [f32; 3],
+    /// The sampling distribution the path tracer draws directions from.
+    ///
+    /// It rides here rather than being built where it is used because of where
+    /// the work has to happen: on the web the decode and the convolution run in
+    /// the import worker so the main thread keeps its frame rate, and this is a
+    /// third pass over the same pixels that would otherwise have to cross the
+    /// boundary twice or block the renderer. Nothing else about the transfer
+    /// changes, which is what "no new worker plumbing" means in the milestone.
+    ///
+    /// Empty for a black image, which is a scene state rather than a failure.
+    pub distribution: EnvDistribution,
 }
 
 impl PreparedHdri {
@@ -407,18 +440,24 @@ impl PreparedHdri {
         sanitize_hdr_pixels(&mut pixels);
         let irradiance_faces = convolve_equirect(width, height, rgb(&pixels));
         let irradiance_average = compute_irradiance_average(&irradiance_faces);
+        let distribution = EnvDistribution::build(width, height, &pixels);
         Ok(Self {
             width,
             height,
             pixels,
             irradiance_faces,
             irradiance_average,
+            distribution,
         })
     }
 
     /// Packs into a little-endian byte blob for the worker boundary:
     /// `width, height`, the average, the six fixed-size irradiance faces,
-    /// then the equirect pixels.
+    /// the equirect pixels, then the sampling distribution.
+    ///
+    /// The distribution goes last and is length-prefixed by its own dimensions,
+    /// so a blob whose image is black carries two zeroes rather than an absent
+    /// section, and the reader never has to guess whether one is present.
     #[must_use]
     pub fn pack(&self) -> Vec<u8> {
         let face_len: usize = self.irradiance_faces.iter().map(Vec::len).sum();
@@ -440,6 +479,15 @@ impl PreparedHdri {
         // produced: components in order, little-endian. Flattening the CPU
         // representation did not move the wire format.
         for c in &self.pixels {
+            out.extend_from_slice(&c.to_le_bytes());
+        }
+        out.extend_from_slice(&self.distribution.width().to_le_bytes());
+        out.extend_from_slice(&self.distribution.height().to_le_bytes());
+        out.extend_from_slice(&self.distribution.total_weight().to_le_bytes());
+        for c in self.distribution.marginal() {
+            out.extend_from_slice(&c.to_le_bytes());
+        }
+        for c in self.distribution.conditional() {
             out.extend_from_slice(&c.to_le_bytes());
         }
         out
@@ -472,7 +520,9 @@ impl PreparedHdri {
             let len = read_u32(take(4)?) as usize;
             let data = take(len.checked_mul(12).ok_or_else(bad)?)?;
             let face = data
-                .chunks_exact(12)
+                .as_chunks::<12>()
+                .0
+                .iter()
                 .map(|px| {
                     [
                         read_f32(&px[0..4]),
@@ -490,7 +540,37 @@ impl PreparedHdri {
             .and_then(|n| n.checked_mul(3))
             .ok_or_else(bad)?;
         let data = take(sample_count.checked_mul(4).ok_or_else(bad)?)?;
-        let pixels = data.chunks_exact(4).map(read_f32).collect();
+        let pixels = data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| read_f32(b))
+            .collect();
+
+        let dist_width = read_u32(take(4)?);
+        let dist_height = read_u32(take(4)?);
+        let total_weight = read_f32(take(4)?);
+        let rows = dist_height as usize;
+        let cells = (dist_width as usize).checked_mul(rows).ok_or_else(bad)?;
+        let marginal: Vec<f32> = take(rows.checked_mul(4).ok_or_else(bad)?)?
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| read_f32(b))
+            .collect();
+        let conditional: Vec<f32> = take(cells.checked_mul(4).ok_or_else(bad)?)?
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| read_f32(b))
+            .collect();
+        let distribution = EnvDistribution::from_parts(
+            dist_width,
+            dist_height,
+            marginal,
+            conditional,
+            total_weight,
+        );
 
         Ok(Self {
             width,
@@ -498,6 +578,7 @@ impl PreparedHdri {
             pixels,
             irradiance_faces,
             irradiance_average,
+            distribution,
         })
     }
 }
@@ -1148,6 +1229,14 @@ mod prepared_tests {
         assert_eq!(back.pixels, prepared.pixels);
         assert_eq!(back.irradiance_faces, prepared.irradiance_faces);
         assert_eq!(back.irradiance_average, prepared.irradiance_average);
+        // The sampling distribution rides the same blob, and it is the half a
+        // reader is most likely to add a section for and forget to read back:
+        // an environment whose tables arrived empty falls silently back to
+        // uniform sampling, which converges to the right picture slowly enough
+        // that it reads as the tracer being slow rather than as a broken
+        // transfer.
+        assert_eq!(back.distribution, prepared.distribution);
+        assert!(!back.distribution.is_empty());
     }
 
     #[test]

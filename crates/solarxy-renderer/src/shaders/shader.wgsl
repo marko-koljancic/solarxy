@@ -655,6 +655,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
+    // The alpha this surface writes to the target. Only a blended material
+    // carries its authored alpha out: OPAQUE ignores alpha by the glTF
+    // contract, and a MASK fragment that survived the cutoff is opaque by
+    // definition. The lane matters only to a transparent film back, where an
+    // authored half-alpha on an opaque material would otherwise punch a hole
+    // in the matte; when the composite is not carrying alpha, nothing reads
+    // it.
+    let surface_alpha = select(1.0, base_alpha, material.alpha_mode == 2u);
+
     if camera.inspection_mode == 1u {
         let id = f32(material.material_index) + 1.0;
         let r = fract(sin(id * 43758.5453) * 1.0);
@@ -714,7 +723,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     if model_id == 3u {
         // Unlit: flat factor x map (glTF KHR_materials_unlit).
-        return vec4(material.base_color.rgb * albedo_sample.rgb * in.vcolor.rgb, base_alpha);
+        return vec4(material.base_color.rgb * albedo_sample.rgb * in.vcolor.rgb, surface_alpha);
     }
     if model_id == 1u {
         // Matcap: the base-color texture IS the matcap, sampled by the
@@ -1174,6 +1183,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let color = ambient + radiance_acc + emissive_color;
-    let alpha = select(base_alpha, 1.0, camera.material_override != 0u);
+    let alpha = select(surface_alpha, 1.0, camera.material_override != 0u);
     return vec4(color, alpha);
 }

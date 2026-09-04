@@ -13,6 +13,9 @@ impl State {
             self.capture_requested = true;
             self.screenshot_expand_review = false;
         }
+        if actions.render_still {
+            self.open_still_dialog();
+        }
         if actions.close_model {
             self.close_document();
         }
@@ -20,7 +23,9 @@ impl State {
             self.save_preferences();
         }
         if let Some(path) = actions.open_recent {
-            self.spawn_load(path);
+            // Through the router, not the model loader: the one list holds
+            // scenes and models, and the routing on extension exists once.
+            self.open_file(std::path::PathBuf::from(path));
         }
         if actions.open_config_file
             && let Some(path) = solarxy_core::preferences::config_path()

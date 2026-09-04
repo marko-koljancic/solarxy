@@ -25,7 +25,11 @@ alongside the CLI it wraps, and a single PR can update both
    cd packaging/github-action
    git init /tmp/solarxy-validate-action
    cp action.yml README.md /tmp/solarxy-validate-action/
-   cp ../../LICENSE /tmp/solarxy-validate-action/    # MIT, same as solarxy
+   # Deliberately this directory's LICENSE, not the repository root's. Solarxy
+   # itself is GPL-3.0-or-later from 0.9.0; a reusable action that people drop
+   # into their own pipelines stays MIT, and copying the root file would
+   # relicense it by accident.
+   cp LICENSE /tmp/solarxy-validate-action/          # MIT: the action stays permissive
    cd /tmp/solarxy-validate-action
    git add -A
    git commit -m "Initial commit — mirror of solarxy/packaging/github-action @ <commit-sha>"

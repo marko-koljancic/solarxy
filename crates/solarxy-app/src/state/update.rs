@@ -44,7 +44,7 @@ impl State {
     pub(super) fn scene_bounds(&self) -> solarxy_core::AABB {
         match (
             self.scene.as_ref().map(|s| s.model.bounds),
-            self.scene_objects.visible_bounds(),
+            self.raster.scene().visible_bounds(),
         ) {
             (Some(model), Some(objects)) => model.union(&objects),
             (Some(only), None) | (None, Some(only)) => only,
@@ -116,7 +116,8 @@ impl State {
     /// fixed placeholder underneath them would read as the ground jumping.
     pub(super) fn reset_env_for_empty_scene(&mut self) {
         let bounds = self
-            .scene_objects
+            .raster
+            .scene()
             .visible_bounds()
             .unwrap_or(self.env_bounds);
         self.rebuild_env(bounds);
@@ -140,7 +141,7 @@ impl State {
         // to a placeholder moves the floor and the grid under a camera that
         // has not moved. Framing and sizing do not read the environment for
         // this, they ask `scene_bounds`, which answers with the placeholder.
-        let Some(bounds) = self.scene_objects.visible_bounds() else {
+        let Some(bounds) = self.raster.scene().visible_bounds() else {
             return;
         };
         let eps = (self.env_bounds.diagonal() * 1e-3).max(1e-6);
@@ -195,6 +196,7 @@ impl State {
                 // have moved even when the HDRI did not.
                 EnvironmentOutcome::Unchanged => {}
                 EnvironmentOutcome::HdriInstalled => {
+                    self.traced_env_dirty = true;
                     if *background == solarxy_core::scene::BackgroundKind::HdriSky {
                         self.view.pane_settings[0].background_mode =
                             solarxy_core::preferences::BackgroundMode::HDRI_SKY;
@@ -204,6 +206,7 @@ impl State {
                 // to the procedural sky the pane's own background derives,
                 // which is exactly what the Clear HDRI button does.
                 EnvironmentOutcome::Cleared => {
+                    self.traced_env_dirty = true;
                     let (top, bottom) = self
                         .resolve_background(&self.view.pane_settings[0])
                         .sky_colors();
@@ -216,6 +219,32 @@ impl State {
                 }
             }
             self.rebuild_light_bind_group();
+        }
+    }
+
+    /// Snap every bound pane's camera to its camera node's current pose.
+    ///
+    /// Runs every frame, so a camera node moved by a scene edit or reload
+    /// carries its panes with it, matching the web shell. The clone ends
+    /// the `raster` borrow before the pane cameras are mutated. A binding
+    /// whose node no longer exists follows nothing and keeps its last
+    /// pose, exactly as on the web.
+    fn follow_look_through_cameras(&mut self) {
+        let updates: Vec<(usize, solarxy_core::scene::CameraDef)> = {
+            let Some(cams) = self.raster.scene().cameras() else {
+                return;
+            };
+            (0..4)
+                .filter_map(|i| {
+                    let id = self.look_through[i]?;
+                    cams.iter().find(|c| c.id == id).map(|d| (i, d.clone()))
+                })
+                .collect()
+        };
+        for (i, def) in updates {
+            if let Some(cam) = self.view.cameras.get_mut(i).and_then(Option::as_mut) {
+                solarxy_host::cameras::apply_camera_def(&mut cam.camera, &def);
+            }
         }
     }
 
@@ -263,11 +292,32 @@ impl State {
             engine.submit_job_result(ctx, id, result);
         }
 
+        // Surface fresh cook failures. The engine emits a status event
+        // only on a transition, so this toasts once per failed cook, not
+        // once per frame; warnings never ride this stream (they are
+        // pull-based on the driver), so bake announcements and migration
+        // notices stay out of the toast queue by construction. Names are
+        // resolved while the engine borrow is live, toasted after it ends.
+        let mut fresh = self.cook_health.absorb(&batch.events);
+        fresh.extend(self.cook_health.absorb(&cooked));
+        let toasts: Vec<String> = fresh
+            .into_iter()
+            .map(|(id, message)| {
+                let name = find_node_name(engine, id);
+                format!("{name} failed to cook: {message}")
+            })
+            .collect();
+
         if dirty || !cooked.is_empty() {
             let delta = engine.take_scene_delta();
             if !delta.ops.is_empty() {
                 self.pending_scene_deltas.push(delta);
             }
+        }
+
+        for message in toasts {
+            self.gui
+                .set_toast(&message, crate::gui::ToastSeverity::Error);
         }
     }
 
@@ -286,7 +336,8 @@ impl State {
         let registry = engine.registry();
         let graph = engine.document().graph(GraphContext::Root).ok();
         info.object_names = self
-            .scene_objects
+            .raster
+            .scene()
             .iter()
             .map(|(id, _)| {
                 let name = graph
@@ -296,24 +347,26 @@ impl State {
             })
             .collect();
 
-        info.counts = engine_scene::count_geometry(&self.scene_objects);
+        info.counts = engine_scene::count_geometry(self.raster.scene());
 
         // Zipped rather than looked up per object: `object_names` was built
         // from this same iterator a moment ago, so the orders agree by
         // construction and the merged issue order is the iteration order.
         let merged = engine_scene::merge_validation(
-            self.scene_objects
+            self.raster
+                .scene()
                 .iter()
                 .zip(&info.object_names)
                 .filter_map(|((id, _), (_, name))| {
-                    let result = self.scene_objects.validation(*id)?;
+                    let result = self.raster.scene().validation(*id)?;
                     Some((*id, name.as_str(), &result.report))
                 }),
         );
         info.validation = merged;
 
         let bounds = self
-            .scene_objects
+            .raster
+            .scene()
             .visible_bounds()
             .unwrap_or(self.env_bounds)
             .size();
@@ -438,84 +491,47 @@ impl State {
     }
 
     pub(super) fn resize_render_targets(&mut self, width: u32, height: u32) {
-        if width == 0 || height == 0 {
+        if !self.renderer.resize_targets(&self.device, width, height) {
             return;
         }
-        if width == self.renderer.target_width && height == self.renderer.target_height {
-            return;
-        }
-        self.renderer.target_width = width;
-        self.renderer.target_height = height;
-        self.renderer.targets.depth_texture = texture::Texture::create_depth_texture(
-            &self.device,
-            width,
-            height,
-            "depth_texture",
-            self.renderer.msaa_sample_count,
-        );
-        self.renderer.targets.msaa_hdr_view = texture::create_msaa_hdr_texture(
-            &self.device,
-            width,
-            height,
-            self.renderer.msaa_sample_count,
-        );
-        let (hdr_tex, hdr_view) = texture::create_hdr_resolve_texture(&self.device, width, height);
-        self.renderer.targets._hdr_resolve_texture = hdr_tex;
-        self.renderer.targets.hdr_resolve_view = hdr_view;
-        self.renderer.post.bloom.resize(
-            &self.device,
-            &self.renderer.layouts,
-            &self.renderer.targets.hdr_resolve_view,
-            width,
-            height,
-        );
-        self.renderer.post.composite.rebuild_bind_group(
-            &self.device,
-            &self.renderer.layouts,
-            &self.renderer.targets.hdr_resolve_view,
-            &self.renderer.post.bloom.ping_view,
-            &self.renderer.post.bloom.sampler,
-            &self.renderer.post.luts,
-        );
-        let (ct, cv) = texture::create_overlap_count_texture(&self.device, width, height, false);
-        self.renderer.uv_overlap.count_texture = ct;
-        self.renderer.uv_overlap.count_view = cv;
-        self.renderer.uv_overlap.overlay_bind_group =
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("UV Overlap Overlay Bind Group"),
-                layout: &self.renderer.layouts.uv_overlap_read,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.renderer.uv_overlap.count_view,
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.renderer.uv_overlap.sampler),
-                    },
-                ],
-            });
+        // Shell policy, which is why it stays here rather than moving into the
+        // renderer with the body above: the overlap statistic is measured over
+        // a texture that just changed size, so a pane showing it has to
+        // remeasure. The web shell has no equivalent because it recomputes the
+        // statistic from its own view state.
         if self.view.pane_settings.iter().any(|p| p.show_uv_overlap) {
             self.renderer.uv_overlap.stats_dirty = true;
         }
-
-        self.renderer
-            .post
-            .ssao
-            .resize(&self.device, &self.renderer.layouts, width, height);
-
-        self.renderer
-            .overdraw
-            .resize(&self.device, &self.renderer.layouts, width, height);
-        let layouts = std::sync::Arc::clone(&self.renderer.layouts);
-        self.renderer
-            .outline
-            .resize(&self.device, &layouts, width, height);
     }
 
     pub fn update(&mut self) {
+        // Uncaptured GPU faults recorded since the last frame. The hook
+        // already logged each full message on the `solarxy::gpu` target,
+        // which the console captures; the toast is the short pointer, and
+        // its wording does not promise the picture is right afterwards.
+        for fault in self.gpu_faults.drain() {
+            use solarxy_renderer::faults::GpuFaultKind;
+            let what = match fault.kind {
+                GpuFaultKind::Validation => {
+                    "Graphics validation error; the view may be wrong. Details in the Console."
+                }
+                GpuFaultKind::OutOfMemory => {
+                    "The GPU ran out of memory; the view may be incomplete. Details in the Console."
+                }
+                GpuFaultKind::Internal => {
+                    "Graphics driver error; the view may be wrong. Details in the Console."
+                }
+            };
+            if fault.count > 1 {
+                self.gui.set_toast(
+                    &format!("{what} (repeated {} times)", fault.count),
+                    ToastSeverity::Error,
+                );
+            } else {
+                self.gui.set_toast(what, ToastSeverity::Error);
+            }
+        }
+        self.follow_look_through_cameras();
         let hdri_poll = self.pending_hdri.as_ref().map(|p| p.receiver.try_recv());
         match hdri_poll {
             Some(Ok(Ok(new_ibl))) => {
@@ -713,7 +729,7 @@ impl State {
     /// alone would let the other overwrite the authored rig on the next
     /// frame.
     pub(super) fn install_authored_lights(&mut self) -> bool {
-        let Some(defs) = self.scene_objects.lights() else {
+        let Some(defs) = self.raster.scene().authored_lights() else {
             return false;
         };
         let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
@@ -780,4 +796,16 @@ pub(super) fn build_bounds_env(
         &renderer.ibl_res.ltc,
     );
     env
+}
+
+/// A node's display name looked up across every context, root first,
+/// because a cook status event carries no context. Falls back to the
+/// bare id for a node that vanished between the event and this frame.
+pub(super) fn find_node_name(engine: &solarxy_graph::Engine, id: NodeId) -> String {
+    let doc = engine.document();
+    let registry = engine.registry();
+    std::iter::once(GraphContext::Root)
+        .chain(doc.subflow_owners().map(GraphContext::Subflow))
+        .find_map(|ctx| doc.graph(ctx).ok().and_then(|g| g.node(id)))
+        .map_or_else(|| format!("Node {}", id.0), |n| node_name(n, registry))
 }

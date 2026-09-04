@@ -9,6 +9,7 @@
 // Imports used only by the std-fs-gated `LoadedModel::load` are gated with
 // it so the no-std-fs (wasm) build stays warning-free.
 use solarxy_core::preferences::{BgKind, ResolvedBackground};
+use solarxy_core::scene::{LightDef, LightKind};
 use solarxy_core::validation::ValidationReport;
 #[cfg(feature = "std-fs")]
 use wgpu::util::DeviceExt;
@@ -18,7 +19,7 @@ use crate::camera::Camera;
 use crate::environment::SceneEnvironment;
 use crate::frame::ObjectValidationGpu;
 use crate::ibl::{BrdfLut, IblState};
-use crate::light::{LightEntry, LightsUniform};
+use crate::light::LightsUniform;
 use crate::ltc::LtcLuts;
 use crate::model::Model;
 use crate::resources::ModelStats;
@@ -43,7 +44,15 @@ impl BackgroundModeExt for ResolvedBackground {
             r: f64::from(self.clear[0]),
             g: f64::from(self.clear[1]),
             b: f64::from(self.clear[2]),
-            a: 1.0,
+            // Opaque, except for the transparent film back, whose whole point
+            // is that the alpha lane leaves the pass as a matte: zero where
+            // nothing was drawn, fractional where the MSAA resolve averaged a
+            // silhouette.
+            a: if self.kind == BgKind::Transparent {
+                0.0
+            } else {
+                1.0
+            },
         }
     }
 
@@ -75,7 +84,7 @@ impl BackgroundModeExt for ResolvedBackground {
         // A gradient's contrast tracks the mean of its sky band; a solid
         // (or the pre-load HDRI fallback) tracks the flat clear colour.
         if self.kind == BgKind::Gradient {
-            (lum(self.sky_top) + lum(self.sky_bottom)) * 0.5
+            f32::midpoint(lum(self.sky_top), lum(self.sky_bottom))
         } else {
             lum(self.clear)
         }
@@ -295,11 +304,27 @@ pub fn create_light_bind_group_selective(
     })
 }
 
-pub fn lights_from_camera(
-    camera: &Camera,
-    bounds: &solarxy_core::AABB,
-    ibl_avg: [f32; 3],
-) -> LightsUniform {
+/// The camera-relative rig a scene that authors no lights of its own is lit by.
+///
+/// Three point lights placed around the camera's target so that a model is
+/// visible the moment it loads, with range and decay at zero so every
+/// generalized attenuation path multiplies by one, and the key as the exclusive
+/// shadow caster.
+///
+/// # Why this returns definitions rather than uniform entries
+///
+/// Because two renderers read it, and only one of them reads a uniform. The
+/// rasterizer folds these into its lights uniform ([`lights_from_camera`],
+/// immediately below); the tracer walks a light array that comes from the scene
+/// itself. While the rig existed only as uniform entries, a scene with no light
+/// nodes was lit in the viewport and lit by nothing at all in a traced still of
+/// the same file. Stating it as scene data removes the special case rather than
+/// writing it a second time.
+///
+/// The intensities are in the units light nodes use, which is what lets both
+/// consumers read them without a scale factor of their own.
+#[must_use]
+pub fn viewer_rig(camera: &Camera) -> [LightDef; 3] {
     use cgmath::InnerSpace;
 
     let target = camera.target;
@@ -313,31 +338,38 @@ pub fn lights_from_camera(
     let fill_dir = (right * 1.0 + up * 0.5 + (-forward) * 0.5).normalize();
     let rim_dir = (right * 0.0 + up * 0.5 + (forward) * 1.5).normalize();
 
-    let key = target + key_dir * radius;
-    let fill = target + fill_dir * radius;
-    let rim = target + rim_dir * radius;
-
-    // The synthesized viewer rig: three point lights with range = 0 and
-    // decay = 0, so the generalized attenuation paths all multiply by 1.0
-    // and desktop output matches the pre-generalization renderer exactly.
-    // The key light (entry 0) is the exclusive shadow caster.
-    let rig = |position: cgmath::Point3<f32>, color: [f32; 3], intensity: f32, shadowed: f32| {
-        LightEntry {
+    let light = |position: cgmath::Point3<f32>, color: [f32; 3], intensity: f32, key: bool| {
+        LightDef {
+            // The rig is synthesized rather than authored, so it names no node
+            // and nothing can select it.
+            id: solarxy_core::scene::SceneObjectId::UNAUTHORED,
+            kind: LightKind::Point,
             position: [position.x, position.y, position.z],
-            kind: crate::light::LIGHT_KIND_POINT,
+            // Unread for a point light by either renderer, and stated rather
+            // than left at zero so the definition describes a light rather than
+            // a degenerate one.
             direction: [0.0, -1.0, 0.0],
-            intensity,
             color,
+            intensity,
             range: 0.0,
             decay: 0.0,
-            cos_inner: 0.0,
-            cos_outer: 0.0,
-            shadowed,
-            // The rig is point lights only, so it carries no rectangle.
-            half_x: [0.0; 3],
-            two_sided: 0.0,
-            half_y: [0.0; 3],
-            _pad_entry: 0.0,
+            // A mathematical point, so the tracer's soft-shadow sampling
+            // collapses to the hard shadow the shadow map draws.
+            radius: 0.0,
+            inner_cone: 0.0,
+            outer_cone: 0.0,
+            area_extent: [0.0, 0.0],
+            rotate: [0.0; 3],
+            two_sided: false,
+            ground_color: [0.0; 3],
+            cast_shadow: key,
+            shadow_map_size: 2048,
+            shadow_bias: 0.0,
+            visible: true,
+            // The rig is not authored, so there is nothing for a helper to
+            // point at and nothing a user could select.
+            show_helper: false,
+            helper_size: 0.0,
         }
     };
 
@@ -349,24 +381,132 @@ pub fn lights_from_camera(
     // render entirely on this path, and moving the shader without moving
     // these would darken every capture by two thirds while looking like an
     // ordinary re-baseline.
-    let mut lights = [LightEntry::disabled(); crate::light::MAX_LIGHTS];
-    lights[0] = rig(key, [1.0, 0.98, 0.95], 6.0, 1.0);
-    lights[1] = rig(fill, [0.90, 0.93, 1.00], 3.0, 0.0);
-    lights[2] = rig(rim, [1.0, 1.00, 1.00], 2.4, 0.0);
+    [
+        light(target + key_dir * radius, [1.0, 0.98, 0.95], 6.0, true),
+        light(target + fill_dir * radius, [0.90, 0.93, 1.00], 3.0, false),
+        light(target + rim_dir * radius, [1.0, 1.00, 1.00], 2.4, false),
+    ]
+}
 
-    LightsUniform {
-        lights,
-        count: 3,
-        sphere_scale: bounds.diagonal() * 0.04,
-        ibl_avg_r: ibl_avg[0],
-        ibl_avg_g: ibl_avg[1],
-        ibl_avg_b: ibl_avg[2],
-        hemi_sky_r: 0.0,
-        hemi_sky_g: 0.0,
-        hemi_sky_b: 0.0,
-        hemi_ground_r: 0.0,
-        hemi_ground_g: 0.0,
-        hemi_ground_b: 0.0,
-        ibl_intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
+/// The viewer rig as the rasterizer's lights uniform.
+///
+/// Nothing here decides what the rig *is*; it is [`viewer_rig`] through the same
+/// conversion every authored light takes, which is what keeps one rig from
+/// becoming two.
+pub fn lights_from_camera(
+    camera: &Camera,
+    bounds: &solarxy_core::AABB,
+    ibl_avg: [f32; 3],
+) -> LightsUniform {
+    LightsUniform::from_defs(&viewer_rig(camera), bounds.diagonal() * 0.04, ibl_avg)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::float_cmp)] // rig constants and pass-through values, compared bit-exact
+
+    use super::*;
+    use cgmath::{InnerSpace, Point3, Vector3};
+    use solarxy_core::preferences::ProjectionMode;
+
+    fn camera() -> Camera {
+        Camera {
+            eye: Point3::new(0.0, 0.0, 4.0),
+            target: Point3::new(0.0, 0.0, 0.0),
+            up: Vector3::new(0.0, 1.0, 0.0),
+            aspect: 1.0,
+            fovy: 45.0,
+            znear: 0.01,
+            zfar: 100.0,
+            projection: ProjectionMode::Perspective,
+            ortho_scale: 1.0,
+        }
+    }
+
+    /// The three brightnesses, pinned.
+    ///
+    /// Every golden capture renders on this rig, because the capture scenes
+    /// carry no light node. A change to one of these numbers moves twenty-two
+    /// images at once and looks exactly like an ordinary re-baseline, so it is
+    /// worth failing here first, where the failure names the value.
+    #[test]
+    fn the_viewer_rig_is_key_fill_and_rim_at_the_brightnesses_the_captures_expect() {
+        let rig = viewer_rig(&camera());
+        assert_eq!(
+            rig.iter().map(|l| l.intensity).collect::<Vec<_>>(),
+            [6.0, 3.0, 2.4]
+        );
+        assert_eq!(rig[0].color, [1.0, 0.98, 0.95]);
+        assert_eq!(rig[1].color, [0.90, 0.93, 1.00]);
+        assert_eq!(rig[2].color, [1.0, 1.00, 1.00]);
+    }
+
+    /// Unbounded, undecaying point lights, and exactly one caster.
+    ///
+    /// Range and decay at zero are what make every generalized attenuation path
+    /// multiply by one; a non-zero either would dim the rig in the rasterizer
+    /// and in the tracer by different amounts, because they attenuate through
+    /// different code.
+    #[test]
+    fn the_rig_is_three_unattenuated_point_lights_with_one_shadow_caster() {
+        let rig = viewer_rig(&camera());
+        for light in &rig {
+            assert_eq!(light.kind, LightKind::Point);
+            assert_eq!(light.range, 0.0);
+            assert_eq!(light.decay, 0.0);
+            assert_eq!(light.radius, 0.0, "a rig light is a mathematical point");
+            assert!(light.visible, "an invisible rig light lights nothing");
+        }
+        assert_eq!(
+            rig.iter().filter(|l| l.cast_shadow).count(),
+            1,
+            "the exclusive shadow caster is the rule the engine enforces for \
+             authored lights, and the rig may not break it"
+        );
+        assert!(rig[0].cast_shadow, "the key is the caster");
+    }
+
+    /// The rig the rasterizer uploads is the rig, not a second one.
+    ///
+    /// This is the join the bug lived at: while the uniform was built by hand
+    /// here, the tracer had no way to read the same three lights, and the two
+    /// renderers lit a lightless scene differently. Asserting the conversion
+    /// rather than the literals is the point, because the conversion is what
+    /// both consumers now share.
+    #[test]
+    fn the_rasterizer_uniform_carries_exactly_the_rig() {
+        let cam = camera();
+        let rig = viewer_rig(&cam);
+        let unit = solarxy_core::AABB {
+            min: Point3::new(-1.0, -1.0, -1.0),
+            max: Point3::new(1.0, 1.0, 1.0),
+        };
+        let uniform = lights_from_camera(&cam, &unit, [0.0; 3]);
+        assert_eq!(uniform.count, 3);
+        for (slot, def) in rig.iter().enumerate() {
+            let entry = uniform.lights[slot];
+            assert_eq!(entry.position, def.position);
+            assert_eq!(entry.color, def.color);
+            assert_eq!(entry.intensity, def.intensity);
+            assert_eq!(entry.kind, crate::light::LIGHT_KIND_POINT);
+            assert_eq!(entry.shadowed, f32::from(u8::from(def.cast_shadow)));
+        }
+    }
+
+    /// The rig follows the camera, which is what makes it a viewer rig rather
+    /// than a lighting setup.
+    #[test]
+    fn the_rig_sits_around_the_cameras_target_and_moves_with_it() {
+        let mut cam = camera();
+        let near = viewer_rig(&cam);
+        cam.eye = Point3::new(0.0, 0.0, 8.0);
+        let far = viewer_rig(&cam);
+        let distance = |l: &LightDef| Vector3::from(l.position).magnitude();
+        for (a, b) in near.iter().zip(far.iter()) {
+            assert!(
+                distance(b) > distance(a) * 1.5,
+                "pulling the eye back should push the rig out with it"
+            );
+        }
     }
 }

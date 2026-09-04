@@ -58,6 +58,19 @@ export interface DisplayPrefs {
   ssaoEnabled: boolean;
   /** Bloom on emissive and bright surfaces, renderer-global. */
   bloomEnabled: boolean;
+  /** How much of the blurred bright pass is added back, 0..4. */
+  bloomStrength: number;
+  /** Luminance a pixel has to exceed before it blooms, 0..4. */
+  bloomThreshold: number;
+  /** How far the composite blends towards the occlusion buffer, 0..1.
+   *
+   * The AO Preview inspection mode shows the raw buffer and is deliberately
+   * unaffected by this. */
+  ssaoStrength: number;
+  /** Whether the path-traced viewport preview runs its edge-aware filter.
+   *
+   * Not the still render's, which the render node owns per shot. */
+  previewDenoise: boolean;
 }
 
 /** The shipped defaults.
@@ -75,6 +88,13 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   // fills these in for sessions saved before the fields existed.
   ssaoEnabled: true,
   bloomEnabled: true,
+  // The values the two effects were compiled with before they were
+  // adjustable (`solarxy_core::view_config::DEFAULT_*`), so a session that
+  // never touches a control renders exactly what it rendered before.
+  bloomStrength: 0.8,
+  bloomThreshold: 0.8,
+  ssaoStrength: 0.8,
+  previewDenoise: true,
   // The label defaults match the renderer's own (`LabelStyle::new_default`),
   // so turning the preference on changes nothing until somebody moves it.
   labelSize: "medium",

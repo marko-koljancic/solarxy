@@ -30,18 +30,39 @@ fn endpoint(key: &str, label: &str, default: [f64; 3], which: &str) -> ParamSpec
 }
 
 fn point_input(key: &str, label: &str, which: &str) -> PortSpec {
-    PortSpec::single(key, label, DataType::Geometry, false).doc(format!(
-        "Optional. When connected, the {which} endpoint snaps to point 0 of \
-         this geometry's first non-empty mesh, overriding the parameter."
-    ))
+    // Carrying here is not "placements survive into the output" -- nothing
+    // of the input survives, the output is a fresh two-point polyline. It is
+    // the narrower claim the driver acts on: hand the set through unbaked.
+    // This node reads one vertex, and baking ten thousand copies of a
+    // scatter to read one of them would be a cliff with nothing at the
+    // bottom of it. `first_point` consults the placement list instead.
+    PortSpec::single(key, label, DataType::Geometry, false)
+        .carries_placements()
+        .doc(format!(
+            "Optional. When connected, the {which} endpoint snaps to point 0 of \
+             this geometry's first non-empty mesh, overriding the parameter."
+        ))
 }
 
 /// Point 0 of the first non-empty mesh, the anchor rule for connected
 /// endpoint inputs: deterministic under recooks, unlike a centroid.
+///
+/// Placed through the mesh's first placement when it carries one. This port
+/// declares that it carries placements, which spares a node that reads a
+/// single vertex from materialising ten thousand copies of a scatter to
+/// find it, and that bargain only holds if the vertex is read where the
+/// copy actually sits. Reading the prototype's untransformed position
+/// instead would put the endpoint somewhere no visible point occupies.
 fn first_point(set: &GeometrySet) -> Option<[f32; 3]> {
-    set.meshes
-        .iter()
-        .find_map(|mesh| mesh.positions.first().copied())
+    set.meshes.iter().find_map(|mesh| {
+        let p = mesh.positions.first().copied()?;
+        Some(
+            match mesh.instances.as_ref().and_then(|list| list.first()) {
+                Some(placement) => placement.apply(p),
+                None => p,
+            },
+        )
+    })
 }
 
 fn resolve_endpoint(inputs: &Inputs, cx: &mut CookCtx, port: &str, fallback: [f32; 3]) -> [f32; 3] {
@@ -200,6 +221,32 @@ mod tests {
         assert_eq!(positions[0], [2.0, 2.0, 2.0]);
         assert_eq!(positions[1], [0.0, 1.0, 0.0], "end param default holds");
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn an_instanced_input_is_read_where_its_first_copy_actually_sits() {
+        // The endpoint ports carry placements rather than baking, so that a
+        // node reading one vertex does not materialise a whole scatter to
+        // find it. That only produces the right answer if the vertex is
+        // read through the placement: the prototype's untransformed
+        // position is somewhere no visible point occupies.
+        let mut translate = solarxy_core::scene::InstanceXform::IDENTITY;
+        translate.0[3] = [10.0, 20.0, 30.0, 1.0];
+        let set = solarxy_kernel::GeometrySet::from_parts_instanced(
+            vec![KernelMesh::points("pts", vec![[1.0, 2.0, 3.0]])],
+            Vec::new(),
+            vec![translate, solarxy_core::scene::InstanceXform::IDENTITY],
+        );
+
+        let mut slots = BTreeMap::new();
+        slots.insert(
+            "start_point".to_string(),
+            InputSlot::Single(Value::Geometry(Arc::new(set))),
+        );
+        let (out, warnings) = run(&Inputs::new(slots));
+
+        assert_eq!(positions_of(&out)[0], [11.0, 22.0, 33.0]);
+        assert!(warnings.is_empty(), "carrying warns about nothing");
     }
 
     #[test]

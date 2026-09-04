@@ -222,7 +222,10 @@ fn a_frame_with_labels_submits_without_validation_errors() {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        // The smoke suite draws no authored lights.
+        show_light_markers: false,
         turntable_active: false,
+        pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     };
 
     // Both background modes of the label channel, because the chip flag
@@ -267,6 +270,137 @@ fn a_frame_with_labels_submits_without_validation_errors() {
          A uniform-size mismatch between a WGSL struct and its Rust mirror \
          shows up exactly here, and in the app it renders as a black \
          viewport rather than an error. See tests/uniform_layout.rs."
+    );
+}
+
+/// Drives the host-facing preference setters inside a validation error
+/// scope, so a buffer created without the usage its setter's write needs
+/// fails a Rust test instead of a user's session.
+///
+/// The class this pins: `queue.write_buffer` against a buffer created
+/// without `COPY_DST` is rejected at validation time, the buffer keeps its
+/// creation contents, and the only symptom is a console line -- or, on the
+/// desktop, a panic from wgpu's default uncaptured-error handler. The
+/// selection tint's colour buffer shipped exactly that way: every browser
+/// boot logged the error and the tint stayed at its hard-coded creation
+/// colour whatever the preference said. Setters whose only caller is one
+/// shell are the exposed ones, which is why this exercises the setters
+/// generally rather than naming that buffer.
+#[test]
+fn preference_setters_write_without_validation_errors() {
+    use solarxy_renderer::frame::{Renderer, RendererInit, SelectionStyle};
+    use solarxy_renderer::labels::LabelStyle;
+
+    let Some((device, queue, config)) = try_get_device() else {
+        return;
+    };
+
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+
+    let init = RendererInit {
+        msaa_sample_count: 4,
+        gradient_top: [0.1, 0.1, 0.12, 1.0],
+        gradient_bottom: [0.02, 0.02, 0.03, 1.0],
+        sky_top: [0.4, 0.5, 0.7],
+        sky_bottom: [0.2, 0.2, 0.25],
+        wireframe_color: [1.0, 1.0, 1.0, 1.0],
+        wireframe_line_width: 1.0,
+        bloom_enabled: false,
+        ssao_enabled: false,
+        tone_mode: solarxy_core::preferences::ToneMode::AcesFilmic,
+        exposure: 1.0,
+        ibl_mode: solarxy_core::preferences::IblMode::Full,
+        uv_checker_png: include_bytes!("../../../res/textures/uv-checker_1k.png"),
+    };
+    let mut renderer = Renderer::new(&device, &queue, &config, &init).expect("headless renderer");
+
+    // Every style, because the buffer writes happen regardless of which
+    // style is active.
+    for style in [
+        SelectionStyle::Outline,
+        SelectionStyle::Tint,
+        SelectionStyle::None,
+    ] {
+        renderer.set_selection_highlight(&queue, style, [0.9, 0.4, 0.1, 1.0], 3.0);
+    }
+    renderer.write_label_style(&queue, &LabelStyle::new_default());
+    renderer.write_label_dpr(&queue, 2.0);
+
+    let _ = device.poll(wgpu::PollType::Wait {
+        submission_index: None,
+        timeout: None,
+    });
+    let error = pollster::block_on(device.pop_error_scope());
+    assert!(
+        error.is_none(),
+        "a host-facing setter raised a wgpu validation error: {error:?}\n\
+         The usual cause is a buffer created without COPY_DST and then \
+         written with queue.write_buffer: the write is rejected and the \
+         buffer silently keeps its creation contents."
+    );
+}
+
+/// The shared uncaptured-error hook: a provoked validation error is
+/// recorded rather than fatal, identical repeats collapse into one record,
+/// and an error inside a scope stays with its scope.
+///
+/// Without the hook this test could not exist: wgpu's default handler for
+/// an uncaptured error panics, which is exactly what the desktop shipped
+/// until the hook was installed.
+#[test]
+fn the_uncaptured_error_hook_records_collapses_and_respects_scopes() {
+    use solarxy_renderer::faults::{self, GpuFaultKind};
+
+    let Some((device, queue, _config)) = try_get_device() else {
+        return;
+    };
+
+    let sink = faults::install(&device);
+
+    // A buffer with no COPY_DST, written anyway: the class that shipped.
+    // Twice, so the collapse is observable.
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("uncaptured probe"),
+        size: 16,
+        usage: wgpu::BufferUsages::UNIFORM,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buffer, 0, &[0u8; 16]);
+    queue.write_buffer(&buffer, 0, &[0u8; 16]);
+    let _ = device.poll(wgpu::PollType::Wait {
+        submission_index: None,
+        timeout: None,
+    });
+
+    let drained = sink.drain();
+    assert_eq!(
+        drained.len(),
+        1,
+        "identical consecutive errors must collapse into one record: {drained:?}"
+    );
+    assert_eq!(drained[0].kind, GpuFaultKind::Validation);
+    assert_eq!(
+        drained[0].count, 2,
+        "the record must count what it collapsed"
+    );
+    assert!(
+        !drained[0].message.is_empty(),
+        "the full message is the only thing a bug report can be written from"
+    );
+    assert!(sink.drain().is_empty(), "a drain must actually take");
+
+    // An error inside a scope is the scope's, not the hook's: the probe
+    // and the smoke suite push scopes deliberately and must keep them.
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    queue.write_buffer(&buffer, 0, &[0u8; 16]);
+    let scoped = pollster::block_on(device.pop_error_scope());
+    assert!(
+        scoped.is_some(),
+        "the scope should have captured the provoked error"
+    );
+    assert!(
+        sink.drain().is_empty(),
+        "a scoped error must not also reach the uncaptured hook"
     );
 }
 
@@ -380,7 +514,10 @@ fn the_two_grading_slots_behave_as_specified() {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        // The smoke suite draws no authored lights.
+        show_light_markers: false,
         turntable_active: false,
+        pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     };
 
     let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -436,6 +573,7 @@ fn the_two_grading_slots_behave_as_specified() {
             look,
             &renderer.post.luts,
             InspectionMode::Shaded,
+            false,
         );
         renderer.post.composite.render(
             &mut encoder,
@@ -445,6 +583,7 @@ fn the_two_grading_slots_behave_as_specified() {
             &renderer.post.ssao,
             Some([0.0, 0.0, W as f32, H as f32]),
             true,
+            None,
         );
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {

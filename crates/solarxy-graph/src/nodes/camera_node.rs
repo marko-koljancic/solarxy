@@ -341,6 +341,77 @@ pub fn camera_descriptor() -> NodeTypeDescriptor {
              frame. Orthographic only.",
         ),
         ParamSpec::new(
+            "f_stop",
+            "F-Stop",
+            "lens",
+            ParamType::Float,
+            ParamValue::Float(0.0),
+        )
+        .hard(0.0, 128.0)
+        .soft(1.0, 22.0)
+        .show_if("kind", Pred::Neq(ParamValue::Enum("orthographic".into())))
+        .doc(
+            "How wide the aperture opens, as a photographer's f-number: the \
+             focal length divided by the opening's diameter. Smaller is \
+             wider, so f/1.4 throws almost everything out of focus and f/16 \
+             holds nearly all of it sharp.\n\n\
+             0, the default, is a pinhole: everything is sharp at every \
+             distance, which is what a computer-generated image does unless \
+             told otherwise and what every camera made before this control \
+             existed still does. Set anything above 0 and Focus Distance \
+             starts to matter.\n\n\
+             On a physical camera the f-number works against Focal Length \
+             directly. On a perspective camera there is no focal length to \
+             work against, so one is derived back out of Field of View \
+             against the same 36mm the Sensor Width control describes, which \
+             is what makes the same f-number mean the same blur on both.\n\n\
+             Read by rendered output only: the interactive viewport draws \
+             through a pinhole whatever this says, because a rasterizer has \
+             one sample per pixel and no aperture to integrate over.",
+        ),
+        ParamSpec::new(
+            "focus_distance",
+            "Focus Distance",
+            "lens",
+            ParamType::Float,
+            ParamValue::Float(0.0),
+        )
+        .hard(0.0, 100_000.0)
+        .soft(0.0, 100.0)
+        .unit(Unit::Meters)
+        .show_if("kind", Pred::Neq(ParamValue::Enum("orthographic".into())))
+        .doc(
+            "How far in front of the camera is sharp, in metres. Everything \
+             nearer or further blurs, and how fast it blurs is F-Stop's job.\n\n\
+             0, the default, focuses on Target, so aiming the camera also \
+             focuses it and opening the aperture does something sensible \
+             immediately. Set a number to override that and focus on a fixed \
+             distance instead, which is what you want when the subject is \
+             not what the camera is pointed at.\n\n\
+             It does nothing while F-Stop is 0, because a pinhole has \
+             nothing to focus.",
+        ),
+        ParamSpec::new(
+            "aperture_blades",
+            "Aperture Blades",
+            "lens",
+            ParamType::Int,
+            ParamValue::Int(0),
+        )
+        .hard(0.0, 16.0)
+        .soft(0.0, 12.0)
+        .show_if("kind", Pred::Neq(ParamValue::Enum("orthographic".into())))
+        .doc(
+            "How many blades the iris has, which is the shape an \
+             out-of-focus highlight takes: 6 blades give hexagonal bokeh, 8 \
+             octagonal. 0, the default, is a perfectly circular opening, \
+             which no real lens has and every one approaches wide open. \
+             Values of 1 and 2 are treated as circular, there being no \
+             polygon with fewer than three sides.\n\n\
+             It does nothing while F-Stop is 0: a pinhole has no opening to \
+             shape.",
+        ),
+        ParamSpec::new(
             "near",
             "Near Clip",
             "lens",
@@ -427,12 +498,13 @@ pub fn camera_descriptor() -> NodeTypeDescriptor {
 
     NodeTypeDescriptor {
         type_id: "camera",
-        // v2 added the `look` group. A pure addition: every new param fills
-        // from its registry default and every default is the identity of
-        // its effect (exposure 1, neutral grade, no table, tone inherited),
-        // so a v1 camera renders exactly as it did and needs no migration
-        // hook.
-        version: 2,
+        // v2 added the `look` group and v3 the aperture. Both are pure
+        // additions: every new param fills from its registry default and every
+        // default is the identity of its effect (exposure 1, neutral grade, no
+        // table, tone inherited, and an f-stop of zero, which is the pinhole
+        // every camera authored before it was a pinhole). So a v1 camera
+        // renders exactly as it did and neither bump needs a migration hook.
+        version: 3,
         display_name: "Camera",
         category: Category::Cameras,
         contexts: ContextSet::OBJ,

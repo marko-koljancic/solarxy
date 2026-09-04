@@ -22,6 +22,17 @@ use crate::validation::ValidationResult;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SceneObjectId(pub u64);
 
+impl SceneObjectId {
+    /// The id of something the renderer synthesized rather than read out of a
+    /// document: the viewer's own light rig, which follows the camera when a
+    /// scene authors no lights of its own.
+    ///
+    /// It exists so nothing can be selected by accident. Node ids start at 1,
+    /// so zero can never collide with one, and a click that resolved to this
+    /// would be naming a node that does not exist.
+    pub const UNAUTHORED: Self = Self(0);
+}
+
 /// One cooked mesh: attribute-complete CPU geometry, connected per its
 /// `topology` (triangle triples, segment pairs, or a point cloud).
 /// Attribute buffers are `Arc`-shared so the engine's cook cache and the
@@ -140,6 +151,15 @@ pub enum LightKind {
 /// conversion (units convention).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LightDef {
+    /// The producing light node's id (the object key), matching
+    /// [`CameraDef::id`].
+    ///
+    /// A light needed no identity while it was only ever shaded and never
+    /// pointed at. A marker is pointed at: the viewport draws one per light
+    /// and has to know which of them the selection means, and a click has to
+    /// come back naming a node. The synthesized viewer rig, which is not
+    /// authored and cannot be selected, uses [`SceneObjectId::UNAUTHORED`].
+    pub id: SceneObjectId,
     pub kind: LightKind,
     /// Where the light sits. The renderer's SHADING ignores this for a
     /// directional light (whose shadow frustum auto-fits scene bounds), but the
@@ -166,6 +186,21 @@ pub struct LightDef {
     pub range: f32,
     /// Point / Spot falloff exponent.
     pub decay: f32,
+    /// Point / Spot emitter size, in meters. `0` is a mathematical point.
+    ///
+    /// The raster path ignores this: a shadow map is a visibility test from
+    /// one place and has no way to be half in shadow, so softness there
+    /// would have to be faked by blurring, which blurs contact and distance
+    /// alike. A tracer gets it for free by sampling the emitter's extent,
+    /// so this is the one light field that is deliberately renderer-specific
+    /// rather than a shared description that one consumer approximates.
+    ///
+    /// A point light samples a sphere of this radius and a spot samples a
+    /// disc of it. Both still report a probability of one and are still
+    /// weighted as delta lights, which is the source's treatment: the extent
+    /// buys a penumbra without making the light a surface that a scattered
+    /// ray could find.
+    pub radius: f32,
     /// Spot inner cone half-angle (radians); full intensity inside.
     pub inner_cone: f32,
     /// Spot outer cone half-angle (radians); zero intensity outside.
@@ -397,6 +432,49 @@ pub struct CameraDef {
     /// The shot's rendering intent. A pane looking through this camera
     /// composites with it; a free pane uses its own.
     pub look: CameraLook,
+    /// The shot's optics: what the aperture does to everything not at the
+    /// focus distance.
+    pub lens: CameraLens,
+}
+
+/// A camera's aperture, already resolved out of the photographic controls
+/// the node exposes.
+///
+/// Resolved here rather than carried as an f-stop for the same reason
+/// [`CameraDef::fov_y`] is resolved out of focal length and sensor width:
+/// this is the runtime description of a camera, and a consumer of it should
+/// not have to know which of three projections the user authored in order
+/// to work out how wide the lens is open.
+///
+/// **Only rendered output reads this.** The interactive viewport draws
+/// through a pinhole, because a rasterizer has one sample per pixel per
+/// draw and no aperture to integrate over; faking it means a depth-driven
+/// blur, which is a different effect wearing this one's name.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CameraLens {
+    /// The aperture's radius in world units. Zero is a pinhole, and a
+    /// pinhole is what every camera authored before this existed had.
+    pub aperture_radius: f32,
+    /// How far in front of the camera is sharp, in world units. Zero means
+    /// the distance to the camera's own target, which is what makes aiming
+    /// a camera also focus it.
+    pub focus_distance: f32,
+    /// Aperture blades. Zero is a perfectly circular opening; three or more
+    /// is a polygon, which is what gives an out-of-focus highlight the shape
+    /// a real iris leaves on it.
+    pub blades: u32,
+}
+
+impl Default for CameraLens {
+    /// A pinhole, which renders exactly as every camera did before there was
+    /// a lens to describe.
+    fn default() -> Self {
+        Self {
+            aperture_radius: 0.0,
+            focus_distance: 0.0,
+            blades: 0,
+        }
+    }
 }
 
 /// One scene mutation. Transforms are column-major world matrices; a
@@ -457,6 +535,14 @@ pub enum SceneOp {
     /// is expensive, so a host is expected to dedupe on
     /// [`RawImageHdr::hash`](crate::RawImageHdr) and do nothing when the
     /// same environment arrives twice.
+    ///
+    /// A still is the exception to that first sentence, and the one place a
+    /// host is expected to read `None` as darkness. A render is a property of
+    /// the scene where a viewport background is a viewing preference, so a
+    /// document that authors no environment is rendered against none rather
+    /// than against whatever a pane happens to be showing. That is also the
+    /// only way a windowed shell and a terminal can produce the same image
+    /// from the same document, the terminal having no panes to borrow from.
     SetEnvironment {
         hdri: Option<Arc<RawImageHdr>>,
         /// Yaw applied to both the visible sky and the lighting it
@@ -513,6 +599,7 @@ mod tests {
 
     fn light(kind: LightKind) -> LightDef {
         LightDef {
+            id: SceneObjectId::UNAUTHORED,
             kind,
             position: [0.0; 3],
             direction: [0.0, -1.0, 0.0],
@@ -520,6 +607,7 @@ mod tests {
             intensity: 1.0,
             range: 0.0,
             decay: 2.0,
+            radius: 0.0,
             inner_cone: 0.0,
             outer_cone: 0.0,
             area_extent: [0.0; 2],

@@ -341,10 +341,38 @@ pub(crate) fn geo_world_matrix(
     )
 }
 
+/// What the viewport needs in order to test a click against a light's marker,
+/// which is a screen-space question the ray alone cannot answer.
+///
+/// The engine has no renderer and must not gain one, so nothing here asks the
+/// renderer where it drew anything: the marker's position is projected from
+/// the same camera the pick ray was built from, and `radius_px` is the
+/// renderer's own `MARKER_PX`, handed down by the host exactly the way it
+/// already hands `GIZMO_PX * world_per_pixel` to the manipulator. That is what
+/// keeps the drawn marker and its click target the same size without either
+/// side knowing about the other.
+#[derive(Debug, Clone, Copy)]
+pub struct MarkerPick {
+    /// The pane's view-projection, as the camera built it.
+    pub view_proj: [[f32; 4]; 4],
+    /// The pane's size in the same pixels `cursor_px` is measured in.
+    pub viewport_px: [f32; 2],
+    /// The cursor, in pane-relative pixels with the origin top left.
+    pub cursor_px: [f32; 2],
+    /// How far from a marker's centre still counts as hitting it.
+    pub radius_px: f32,
+}
+
 /// Picks the root `geo` container whose displayed, world-transformed
 /// geometry the ray hits nearest (single-pane picking; pane-awareness is
 /// Runs entirely in Rust over CPU-retained cooked geometry, so
 /// nothing crosses into JavaScript. Returns the producing geo node's id.
+///
+/// With `markers`, a light's marker is tested FIRST and wins outright. That is
+/// not a preference between two candidates but a consequence of how they are
+/// drawn: the marker is painted over the scene, so a click that lands on one
+/// takes it rather than falling through to whatever is behind. Passing `None`
+/// is the geometry-only behaviour, unchanged.
 #[must_use]
 pub fn pick_node(
     doc: &Document,
@@ -353,6 +381,7 @@ pub fn pick_node(
     previews: &Previews,
     origin: [f32; 3],
     direction: [f32; 3],
+    markers: Option<MarkerPick>,
 ) -> Option<NodeId> {
     let dir = Vector3::from(direction);
     if dir.magnitude2() <= 1e-12 {
@@ -362,6 +391,11 @@ pub fn pick_node(
         origin: Point3::from(origin),
         direction: dir.normalize(),
     };
+    if let Some(m) = markers
+        && let Some(hit) = pick_light_marker(doc, registry, previews, &m)
+    {
+        return Some(hit);
+    }
     let root = doc.graph(GraphContext::Root).ok()?;
     let mut best: Option<(f32, NodeId)> = None;
     for node in root.nodes() {
@@ -414,6 +448,73 @@ pub fn pick_node(
         }
     }
     best.map(|(_, node)| node)
+}
+
+/// The light whose marker the cursor is nearest, within the marker's own
+/// radius, or `None`.
+///
+/// Screen space rather than a ray, because a light has no geometry to
+/// intersect. That is also what gives a marker a predictable click area
+/// wherever the light is: a distant light is exactly as easy to hit as a near
+/// one, which a world-space test could not promise.
+///
+/// Ties break toward the camera. Two markers can genuinely coincide, because
+/// ambient and hemisphere lights have no position and both mark the world
+/// origin; the nearer one wins, and the other stays selectable from the node
+/// canvas.
+fn pick_light_marker(
+    doc: &Document,
+    registry: &Registry,
+    previews: &Previews,
+    m: &MarkerPick,
+) -> Option<NodeId> {
+    let root = doc.graph(GraphContext::Root).ok()?;
+    let (w, h) = (m.viewport_px[0], m.viewport_px[1]);
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let vp = Matrix4::from(m.view_proj);
+    let mut best: Option<(f32, f32, NodeId)> = None;
+
+    for node in root.nodes() {
+        if !is_light(&node.type_id) {
+            continue;
+        }
+        let Some(light) = light_from_node(doc, registry, previews, node) else {
+            continue;
+        };
+        // An invisible light draws no marker, so it catches no clicks.
+        if !light.visible {
+            continue;
+        }
+        let anchor = match light.kind {
+            // No position: their markers sit at the world origin, which is
+            // where their helper has always drawn for the same reason.
+            solarxy_core::scene::LightKind::Ambient
+            | solarxy_core::scene::LightKind::Hemisphere => [0.0, 0.0, 0.0],
+            _ => light.position,
+        };
+
+        let clip = vp * cgmath::Vector4::new(anchor[0], anchor[1], anchor[2], 1.0);
+        // Behind the eye, or exactly on the plane through it: not on screen.
+        if clip.w <= 1e-6 {
+            continue;
+        }
+        let ndc = (clip.x / clip.w, clip.y / clip.w);
+        // NDC to pane pixels, y flipped: clip space is y-up and a cursor is
+        // y-down.
+        let px = (ndc.0 * 0.5 + 0.5) * w;
+        let py = (0.5 - ndc.1 * 0.5) * h;
+        let d = (px - m.cursor_px[0]).hypot(py - m.cursor_px[1]);
+        if d > m.radius_px {
+            continue;
+        }
+        let depth = clip.w;
+        if best.is_none_or(|(_, bd, _)| depth < bd) {
+            best = Some((d, depth, node.id));
+        }
+    }
+    best.map(|(_, _, node)| node)
 }
 
 /// [`pick_node`] with the full hit detail the review workflow anchors to:
@@ -576,6 +677,46 @@ fn camera_from_node(
         lut_b_strength: strength("lut_b_strength"),
     };
 
+    // The lens, resolved the way `fov_y` above is: the runtime description of
+    // a camera should not make its consumer work out which of three
+    // projections the user authored.
+    //
+    // An f-number is the focal length over the aperture's diameter, so the
+    // radius is `focal / (2 * f)`. A physical camera states its focal length in
+    // millimetres; a perspective one has none, so one is derived back out of
+    // the field of view against the same 36mm sensor width the node documents
+    // as driving it. That is what makes f/2.8 mean the same blur on both, and
+    // it is the exact inverse of the formula the physical arm above applies.
+    let lens = if kind == CameraKind::Orthographic {
+        // Parallel rays have no lens and nothing to focus. The node hides the
+        // controls here too, but a stored value survives a projection change,
+        // so this is what stops one taking effect where it means nothing.
+        solarxy_core::scene::CameraLens::default()
+    } else {
+        let f_stop = f32p("f_stop");
+        let aperture_radius = if f_stop > 0.0 {
+            let focal_mm = if kind == CameraKind::Physical {
+                f32p("focal_length").max(1e-3)
+            } else {
+                const DEFAULT_SENSOR_MM: f32 = 36.0;
+                DEFAULT_SENSOR_MM / (2.0 * (fov_y * 0.5).tan().max(1e-6))
+            };
+            // Millimetres to world units, which are metres everywhere else in
+            // the scene contract.
+            focal_mm / (2.0 * f_stop) / 1000.0
+        } else {
+            0.0
+        };
+        solarxy_core::scene::CameraLens {
+            aperture_radius,
+            focus_distance: f32p("focus_distance").max(0.0),
+            blades: match p.get("aperture_blades") {
+                Some(ParamValue::Int(v)) => u32::try_from(*v).unwrap_or(0),
+                _ => 0,
+            },
+        }
+    };
+
     Some(CameraDef {
         id: SceneObjectId(node.id.0),
         kind,
@@ -590,6 +731,7 @@ fn camera_from_node(
         show_gizmo: matches!(p.get("show_gizmo"), Some(ParamValue::Bool(true))),
         gizmo_size: f32p("gizmo_size"),
         look,
+        lens,
     })
 }
 
@@ -672,6 +814,9 @@ fn light_from_node(
     let boolp = |key: &str| matches!(p.get(key), Some(ParamValue::Bool(true)));
 
     let mut light = LightDef {
+        // Derived the same way a geo's and a camera's are, so a marker click
+        // comes back naming the node the canvas and the panel already mean.
+        id: solarxy_core::scene::SceneObjectId(node.id.0),
         kind: LightKind::Point,
         position: [0.0; 3],
         direction: [0.0, -1.0, 0.0],
@@ -679,6 +824,7 @@ fn light_from_node(
         intensity: f32p("intensity"),
         range: 0.0,
         decay: 0.0,
+        radius: 0.0,
         inner_cone: 0.0,
         outer_cone: 0.0,
         area_extent: [0.0; 2],
@@ -713,6 +859,7 @@ fn light_from_node(
             light.position = p.vec3_f32("position");
             light.range = f32p("range");
             light.decay = f32p("decay");
+            light.radius = f32p("radius");
             light.cast_shadow = boolp("cast_shadow");
             light.shadow_map_size = map_size(&p);
         }
@@ -733,6 +880,7 @@ fn light_from_node(
             light.direction = direction_to_target(&p);
             light.range = f32p("range");
             light.decay = f32p("decay");
+            light.radius = f32p("radius");
             // `angle` is the outer cone half-angle (radians after resolve);
             // penumbra narrows the inner cone toward it.
             let outer = f32p("angle");

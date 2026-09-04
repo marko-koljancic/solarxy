@@ -64,9 +64,9 @@ pub fn uv_project(
         (bounds.max.z - bounds.min.z).max(1e-6),
     ];
     let center = [
-        (bounds.min.x + bounds.max.x) * 0.5,
-        (bounds.min.y + bounds.max.y) * 0.5,
-        (bounds.min.z + bounds.max.z) * 0.5,
+        f32::midpoint(bounds.min.x, bounds.max.x),
+        f32::midpoint(bounds.min.y, bounds.max.y),
+        f32::midpoint(bounds.min.z, bounds.max.z),
     ];
 
     let mut out = set.clone();
@@ -169,7 +169,7 @@ fn box_project_mesh(
     let mut uvs = Vec::with_capacity(tri_count * 3);
     let mut corner_sources = Vec::with_capacity(tri_count * 3);
 
-    for tri in mesh.indices.chunks_exact(3) {
+    for tri in mesh.indices.as_chunks::<3>().0 {
         let [i0, i1, i2] = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
         let (p0, p1, p2) = (mesh.positions[i0], mesh.positions[i1], mesh.positions[i2]);
         let e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];

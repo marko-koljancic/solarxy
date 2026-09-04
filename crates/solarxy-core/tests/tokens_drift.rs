@@ -1055,3 +1055,40 @@ fn the_planning_code_matcher_fires_on_real_examples() {
         "a planning code in a test title must be caught"
     );
 }
+
+/// The wasm boundary's two serde enums must rename their struct-variant
+/// FIELDS, not only their variants.
+///
+/// A source-level rule for the same reason the ones above are: `HostEvent`
+/// lives behind `cfg(target_arch = "wasm32")`, so no native test can serialize
+/// one, and the failure it guards against is silent. `rename_all` on an enum
+/// renames variants alone; without `rename_all_fields`, a multi-word field
+/// goes out in snake case while `web/src/engine/types.ts` declares it camel,
+/// and the frontend quietly reads `undefined`. That is not hypothetical: it is
+/// how the still dialog's elapsed and remaining readouts came to be blank, and
+/// it stayed invisible because every other field in that enum was one word.
+#[test]
+fn the_wasm_boundary_enums_rename_their_fields_too() {
+    let cases = [
+        ("crates/solarxy-web/src/app.rs", "enum HostEvent {"),
+        (
+            "crates/solarxy-graph/src/engine/mod.rs",
+            "pub enum Command {",
+        ),
+    ];
+    for (rel, decl) in cases {
+        let src = std::fs::read_to_string(workspace_root().join(rel))
+            .unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let at = src
+            .find(decl)
+            .unwrap_or_else(|| panic!("{rel} no longer declares `{decl}`"));
+        // The attribute block sits immediately above the declaration.
+        let head = &src[at.saturating_sub(400)..at];
+        assert!(
+            head.contains("rename_all_fields = \"camelCase\""),
+            "{rel}: `{decl}` must carry `rename_all_fields = \"camelCase\"`, or a \
+             multi-word field crosses the boundary in snake case while the \
+             TypeScript mirror declares it camel"
+        );
+    }
+}

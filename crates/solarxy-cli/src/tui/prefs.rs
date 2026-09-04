@@ -24,7 +24,7 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use super::layout::Layout;
+use super::layout::{Layout, PanelType};
 
 /// The file name, beside the desktop shell's `config.toml`.
 pub const FILE_NAME: &str = "tui.toml";
@@ -78,7 +78,7 @@ impl TuiPrefs {
 
     /// The arrangement to open with: what the reader last had, or the default
     /// preset if they have never quit out of one.
-    pub fn opening_layout(&self) -> Option<Layout> {
+    pub fn opening_layout(&self) -> Option<Layout<PanelType>> {
         let text = self.last_layout.as_deref()?;
         Layout::decode(text).ok()
     }
@@ -138,7 +138,7 @@ impl TuiPrefs {
             ("saved_layout", &prefs.saved_layout),
         ] {
             if let Some(text) = value {
-                Layout::decode(text).map_err(|e| format!("tui.{key}: {e}"))?;
+                Layout::<PanelType>::decode(text).map_err(|e| format!("tui.{key}: {e}"))?;
             }
         }
         Ok(prefs)

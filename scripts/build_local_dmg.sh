@@ -13,13 +13,15 @@
 #   ./bundle-out/Solarxy-<ver>-<arch>.dmg
 #
 # Usage:
-#   ./packaging/scripts/build_local_dmg.sh                 # defaults to current arch, v0.6.0
-#   V=0.6.0 TARGET=x86_64-apple-darwin ./packaging/scripts/build_local_dmg.sh
+#   ./scripts/build_local_dmg.sh                           # current arch, workspace version
+#   V=0.9.0 TARGET=x86_64-apple-darwin ./scripts/build_local_dmg.sh
 #
 set -euo pipefail
 
 # ---- Defaults (can be overridden via env) ---------------------------------
-: "${V:=0.6.0}"
+# Read from the workspace rather than carried here, because a version literal in
+# this file is what went three releases stale the last time.
+: "${V:=$(grep -m1 '^version' "$(dirname "$0")/../Cargo.toml" | cut -d'"' -f2)}"
 if [ -z "${TARGET:-}" ]; then
     case "$(uname -m)" in
         arm64)  TARGET="aarch64-apple-darwin" ;;
@@ -30,7 +32,7 @@ fi
 : "${BINARY:=target/release/solarxy}"
 : "${CLI_BINARY:=target/release/solarxy-cli}"
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [ ! -x "$BINARY" ]; then
@@ -60,6 +62,12 @@ chmod +x "$APP/Contents/MacOS/solarxy"
 cp "$CLI_BINARY" "$APP/Contents/MacOS/solarxy-cli"
 chmod +x "$APP/Contents/MacOS/solarxy-cli"
 cp res/bundle/solarxy.icns "$APP/Contents/Resources/Solarxy.icns"
+# Mirrors the CI bundle action: the license and the ported-source notices
+# travel inside the bundle. Kept in step deliberately, because the point of
+# this script is that a local smoke test sees what CI would produce, and a
+# missing license is exactly the kind of omission it exists to catch.
+cp LICENSE "$APP/Contents/Resources/"
+cp THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -86,6 +94,8 @@ plutil -lint "$APP/Contents/Info.plist"
 
 cp "res/bundle/macos/Install CLI.command" "$STAGE/"
 cp "res/bundle/macos/READ ME FIRST.txt" "$STAGE/"
+cp THIRD-PARTY-NOTICES.md "$STAGE/"
+cp LICENSE "$STAGE/"
 
 mkdir -p bundle-out
 OUT="bundle-out/Solarxy-${V}-${ARCH}.dmg"

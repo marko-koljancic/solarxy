@@ -159,6 +159,101 @@ impl Builder {
 
 const ROOT: GraphContext = GraphContext::Root;
 
+/// One pixel of a Radiance image: a shared mantissa and a single exponent.
+///
+/// Radiance stores a float triple in four bytes by giving the three channels
+/// one exponent, which is why a high-dynamic-range file is the size of an
+/// ordinary one and why it still holds a sun a thousand times brighter than
+/// the sky beside it.
+fn rgbe(rgb: [f32; 3]) -> [u8; 4] {
+    let peak = rgb[0].max(rgb[1]).max(rgb[2]);
+    if peak < 1e-32 {
+        return [0, 0, 0, 0];
+    }
+    let exponent = peak.log2().floor() as i32 + 1;
+    let scale = 256.0 / exp2(exponent);
+    [
+        (rgb[0] * scale).clamp(0.0, 255.0) as u8,
+        (rgb[1] * scale).clamp(0.0, 255.0) as u8,
+        (rgb[2] * scale).clamp(0.0, 255.0) as u8,
+        (exponent + 128).clamp(0, 255) as u8,
+    ]
+}
+
+fn exp2(e: i32) -> f32 {
+    if e >= 0 {
+        (1u64 << e.min(62)) as f32
+    } else {
+        1.0 / (1u64 << (-e).min(62)) as f32
+    }
+}
+
+/// A small equirectangular sky, generated rather than shipped as a file.
+///
+/// Every other asset in these samples is parametric, and an environment has no
+/// reason to be the exception: a committed image would be a binary blob in a
+/// public repository whose provenance somebody would eventually have to answer
+/// for, where this is a hundred lines that produce the same bytes on every
+/// machine. Sixty-four by thirty-two is coarse for a mirror and ample for
+/// everything else, because image-based lighting convolves it to a handful of
+/// coefficients anyway.
+///
+/// The shape is a studio sky: a cool zenith falling to a warm horizon, a dim
+/// warm floor below it, and one soft sun to put a highlight on a curved
+/// surface and give the shadow a direction.
+fn studio_hdri() -> Vec<u8> {
+    const W: usize = 64;
+    const H: usize = 32;
+
+    let mut bytes = Vec::from(*b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n");
+    bytes.extend_from_slice(format!("-Y {H} +X {W}\n").as_bytes());
+
+    // Where the sun sits, as a fraction of the way around and down.
+    let sun_u = 0.62_f32;
+    let sun_v = 0.30_f32;
+
+    for y in 0..H {
+        let mut row = Vec::with_capacity(W * 4);
+        // 0 at the zenith, 1 at the nadir.
+        let v = (y as f32 + 0.5) / H as f32;
+        for x in 0..W {
+            let u = (x as f32 + 0.5) / W as f32;
+            let mut rgb = if v < 0.5 {
+                // Sky: cool overhead, warming as it falls to the horizon.
+                let t = v / 0.5;
+                [0.20 + 0.34 * t, 0.24 + 0.30 * t, 0.33 + 0.16 * t]
+            } else {
+                // Ground: a dim warm bounce, darkening underfoot.
+                // A studio sweep rather than a floor: brightest where it
+                // meets the horizon and falling away underneath, because the
+                // only part of it a camera pitched down at a subject ever
+                // sees is that first band.
+                let t = (v - 0.5) / 0.5;
+                let fall = 1.0 - 0.75 * t * t;
+                [0.30 * fall, 0.26 * fall, 0.22 * fall]
+            };
+            // The sun, as a soft falloff rather than a disc: a hard edge at
+            // this resolution is four pixels and reads as a square.
+            let du = (u - sun_u).abs().min(1.0 - (u - sun_u).abs());
+            let dv = v - sun_v;
+            let d = (du * du * 4.0 + dv * dv).sqrt();
+            let sun = (1.0 - (d / 0.22).min(1.0)).powi(3) * 6.0;
+            for c in 0..3 {
+                rgb[c] += sun * [1.0, 0.93, 0.82][c];
+            }
+            row.extend_from_slice(&rgbe(rgb));
+        }
+        // A scanline whose first pixel begins `2, 2` is read as a run-length
+        // header rather than as a colour. Nothing in this palette lands there,
+        // and one unit of a mantissa is invisible if it ever does.
+        if row[0] == 2 && row[1] == 2 {
+            row[1] = 3;
+        }
+        bytes.extend_from_slice(&row);
+    }
+    bytes
+}
+
 fn sub(id: NodeId) -> GraphContext {
     GraphContext::Subflow(id)
 }
@@ -681,9 +776,9 @@ fn procedural_lookdev() -> Builder {
         [240.0, -160.0],
         [280.0, 160.0],
         "Voronoi cells for the large structure, fine noise on top, mixed \
-         and then shaped with levels. Every map here is generated: the \
-         scene carries no image files, so it is a few kilobytes and looks \
-         the same on any machine.",
+         and then shaped with levels. Every map here is generated, and so \
+         is the sky lighting the shot, so the whole scene is a few \
+         kilobytes and looks the same on any machine.",
     );
 
     // --- material ---------------------------------------------------
@@ -693,12 +788,9 @@ fn procedural_lookdev() -> Builder {
     let map = b.add(m, "tex_ref", [0.0, -120.0]);
     b.set(m, map, "texture_path", ParamValue::NodeRef(Some(tex)));
     let surface = b.add(m, "principled", [0.0, 20.0]);
-    b.set(
-        m,
-        surface,
-        "base_color",
-        ParamValue::Color([0.72, 0.44, 0.30, 1.0]),
-    );
+    // No base_color here on purpose: the map below is connected, and a
+    // mapped channel takes no factor (the node doc and the dimmed swatch
+    // both say so). The note beside the node teaches the same rule.
     b.set(m, surface, "roughness", ParamValue::Float(0.55));
     b.set(m, surface, "metallic", ParamValue::Float(0.15));
     b.set(
@@ -708,6 +800,15 @@ fn procedural_lookdev() -> Builder {
         ParamValue::Text("fired clay".into()),
     );
     b.connect(m, (map, "image"), (surface, "base_color_map"));
+    b.note(
+        m,
+        [220.0, -120.0],
+        [380.0, 150.0],
+        "The base colour is left at its default on purpose. With a map \
+         connected the channel takes no factor: the map alone drives it, \
+         and the panel dims the swatch to say so. To tint a mapped \
+         surface, tint in the texture network, where the map is authored.",
+    );
     b.display(m, surface);
 
     // --- geometry ---------------------------------------------------
@@ -757,6 +858,42 @@ fn procedural_lookdev() -> Builder {
          widening it broadens the highlight and softens the shadow edge \
          the way a larger softbox would. Rotate it and the shading \
          follows.",
+    );
+
+    // The sky, which is what makes this look-dev rather than a lit object:
+    // a surface is judged against the environment it will live in, and the
+    // reflections and the ambient both come from here rather than from a
+    // constant. Generated by this file, so the scene still carries no
+    // photograph and still opens the same everywhere.
+    let sky = b
+        .engine
+        .stage_asset("studio-sky.hdr", "image/vnd.radiance", studio_hdri());
+    let env = b.add(ROOT, "environment", [720.0, 230.0]);
+    b.rename(ROOT, env, "studio");
+    b.set(ROOT, env, "hdri", ParamValue::Asset(sky));
+    b.set(ROOT, env, "rotation", ParamValue::Float(20.0));
+    b.set(ROOT, env, "background", ParamValue::Enum("hdri_sky".into()));
+
+    let render = b.add(ROOT, "render", [920.0, 130.0]);
+    b.set(
+        ROOT,
+        render,
+        "camera_path",
+        ParamValue::NodeRef(Some(camera)),
+    );
+    b.set(ROOT, render, "engine", ParamValue::Enum("traced".into()));
+    b.set(ROOT, render, "width", ParamValue::Int(960));
+    b.set(ROOT, render, "height", ParamValue::Int(720));
+
+    b.note(
+        ROOT,
+        [920.0, 300.0],
+        [280.0, 190.0],
+        "The environment lights the shot and is the backdrop behind it, so \
+         rotating it moves the highlight and the reflection together. \
+         Press Render on the render node to shoot it: the same file \
+         renders the same picture from the command line, because the \
+         environment is scene data rather than a viewport setting.",
     );
     b
 }
@@ -1205,6 +1342,322 @@ fn orrery() -> Builder {
     b
 }
 
+/// The Cornell box: the canonical test of global illumination, authored
+/// so one traced still shows colour bleeding, a soft shadow, a mirror
+/// reflection and refraction at once.
+///
+/// Two authoring choices are worth stating, because both look like
+/// mistakes until you know why.
+///
+/// The walls are five separate single-sided planes rather than one
+/// inverted box. The viewport culls back faces while the tracer shades
+/// both sides, so an inverted box would read as a box in the render and as
+/// nothing at all in the pane you are authoring in. Planes keep the two
+/// renderers honest with each other, and the merge deduplicates identical
+/// materials, so each wall carries its own to stay a distinct colour.
+///
+/// The ceiling light is a rect area light, not emissive geometry. It is
+/// the one light kind the tracer both intersects and importance-samples,
+/// so it reads as a glowing panel and casts the soft shadow the scene
+/// exists to show. Emissive geometry would be found only by chance
+/// scattering, which is exactly the wrong showcase for a box whose whole
+/// subject is where the light goes.
+fn cornell_box() -> Builder {
+    // The room, in metres. The classic box is a 555 mm cube, but lights
+    // here carry physical units whose defaults are tuned for a room, so the
+    // scene is scaled up rather than the intensities scaled down. It is
+    // also wider than it is tall, unlike the classic cube, because the
+    // output is 16:9: a cubic room either leaves the background showing at
+    // the sides or has to be shot from so close that the ceiling panel
+    // falls out of frame.
+    const W: f64 = 2.6;
+    const HGT: f64 = 2.0;
+    const D: f64 = 2.4;
+
+    // One wall: name, plane size, translate, rotate, base colour.
+    type WallSpec = (&'static str, [f64; 2], [f64; 3], [f64; 3], [f32; 4]);
+
+    let mut b = Builder::new();
+    b.note(
+        ROOT,
+        [40.0, -220.0],
+        [400.0, 190.0],
+        "The Cornell box: the standard test of global illumination. Press \
+         Render on the render node for the traced still. The viewport \
+         preview and that still deliberately differ, and this scene is \
+         where the difference is the whole point: colour bleeding off the \
+         walls, a soft shadow under the area light, a mirror reflection \
+         and refraction through the glass are all things the tracer \
+         computes and the rasterized pane approximates or omits.",
+    );
+
+    let geo = b.add(ROOT, "geo", [120.0, 0.0]);
+    b.rename(ROOT, geo, "box");
+    let g = sub(geo);
+
+    // Five walls. Each is a plane lying in XY, rotated into place and
+    // pushed out to its face of the room, so the inside faces the camera.
+    // A plane's own width and height are its X and Y before that rotation,
+    // which is why the floor's height is the room's depth.
+    // Order: floor, ceiling, back, left (red), right (green).
+    let walls: [WallSpec; 5] = [
+        (
+            "floor",
+            [W, D],
+            [0.0, 0.0, 0.0],
+            [-90.0, 0.0, 0.0],
+            [0.73, 0.73, 0.73, 1.0],
+        ),
+        (
+            "ceiling",
+            [W, D],
+            [0.0, HGT, 0.0],
+            [90.0, 0.0, 0.0],
+            [0.73, 0.73, 0.73, 1.0],
+        ),
+        (
+            "back",
+            [W, HGT],
+            [0.0, HGT / 2.0, -D / 2.0],
+            [0.0, 0.0, 0.0],
+            [0.73, 0.73, 0.73, 1.0],
+        ),
+        (
+            "left",
+            [D, HGT],
+            [-W / 2.0, HGT / 2.0, 0.0],
+            [0.0, 90.0, 0.0],
+            [0.63, 0.07, 0.06, 1.0],
+        ),
+        (
+            "right",
+            [D, HGT],
+            [W / 2.0, HGT / 2.0, 0.0],
+            [0.0, -90.0, 0.0],
+            [0.14, 0.45, 0.09, 1.0],
+        ),
+    ];
+    let mut wall_outs = Vec::new();
+    for (i, (name, size, translate, rotate, color)) in walls.into_iter().enumerate() {
+        #[allow(clippy::cast_precision_loss)]
+        let y = -260.0 + (i as f32) * 90.0;
+        let plane = b.add(g, "plane", [-420.0, y]);
+        b.rename(g, plane, name);
+        b.set(g, plane, "width", ParamValue::Float(size[0]));
+        b.set(g, plane, "height", ParamValue::Float(size[1]));
+        let xform = b.add(g, "transform", [-250.0, y]);
+        b.set(g, xform, "translate", ParamValue::Vec3(translate));
+        b.set(g, xform, "rotate", ParamValue::Vec3(rotate));
+        let mat = b.add(g, "material", [-90.0, y]);
+        b.set(g, mat, "base_color", ParamValue::Color(color));
+        b.set(g, mat, "roughness", ParamValue::Float(0.9));
+        b.set(g, mat, "metallic", ParamValue::Float(0.0));
+        b.set(g, mat, "material_name", ParamValue::Text(name.to_string()));
+        b.connect(g, (plane, "geometry"), (xform, "geometry"));
+        b.connect(g, (xform, "geometry"), (mat, "geometry"));
+        wall_outs.push(mat);
+    }
+
+    // The three showcase surfaces, each demonstrating one thing the
+    // tracer does that the raster preview cannot.
+    let diffuse = b.add(g, "box", [-420.0, 210.0]);
+    b.rename(g, diffuse, "diffuse_block");
+    b.set(g, diffuse, "width", ParamValue::Float(0.55));
+    b.set(g, diffuse, "height", ParamValue::Float(1.0));
+    b.set(g, diffuse, "depth", ParamValue::Float(0.55));
+    let diffuse_x = b.add(g, "transform", [-250.0, 210.0]);
+    b.set(
+        g,
+        diffuse_x,
+        "translate",
+        ParamValue::Vec3([-0.6, 0.5, -0.45]),
+    );
+    b.set(g, diffuse_x, "rotate", ParamValue::Vec3([0.0, 18.0, 0.0]));
+    let diffuse_m = b.add(g, "material", [-90.0, 210.0]);
+    b.set(
+        g,
+        diffuse_m,
+        "base_color",
+        ParamValue::Color([0.73, 0.73, 0.73, 1.0]),
+    );
+    b.set(g, diffuse_m, "roughness", ParamValue::Float(0.9));
+    b.set(
+        g,
+        diffuse_m,
+        "material_name",
+        ParamValue::Text("white_matte".into()),
+    );
+    b.connect(g, (diffuse, "geometry"), (diffuse_x, "geometry"));
+    b.connect(g, (diffuse_x, "geometry"), (diffuse_m, "geometry"));
+
+    let metal = b.add(g, "sphere", [-420.0, 300.0]);
+    b.rename(g, metal, "metal_ball");
+    b.set(g, metal, "radius", ParamValue::Float(0.35));
+    b.set(g, metal, "width_segments", ParamValue::Int(64));
+    b.set(g, metal, "height_segments", ParamValue::Int(48));
+    let metal_x = b.add(g, "transform", [-250.0, 300.0]);
+    b.set(
+        g,
+        metal_x,
+        "translate",
+        ParamValue::Vec3([0.62, 0.35, -0.1]),
+    );
+    let metal_m = b.add(g, "material", [-90.0, 300.0]);
+    b.set(
+        g,
+        metal_m,
+        "base_color",
+        ParamValue::Color([0.94, 0.92, 0.88, 1.0]),
+    );
+    b.set(g, metal_m, "metallic", ParamValue::Float(1.0));
+    b.set(g, metal_m, "roughness", ParamValue::Float(0.05));
+    b.set(
+        g,
+        metal_m,
+        "material_name",
+        ParamValue::Text("mirror".into()),
+    );
+    b.connect(g, (metal, "geometry"), (metal_x, "geometry"));
+    b.connect(g, (metal_x, "geometry"), (metal_m, "geometry"));
+
+    let glass = b.add(g, "sphere", [-420.0, 390.0]);
+    b.rename(g, glass, "glass_ball");
+    b.set(g, glass, "radius", ParamValue::Float(0.3));
+    b.set(g, glass, "width_segments", ParamValue::Int(64));
+    b.set(g, glass, "height_segments", ParamValue::Int(48));
+    let glass_x = b.add(g, "transform", [-250.0, 390.0]);
+    b.set(g, glass_x, "translate", ParamValue::Vec3([-0.05, 0.3, 0.0]));
+    let glass_m = b.add(g, "material", [-90.0, 390.0]);
+    b.set(
+        g,
+        glass_m,
+        "base_color",
+        ParamValue::Color([1.0, 1.0, 1.0, 1.0]),
+    );
+    b.set(g, glass_m, "roughness", ParamValue::Float(0.0));
+    b.set(g, glass_m, "metallic", ParamValue::Float(0.0));
+    b.set(g, glass_m, "transmission", ParamValue::Float(1.0));
+    b.set(g, glass_m, "ior", ParamValue::Float(1.5));
+    // What makes the ball a solid rather than a pane, and the whole reason
+    // it refracts at all. At zero the tracer reads the surface as thin film
+    // and refracts a second time through the opposite interface, handing
+    // every ray back the direction it arrived on: no lensing, no caustic,
+    // no shadow. The kernel only asks whether this is zero, so the value is
+    // a look choice rather than a measurement, and the ball's own diameter
+    // is the one that reads as solid glass at this camera distance.
+    b.set(g, glass_m, "thickness", ParamValue::Float(0.6));
+    // Absorption stays off, which is what the defaults already say: white
+    // at a distance of zero. The ball is water-clear on purpose, because a
+    // tint would compete with the coloured walls for the same read.
+    b.set(
+        g,
+        glass_m,
+        "material_name",
+        ParamValue::Text("glass".into()),
+    );
+    b.connect(g, (glass, "geometry"), (glass_x, "geometry"));
+    b.connect(g, (glass_x, "geometry"), (glass_m, "geometry"));
+
+    let merge = b.add(g, "merge", [110.0, 60.0]);
+    for out in wall_outs {
+        b.connect(g, (out, "geometry"), (merge, "inputs"));
+    }
+    for out in [diffuse_m, metal_m, glass_m] {
+        b.connect(g, (out, "geometry"), (merge, "inputs"));
+    }
+    b.display(g, merge);
+
+    b.note(
+        g,
+        [110.0, 150.0],
+        [380.0, 260.0],
+        "Five single-sided planes, not one inverted box: the viewport culls \
+         back faces and the tracer shades both, so a box would render and \
+         preview differently. Each wall carries its own material because \
+         the merge deduplicates identical ones, and two of them have to \
+         stay red and green.\n\nThe block is diffuse (watch it pick up the \
+         wall colours), the near-white ball is a mirror, and the clear ball \
+         refracts: it carries a thickness, which is what makes it a solid \
+         rather than a pane with nothing behind it. Only the first survives \
+         the raster preview intact.",
+    );
+
+    // The scene's only light, and the ceiling panel the shadow comes from.
+    let light = b.add(ROOT, "rect_area_light", [340.0, -60.0]);
+    b.rename(ROOT, light, "ceiling_panel");
+    b.set(
+        ROOT,
+        light,
+        "translate",
+        ParamValue::Vec3([0.0, 1.97, -0.1]),
+    );
+    b.set(ROOT, light, "width", ParamValue::Float(0.7));
+    b.set(ROOT, light, "height", ParamValue::Float(0.7));
+    b.set(ROOT, light, "intensity", ParamValue::Float(18.0));
+    b.set(
+        ROOT,
+        light,
+        "color",
+        ParamValue::Color([1.0, 0.95, 0.88, 1.0]),
+    );
+
+    b.note(
+        ROOT,
+        [340.0, 140.0],
+        [380.0, 170.0],
+        "An area light rather than a glowing box, because it is the light \
+         kind the tracer both hits and importance-samples: that is what \
+         makes the shadow soft instead of noisy. It is a light, though, not \
+         geometry, so it receives no bounce light and occludes nothing. A \
+         purist box would notice; the shadow it buys is worth it.\n\nThere \
+         is no environment light. The background is black on purpose, so \
+         every photon in the picture came off that panel.",
+    );
+
+    let camera = b.add(ROOT, "camera", [340.0, 40.0]);
+    b.rename(ROOT, camera, "shot");
+    // Close enough to the open front that the walls fill the frame. That is
+    // not a composition preference: it is what keeps the background out of
+    // the picture, so every pixel is light that came off the ceiling panel
+    // and bounced. Pull back past about z = 2.6 at this field of view and
+    // the box turns into a doll's house sitting in a grey void.
+    b.set(ROOT, camera, "position", ParamValue::Vec3([0.0, 1.05, 1.7]));
+    b.set(ROOT, camera, "target", ParamValue::Vec3([0.0, 0.8, -1.2]));
+    // Wide enough to hold the ceiling panel in shot, because a scene that
+    // argues for an area light should show you the area light.
+    b.set(ROOT, camera, "fov_y", ParamValue::Float(62.0));
+    // Focused on the glass ball with the aperture open enough that the back
+    // wall softens: the depth of field the milestone's finished-still
+    // acceptance run is measured against.
+    b.set(ROOT, camera, "f_stop", ParamValue::Float(1.4));
+    b.set(ROOT, camera, "focus_distance", ParamValue::Float(1.86));
+
+    let render = b.add(ROOT, "render", [560.0, 40.0]);
+    b.set(
+        ROOT,
+        render,
+        "camera_path",
+        ParamValue::NodeRef(Some(camera)),
+    );
+    b.set(ROOT, render, "engine", ParamValue::Enum("traced".into()));
+    // A size and sample count that return in seconds, because the scene is
+    // here to be opened and understood. The finished-still measurement
+    // overrides all three from the command line.
+    b.set(ROOT, render, "width", ParamValue::Int(1280));
+    b.set(ROOT, render, "height", ParamValue::Int(720));
+    b.set(ROOT, render, "quality", ParamValue::Enum("good".into()));
+    // Interiors live on late bounces, and a clear sphere costs two
+    // crossings by itself, so both budgets are above their defaults.
+    b.set(ROOT, render, "bounces", ParamValue::Int(8));
+    b.set(ROOT, render, "transmissive_bounces", ParamValue::Int(8));
+    // On, unlike the node default. A box lit by one small panel is the
+    // noisiest thing the tracer draws, and a sample that opens looking like
+    // television static teaches the wrong lesson about the renderer.
+    b.set(ROOT, render, "denoise", ParamValue::Bool(true));
+
+    b
+}
+
 fn main() {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web/public/samples");
     std::fs::create_dir_all(&dir).expect("samples dir");
@@ -1216,4 +1669,5 @@ fn main() {
     animated_field().save(&dir, "animated-field.slxy");
     procedural_lookdev().save(&dir, "procedural-lookdev.slxy");
     orrery().save(&dir, "the-orrery.slxy");
+    cornell_box().save(&dir, "cornell-box.slxy");
 }

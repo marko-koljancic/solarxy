@@ -37,8 +37,27 @@ mod app;
 // desktop shell needs them too, and a module in a crate named for the web was
 // never going to be where it reached for them.
 
+// The no-movement guard on a locked look-through camera commit. Both targets,
+// unlike the host that calls it, so native CI runs its tests; it cannot move
+// to `solarxy-host`, which has no `solarxy-graph` dependency by design.
+mod camera_commit;
+
+// What a still asks the tracer for, from what the render node says. Both
+// targets for the same reason as above, and it cannot move to `solarxy-host`
+// for the same reason either.
+mod trace_settings;
+
+// The traversal parity probe: the browser half of the check that the WGSL
+// traversal agrees with its CPU twin. Feature-gated, because the shipped
+// artifact has no reason to carry a diagnostic.
+#[cfg(all(target_arch = "wasm32", feature = "pt-probe"))]
+mod pathtrace_probe;
+
 #[cfg(target_arch = "wasm32")]
 pub use app::SolarxyApp;
+
+#[cfg(all(target_arch = "wasm32", feature = "pt-probe"))]
+pub use pathtrace_probe::{BsdfProbeCheck, PathtraceProbe};
 
 /// Installs the panic hook that routes Rust panics to `console.error`, so a
 /// boundary panic is legible in the browser devtools. Called once by JS

@@ -1,0 +1,21 @@
+[package]
+name = "solarxy-bvh"
+description = "GPU-free bounding volume hierarchy for Solarxy: a binned-SAH BVH2 builder, a two-level structure, and the GPU array layout the traversal kernel consumes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+solarxy-core = { path = "../solarxy-core", default-features = false }
+bytemuck = { version = "1.24", features = ["derive"] }
+
+[dev-dependencies]
+# The parity corpus checks this crate's traversal against the CPU raycaster in
+# `solarxy-core`, whose public API speaks `cgmath` points and vectors. Nothing
+# in the library itself needs a math crate, and it deliberately does not take
+# one: the builder and the traversal are written on `[f32; 3]` so they port to
+# WGSL line for line.
+cgmath = { workspace = true }

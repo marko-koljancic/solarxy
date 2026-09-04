@@ -32,6 +32,10 @@
     clippy::wildcard_imports
 )]
 
+// Path-reading by construction (it walks the model's own directory through
+// `DirResolver`), so it exists only where the path wrappers do.
+#[cfg(feature = "std-fs")]
+pub mod companions;
 pub mod export;
 pub mod gltf;
 pub mod hdr;

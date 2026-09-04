@@ -685,8 +685,17 @@ export interface PaneDisplaySettings {
   uvZoom: number;
   showUvOverlap: boolean;
   showValidation: boolean;
+  /** Draw a screen-constant marker at every light, so one can be found and
+   * clicked without knowing where it already is. On by default. Distinct from
+   * a light's own Show Helper param, which draws the world-scaled wireframe
+   * describing that light's extent; the two answer different questions. */
+  showLightMarkers: boolean;
   /** Live per-pane turntable spin; session-temporary, not persisted. */
   turntableActive: boolean;
+  /** Which backend draws this pane's 3D content. A traced pane is still a
+   * 3D pane (same navigation, picking and toolbar semantics); only the
+   * encode differs. Pinned to `solarxy_core::view_config::PaneEngine`. */
+  paneEngine: "raster" | "traced";
 }
 
 /** A free pane's own rendering intent, pinned to
@@ -759,15 +768,164 @@ export type HostEvent =
   | { type: "activePane"; pane: number }
   | { type: "uvOverlap"; pct: number | null; pending: boolean }
   | { type: "viewChanged" }
-  | { type: "attrPinStats"; capacity: number; total: number };
+  | { type: "attrPinStats"; capacity: number; total: number }
+  | {
+      type: "renderProgress";
+      tile: number;
+      tiles: number;
+      sample: number;
+      samples: number;
+      done: boolean;
+      /** How long the render has taken, in milliseconds. */
+      elapsedMs: number;
+      /** How much longer, or null while there is not enough to say: the first
+       * chunks have no rate to extrapolate from, and after the last one the job
+       * is still assembling. A confident wrong number is worse than a blank. */
+      remainingMs: number | null;
+    }
+  | { type: "renderNotice"; message: string }
+  | { type: "paneSamples"; pane: number; samples: number; target: number }
+  /** What the current selection can be manipulated with. `tools` is the set
+   * that applies to it, and `transformParams` names the params its transform
+   * is made of, which is what "reset transform" resets. Both empty when
+   * nothing manipulable is selected, which the tool column reads as "do not
+   * narrow anything" rather than as "nothing is possible". Pushed on change. */
+  | { type: "selectionCapability"; tools: ToolMode[]; transformParams: string[] }
+  | {
+      type: "gpuFault";
+      kind: "validation" | "outOfMemory" | "internal";
+      message: string;
+      count: number;
+    };
 
-/** The viewport tool. Rotate and Scale select, draw and
- * grab nothing, which is why their buttons ship disabled rather than dead. */
-export type ToolMode = "select" | "move" | "rotate" | "scale";
+/** What one render backend can do, pinned to the Rust `BackendCaps`
+ * constants. `progressive` is what drives a sample counter: repeated
+ * frames of an unchanged pane keep improving the image. */
+export interface BackendCaps {
+  progressive: boolean;
+  supportsInstancing: boolean;
+  writesAovs: boolean;
+  /** Whether THIS device can run the backend, as opposed to what the backend
+   * can do. Not a constant: the tracer spends core WebGPU's per-stage storage
+   * budget exactly, so a device at downlevel limits cannot build its layouts.
+   * Gate offering a mode on this, never on the capability fields above. */
+  available: boolean;
+}
+
+/** Both backends' capabilities, for menu gating. */
+export interface BackendCapsSet {
+  raster: BackendCaps;
+  traced: BackendCaps;
+}
+
+/** One rectangle of a still render, as it crosses the boundary.
+ *
+ * Tiles cross one at a time and the frontend assembles them, which is what
+ * keeps a 67-megapixel image out of the wasm heap and gives the modal its
+ * live preview for free.
+ *
+ * The picture-so-far crosses in this same shape, from `takeStillPreview`, so
+ * the modal paints both through one call. The difference is what they mean
+ * rather than what they carry: a tile is the render's output and a preview is
+ * an unfinished look at one, which is why only tiles reach the saved file. */
+export interface StillTileDto {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Always four bytes a pixel, whatever the render's own depth. A float
+   * still's tiles are clamped and sRGB-encoded on the Rust side before they
+   * cross, because the canvas is eight bits by construction and the floats
+   * have no business here except inside the encoded file. */
+  pixels: Uint8Array;
+}
+
+/** A pass a render window can show.
+ *
+ * The beauty is in the list because it is what a selector defaults to, and it
+ * is not an auxiliary pass: it is the picture, and every render has one. */
+export type StillPass = "beauty" | "albedo" | "normal" | "depth";
+
+/** What the running render produces, and what its engine could produce.
+ *
+ * Two answers rather than one, because a selector says different things with
+ * them: a pass nobody asked for is offered and disabled, naming the parameter
+ * that would produce it, while a render whose engine writes none shows the
+ * beauty alone, since no checkbox anywhere would have helped.
+ *
+ * `engineWritesAovs` is a capability, resolved from the backend's own constant.
+ * Nothing here asks which engine is running. */
+export interface StillPasses {
+  albedo: boolean;
+  normal: boolean;
+  depth: boolean;
+  engineWritesAovs: boolean;
+}
+
+/** What a still is saved as. Chosen before the render starts, because the
+ * format decides what the tiles are and cannot change once they arrive. */
+export type StillFormat = "png" | "exr";
+
+/** Which floats a float still carries. The same two the headless command
+ * offers, with the same default, so there is one vocabulary for the idea.
+ *
+ * `sceneLinear` is light with no exposure, tone map or grade applied, which is
+ * what a compositing package expects to be handed. `display` is the finished
+ * look without the quantization. Meaningless for a PNG, and ignored there. */
+export type StillSpace = "sceneLinear" | "display";
+
+/** What a `render` node is asking for, resolved by the engine.
+ *
+ * Read out of the engine rather than assembled here. The rule for turning
+ * authored parameters into a render lived on this side until 0.9.0, which is
+ * how the node's two bounce budgets came to be authored and read by nothing:
+ * this shape had no field for them. A render is now asked for by naming the
+ * node, and this travels one way, out, for the dialog to show. */
+export interface RenderSettings {
+  width: number;
+  height: number;
+  samples: number;
+  engine: "raster" | "pathTraced";
+  bounces: number;
+  transmissiveBounces: number;
+  denoise: boolean;
+  /** The `camera` node to shoot through, or null for the active pane's view. */
+  camera: number | null;
+  /** The auxiliary passes the run writes beside the image.
+   *
+   * The production half of the pass model, and a property of the render node
+   * rather than of the window: what a render makes is authored in the document
+   * and what a window shows is chosen in the window. */
+  aovAlbedo: boolean;
+  aovNormal: boolean;
+  aovDepth: boolean;
+  /** Whether the render carries a matte. The window reads it for two things
+   * the picture cannot say about itself: the checker shows only behind a
+   * render that actually has transparency, and the eight-bit save routes
+   * through the engine's own encoder, whose straight alpha a canvas round
+   * trip would corrupt. */
+  transparentBackground: boolean;
+}
+
+/** The viewport tool.
+ *
+ * Which of these apply is a property of what is SELECTED, not of the toolbar:
+ * a point light has no rotation and no size, so arming Rotate on one would
+ * draw handles that write nowhere. The host reports the applicable set as it
+ * changes (`selectionCapability`); a tool outside it renders disabled.
+ *
+ * `aim` moves the point a light points at. It is its own tool rather than a
+ * mode of `rotate` because aiming is not rotating: a spot light carries a
+ * second point in space, not an orientation, so the handle writes a position. */
+export type ToolMode = "select" | "move" | "rotate" | "scale" | "aim";
 
 export type ViewAxis = "top" | "bottom" | "front" | "back" | "left" | "right";
 
 export type CameraCommand =
   | { kind: "fit" }
+  /** Frame what is selected rather than the whole scene. A light has no size,
+   * so it is framed with a box scaled to the scene; an unframeable selection
+   * falls back to fitting everything rather than sending the camera nowhere. */
+  | { kind: "fitSelection" }
   | { kind: "view"; axis: ViewAxis }
   | { kind: "projection"; mode: "perspective" | "orthographic" };

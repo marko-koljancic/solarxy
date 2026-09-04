@@ -333,6 +333,36 @@ impl Glyphs {
     /// Density ramp for a plot at the ASCII tier, lightest first.
     pub const ASCII_DENSITY: [&'static str; 5] = [" ", ".", ":", "*", "#"];
 
+    /// The same five rungs in block elements.
+    ///
+    /// Five and not more: the shade characters are the only ones that read as
+    /// a continuous ramp, `\u{2588}` is already the meter's filled cell, and a
+    /// longer ramp built out of anything else would be a set of marks rather
+    /// than a gradient.
+    pub const UNICODE_DENSITY: [&'static str; 5] =
+        [" ", "\u{2591}", "\u{2592}", "\u{2593}", "\u{2588}"];
+
+    /// The shading ramp at this tier, lightest first.
+    ///
+    /// One accessor rather than two constants at every call site, because a
+    /// surface drawing a picture or a fill level should not be the thing that
+    /// remembers which tier it is on.
+    #[must_use]
+    pub fn density(&self) -> &'static [&'static str; 5] {
+        match self.tier {
+            GlyphTier::Unicode => &Self::UNICODE_DENSITY,
+            GlyphTier::Ascii => &Self::ASCII_DENSITY,
+        }
+    }
+
+    /// The rung a fraction of one lands on, clamped.
+    #[must_use]
+    pub fn shade(&self, fraction: f64) -> &'static str {
+        let ramp = self.density();
+        let step = (fraction.clamp(0.0, 1.0) * (ramp.len() - 1) as f64).round() as usize;
+        ramp[step.min(ramp.len() - 1)]
+    }
+
     pub fn for_tier(tier: GlyphTier) -> Self {
         match tier {
             GlyphTier::Unicode => Self {

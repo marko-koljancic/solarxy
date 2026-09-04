@@ -17,7 +17,7 @@ use ratatui::widgets::Paragraph;
 use solarxy_core::validation::Severity;
 
 use super::super::widgets;
-use super::{Action, Ctx, Panel};
+use super::{Action, AnalyzeCtx, Analysis, Panel};
 
 /// Which severities are shown. Cycles with the panel's one menu word.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -61,20 +61,20 @@ pub struct Health {
 
 const NAME_WIDTH: u16 = 18;
 
-impl Panel for Health {
+impl Panel<Analysis<'_>, Action> for Health {
     fn menu(&self) -> &'static [&'static str] {
         &["filter"]
     }
 
-    fn handle(&mut self, key: KeyEvent, _ctx: &Ctx<'_>) -> Action {
+    fn handle(&mut self, key: KeyEvent, _ctx: &AnalyzeCtx<'_>) -> Action {
         if matches!(key.code, KeyCode::Char('/')) {
             self.filter = self.filter.next();
         }
         Action::None
     }
 
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
-        let validation = &ctx.report.validation;
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
+        let validation = &ctx.subject.report.validation;
         let errors = validation.error_count();
         let warnings = validation.warning_count();
 
@@ -137,8 +137,8 @@ impl Panel for Health {
         frame.render_widget(Paragraph::new(lines), area);
     }
 
-    fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
-        let kinds = ctx.report.validation.ranked_kinds().len();
+    fn status(&self, ctx: &AnalyzeCtx<'_>) -> Option<String> {
+        let kinds = ctx.subject.report.validation.ranked_kinds().len();
         Some(format!("{} kinds \u{b7} {}", kinds, self.filter.label()))
     }
 }

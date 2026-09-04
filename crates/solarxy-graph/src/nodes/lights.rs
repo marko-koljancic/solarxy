@@ -30,7 +30,8 @@ fn helper_group(show_helper_doc: &str, helper_size_doc: &str) -> Vec<ParamSpec> 
         .doc(
             "Whether this light is in the scene at all. Off removes its \
              contribution and hides its helper, and releases its slot in the \
-             8-light budget for the next light that wants one.",
+             interactive viewport's 8-light budget for the next light that \
+             wants one.",
         ),
         ParamSpec::new(
             "show_helper",
@@ -154,6 +155,40 @@ fn decay_param() -> ParamSpec {
     )
 }
 
+/// Shared by point and spot: the emitter's physical size.
+///
+/// Only the path tracer reads it, and the doc says so rather than leaving a
+/// control that does nothing in the viewport look broken. A shadow map is a
+/// visibility test from a single place, so it has no way to be half in
+/// shadow; softening it means blurring the map, which softens a contact
+/// shadow and a distant one by the same amount and is a different effect
+/// wearing this one's name.
+fn radius_param() -> ParamSpec {
+    ParamSpec::new(
+        "radius",
+        "Radius",
+        "light",
+        ParamType::Float,
+        ParamValue::Float(0.0),
+    )
+    .hard(0.0, 1000.0)
+    .soft(0.0, 5.0)
+    .unit(Unit::Meters)
+    .doc(
+        "How big the emitter is, in metres. 0, the default, is a \
+         mathematical point, which casts a shadow with a perfectly hard \
+         edge -- the giveaway that a light is not a real object. Give it a \
+         size and the shadow gains a penumbra that widens with distance \
+         from the surface, the way a real lamp's does, because part of the \
+         emitter is visible where the rest is hidden.\n\n\
+         This is read by rendered output only; the interactive viewport \
+         draws hard-edged shadows whatever you set here. That is not an \
+         oversight to be fixed later: a shadow map answers one visibility \
+         question from one place, and blurring it would soften a contact \
+         shadow as much as a distant one.",
+    )
+}
+
 fn map_size_param(default: &str) -> ParamSpec {
     ParamSpec::new(
         "map_size",
@@ -250,13 +285,15 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
          off the node rather than passing a light down a chain. Reach for \
          `directional_light` when you want a sun instead, or `spot_light` \
          when you want the same falloff inside a cone.\n\n\
-         Two limits bite. Only 8 point, spot, directional, and rect-area \
-         lights reach the shader: the first 8 in document order win and the \
-         rest are dropped with no warning anywhere, so a scene that quietly \
-         stops responding to new lights is probably at the cap (ambient and \
-         hemisphere lights are free, and an invisible light gives its slot \
-         back). And shadow casting is exclusive -- switching Cast Shadow on \
-         here switches it off on every other light, in one undo step.",
+         Two limits bite. It spends one of the 8 direct-light slots the \
+         interactive viewport binds, and past 8 the first 8 in document \
+         order win with the rest dropped silently, so a scene that quietly \
+         stops responding to new lights is probably at that cap (ambient \
+         and hemisphere lights are free, and an invisible light gives its \
+         slot back). That ceiling is the viewport's, not the scene's -- \
+         rendered output reads every light. And shadow casting is \
+         exclusive: switching Cast Shadow on here switches it off on every \
+         other light, in one undo step.",
         &["light", "omni", "bulb"],
         "point",
         vec![
@@ -285,6 +322,7 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
             intensity(4.5, 30.0),
             range_param(),
             decay_param(),
+            radius_param(),
             cast_shadow_param(),
             map_size_param("1024"),
             bias_param(-0.0001),
@@ -303,7 +341,12 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
     // to move by the same factor to mean what it did. Ambient and
     // hemisphere deliberately do NOT bump, because they fold into the
     // hemisphere rows of the light uniform and never entered that loop.
-    desc.version = 2;
+    //
+    // v3 adds Radius. A pure addition whose default is the identity of its
+    // effect -- a zero radius is the point emitter every earlier scene
+    // already had -- so it needs no arm of its own, and the hook stays the
+    // one v2 installed because it already keys on the version it came from.
+    desc.version = 3;
     desc.migrate = Some(super::common::migrate_scale_intensity);
     desc
 }
@@ -325,8 +368,10 @@ pub fn directional_descriptor() -> NodeTypeDescriptor {
          Position-to-Target direction, and the shadow frustum auto-fits the \
          scene bounds instead of sitting at Position, so moving the node in \
          space moves nothing but its helper arrow. It spends one of the 8 \
-         direct-light slots, and Cast Shadow is exclusive: granting it here \
-         revokes it from every other light in a single undo step.",
+         direct-light slots the interactive viewport binds -- that ceiling is \
+         the viewport's, not the scene's -- and Cast Shadow is exclusive: \
+         granting it here revokes it from every other light in a single undo \
+         step.",
         &["light", "sun", "sky"],
         "directional",
         vec![
@@ -411,8 +456,9 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
          classic tell of a CG spotlight, and rarely what you want; a little \
          goes a long way. Angle is the HALF-angle, so the default 45 spreads \
          90 degrees in total. The light spends one of the 8 direct-light \
-         slots, and Cast Shadow is exclusive: granting it here revokes it \
-         from every other light in a single undo step.",
+         slots the interactive viewport binds -- that ceiling is the \
+         viewport's, not the scene's -- and Cast Shadow is exclusive: granting \
+         it here revokes it from every other light in a single undo step.",
         &["light", "cone", "flashlight"],
         "spot",
         vec![
@@ -487,6 +533,7 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
                  and fades across the gap, so 1 spreads the falloff over the \
                  whole cone and leaves no flat core at all.",
             ),
+            radius_param(),
             cast_shadow_param(),
             map_size_param("1024"),
             bias_param(-0.0001),
@@ -507,7 +554,10 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
     // to move by the same factor to mean what it did. Ambient and
     // hemisphere deliberately do NOT bump, because they fold into the
     // hemisphere rows of the light uniform and never entered that loop.
-    desc.version = 2;
+    //
+    // v3 adds Radius, on the same reasoning as the point light's: a pure
+    // addition whose default is the identity of its effect.
+    desc.version = 3;
     desc.migrate = Some(super::common::migrate_scale_intensity);
     desc
 }
@@ -526,8 +576,8 @@ pub fn ambient_descriptor() -> NodeTypeDescriptor {
          ambient when you specifically want flatness, or want a quick global \
          lift while blocking out a scene.\n\n\
          It costs no light slot: ambient and hemisphere lights fold into the \
-         ambient term instead of competing for the 8 direct-light slots, so \
-         stack as many as you like. Two honest limits: it ADDS to the IBL \
+         ambient term instead of competing for the interactive viewport's 8 \
+         direct-light slots, so stack as many as you like. Two honest limits: it ADDS to the IBL \
          environment rather than scaling it, so it cannot dim an HDRI, and \
          ambient occlusion still darkens it, so it will not fully flatten \
          creases. Show Helper and Helper Size do nothing here -- with no \
@@ -638,7 +688,8 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
          shadow caster stays with the punctual lights -- so it lights \
          through geometry. And Helper Size is ignored, because the helper \
          rectangle takes its size from Width and Height. It spends one of \
-         the 8 direct-light slots like any other.",
+         the 8 direct-light slots the interactive viewport binds, like any \
+         other.",
         &["light", "area", "softbox", "panel"],
         "rect_area",
         vec![

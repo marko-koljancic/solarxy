@@ -95,11 +95,22 @@ impl Handle {
         }
     }
 
+    /// This handle's bit in a [`HandleMask`]. Stable only within a build; it
+    /// is never persisted.
+    #[must_use]
+    fn bit(self) -> u16 {
+        1 << (self as u16)
+    }
+
     /// Every handle this tool offers, in hit-test priority order (first hit of
     /// equal depth wins). Plane handles lead the translate set so the small
     /// square between two axes stays grabbable where it overlaps their shafts;
     /// the axis rings lead the rotate set so they win against the outer view
     /// ring wherever the two cross at a grazing angle.
+    ///
+    /// The full set for the tool, before any target has said which of them it
+    /// can write. [`ManipulatorState::offers`] is the question a caller
+    /// usually wants.
     #[must_use]
     pub fn for_tool(tool: ManipulatorTool) -> &'static [Handle] {
         match tool {
@@ -124,6 +135,42 @@ impl Handle {
                 Handle::ScaleZ,
             ],
         }
+    }
+}
+
+/// Which of a tool's handles the target being manipulated can actually write.
+///
+/// A rect-area light is sized by two edge lengths along its own X and Z, so
+/// its scale tool offers those two cubes and the uniform one and no Y cube at
+/// all: a panel has no thickness, and a handle that moves while writing
+/// nothing is worse than a missing one. The mask is how a target says so
+/// without the renderer learning what a light is.
+///
+/// Read by BOTH the vertex generator and the hit test, which is the same rule
+/// every other accessor here follows: a handle that is not drawn cannot be
+/// grabbed, and one that is drawn always can.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HandleMask(u16);
+
+impl Default for HandleMask {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
+impl HandleMask {
+    /// Everything the tool offers, which is what geometry has always had.
+    pub const ALL: Self = Self(u16::MAX);
+
+    /// Only the listed handles.
+    #[must_use]
+    pub fn only(handles: &[Handle]) -> Self {
+        Self(handles.iter().fold(0, |bits, h| bits | h.bit()))
+    }
+
+    #[must_use]
+    pub fn contains(self, handle: Handle) -> bool {
+        self.0 & handle.bit() != 0
     }
 }
 
@@ -158,6 +205,23 @@ pub struct ManipulatorState {
     /// World units per gizmo unit: `GIZMO_PX * world_per_pixel(...)`. Recomputed
     /// per pane, since a pane's camera and height decide it.
     pub scale: f32,
+    /// Which of the tool's handles this target can write. Defaults to all of
+    /// them, which is what geometry has always offered.
+    pub handles: HandleMask,
+}
+
+impl ManipulatorState {
+    /// The handles this state actually offers: the tool's set, narrowed to
+    /// what the target can write, in hit-test priority order.
+    ///
+    /// The single answer both the vertex generator and the hit test ask, so a
+    /// drawn handle is always grabbable and a grabbable one is always drawn.
+    pub fn offers(&self) -> impl Iterator<Item = Handle> + '_ {
+        Handle::for_tool(self.tool)
+            .iter()
+            .copied()
+            .filter(|h| self.handles.contains(*h))
+    }
 }
 
 // ---- geometry constants (in gizmo units; multiplied by `scale`) ----
@@ -166,6 +230,20 @@ pub struct ManipulatorState {
 pub const GIZMO_PX: f32 = 90.0;
 /// Click tolerance around an axis shaft or a ring band, in pixels.
 pub const HIT_PX: f32 = 9.0;
+
+/// The radius of a light's viewport marker, in pixels.
+///
+/// Lives here beside the gizmo's own sizes rather than with the marker
+/// geometry, because it is read twice and by two crates that must agree: the
+/// renderer draws a marker this big, and the engine's pick tests a disc this
+/// big in screen space. They cannot disagree, because the host reads this one
+/// constant and hands it to both, the same way it already hands
+/// `GIZMO_PX * world_per_pixel` to the manipulator.
+///
+/// Smaller than a gizmo handle on purpose. A marker is a thing to find and
+/// click, not a thing to drag, and at gizmo size six of them would crowd a
+/// scene they exist to help you read.
+pub const MARKER_PX: f32 = 11.0;
 
 /// Where the shaft stops and the arrowhead begins.
 const HEAD_START: f32 = 0.78;
@@ -396,6 +474,9 @@ impl ManipulatorState {
 
         for axis in 0..3 {
             let handle = [Handle::AxisX, Handle::AxisY, Handle::AxisZ][axis];
+            if !self.handles.contains(handle) {
+                continue;
+            }
             let color = self.color_for(handle);
             let (start, end) = self.axis_segment(axis);
             self.push_ribbon(&mut tris, start, end, color);
@@ -407,6 +488,9 @@ impl ManipulatorState {
             (1, 2, Handle::PlaneYZ),
             (2, 0, Handle::PlaneZX),
         ] {
+            if !self.handles.contains(handle) {
+                continue;
+            }
             let color = self.color_for(handle);
             let (corner, u, v) = self.plane_quad(a, b);
             // Two triangles, wound both ways: the quad must read from either
@@ -422,11 +506,11 @@ impl ManipulatorState {
 
     fn build_rotate(&self) -> (Vec<GizmoVertex>, Vec<GizmoVertex>) {
         let mut tris = Vec::with_capacity(4 * RING_SEGMENTS * 6);
-        for handle in Handle::for_tool(ManipulatorTool::Rotate) {
-            let Some((center, normal, radius)) = self.ring(*handle) else {
+        for handle in self.offers() {
+            let Some((center, normal, radius)) = self.ring(handle) else {
                 continue;
             };
-            self.push_ring(&mut tris, center, normal, radius, self.color_for(*handle));
+            self.push_ring(&mut tris, center, normal, radius, self.color_for(handle));
         }
         (Vec::new(), tris)
     }
@@ -436,6 +520,11 @@ impl ManipulatorState {
 
         for axis in 0..3 {
             let handle = [Handle::ScaleX, Handle::ScaleY, Handle::ScaleZ][axis];
+            // A lane the target cannot write draws neither its cube nor the
+            // shaft leading to it: half a handle still invites a drag.
+            if !self.handles.contains(handle) {
+                continue;
+            }
             let color = self.color_for(handle);
             // The shaft runs out to the cube, exactly like the translate arrow's
             // does, so the two tools read as the same gizmo wearing a different
@@ -447,7 +536,9 @@ impl ManipulatorState {
             }
         }
 
-        if let Some((c, axes, half)) = self.scale_cube(Handle::ScaleUniform) {
+        if self.handles.contains(Handle::ScaleUniform)
+            && let Some((c, axes, half)) = self.scale_cube(Handle::ScaleUniform)
+        {
             push_cube(
                 &mut tris,
                 c,
@@ -636,6 +727,7 @@ mod tests {
             hovered: None,
             active: None,
             scale,
+            handles: HandleMask::ALL,
         }
     }
 
@@ -883,6 +975,7 @@ mod view_fade_tests {
             hovered: None,
             active: None,
             scale: 1.0,
+            handles: HandleMask::ALL,
         }
     }
 

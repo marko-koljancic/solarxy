@@ -472,7 +472,7 @@ mod tests {
     }
 
     /// A mesh with fixed normals + UVs and one map lane, the producer mix
-    /// uv_project / compute_normals / attribute_create leave behind.
+    /// `uv_project` / `compute_normals` / `attribute_create` leave behind.
     fn fixed_buffer_mesh() -> KernelMesh {
         let mut m = pts("f", vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]);
         m.normals = Some(Arc::new(vec![[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]));

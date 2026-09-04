@@ -1,0 +1,36 @@
+[package]
+name = "solarxy-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Headless render orchestration for Solarxy: load a scene or a model, cook it, render it through the shared backends, and write the image."
+publish = false
+
+[features]
+# Off by default so the library carries no mandatory command-line dependency,
+# matching the validation crate. The binary opts in.
+clap = ["dep:clap"]
+
+[dependencies]
+# `fs` and `serialization`: unlike the shells, this crate reads files from disk
+# and writes a report, which is the whole reason it exists.
+solarxy-core = { path = "../solarxy-core" }
+solarxy-graph = { path = "../solarxy-graph" }
+solarxy-host = { path = "../solarxy-host" }
+solarxy-renderer = { path = "../solarxy-renderer" }
+solarxy-formats = { path = "../solarxy-formats" }
+wgpu = "27.0.1"
+cgmath = { workspace = true }
+# The render loop is the only thing running: there is no executor to await on,
+# so the two async wgpu calls are blocked on directly.
+pollster = "0.4.0"
+thiserror = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4.5.53", features = ["derive"], optional = true }
+
+[dev-dependencies]
+solarxy-scenefile = { path = "../solarxy-scenefile" }

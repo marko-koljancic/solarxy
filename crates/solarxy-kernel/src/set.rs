@@ -978,6 +978,8 @@ mod tests {
 
 #[cfg(test)]
 mod instance_tests {
+    #![allow(clippy::float_cmp)] // bounds carried through unchanged, compared bit-exact
+
     use super::*;
 
     fn unit_cube() -> GeometrySet {

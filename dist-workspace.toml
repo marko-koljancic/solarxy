@@ -15,6 +15,13 @@ targets = [
 install-path = "~/.local/bin"
 install-updater = false
 
+# Carried into every archive alongside the LICENSE and README dist detects on
+# its own. The path-traced renderer ports MIT-licensed work whose terms say the
+# notice travels with every copy, and these archives are how the command line is
+# distributed on three platforms. Verified with `dist plan`: without this the
+# archives carry LICENSE and README.md and nothing else.
+include = ["THIRD-PARTY-NOTICES.md"]
+
 # Reusable workflows invoked after cargo-dist announces the release. Runs
 # in-graph (same workflow run), so they inherit secrets and bypass the
 # GITHUB_TOKEN chain restriction that kills `on: release: published`.

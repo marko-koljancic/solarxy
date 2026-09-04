@@ -64,7 +64,10 @@ fn modes() -> Vec<(&'static str, PaneDisplaySettings)> {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        // The pixel gate photographs geometry, not viewport furniture.
+        show_light_markers: false,
         turntable_active: false,
+        pane_engine: solarxy_core::view_config::PaneEngine::Raster,
     };
     vec![
         ("shaded", base),
@@ -421,6 +424,8 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         let d = scene.model.bounds.diagonal().max(1e-3);
         let at = |x: f32, y: f32, z: f32| [c.x + x * d, c.y + y * d, c.z + z * d];
         let lamp = |position: [f32; 3], color: [f32; 3], intensity: f32| LightDef {
+            // The harness authors no document, so its lamps name no node.
+            id: solarxy_core::scene::SceneObjectId::UNAUTHORED,
             kind: LightKind::Point,
             position,
             direction: [0.0, -1.0, 0.0],
@@ -431,6 +436,10 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             // intensity rather than the attenuation curve.
             range: 0.0,
             decay: 0.0,
+            // A point emitter, so the golden's shadows stay hard: a radius
+            // would change nothing the raster path draws, and stating it here
+            // says the capture is not relying on that.
+            radius: 0.0,
             inner_cone: 0.0,
             outer_cone: 0.0,
             area_extent: [0.0; 2],
@@ -772,6 +781,7 @@ fn grown_captures() -> &'static [&'static str] {
 /// The shared composite derives its bloom and SSAO flags from the renderer,
 /// which this harness builds with both disabled, so it resolves to the same
 /// `false, false` the six hand-written copies passed.
+#[allow(clippy::too_many_arguments)] // each argument is a distinct GPU resource wired straight into the shared calls; a bundle would duplicate PaneScene
 fn capture_through_host(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -822,6 +832,7 @@ fn capture_through_host(
             is_uv_map: false,
             scene_present: true,
             outline: false,
+            writes_occlusion: solarxy_host::RasterBackend::CAPS.writes_occlusion,
         },
     );
 }
@@ -893,7 +904,7 @@ fn read_target(
     buffer.unmap();
 
     // BGRA -> RGBA.
-    for chunk in pixels.chunks_exact_mut(4) {
+    for chunk in pixels.as_chunks_mut::<4>().0 {
         chunk.swap(0, 2);
     }
     Ok(pixels)
@@ -941,23 +952,11 @@ fn compare(args: &[String]) -> anyhow::Result<()> {
             failures += 1;
             continue;
         }
-        let mut max_delta = 0u8;
-        let mut differing = 0usize;
-        for (pa, pb) in a.pixels().zip(b.pixels()) {
-            let mut pixel_differs = false;
-            for c in 0..4 {
-                let d = pa.0[c].abs_diff(pb.0[c]);
-                max_delta = max_delta.max(d);
-                if d > tolerance {
-                    pixel_differs = true;
-                }
-            }
-            if pixel_differs {
-                differing += 1;
-            }
-        }
-        let total = (a.width() * a.height()) as usize;
-        let status = if differing == 0 { "OK" } else { "DIFF" };
+        // The shared comparator, so a gate and a test cannot come to disagree
+        // about what "the same image" means.
+        let d = solarxy_host::compare_rgba8(a.as_raw(), b.as_raw(), tolerance);
+        let (max_delta, differing, total) = (d.max_channel, d.differing, d.total);
+        let status = if d.within_tolerance() { "OK" } else { "DIFF" };
         println!(
             "GOLDEN {name}: {status} max_channel_delta={max_delta} differing_pixels={differing}/{total}"
         );

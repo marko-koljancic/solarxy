@@ -2,3 +2,9 @@ node_modules/
 dist/
 src/wasm/pkg/
 *.tsbuildinfo
+# Copied from the repository root by the prebuild step, so the notices and the
+# license ship in the web build without a second tracked copy that could drift.
+# The license has to be served, not merely available: the browser is handed
+# compiled WebAssembly, which the GPL treats as conveying object code.
+public/THIRD-PARTY-NOTICES.md
+public/LICENSE.txt

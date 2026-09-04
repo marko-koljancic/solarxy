@@ -61,6 +61,45 @@ impl CameraState {
         }
     }
 
+    /// A camera state over an explicit camera rather than one framed from
+    /// bounds.
+    ///
+    /// For a render that is not a view. A still renders through the camera the
+    /// document names, and moving a pane to it would be a side effect nobody
+    /// asked for: the shot is a property of the scene and the viewport is where
+    /// someone happens to be looking. So the job gets its own, built from a
+    /// camera it was handed, and the panes are untouched.
+    #[must_use]
+    pub fn from_camera(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        camera: Camera,
+    ) -> Self {
+        let mut uniform = CameraUniform::new();
+        uniform.update_view_proj(&camera);
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Still Camera Buffer"),
+            contents: bytemuck::cast_slice(&[uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("still_camera_bind_group"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+        Self {
+            camera,
+            uniform,
+            buffer,
+            bind_group,
+            controller: CameraController::new(0.2),
+            transition: None,
+        }
+    }
+
     pub fn update(&mut self, queue: &wgpu::Queue, dt: f32) {
         if let Some(ref transition) = self.transition {
             let factor = 1.0 - (1.0 - 0.18_f32).powf(dt * 60.0);
@@ -222,6 +261,28 @@ impl CameraState {
         let saved = self.camera.aspect;
         self.camera.aspect = aspect;
         self.uniform.update_view_proj(&self.camera);
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+        self.camera.aspect = saved;
+    }
+
+    /// Writes the camera restricted to one tile of a larger image.
+    ///
+    /// `aspect` is the **whole image's**, because the frustum this windows is
+    /// the whole image's frustum; a tile that passed its own aspect would be
+    /// looking through a different lens. See
+    /// [`crate::camera::Camera::build_proj_matrix_windowed`].
+    pub fn write_windowed(
+        &mut self,
+        queue: &wgpu::Queue,
+        aspect: f32,
+        origin: [f32; 2],
+        size: [f32; 2],
+        full: [f32; 2],
+    ) {
+        let saved = self.camera.aspect;
+        self.camera.aspect = aspect;
+        self.uniform
+            .update_view_proj_windowed(&self.camera, origin, size, full);
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
         self.camera.aspect = saved;
     }

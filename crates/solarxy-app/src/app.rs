@@ -166,7 +166,7 @@ impl ApplicationHandler<State> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
             WindowEvent::DroppedFile(path) => {
-                state.handle_dropped_file(path);
+                state.open_file(path);
             }
             WindowEvent::RedrawRequested => {
                 self.frame_count = self.frame_count.wrapping_add(1);

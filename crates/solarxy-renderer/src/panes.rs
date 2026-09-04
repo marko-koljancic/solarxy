@@ -194,9 +194,89 @@ pub fn hit_test_pane(panes: &[PaneRect], cursor: (f32, f32)) -> usize {
     0
 }
 
-/// The visible split-divider line for the two-pane layouts, `thickness`
-/// wide, or `None` for layouts without a draggable divider. Same unit
-/// space as `compute_panes`.
+/// The 2px strips `compute_panes` reserves between adjacent panes, in the
+/// same unit space, exactly tiling the region with the panes. Every
+/// returned strip wants painting; whether one of them also drags is
+/// `divider_rect`'s answer, kept separate because the quad and
+/// three-left-big gaps have no ratio behind them.
+#[must_use]
+pub fn gap_rects(
+    layout: ViewLayout,
+    split_ratio: f32,
+    origin: (f32, f32),
+    size: (f32, f32),
+) -> Vec<PaneRect> {
+    let (origin_x, origin_y) = origin;
+    let (w, h) = size;
+    match layout {
+        ViewLayout::Single => Vec::new(),
+        ViewLayout::SplitVertical => {
+            let cx = (w * split_ratio).floor();
+            vec![PaneRect {
+                x: origin_x + cx - 1.0,
+                y: origin_y,
+                width: 2.0,
+                height: h,
+            }]
+        }
+        ViewLayout::SplitHorizontal => {
+            let cy = (h * split_ratio).floor();
+            vec![PaneRect {
+                x: origin_x,
+                y: origin_y + cy - 1.0,
+                width: w,
+                height: 2.0,
+            }]
+        }
+        ViewLayout::Quad => {
+            let sx = (w * 0.5).floor();
+            let sy = (h * 0.5).floor();
+            vec![
+                PaneRect {
+                    x: origin_x + sx - 1.0,
+                    y: origin_y,
+                    width: 2.0,
+                    height: h,
+                },
+                PaneRect {
+                    x: origin_x,
+                    y: origin_y + sy - 1.0,
+                    width: (sx - 1.0).max(0.0),
+                    height: 2.0,
+                },
+                PaneRect {
+                    x: origin_x + sx + 1.0,
+                    y: origin_y + sy - 1.0,
+                    width: (w - sx - 1.0).max(0.0),
+                    height: 2.0,
+                },
+            ]
+        }
+        ViewLayout::ThreeLeftBig => {
+            let sx = (w * 0.5).floor();
+            let sy = (h * 0.5).floor();
+            vec![
+                PaneRect {
+                    x: origin_x + sx - 1.0,
+                    y: origin_y,
+                    width: 2.0,
+                    height: h,
+                },
+                PaneRect {
+                    x: origin_x + sx + 1.0,
+                    y: origin_y + sy - 1.0,
+                    width: (w - sx - 1.0).max(0.0),
+                    height: 2.0,
+                },
+            ]
+        }
+    }
+}
+
+/// The DRAGGABLE divider's visible strip, `thickness` wide, or `None` for
+/// layouts without a ratio to drag. Painting every gap is `gap_rects`'s
+/// job; this one answers only what `divider_hit_rect` should expand. Same
+/// unit space as `compute_panes`.
 #[must_use]
 pub fn divider_rect(
     layout: ViewLayout,
@@ -468,5 +548,56 @@ mod tests {
         assert_eq!(c.y, 42.0);
         assert_eq!(c.width, 300.0);
         assert_eq!(c.height, 178.0);
+    }
+
+    /// Every pixel of the region is covered by exactly one pane or one gap
+    /// strip: what "no black shows anywhere between panes" means in math.
+    /// A pixel covered zero times is where the composite's clear would show
+    /// through; a pixel covered twice is a strip overlapping a pane.
+    #[test]
+    fn panes_and_gap_strips_tile_the_region_exactly() {
+        let origin = (7.0, 11.0);
+        for layout in [
+            ViewLayout::Single,
+            ViewLayout::SplitVertical,
+            ViewLayout::SplitHorizontal,
+            ViewLayout::Quad,
+            ViewLayout::ThreeLeftBig,
+        ] {
+            for size in [(200.0, 100.0), (201.0, 101.0)] {
+                for ratio in [0.5, 0.37] {
+                    let panes = compute_panes(layout, ratio, origin, size);
+                    let gaps = gap_rects(layout, ratio, origin, size);
+                    for py in 0..size.1 as u32 {
+                        for px in 0..size.0 as u32 {
+                            let p = (origin.0 + px as f32 + 0.5, origin.1 + py as f32 + 0.5);
+                            let in_panes = panes.iter().filter(|r| r.contains(p)).count();
+                            let in_gaps = gaps.iter().filter(|r| r.contains(p)).count();
+                            assert_eq!(
+                                in_panes + in_gaps,
+                                1,
+                                "{layout:?} {size:?} ratio {ratio}: pixel ({px},{py}) is \
+                                 covered {in_panes} times by panes and {in_gaps} by gaps"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// For the two-pane layouts the one gap strip IS the draggable
+    /// divider's strip, so painting gaps and dragging the divider act on
+    /// the same pixels.
+    #[test]
+    fn the_two_pane_gap_is_the_divider_strip() {
+        let o = (0.0, 0.0);
+        let s = (1000.0, 600.0);
+        for layout in [ViewLayout::SplitVertical, ViewLayout::SplitHorizontal] {
+            let gaps = gap_rects(layout, 0.5, o, s);
+            let div = divider_rect(layout, 0.5, o, s, 2.0).unwrap();
+            assert_eq!(gaps.len(), 1);
+            assert_eq!(gaps[0], div);
+        }
     }
 }

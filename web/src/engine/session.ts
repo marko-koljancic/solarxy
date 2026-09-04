@@ -24,9 +24,18 @@ import { useReview } from "../store/review";
 import { pushToast, useToasts } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
+import { useRenderJob } from "../store/renderJob";
 import { useAttrPinStats } from "./attrPins";
 import { applyMarkerPositions, hideAllMarkers } from "./markers";
-import { hasMissing, missingSidecars, referencedSidecars } from "./sidecars";
+import {
+  basename,
+  hasMissing,
+  mergeRefs,
+  missingSidecars,
+  mtlTextures,
+  referencedSidecars,
+  type SidecarRefs,
+} from "./sidecars";
 import { ctxKey } from "./types";
 import type {
   AttrVizState,
@@ -55,7 +64,7 @@ import type {
 let importWorker: Worker | null = null;
 
 interface WorkerResult {
-  kind: "parse" | "validate" | "hdri" | "decodeImage";
+  kind: "parse" | "validate" | "hdri" | "decodeImage" | "buildBvh";
   jobId: number;
   ctx: GraphContext;
   blob?: Uint8Array;
@@ -68,6 +77,8 @@ interface WorkerResult {
   width?: number;
   height?: number;
   pixels?: Uint8Array;
+  /** The packed acceleration structure (buildBvh kind). */
+  bvh?: Uint8Array;
   error?: string;
   /** True when `error` is a wasm trap (our bug) rather than a bad input file
    * (the user's). The worker distinguishes them; only the former is reported. */
@@ -89,6 +100,18 @@ let previewToken = -1_000_000;
 const previewWaiters = new Map<
   number,
   { resolve: (blob: Uint8Array) => void; reject: (e: Error) => void }
+>();
+
+// Hierarchy builds are renderer work rather than engine jobs, so they resolve
+// through their own promise map on their own negative token range, exactly as
+// HDRI preparation and asset previews do. Nothing calls this yet: the traced
+// scene is not on either shell's frame path this release, and the still-render
+// job is its first caller. It is here now so the build has somewhere to happen
+// that is not the main thread, which is the whole point of the exercise.
+let bvhToken = -2_000_000;
+const bvhWaiters = new Map<
+  number,
+  { resolve: (b: Uint8Array) => void; reject: (e: Error) => void }
 >();
 
 /** Parses a staged model in the import worker (off the main thread) and
@@ -159,6 +182,36 @@ function prepareHdriInWorker(bytes: Uint8Array, format: string): Promise<Uint8Ar
   });
 }
 
+/** Builds one acceleration structure in the import worker; resolves with the
+ * packed transfer blob the renderer's codec reads.
+ *
+ * Both buffers are transferred rather than copied, so the caller must not
+ * touch them afterwards. That is the right trade here: they are the largest
+ * things that cross this boundary, and a caller asking for a build over a mesh
+ * has no further use for its own copy of it. */
+export function buildHierarchyInWorker(
+  positions: Float32Array,
+  indices: Uint32Array,
+): Promise<Uint8Array> {
+  const worker = ensureImportWorker();
+  const token = bvhToken;
+  bvhToken -= 1;
+  return new Promise((resolve, reject) => {
+    bvhWaiters.set(token, { resolve, reject });
+    try {
+      worker.postMessage({ kind: "buildBvh", jobId: token, ctx: "root", positions, indices }, [
+        positions.buffer,
+        indices.buffer,
+      ]);
+    } catch (e) {
+      // A failed post never yields a reply; drop the waiter so it does not
+      // leak, and reject so the caller sees the error.
+      bvhWaiters.delete(token);
+      reject(e instanceof Error ? e : new Error(String(e)));
+    }
+  });
+}
+
 function ensureImportWorker(): Worker {
   if (!importWorker) {
     importWorker = new Worker(new URL("./importWorker.ts", import.meta.url), { type: "module" });
@@ -184,6 +237,18 @@ function onWorkerResult(data: WorkerResult): void {
   if (data.kind === "hdri") {
     hdriWaiters.get(data.jobId)?.(data);
     hdriWaiters.delete(data.jobId);
+    return;
+  }
+  if (data.kind === "buildBvh") {
+    const waiter = bvhWaiters.get(data.jobId);
+    bvhWaiters.delete(data.jobId);
+    if (waiter) {
+      if (data.error !== undefined || !data.bvh) {
+        waiter.reject(new Error(data.error ?? "the build produced nothing"));
+      } else {
+        waiter.resolve(data.bvh);
+      }
+    }
     return;
   }
   // Preview parses resolve their own promise (keyed by the negative token)
@@ -357,6 +422,9 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
     client = c;
     useMirror.getState().setRegistry(c.registrySnapshot());
     useViewState.getState().setView(c.viewState());
+    // Constants on the Rust side, so once at boot is the whole read; the
+    // pane display menu offers the traced mode from this.
+    useViewState.getState().setBackendCaps(c.backendCaps());
     // The host caches the gizmo's snap steps and orientation; push the current
     // prefs in once, then keep it in step for the rest of the session.
     pushGizmoSettings();
@@ -1011,6 +1079,25 @@ export function stagedManifestNames(): string[] {
     .map((a) => a.name);
 }
 
+/** Widens a reference set with the textures of any material library in
+ * `files` that the set names: an OBJ names its `.mtl`, and the `.mtl`
+ * names textures the parse will also try to resolve, so a drop of
+ * `model.obj` plus its library must still prompt for the maps. Only
+ * libraries present in `files` can be read (the browser cannot open a
+ * sibling by itself); one already staged in an earlier import is not
+ * re-readable here, and its textures were prompted for when it arrived. */
+export async function refsWithMtlTextures(refs: SidecarRefs, files: File[]): Promise<SidecarRefs> {
+  const named = new Set([...refs.required, ...refs.optional]);
+  let out = refs;
+  for (const file of files) {
+    const name = basename(file.name);
+    if (!name.toLowerCase().endsWith(".mtl") || !named.has(name)) continue;
+    const textures = mtlTextures(new Uint8Array(await file.arrayBuffer()));
+    out = mergeRefs(out, { required: [], optional: textures });
+  }
+  return out;
+}
+
 /** Stages dropped files and creates the matching import node referencing the
  * primary model. Companion files (mtl/bin/textures) are staged too and
  * resolved by name at parse time, so a multi-file `.gltf` just works. When
@@ -1031,7 +1118,8 @@ export async function importDroppedFiles(files: File[]): Promise<void> {
   const primary = files[primaryIdx];
   const staged = await Promise.all(files.map(stageFile));
 
-  const refs = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+  const shallow = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+  const refs = await refsWithMtlTextures(shallow, files);
   const missing = missingSidecars(refs, stagedManifestNames());
   if (hasMissing(missing)) {
     useUi.getState().setSidecarPrompt({
@@ -1090,6 +1178,29 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "uvOverlap") useViewState.getState().setUvOverlap(ev.pct, ev.pending);
     else if (ev.type === "viewChanged") refreshViewState();
     else if (ev.type === "attrPinStats") useAttrPinStats.getState().set(ev.capacity, ev.total);
+    else if (ev.type === "renderProgress") useRenderJob.getState().progress(ev);
+    // A warning rather than an error: the render is going ahead, and what it
+    // is about to leave out is something the person still has time to act on.
+    else if (ev.type === "renderNotice") pushToast(ev.message, "warn");
+    else if (ev.type === "paneSamples")
+      useViewState.getState().setPaneSamples(ev.pane, ev.samples, ev.target);
+    else if (ev.type === "selectionCapability")
+      useViewState.getState().setSelectionCapability(ev.tools, ev.transformParams);
+    else if (ev.type === "gpuFault") {
+      // The full message goes to console.error, which the crash reporter
+      // captures as context for its next report; the toast is the short
+      // pointer, and it does not promise the picture is right afterwards.
+      console.error(
+        `GPU fault (${ev.kind}${ev.count > 1 ? `, repeated ${ev.count} times` : ""}): ${ev.message}`,
+      );
+      const what =
+        ev.kind === "outOfMemory"
+          ? "The GPU ran out of memory; the view may be incomplete. Details in the browser console."
+          : ev.kind === "internal"
+            ? "Graphics driver error; the view may be wrong. Details in the browser console."
+            : "Graphics validation error; the view may be wrong. Details in the browser console.";
+      pushToast(ev.count > 1 ? `${what} (repeated ${ev.count} times)` : what, "error");
+    }
   }
   // The gizmo's live delta. Polled here rather than pushed from `pointerMove`,
   // which stays void so the drag keeps costing zero boundary crossings; the

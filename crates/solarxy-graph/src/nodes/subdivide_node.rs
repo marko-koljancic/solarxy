@@ -34,6 +34,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()
+                .carries_placements()
                 .doc(
                     "The geometry to refine. Every mesh in the set is subdivided, and it \
                      is the triangle count of the whole set that the output ceiling is \

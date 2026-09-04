@@ -2,17 +2,14 @@
 //! per-pane viewport/scissor rectangle that splits the surface in F2/F3.
 
 use crate::bind_groups::BindGroupLayouts;
-use crate::bloom::BLOOM_STRENGTH;
 use crate::lut::{LutSlot, LutSlots};
 use crate::pipelines::Pipelines;
 use crate::ssao::SsaoState;
 use solarxy_core::preferences::{InspectionMode, ToneMode};
 use solarxy_core::scene::CameraLook;
-use solarxy_core::view_config::PaneLook;
+use solarxy_core::view_config::{PaneLook, PostStrengths};
 use solarxy_core::{LUT_LOG_MAX_STOP, LUT_LOG_MIN_STOP};
 use wgpu::util::DeviceExt;
-
-const SSAO_STRENGTH: f32 = 0.8;
 
 /// The shot's rendering intent, resolved for one pane.
 ///
@@ -98,6 +95,15 @@ impl CompositeLook {
 }
 
 pub struct CompositeState {
+    /// The bloom and occlusion intensities every pane composites with.
+    ///
+    /// Held rather than passed, for the reason the module documentation of
+    /// [`CompositeLook`] gives about positional arguments: the value is the
+    /// same for every pane and every still, and threading it through the
+    /// five call sites that write this uniform is how one of them ends up
+    /// stale and a still stops matching the viewport it was framed in.
+    /// Written only by [`crate::frame::PostProcessing::set_strengths`].
+    strengths: PostStrengths,
     params_buffer: wgpu::Buffer,
     params_bind_group: wgpu::BindGroup,
     bind_group: wgpu::BindGroup,
@@ -117,12 +123,15 @@ impl CompositeState {
         tone_mode: ToneMode,
         exposure: f32,
     ) -> Self {
+        let strengths = PostStrengths::default();
         let params_data = build_params(
             bloom_enabled,
             ssao_enabled,
             &CompositeLook::from_tone(tone_mode, exposure),
             luts,
             InspectionMode::Shaded,
+            strengths,
+            false,
         );
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Composite Params Uniform"),
@@ -147,10 +156,16 @@ impl CompositeState {
         );
 
         Self {
+            strengths,
             params_buffer,
             params_bind_group,
             bind_group,
         }
+    }
+
+    /// See [`crate::frame::PostProcessing::set_strengths`], the only caller.
+    pub(crate) fn set_strengths(&mut self, strengths: PostStrengths) {
+        self.strengths = strengths;
     }
 
     /// Rebuild the group. Called on surface resize, when the HDR target's
@@ -185,6 +200,13 @@ impl CompositeState {
         ssao: &SsaoState,
         viewport: Option<[f32; 4]>,
         clear: bool,
+        // A pipeline to use instead of the one built against the surface's
+        // format. The finishing chain is one shader, and this is the only thing
+        // that varies between writing it to a screen and writing it to a float
+        // file: a pipeline's colour target format is fixed when it is built.
+        // `None` is the ordinary case and takes the pipeline every pane already
+        // renders through, untouched.
+        pipeline: Option<&wgpu::RenderPipeline>,
     ) {
         let load = if clear {
             wgpu::LoadOp::Clear(wgpu::Color::BLACK)
@@ -210,7 +232,7 @@ impl CompositeState {
             pass.set_viewport(x, y, w, h, 0.0, 1.0);
             pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
         }
-        pass.set_pipeline(&pipelines.post.composite);
+        pass.set_pipeline(pipeline.unwrap_or(&pipelines.post.composite));
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_bind_group(1, &self.params_bind_group, &[]);
         if ssao_enabled {
@@ -227,6 +249,12 @@ impl CompositeState {
     /// exposure, because the look is now nine values rather than two and a
     /// ninth positional argument is how the wrong pane's grade gets
     /// written.
+    /// `carry_alpha` marks the scene texture's alpha lane as a matte to carry
+    /// through the chain rather than a constant to drop. Only the still job
+    /// sets it, and only for a transparent render; a pane, a screenshot and
+    /// the smoke harness all pass false, which leaves the shader's arithmetic
+    /// exactly what it was.
+    #[allow(clippy::too_many_arguments)]
     pub fn write_params(
         &self,
         queue: &wgpu::Queue,
@@ -235,8 +263,17 @@ impl CompositeState {
         look: &CompositeLook,
         luts: &LutSlots,
         inspection_mode: InspectionMode,
+        carry_alpha: bool,
     ) {
-        let params = build_params(bloom_enabled, ssao_enabled, look, luts, inspection_mode);
+        let params = build_params(
+            bloom_enabled,
+            ssao_enabled,
+            look,
+            luts,
+            inspection_mode,
+            self.strengths,
+            carry_alpha,
+        );
         queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
     }
 }
@@ -303,7 +340,12 @@ pub struct CompositeParams {
     tone_mode: u32,
     exposure: f32,
     inspection_mode: u32,
-    _pad: u32,
+    /// Whether the scene texture's alpha lane is a matte to carry through
+    /// rather than a constant to drop. Set only by the still job for a
+    /// transparent render; every viewport pane writes zero, which is the
+    /// arithmetic the goldens pin. This word was the struct's padding, so
+    /// spending it moved nothing.
+    carry_alpha: u32,
 
     lut_a_enabled: u32,
     lut_a_strength: f32,
@@ -346,6 +388,8 @@ fn build_params(
     look: &CompositeLook,
     luts: &LutSlots,
     inspection_mode: InspectionMode,
+    strengths: PostStrengths,
+    carry_alpha: bool,
 ) -> CompositeParams {
     // A slot is on only when it holds a real table: a strength left turned
     // up on an empty slot must not blend towards the identity texture that
@@ -356,15 +400,15 @@ fn build_params(
     let a = luts.sampling(LutSlot::A);
     let b = luts.sampling(LutSlot::B);
     CompositeParams {
-        bloom_strength: BLOOM_STRENGTH,
+        bloom_strength: strengths.bloom_strength,
         bloom_enabled: u32::from(bloom_enabled),
         ssao_enabled: u32::from(ssao_enabled),
-        ssao_strength: SSAO_STRENGTH,
+        ssao_strength: strengths.ssao_strength,
 
         tone_mode: look.tone_mode.as_u32(),
         exposure: look.exposure,
         inspection_mode: inspection_mode.as_u32(),
-        _pad: 0,
+        carry_alpha: u32::from(carry_alpha),
 
         lut_a_enabled: u32::from(a_on),
         lut_a_strength: look.lut_a_strength.clamp(0.0, 1.0),
@@ -436,6 +480,8 @@ fn create_bind_group(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // the look resolution copies values, it never computes them
+
     use super::*;
 
     /// Neutral has to mean bit-identical, not merely close: it is what

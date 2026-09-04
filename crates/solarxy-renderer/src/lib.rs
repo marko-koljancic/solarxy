@@ -53,14 +53,17 @@
     clippy::wildcard_imports
 )]
 
+pub mod backend;
 pub mod bind_groups;
 pub mod bloom;
 pub mod camera;
 pub mod camera_state;
 pub mod capture;
 pub mod composite;
+pub mod env_dist;
 pub mod environment;
 pub mod error;
+pub mod faults;
 pub mod frame;
 pub mod geometry;
 pub mod helpers;
@@ -68,6 +71,7 @@ pub mod ibl;
 pub mod input;
 pub mod labels;
 pub mod light;
+pub mod limits;
 pub mod ltc;
 pub mod lut;
 pub mod manipulator;
@@ -77,6 +81,7 @@ pub mod model;
 pub mod outline;
 pub mod overdraw;
 pub mod panes;
+pub mod pathtrace;
 pub mod pipeline_builder;
 pub mod pipelines;
 pub mod resources;

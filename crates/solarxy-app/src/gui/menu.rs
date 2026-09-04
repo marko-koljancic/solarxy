@@ -25,9 +25,11 @@ pub(super) fn draw_menu_bar(
     actions: &mut MenuActions,
     vis: &mut MenuBarVisibility,
     has_model: bool,
+    still_renderable: bool,
     recent_files: &[String],
     hdri_available: bool,
     customs: &[CustomBackground],
+    review_available: bool,
     review_active: bool,
     review_markers_hidden: bool,
     review_dirty: bool,
@@ -37,12 +39,13 @@ pub(super) fn draw_menu_bar(
         egui::MenuBar::new().ui(ui, |ui| {
             draw_file_menu(ui, actions, has_model, recent_files);
             draw_edit_menu(ui, actions);
-            draw_render_menu(ui, snap, actions, hdri_available, customs);
+            draw_render_menu(ui, snap, actions, still_renderable, hdri_available, customs);
             // Review is a viewport mode — it belongs between Render and
             // View, not stranded out past Help.
             draw_review_menu(
                 ui,
                 actions,
+                review_available,
                 review_active,
                 review_markers_hidden,
                 review_dirty,
@@ -62,6 +65,7 @@ pub(super) fn draw_menu_bar(
 fn draw_review_menu(
     ui: &mut egui::Ui,
     actions: &mut MenuActions,
+    review_available: bool,
     review_active: bool,
     review_markers_hidden: bool,
     review_dirty: bool,
@@ -75,17 +79,29 @@ fn draw_review_menu(
         "Review".into()
     };
     ui.menu_button(label, |ui| {
+        // Both viewport affordances are honest about the open document: the
+        // desktop's review anchors against a file-loaded model, so a scene
+        // (or nothing) disables them rather than discarding clicks. The mode
+        // toggle stays enabled while active, so it can always be turned off.
         if ui
-            .selectable_label(review_active, "Review Mode")
+            .add_enabled(
+                review_available || review_active,
+                egui::Button::selectable(review_active, "Review Mode"),
+            )
             .on_hover_text("Shift+R")
+            .on_disabled_hover_text("Review needs an open model file")
             .clicked()
         {
             actions.toggle_review_mode = true;
             ui.close();
         }
         if ui
-            .selectable_label(!review_markers_hidden, "Show Markers")
+            .add_enabled(
+                review_available,
+                egui::Button::selectable(!review_markers_hidden, "Show Markers"),
+            )
             .on_hover_text("Show review markers in the viewport")
+            .on_disabled_hover_text("Review needs an open model file")
             .clicked()
         {
             actions.toggle_review_markers = true;
@@ -251,10 +267,24 @@ fn draw_render_menu(
     ui: &mut egui::Ui,
     snap: &mut GuiSnapshot,
     actions: &mut MenuActions,
+    still_renderable: bool,
     hdri_available: bool,
     customs: &[CustomBackground],
 ) {
     ui.menu_button("Render", |ui| {
+        // The still renders either root through the render node's
+        // authority: a scene the engine cooked, or an open model through
+        // the same synthesized document the terminal renders.
+        if ui
+            .add_enabled(still_renderable, egui::Button::new("Render Still\u{2026}"))
+            .on_disabled_hover_text("Open a scene or a model to render a still")
+            .clicked()
+        {
+            actions.render_still = true;
+            ui.close();
+        }
+        ui.separator();
+
         variant_submenu(ui, "Shading", "W", &mut snap.view_mode, ViewMode::ALL);
 
         ui.menu_button("Inspection", |ui| {

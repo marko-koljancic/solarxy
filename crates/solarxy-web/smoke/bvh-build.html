@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>solarxy hierarchy build: worker against main thread</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #0d1017; color: #cbccc6;
+        font: 14px system-ui, sans-serif; }
+      main { max-width: 760px; margin: 0 auto; padding: 24px; }
+      h1 { font-size: 18px; font-weight: 600; }
+      p { line-height: 1.6; color: #8a8f98; }
+      #status { white-space: pre-wrap; font-family: ui-monospace, monospace;
+        background: #12151c; border: 1px solid #1c1f26; padding: 12px; }
+      .ok { color: #7fd962; } .bad { color: #e5484d; }
+      #spinner { width: 48px; height: 48px; margin: 16px 0; background: #7fd962; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Hierarchy build: the worker against the main thread</h1>
+      <p>
+        Builds an acceleration structure over roughly a million triangles twice: once in a
+        worker and once on the main thread, with a task loop running throughout. The
+        number that matters is the longest the main thread went without being able to run
+        anything, because a render loop that cannot get a task cannot draw a frame. A
+        worker build should cost it a task; a main-thread build should block it for the
+        whole build, which is the reason the worker exists.
+      </p>
+      <p>
+        The square below is driven by an animation frame, for a human watching: it keeps
+        moving during the worker build and freezes during the main-thread one. It is
+        deliberately not the instrument, because an automated tab never gets one.
+      </p>
+      <p>
+        Build with the probe on:
+        <code>bash crates/solarxy-web/build-wasm.sh crates/solarxy-web/smoke/pkg --features pt-probe</code>
+      </p>
+      <div id="spinner"></div>
+      <div id="status">booting...</div>
+    </main>
+    <script type="module">
+      const statusEl = document.getElementById("status");
+      const spinner = document.getElementById("spinner");
+      const lines = [];
+      const set = (msg, cls) => {
+        lines.push(msg);
+        statusEl.textContent = lines.join("\n");
+        if (cls) statusEl.className = cls;
+        // A machine-readable marker, matching the convention the other smoke
+        // pages use.
+        console.log("BVH_BUILD " + (cls || "info") + " :: " + msg);
+      };
+
+      // The loop under measurement, and the choice of instrument is the whole
+      // point of it.
+      //
+      // NOT `requestAnimationFrame`. Under automation a tab is not considered
+      // visible, rAF never fires at all, and a harness built on it reports zero
+      // frames for every case and compares nothing. NOT `setTimeout` either:
+      // background tabs clamp timers to a second, which is coarser than the
+      // thing being measured.
+      //
+      // A `MessageChannel` ping-pong is a task-queue loop rather than a timer,
+      // so it is not throttled, and what it measures is exactly what the
+      // criterion means: how long the main thread went without being able to
+      // run anything. A render loop that cannot get a task cannot draw a frame.
+      let ticks = 0;
+      let worst = 0;
+      let last = performance.now();
+      let watching = false;
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        const now = performance.now();
+        if (watching) {
+          worst = Math.max(worst, now - last);
+          ticks += 1;
+        }
+        last = now;
+        channel.port2.postMessage(0);
+      };
+      channel.port2.postMessage(0);
+
+      // The visible half, for a human watching. Its absence under automation is
+      // why it is not the instrument.
+      (function paint(now) {
+        spinner.style.transform = "translateX(" + (Math.sin(now / 300) * 60 + 60) + "px)";
+        requestAnimationFrame(paint);
+      })(performance.now());
+
+      function watch() {
+        ticks = 0;
+        worst = 0;
+        last = performance.now();
+        watching = true;
+      }
+      function stopWatching() {
+        watching = false;
+        return { ticks, worst: Math.round(worst) };
+      }
+
+      /// Lets the loop run once.
+      ///
+      /// Load-bearing before every `stopWatching`. A block is measured as the
+      /// gap between two ticks, so the tick AFTER the block is the one that
+      /// records it; stopping the watch first means a main-thread build reports
+      /// zero tasks and a zero-millisecond block, which reads as a pass and is
+      /// the opposite of one. Its own channel rather than a timer, because a
+      /// background tab clamps timers and does not clamp this.
+      const yieldToLoop = () =>
+        new Promise((resolve) => {
+          const once = new MessageChannel();
+          once.port1.onmessage = () => resolve();
+          once.port2.postMessage(0);
+        });
+
+      try {
+        const mod = await import("./pkg/solarxy_web.js?v=" + Date.now());
+        await mod.default();
+        mod.start && mod.start();
+        if (!mod.bvh_corpus_mesh) {
+          throw new Error("this wasm was built without --features pt-probe");
+        }
+
+        // Roughly a million triangles, which is the figure the feasibility
+        // gate was measured against.
+        const mesh = mod.bvh_corpus_mesh(1024, 512);
+        set("mesh: " + mesh.triangles.toLocaleString() + " triangles");
+
+        // ---- the worker build ----
+        const worker = new Worker(new URL("./bvh-worker.js", import.meta.url), {
+          type: "module",
+        });
+        const inWorker = (positions, indices) =>
+          new Promise((resolve, reject) => {
+            worker.onmessage = (e) =>
+              e.data.error ? reject(new Error(e.data.error)) : resolve(e.data);
+            worker.onerror = (e) => reject(new Error(e.message || "worker crashed"));
+            worker.postMessage({ id: 1, positions, indices }, [
+              positions.buffer,
+              indices.buffer,
+            ]);
+          });
+
+        // Warm BOTH instances first, and this is not a nicety. A fresh wasm
+        // instance's first build costs about twice its steady state, so a cold
+        // worker against an already-warm main thread measures instantiation and
+        // reports the worker as twice as slow. Measured that way once, at 3,900
+        // against 1,907 ms, before this existed.
+        const warm = mod.bvh_corpus_mesh(64, 32);
+        mod.build_bvh_job(warm.positions.slice(), warm.indices.slice());
+        await inWorker(warm.positions, warm.indices);
+
+        // The buffers are transferred, so each build needs its own copy.
+        const workerPositions = mesh.positions.slice();
+        const workerIndices = mesh.indices.slice();
+        watch();
+        const started = performance.now();
+        const result = await inWorker(workerPositions, workerIndices);
+        const wall = Math.round(performance.now() - started);
+        await yieldToLoop();
+        const workerLoop = stopWatching();
+        set(
+          "worker build: " +
+            Math.round(result.elapsed) +
+            " ms in the worker, " +
+            wall +
+            " ms wall including transfer",
+        );
+        set(
+          "  main thread during it: " +
+            workerLoop.ticks +
+            " tasks, longest block " +
+            workerLoop.worst +
+            " ms",
+        );
+        set("  result: " + mod.bvh_blob_summary(result.bvh) + " (nodes, permutation, triangles)");
+
+        // ---- the main-thread control ----
+        watch();
+        const mainStart = performance.now();
+        const mainBlob = mod.build_bvh_job(mesh.positions, mesh.indices);
+        const mainWall = Math.round(performance.now() - mainStart);
+        await yieldToLoop();
+        const mainLoop = stopWatching();
+        set("main-thread build: " + mainWall + " ms");
+        set(
+          "  main thread during it: " +
+            mainLoop.ticks +
+            " tasks, longest block " +
+            mainLoop.worst +
+            " ms",
+        );
+
+        // Both must produce the same hierarchy: one build path, two threads.
+        const a = mod.bvh_blob_summary(result.bvh);
+        const b = mod.bvh_blob_summary(mainBlob);
+        if (a !== b) throw new Error("the two builds disagree: " + a + " vs " + b);
+        set("both builds agree: " + a);
+
+        // The claim under test, stated as a comparison rather than a threshold:
+        // a threshold would be a property of this machine.
+        if (workerLoop.worst >= mainLoop.worst) {
+          set(
+            "FAIL: the worker build blocked the main thread as long as the main-thread one",
+            "bad",
+          );
+        } else {
+          set(
+            "PASS: the worker build blocked the main thread for " +
+              workerLoop.worst +
+              " ms against the main-thread build's " +
+              mainLoop.worst +
+              " ms",
+            "ok",
+          );
+        }
+      } catch (e) {
+        set("ERROR: " + (e && e.message ? e.message : e), "bad");
+      }
+    </script>
+  </body>
+</html>

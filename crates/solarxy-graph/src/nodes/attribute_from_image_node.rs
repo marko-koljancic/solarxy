@@ -159,7 +159,6 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
-    let input = &super::common::baked_input(input, cx)?;
     let Some(image) = inputs.image("image") else {
         cx.warn("attribute_from_image has no image wired; the input passes through unchanged");
         return Ok(CookOutcome::Done(Outputs::geometry((**input).clone())));

@@ -228,10 +228,13 @@ impl LightsUniform {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact values constructed by the tests
+
     use super::*;
 
     fn def(kind: LightKind) -> LightDef {
         LightDef {
+            id: solarxy_core::scene::SceneObjectId::UNAUTHORED,
             kind,
             position: [1.0, 2.0, 3.0],
             direction: [0.0, -1.0, 0.0],
@@ -239,6 +242,7 @@ mod tests {
             intensity: 2.0,
             range: 10.0,
             decay: 2.0,
+            radius: 0.0,
             inner_cone: 0.3,
             outer_cone: 0.6,
             area_extent: [1.0, 1.0],

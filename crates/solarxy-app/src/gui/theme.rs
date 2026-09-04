@@ -253,6 +253,21 @@ pub(super) fn make_dock_style(ctx: &egui::Context, theme: &Theme) -> egui_dock::
 
 pub(super) fn configure_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
+    // Two bundled faces, one per family. Inter fronts the proportional
+    // family: it is the same interface face the web application uses, so
+    // the two shells read as one product, and it is already recorded in
+    // THIRD-PARTY-NOTICES.md under the same license as the face below.
+    // Lilex fronts the monospace family alone; putting it at the front of
+    // both was what rendered every menu and dialog in a coding face. The
+    // toolkit's default faces stay behind both for symbol and emoji
+    // fallback, per the decision recorded on the egui line of Cargo.toml.
+    // The renderer's committed glyph atlas is independent: it is baked
+    // offline from the monospaced face and untouched by this chain.
+    fonts.font_data.insert(
+        "inter".to_owned(),
+        egui::FontData::from_static(include_bytes!("../../../../res/Inter/Inter-Medium.ttf"))
+            .into(),
+    );
     fonts.font_data.insert(
         "lilex".to_owned(),
         egui::FontData::from_static(include_bytes!(
@@ -264,7 +279,7 @@ pub(super) fn configure_fonts(ctx: &egui::Context) {
         .families
         .entry(egui::FontFamily::Proportional)
         .or_default()
-        .insert(0, "lilex".to_owned());
+        .insert(0, "inter".to_owned());
     fonts
         .families
         .entry(egui::FontFamily::Monospace)

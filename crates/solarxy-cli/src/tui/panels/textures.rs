@@ -18,7 +18,7 @@ use ratatui::widgets::{Paragraph, Row, Table, TableState};
 use solarxy_core::report::TextureEntry;
 
 use super::super::widgets;
-use super::{Action, Ctx, Panel, Sort};
+use super::{Action, AnalyzeCtx, Analysis, Panel, Sort};
 
 /// The table's column headers, in sort-cycle order.
 pub const COLUMNS: [&str; 4] = ["slot", "file", "res", "ok"];
@@ -30,8 +30,9 @@ pub struct Textures {
 }
 
 impl Textures {
-    fn rows<'a>(&self, ctx: &Ctx<'a>) -> Vec<&'a TextureEntry> {
+    fn rows<'a>(&self, ctx: &AnalyzeCtx<'a>) -> Vec<&'a TextureEntry> {
         let mut rows: Vec<&TextureEntry> = ctx
+            .subject
             .report
             .materials
             .iter()
@@ -50,12 +51,12 @@ impl Textures {
     }
 }
 
-impl Panel for Textures {
+impl Panel<Analysis<'_>, Action> for Textures {
     fn menu(&self) -> &'static [&'static str] {
         &["sort"]
     }
 
-    fn handle(&mut self, key: KeyEvent, ctx: &Ctx<'_>) -> Action {
+    fn handle(&mut self, key: KeyEvent, ctx: &AnalyzeCtx<'_>) -> Action {
         let count = self.rows(ctx).len();
         match key.code {
             KeyCode::Char('s') | KeyCode::Char('S') => self.sort = self.sort.cycle(COLUMNS.len()),
@@ -68,7 +69,7 @@ impl Panel for Textures {
         Action::None
     }
 
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
         let rows = self.rows(ctx);
         if rows.is_empty() {
             let (line, rect) = widgets::empty_state("no textures referenced", area, ctx.theme);
@@ -130,8 +131,9 @@ impl Panel for Textures {
         true
     }
 
-    fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
+    fn status(&self, ctx: &AnalyzeCtx<'_>) -> Option<String> {
         let all: Vec<&TextureEntry> = ctx
+            .subject
             .report
             .materials
             .iter()

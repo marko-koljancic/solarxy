@@ -20,7 +20,7 @@ use ratatui::widgets::{Paragraph, Row, Table, TableState};
 use solarxy_core::report::{AnalysisReport, MaterialSummary};
 
 use super::super::widgets;
-use super::{Action, Ctx, Panel, Sort};
+use super::{Action, AnalyzeCtx, Analysis, Panel, Sort};
 
 /// The table's column headers, in sort-cycle order.
 pub const COLUMNS: [&str; 4] = ["name", "base colour", "tex", "used by"];
@@ -47,13 +47,13 @@ impl Materials {
     }
 }
 
-impl Panel for Materials {
+impl Panel<Analysis<'_>, Action> for Materials {
     fn menu(&self) -> &'static [&'static str] {
         &["sort"]
     }
 
-    fn handle(&mut self, key: KeyEvent, ctx: &Ctx<'_>) -> Action {
-        let count = self.rows(ctx.report).len();
+    fn handle(&mut self, key: KeyEvent, ctx: &AnalyzeCtx<'_>) -> Action {
+        let count = self.rows(ctx.subject.report).len();
         match key.code {
             KeyCode::Char('s') | KeyCode::Char('S') => self.sort = self.sort.cycle(COLUMNS.len()),
             KeyCode::Down | KeyCode::Char('j') => step(&mut self.state, 1, count),
@@ -65,8 +65,8 @@ impl Panel for Materials {
         Action::None
     }
 
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
-        let rows = self.rows(ctx.report);
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &AnalyzeCtx<'_>) {
+        let rows = self.rows(ctx.subject.report);
         if rows.is_empty() {
             let (line, rect) = widgets::empty_state("no materials in this model", area, ctx.theme);
             frame.render_widget(Paragraph::new(line), rect);
@@ -117,7 +117,7 @@ impl Panel for Materials {
                     ))
                 };
 
-                let used = users(ctx.report, material.index);
+                let used = users(ctx.subject.report, material.index);
                 Row::new(vec![
                     ratatui::text::Line::from(ratatui::text::Span::styled(
                         material.name.clone(),
@@ -166,9 +166,16 @@ impl Panel for Materials {
         true
     }
 
-    fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
-        let slots: usize = ctx.report.materials.iter().map(|m| m.textures.len()).sum();
+    fn status(&self, ctx: &AnalyzeCtx<'_>) -> Option<String> {
+        let slots: usize = ctx
+            .subject
+            .report
+            .materials
+            .iter()
+            .map(|m| m.textures.len())
+            .sum();
         let missing = ctx
+            .subject
             .report
             .materials
             .iter()
@@ -177,7 +184,7 @@ impl Panel for Materials {
             .count();
         Some(format!(
             "{} materials \u{b7} {slots} texture slots \u{b7} {missing} missing",
-            ctx.report.material_count
+            ctx.subject.report.material_count
         ))
     }
 }

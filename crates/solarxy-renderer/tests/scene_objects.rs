@@ -187,6 +187,63 @@ fn capacity_overflow_rebuilds_and_preserves_transform() {
     assert!((obj.transform.w.y - 4.0).abs() < 1e-6);
 }
 
+/// Framing one object has to put the camera around where that object actually
+/// is, not around the origin its geometry was authored about.
+///
+/// The same composition `visible_bounds` makes, for one object rather than all
+/// of them, which is what "Frame selection" reads. Written because that action
+/// is otherwise the only way to recover something dragged out of view, so a
+/// silent identity transform here is a camera that goes nowhere useful.
+#[test]
+fn one_objects_world_bounds_follow_its_transform() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    scene
+        .apply(&g.device, &g.queue, &g.layouts, &upsert(1, tri(1.0)))
+        .expect("apply");
+
+    let local = scene
+        .object_world_bounds(SceneObjectId(1))
+        .expect("an object that exists has bounds");
+    assert!(local.max.x.abs() < 10.0, "authored about the origin");
+
+    let translate = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [100.0, 0.0, 0.0, 1.0],
+    ];
+    scene
+        .apply(
+            &g.device,
+            &g.queue,
+            &g.layouts,
+            &SceneDelta {
+                ops: vec![SceneOp::SetTransform {
+                    id: SceneObjectId(1),
+                    transform: translate,
+                }],
+            },
+        )
+        .expect("transform");
+
+    let moved = scene
+        .object_world_bounds(SceneObjectId(1))
+        .expect("still exists");
+    assert!(
+        (moved.center().x - (local.center().x + 100.0)).abs() < 1e-4,
+        "world bounds must follow the transform, got {:?}",
+        moved.center()
+    );
+    // The size is unchanged by a pure translation, which is what says the
+    // transform was composed rather than the box replaced.
+    assert!((moved.size().x - local.size().x).abs() < 1e-4);
+
+    // An object that is not there cannot be framed, and says so rather than
+    // handing back an empty box at the origin.
+    assert!(scene.object_world_bounds(SceneObjectId(99)).is_none());
+}
+
 #[test]
 fn visibility_remove_and_clear() {
     let g = require_gpu!();
@@ -251,6 +308,7 @@ fn set_lights_stores_and_flags_dirty_once() {
     assert!(!scene.take_lights_dirty());
 
     let light = LightDef {
+        id: SceneObjectId::UNAUTHORED,
         kind: LightKind::Point,
         position: [0.0, 5.0, 0.0],
         direction: [0.0, -1.0, 0.0],
@@ -258,6 +316,7 @@ fn set_lights_stores_and_flags_dirty_once() {
         intensity: 2.0,
         range: 0.0,
         decay: 0.0,
+        radius: 0.0,
         inner_cone: 0.0,
         outer_cone: 0.0,
         area_extent: [0.0, 0.0],
@@ -285,8 +344,42 @@ fn set_lights_stores_and_flags_dirty_once() {
         .expect("lights");
 
     assert_eq!(scene.lights().map(<[LightDef]>::len), Some(1));
+    assert_eq!(scene.authored_lights().map(<[LightDef]>::len), Some(1));
     assert!(scene.take_lights_dirty());
     assert!(!scene.take_lights_dirty(), "dirty consumed once");
+}
+
+/// An empty light list is a cook, not a lighting setup.
+///
+/// The engine pushes `SetLights` for every document, including one with no
+/// light nodes, so `lights()` answering `Some` says only that a cook has
+/// happened. Every shell asked it whether the scene lights itself, read the
+/// empty list as yes, and switched the camera rig off. That is why the
+/// distinction is a second accessor rather than a comment.
+#[test]
+fn an_empty_light_list_is_not_an_authored_lighting_setup() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    scene
+        .apply(
+            &g.device,
+            &g.queue,
+            &g.layouts,
+            &SceneDelta {
+                ops: vec![SceneOp::SetLights { lights: vec![] }],
+            },
+        )
+        .expect("lights");
+
+    assert!(
+        scene.lights().is_some(),
+        "the op arrived, which is what this accessor reports"
+    );
+    assert!(
+        scene.authored_lights().is_none(),
+        "a document with no light nodes does not describe its own lighting, \
+         and a shell that thinks it does renders it unlit"
+    );
 }
 
 #[test]

@@ -17,7 +17,6 @@ import {
 } from "../../engine/session";
 import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
-import { DIRECTORY_PICKER } from "../directoryPicker";
 import { AboutModal } from "../AboutModal";
 import { isAssetsPanelOpen, isAttributesPanelOpen, isNodesPanelOpen, isPropertiesPanelOpen, isTexturePanelOpen, isTextPanelOpen, isTreePanelOpen, setAssetsPanelOpen, setAttributesPanelOpen, setNodesPanelOpen, setPropertiesPanelOpen, setReviewPanelOpen, setTexturePanelOpen, setTextPanelOpen, setTreePanelOpen } from "../../dock/api";
 import { selectGraph, useMirror } from "../../store/mirror";
@@ -54,13 +53,16 @@ const SAMPLE_SCENES: { label: string; file: string }[] = [
   { label: "Procedural Look-dev", file: "procedural-lookdev.slxy" },
   // The flagship: everything above composed into one scene.
   { label: "The Orrery", file: "the-orrery.slxy" },
+  // Last because it teaches the renderer rather than the node graph: it is
+  // the one sample whose point is what the traced still does that the
+  // viewport preview cannot.
+  { label: "Cornell Box", file: "cornell-box.slxy" },
 ];
 
 export function MenuBar() {
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const importRef = useRef<HTMLInputElement>(null);
-  const importFolderRef = useRef<HTMLInputElement>(null);
   const [confirmNew, setConfirmNew] = useState(false);
   const [confirmSample, setConfirmSample] = useState<{ label: string; file: string } | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -90,7 +92,6 @@ export function MenuBar() {
     { label: "Save Scene", shortcut: `${MOD}S`, onClick: () => void explicitSave() },
     { divider: true },
     { label: "Import Model...", onClick: () => importRef.current?.click() },
-    { label: "Import Model Folder...", onClick: () => importFolderRef.current?.click() },
     { divider: true },
     { label: "Export web bundle...", onClick: () => setBundleOpen(true) },
   ];
@@ -272,18 +273,6 @@ export function MenuBar() {
           if (files.length) void importDroppedFiles(files);
           e.target.value = "";
         }}
-      />
-      <input
-        ref={importFolderRef}
-        type="file"
-        multiple
-        style={{ display: "none" }}
-        onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          if (files.length) void importDroppedFiles(files);
-          e.target.value = "";
-        }}
-        {...DIRECTORY_PICKER}
       />
     </nav>
   );

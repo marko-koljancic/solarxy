@@ -14,15 +14,15 @@
  */
 
 export const NODE_TYPE_COUNT = 77;
-export const CRATE_COUNT = 13;
+export const CRATE_COUNT = 15;
 export const CONTEXT_COUNT = 4;
 export const SHELL_COUNT = 3;
 export const VALIDATION_KIND_COUNT = 11;
 export const CARD_COUNT = 72;
 export const PROGRAM_RELEASE_COUNT = 13;
-export const RELEASES_TO_1_0 = 4;
+export const RELEASES_TO_1_0 = 3;
 export const JOURNEY_COUNT = 16;
-export const LIVE_VERSION = "v0.8.2";
+export const LIVE_VERSION = "v0.9.0";
 
 export interface Section {
   id: string;
@@ -300,75 +300,6 @@ export const TIMELINE: TimelineEntry[] = [
   },
 ];
 
-export interface ReleaseSummary {
-  v: string;
-  st: string;
-  p: string;
-}
-
-export const RELEASES: ReleaseSummary[] = [
-  {
-    v: "v0.1.0",
-    st: "Mar 2026",
-    p: "First Light. Rust + wgpu, OBJ loading, Cook-Torrance PBR, an in-viewport HUD, and the analyze TUI.",
-  },
-  {
-    v: "v0.2.0",
-    st: "Apr 2026",
-    p: "Interactivity. Grid and gizmo, bbox, turntable, bloom, background presets, settings persistence, and side-by-side compare.",
-  },
-  {
-    v: "v0.3.0",
-    st: "Apr 2026",
-    p: "Feature Baseline. Four operation modes, per-material PBR, procedural + HDRI IBL, environment reflections, SSAO, and ACES.",
-  },
-  {
-    v: "v0.4.0",
-    st: "Apr 2026",
-    p: "Inspection Intelligence. Viewer to debugger: egui, split viewports, inspection modes, the validation overlay, and the crate split.",
-  },
-  {
-    v: "v0.5.0",
-    st: "Apr 2026",
-    p: "Two Binaries. GUI and CLI split into separate binaries, native installers, a Preferences dialog, and grouped sidebar controls.",
-  },
-  {
-    v: "v0.6.0",
-    st: "May 2026",
-    p: "Studio Adoption. Anchored review notes, dockable panels, a Material Inspector, overdraw / AO modes, configurable validation, CI adapters, Homebrew + winget.",
-  },
-  {
-    v: "v0.7.0",
-    st: "Jul 2026",
-    p: "Web Reach. The browser build ahead of target: Solarxy Web on WASM + WebGPU, node-based modeling on the same core, the .slxy format, transform gizmos.",
-  },
-  {
-    v: "v0.7.1",
-    st: "Jul 2026",
-    p: "Contexts and Cameras. 58 documented node types, typed material / texture networks, cameras you look through, OBJ / STL / PLY / GLB export, one palette across all three shells.",
-  },
-  {
-    v: "v0.7.2",
-    st: "Jul 2026",
-    p: "Polish. Consistency and the first cheap wins across desktop and web: an ambient-occlusion fix plus AO strength, a validate-node UV guard, four new procedural texture generators (voronoi / gradient / checker / brick), parameter-panel polish, and a preview worker-split. Registry 58 to 62.",
-  },
-  {
-    v: "v0.8.0",
-    st: "Jul 2026",
-    p: "First Modeling Wave. Point clouds, poly-lines, and a typed per-element attribute system, with scatter and copy-to-points instancing, vertex colors end to end, material export from geo_export, the Attributes pane, GPU attribute labels, and a scene Tree panel. Registry 58 to 74.",
-  },
-  {
-    v: "v0.8.1",
-    st: "Jul 2026",
-    p: "Expressions, Runtime and Publishing. Expressions on any numeric parameter with ch() cross-node references and geometry queries, the attribute wrangle, a scene clock with a Playbar, standalone web export, and physically based rect-area lights through linearly transformed cosines. Registry 74 to 76.",
-  },
-  {
-    v: "v0.8.2",
-    st: "live",
-    p: "Rendering foundations. Principled surfaces end to end, the environment as scene data, real geometry instancing, two-slot LUT grading with a camera-owned look and physical light intensity, the shared host extraction, the desktop's first engine surface, and the analyze report reborn as a tiled terminal workspace. Registry 76 to 77. The current release on solarxy.koljam.com.",
-  },
-];
-
 export interface ChangelogItem {
   lead: string;
   text: string;
@@ -392,6 +323,118 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    v: "v0.9.0",
+    code: "Path-traced rendering",
+    date: "September 2026",
+    status: "live",
+    statusLabel: "Released",
+    open: true,
+    summary:
+      "Solarxy grows a second renderer. The viewport draws each pixel once and approximates where the light came from; the new one follows light through the scene and lets it bounce, so colour bleeds off a wall onto a floor, a small light casts a soft-edged shadow, and glass bends what is behind it. The command line becomes a first-class render surface at the same time, with exit codes a build system can branch on. A still can also leave with nothing behind it, as an element to composite rather than a finished picture, and lights stop being reachable only through the parameter panel: they are drawn in the viewport, and you can grab them.",
+    groups: [
+      {
+        h: "A second renderer",
+        items: [
+          {
+            lead: "Global illumination, computed rather than approximated.",
+            text: "Light that bounced off something else before reaching a surface is followed rather than guessed at. That is what produces colour bleeding, and it is the difference the bundled Cornell Box sample exists to show.",
+          },
+          {
+            lead: "Soft shadows with the right shape, and traced depth of field.",
+            text: "A shadow's softness comes from the size of the light that cast it, so a rect area light is the one to reach for. Set a camera's F-Stop above zero and the aperture is integrated properly; a Focus Distance of zero focuses on whatever the camera is aimed at, so aiming also focuses.",
+          },
+          {
+            lead: "Every light in the scene, and an edge-aware denoiser.",
+            text: "The viewport binds eight lights; a traced render reads them all. The denoiser steers by the albedo and normal recorded while tracing, so it removes noise without smearing across the edge between two surfaces.",
+          },
+        ],
+      },
+      {
+        h: "Rendering a still",
+        items: [
+          {
+            lead: "The picture refines while it renders.",
+            text: "It arrives in tiles and improves from the first few chunks rather than appearing at the end, so you can tell early whether the shot is the one you wanted. Pan and zoom it while it converges; the tiles keep landing in the right places underneath.",
+          },
+          {
+            lead: "Albedo, normal and depth are selectable in the browser.",
+            text: "Switch pass while the render is still running. A pass nobody asked for says what would produce it, and a rasterized render offers the beauty alone rather than three empty rows, because it has nothing else to give.",
+          },
+          {
+            lead: "PNG or 32-bit float EXR, from every shell.",
+            text: "In either the scene-linear or the display-referred space. The format is chosen before the render starts, because it decides what the renderer reads back.",
+          },
+        ],
+      },
+      {
+        h: "Rendering with nothing behind it",
+        items: [
+          {
+            lead: "A real matte, not a colour key.",
+            text: "Opaque where the camera found a surface, clear where it found sky, fractional along every silhouette so an edge antialiases instead of staircasing. A mirror against the sky is opaque, because the camera did find a surface there. Both renderers honour it, and it survives exposure, the tone map and the grade.",
+          },
+          {
+            lead: "Each format carries its own stated convention.",
+            text: "Floating-point files carry premultiplied alpha and eight-bit files carry straight alpha, so a compositor that honours each composites both identically over the same plate. A matte whose convention is unstated is one somebody composites wrong.",
+          },
+        ],
+      },
+      {
+        h: "Lights in the viewport",
+        items: [
+          {
+            lead: "Every light draws a marker you can click.",
+            text: "Screen-constant, so one across the scene is no harder to hit than one in front of you, with a shape that says which of the six kinds it is. Selecting it is the same selection the rest of the application means. Markers switch off per pane and never appear in a rendered still.",
+          },
+          {
+            lead: "A light takes the transform tools, and offers only what it can use.",
+            text: "The scene relights continuously as you drag, and a drag is one undo step. A fifth tool, Aim, moves the point a light points at rather than the light. A point light offers Move; a rect-area panel offers Move, Rotate and Scale, its size handles writing Width and Height in metres; the two lights with no position offer none.",
+          },
+        ],
+      },
+      {
+        h: "Controls for the shot you are making",
+        items: [
+          {
+            lead: "Named output sizes, and an exact sample count.",
+            text: "HD, UHD 4K and 8K, the DCI sizes, square and 5:4, and A4, A3 and Letter at 300 dpi, with an orientation that turns them. Every entry states its own pixel size. The four quality presets keep the wide steps most shots want, with an exact count beside them for the scene that is not there.",
+          },
+          {
+            lead: "A bright sample limit, a seed, and a steerable denoiser.",
+            text: "The limit clamps the rare very bright indirect sample that arrives as a lone white speckle. The seed makes a render repeat exactly on the surface that produced it. Six steering values let the filter be tuned to a scene rather than accepted as it comes.",
+          },
+        ],
+      },
+      {
+        h: "The command line renders",
+        items: [
+          {
+            lead: "A render becomes a pipeline step rather than something a person does.",
+            text: "Everything the render needs comes from the scene's own render node, with flags overriding one value at a time. Eight meaningful exit codes, and a flag that cannot take effect is refused rather than ignored.",
+          },
+          {
+            lead: "Standard output is data.",
+            text: "Progress goes to standard error, so the image can go down a pipe and a machine-readable result can be read by the next step. Watch it converge on a terminal dashboard, or in a window.",
+          },
+        ],
+      },
+      {
+        h: "A licence change",
+        items: [
+          {
+            lead: "From this release Solarxy is GPL-3.0-or-later.",
+            text: "Releases through v0.8.2 were published under MIT and stay MIT for anyone holding them: that grant cannot be withdrawn, so this is a boundary rather than a retroactive change. An additional permission under section 7 covers the graph-layout library and the bundled fonts, so no feature was removed to reach compatibility.",
+          },
+        ],
+      },
+    ],
+    meta: [
+      ["Registry", "stays 77"],
+      ["Schema", "stays 1"],
+      ["Licence", "MIT to GPL-3.0-or-later"],
+    ],
+  },
   {
     v: "v0.8.2",
     code: "Rendering foundations",
@@ -910,11 +953,14 @@ export const RELEASE_PLAN: ReleasePlanEntry[] = [
   {
     v: "v0.9.0",
     code: "Path-traced rendering",
-    kind: "next",
     theme: "A physically based GPU path tracer, and the CLI as a render surface",
     items: [
       "A compute path tracer on core WebGPU (12.5): global illumination, soft area-light shadows, optical depth of field, unbounded light count.",
       "A render command for the CLI (17.3), making it the first native node-engine host: .slxy in, PNG or EXR with AOVs out.",
+      "The render window finished: the picture refines while it renders rather than appearing at the end, the albedo, normal and depth passes are selectable and viewable in the browser, and the image pans and zooms while it converges.",
+      "Controls to tune a render for your own scene: an exact sample count beside the presets, an indirect clamp, a seed, denoiser strength and a threshold, and named output sizes.",
+      "Rendering with a transparent background, so a still arrives as an element that can be composited over something else rather than as a finished picture.",
+      "Lights can be moved by grabbing them in the viewport, which is the first thing there that is not geometry.",
       "Priya joins the personas: technical director and pipeline engineer, with two new journeys.",
       "The last release whose authoring surface is web-only.",
     ],
@@ -922,6 +968,7 @@ export const RELEASE_PLAN: ReleasePlanEntry[] = [
   {
     v: "v0.9.5",
     code: "Desktop node canvas",
+    kind: "next",
     theme: "Node editing on the desktop; the desktop wiring closes",
     items: [
       "The egui node canvas, palette, parameter panel, transform gizmo and undo.",
@@ -1010,7 +1057,7 @@ export const PROGRAM: ProgramEntry[] = [
   {
     v: "0.9.0",
     code: "Path-traced rendering",
-    kind: "next",
+    kind: "shipped",
     era: "pre",
     theme: "A GPU path tracer, and the CLI as a render surface",
     cards: ["12.5", "17.3"],
@@ -1019,7 +1066,7 @@ export const PROGRAM: ProgramEntry[] = [
   {
     v: "0.9.5",
     code: "Desktop node canvas",
-    kind: "planned",
+    kind: "next",
     era: "pre",
     theme: "Node editing on the desktop; card 18.1 closes",
     cards: ["18.1"],
@@ -1102,13 +1149,13 @@ export const DISPOSITIONS: Disposition[] = [
   {
     key: "shipped",
     label: "Shipped",
-    n: 14,
-    blurb: "Already released, most recently the 0.8.2 rendering foundations, including the scene clock whose transport bar shipped in 0.8.1.",
+    n: 16,
+    blurb: "Already released, most recently the 0.9.0 path tracer and the render command that made the terminal a first-class render surface.",
   },
   {
     key: "scheduled",
     label: "Scheduled",
-    n: 31,
+    n: 29,
     blurb: "Assigned to a named release between v0.9.0 and v1.5.0.",
   },
   {
@@ -1343,7 +1390,6 @@ export const JOURNEYS: Journey[] = [
 ];
 
 export const COVERAGE_RELEASES: string[] = [
-  "0.9.0",
   "0.9.5",
   "0.10.0",
   "1.0.0",
@@ -1355,22 +1401,22 @@ export const COVERAGE_RELEASES: string[] = [
 ];
 
 export const COVERAGE: Record<string, number[]> = {
-  J1: [0, 1, 1, 0, 0, 1, 0, 0, 1],
-  J2: [0, 0, 1, 0, 0, 0, 0, 0, 0],
-  J3: [1, 0, 0, 0, 1, 0, 0, 0, 0],
-  J4: [0, 0, 0, 1, 0, 0, 0, 0, 0],
-  J5: [0, 1, 0, 1, 0, 0, 0, 0, 1],
-  J6: [0, 1, 0, 0, 0, 1, 0, 0, 0],
-  J7: [0, 1, 0, 0, 0, 0, 0, 0, 1],
-  J8: [0, 0, 0, 0, 0, 1, 0, 0, 0],
-  J9: [0, 0, 0, 1, 0, 0, 0, 1, 0],
-  J10: [0, 1, 0, 0, 0, 0, 1, 0, 1],
-  J11: [1, 0, 0, 0, 0, 0, 0, 0, 0],
-  J12: [1, 0, 0, 1, 0, 0, 0, 0, 0],
-  J13: [0, 1, 0, 0, 0, 0, 0, 0, 0],
-  J14: [1, 0, 0, 0, 1, 0, 0, 0, 0],
-  J15: [0, 0, 1, 0, 0, 0, 1, 0, 0],
-  J16: [0, 0, 1, 0, 0, 0, 0, 1, 0],
+  J1: [1, 1, 0, 0, 1, 0, 0, 1],
+  J2: [0, 1, 0, 0, 0, 0, 0, 0],
+  J3: [0, 0, 0, 1, 0, 0, 0, 0],
+  J4: [0, 0, 1, 0, 0, 0, 0, 0],
+  J5: [1, 0, 1, 0, 0, 0, 0, 1],
+  J6: [1, 0, 0, 0, 1, 0, 0, 0],
+  J7: [1, 0, 0, 0, 0, 0, 0, 1],
+  J8: [0, 0, 0, 0, 1, 0, 0, 0],
+  J9: [0, 0, 1, 0, 0, 0, 1, 0],
+  J10: [1, 0, 0, 0, 0, 1, 0, 1],
+  J11: [0, 0, 0, 0, 0, 0, 0, 0],
+  J12: [0, 0, 1, 0, 0, 0, 0, 0],
+  J13: [1, 0, 0, 0, 0, 0, 0, 0],
+  J14: [0, 0, 0, 1, 0, 0, 0, 0],
+  J15: [0, 1, 0, 0, 0, 1, 0, 0],
+  J16: [0, 1, 0, 0, 0, 0, 1, 0],
 };
 
 export const UX_CONTRACT: string[] = [
@@ -2147,7 +2193,7 @@ export const CARDS: Card[] = [
     tier: "Near",
     planned: "0.9.0",
     what: "A physically based path tracer for reference-quality stills: global illumination, soft area-light shadows, optical depth of field, and an unbounded light count.",
-    why: "Photoreal output; the top of the quality ladder. Scheduled as v0.9.0 with a build-ready spec.",
+    why: "Photoreal output; the top of the quality ladder. Shipped in v0.9.0.",
     dep: "Depends on v0.8.2's material model, HDR environment, instancing and shared host. Supersedes the earlier tiled raster still-render plan rather than sitting on it.",
     risk: "Regraded from Research once the feasibility spike ran: a full tracer runs on core WebGPU with no feature or limit change. Remaining risks are the wasm payload, one browser's WGSL uniformity analysis, and convergence time.",
   },

@@ -85,6 +85,11 @@ runs:
         cp "$CLI_BINARY" "$APP/Contents/MacOS/solarxy-cli"
         chmod +x "$APP/Contents/MacOS/solarxy-cli"
         cp res/bundle/solarxy.icns "$APP/Contents/Resources/Solarxy.icns"
+        # The ported-source notices travel inside the bundle, which is what the
+        # ported work's terms attach to, and again beside it in the DMG so a
+        # reader does not have to know that an app is a directory to find them.
+        cp THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/"
+        cp LICENSE "$APP/Contents/Resources/"
 
         cat > "$APP/Contents/Info.plist" <<PLIST
         <?xml version="1.0" encoding="UTF-8"?>
@@ -116,6 +121,12 @@ runs:
         # to the top-center position so it's the first thing users see.
         cp "res/bundle/macos/Install CLI.command" "$STAGE/"
         cp "res/bundle/macos/READ ME FIRST.txt" "$STAGE/"
+        cp THIRD-PARTY-NOTICES.md "$STAGE/"
+        # Also at the DMG root, not only inside the .app, because READ ME
+        # FIRST.txt tells the reader the license is beside it and because a
+        # user who drags the app out and discards the image should not have
+        # to open a bundle to find the terms.
+        cp LICENSE "$STAGE/"
 
         mkdir -p bundle-out
         OUT="bundle-out/Solarxy-${V}-${ARCH}.dmg"
@@ -155,6 +166,8 @@ runs:
         cp res/bundle/solarxy.png "$APPDIR/"
         cp res/bundle/linux/appimage/AppRun "$APPDIR/"
         chmod +x "$APPDIR/AppRun"
+        cp THIRD-PARTY-NOTICES.md "$APPDIR/"
+        cp LICENSE "$APPDIR/"
 
         # Pinned to continuous build — appimagetool has no tagged releases.
         # Freshness risk is low since the binary is ~30 MB and the tool is

@@ -343,6 +343,37 @@ fn obj_map_kd_decodes_through_resolver() {
 /// The `DirResolver` must refuse to escape its base directory, or a malicious
 /// model's `mtllib`/`map_Kd`/glTF `uri` becomes an arbitrary local-file read
 /// (and, for the server-side `solarxy-validate` library, an LFI oracle).
+/// A symlink pointing out of the base is refused, which is the escape the
+/// component check alone does not catch: the path has no `..`, no root and no
+/// prefix, so only the canonicalize-and-contain step can see it.
+///
+/// Unix only, because creating a symlink on Windows needs a privilege the
+/// test runner is not guaranteed to hold.
+#[cfg(unix)]
+#[test]
+fn dir_resolver_rejects_a_symlink_that_leaves_the_base() {
+    let base = std::env::temp_dir().join("solarxy-formats-symlink-escape");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).expect("base directory");
+
+    let outside = std::env::temp_dir().join("solarxy-formats-symlink-target.txt");
+    std::fs::write(&outside, b"not yours").expect("target file");
+
+    // The link sits inside the base and its name is an ordinary one.
+    let link = base.join("innocent.png");
+    std::os::unix::fs::symlink(&outside, &link).expect("symlink");
+
+    let mut resolver = DirResolver::new(&base);
+    assert!(
+        resolver.read("innocent.png").is_none(),
+        "a symlink resolving outside the base must be refused after canonicalization"
+    );
+
+    // The target really is readable, so the refusal is the rule acting rather
+    // than the file being absent.
+    assert!(std::fs::read(&outside).is_ok());
+}
+
 #[test]
 fn dir_resolver_rejects_path_traversal() {
     let dir = Path::new(&fixture("textured.obj"))

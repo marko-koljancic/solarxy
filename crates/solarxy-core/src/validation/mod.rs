@@ -174,7 +174,7 @@ mod tests {
     /// The topology-gate acceptance line: a point cloud has an empty index buffer by
     /// definition and a polyline's pair count is not divisible by three,
     /// so without the topology gate both would fire false Errors
-    /// (EmptyIndices / NonTriangulated) plus manifold and normals noise.
+    /// (`EmptyIndices` / `NonTriangulated`) plus manifold and normals noise.
     #[test]
     fn point_and_line_topologies_produce_no_false_triangle_issues() {
         let raw = RawModelData {

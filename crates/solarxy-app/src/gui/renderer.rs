@@ -23,6 +23,7 @@ use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
 use super::review_panel::draw_delete_confirm_modal;
 use super::review_popup::draw_review_popup;
 use super::screenshot_modal::{ScreenshotModal, draw_screenshot_modal};
+use super::still_modal::{StillRenderModal, draw_still_modal};
 use super::properties::{ModelInfo, PropertiesEvents};
 use super::snapshot::{GuiSnapshot, HudInfo};
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
@@ -44,6 +45,7 @@ pub struct EguiRenderer {
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
     screenshot_modal: ScreenshotModal,
+    still_modal: StillRenderModal,
     material_inspector: MaterialInspectorState,
     node_tree: NodeTreeState,
     toasts: VecDeque<Toast>,
@@ -108,6 +110,7 @@ impl EguiRenderer {
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
             screenshot_modal: ScreenshotModal::default(),
+            still_modal: StillRenderModal::default(),
             material_inspector: MaterialInspectorState::default(),
             node_tree: NodeTreeState::default(),
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
@@ -425,6 +428,7 @@ impl EguiRenderer {
         screen: ScreenDescriptor,
         frame_ms: f32,
         divider: Option<DividerInfo>,
+        pane_gaps: &[egui::Rect],
         active_pane_rect: Option<egui::Rect>,
         review_panes: &[super::ReviewPaneOverlay],
         recent_files: &[String],
@@ -497,6 +501,12 @@ impl EguiRenderer {
         let update_modal = &mut self.update_modal;
         let preferences_modal = &mut self.preferences_modal;
         let screenshot_modal = &mut self.screenshot_modal;
+        let still_modal = &mut self.still_modal;
+        // The still renders either root: an open scene, or an open model
+        // through the synthesized document. `model_info` is set exactly when
+        // a file-loaded model is open.
+        let still_renderable = self.scene_open || self.model_info.is_some();
+        let review_available = model.is_some();
         let shortcuts_modal = &mut self.shortcuts_modal;
         let material_inspector = &mut self.material_inspector;
         let node_tree_state = &mut self.node_tree;
@@ -514,6 +524,9 @@ impl EguiRenderer {
             hdri_available: pt_hdri_available,
             customs: pt_customs,
             uv_overlap_pct: pt_uv_overlap_pct,
+            cameras: pt_cameras,
+            look_through: pt_look_through,
+            look_through_change: pt_look_through_change,
         } = pane_toolbar;
         let mut viewport_rect_logical: Option<egui::Rect> = None;
 
@@ -528,9 +541,14 @@ impl EguiRenderer {
                     &mut actions,
                     &mut menu_vis,
                     has_model,
+                    still_renderable,
                     recent_files,
                     pt_hdri_available,
                     pt_customs,
+                    // Review anchors against the file-loaded model, so its
+                    // availability is the model's presence, not has_model
+                    // (which a scene also satisfies).
+                    review_available,
                     review.active,
                     review.markers_hidden,
                     review.dirty,
@@ -552,6 +570,7 @@ impl EguiRenderer {
                         avg_ms,
                         fps,
                         backend: backend_info,
+                        still: still_modal.running_progress(),
                     },
                     theme,
                 );
@@ -587,6 +606,9 @@ impl EguiRenderer {
                     hdri_available: pt_hdri_available,
                     customs: pt_customs,
                     uv_overlap_pct: pt_uv_overlap_pct,
+                    cameras: pt_cameras,
+                    look_through: pt_look_through,
+                    look_through_change: pt_look_through_change,
                 },
             };
             DockArea::new(dock_state)
@@ -624,6 +646,9 @@ impl EguiRenderer {
             if !suppress_screenshot_modal {
                 draw_screenshot_modal(ctx, screenshot_modal, &theme);
             }
+            // Drawn ahead of the escape chain below: while a render runs,
+            // Escape cancels it before it dismisses anything else.
+            draw_still_modal(ctx, still_modal, &theme);
 
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);
@@ -732,9 +757,16 @@ impl EguiRenderer {
             if let Some(id) = hud_result.dismissed_toast_id {
                 dismissed_toast_id = Some(id);
             }
-            if let Some(div) = divider {
+            // Every inter-pane gap strip, painted in the theme's border
+            // colour; without this the composite's black clear shows
+            // through wherever a layout has no draggable divider.
+            if !pane_gaps.is_empty() {
                 let painter = ctx.layer_painter(egui::LayerId::background());
-                painter.rect_filled(div.visible, 0.0, theme.border);
+                for gap in pane_gaps {
+                    painter.rect_filled(*gap, 0.0, theme.border);
+                }
+            }
+            if let Some(div) = divider {
                 let resp = egui::Area::new(egui::Id::new("solarxy_divider_drag"))
                     .fixed_pos(div.hit.min)
                     .order(egui::Order::Foreground)
@@ -965,5 +997,94 @@ impl EguiRenderer {
     /// Take the captured screenshot image out and close the modal.
     pub fn take_screenshot_image(&mut self) -> Option<image::RgbaImage> {
         self.screenshot_modal.take_image()
+    }
+
+    /// Open the still-render modal for a fresh run.
+    pub fn open_still_modal(
+        &mut self,
+        width: u32,
+        height: u32,
+        traced: bool,
+        samples: u32,
+        denoise: bool,
+        filename: String,
+    ) {
+        self.still_modal
+            .start(width, height, traced, samples, denoise, filename);
+    }
+
+    /// Update the still modal's tile and sample readout.
+    pub fn set_still_progress(&mut self, tile: u32, tiles: u32, sample: u32, samples: u32) {
+        self.still_modal.set_progress(tile, tiles, sample, samples);
+    }
+
+    /// The output format and space the dialog is set to, in the words the
+    /// shared readback rule takes.
+    pub fn still_output_choice(&self) -> (&'static str, &'static str) {
+        self.still_modal.output_choice()
+    }
+
+    /// Whether the dialog is set to write a floating-point image, which is
+    /// what decides the save filter and the extension.
+    pub fn still_is_float(&self) -> bool {
+        self.still_modal.is_float()
+    }
+
+    /// The dialog's Render button was pressed.
+    pub fn take_still_render_request(&mut self) -> bool {
+        self.still_modal.take_render_request()
+    }
+
+    /// The job has started; the dialog stops being idle. `transparent` comes
+    /// from the job's own spec, so the preview's checker cannot drift from
+    /// what the render actually carries.
+    pub fn begin_still(&mut self, transparent: bool) {
+        self.still_modal.begin(transparent);
+    }
+
+    /// Hand the modal the render's elapsed and remaining, both computed by the
+    /// shared job so this shell agrees with the other two.
+    pub fn set_still_timing(&mut self, elapsed_ms: u64, remaining_ms: Option<u64>) {
+        self.still_modal.set_timing(elapsed_ms, remaining_ms);
+    }
+
+    /// Hand the modal a fresh preview-sized frame of the assembling image.
+    pub fn set_still_preview(&mut self, preview: image::RgbaImage) {
+        self.still_modal.set_preview(preview);
+    }
+
+    /// Hand the modal the finished picture; `Save As…` becomes available.
+    pub fn finish_still(&mut self, image: image::RgbaImage) {
+        self.still_modal.finish(image);
+    }
+
+    /// Tell the modal the render failed and the picture is incomplete.
+    pub fn fail_still(&mut self) {
+        self.still_modal.fail();
+    }
+
+    /// Tell the modal the run was cancelled.
+    pub fn mark_still_cancelled(&mut self) {
+        self.still_modal.mark_cancelled();
+    }
+
+    /// Drain a pending cancel from the still modal (button or Escape).
+    pub fn take_still_cancel(&mut self) -> bool {
+        self.still_modal.take_cancel_request()
+    }
+
+    /// Drain a pending `Save As…` request from the still modal.
+    pub fn take_still_save_request(&mut self) -> bool {
+        self.still_modal.take_save_request()
+    }
+
+    /// The still modal's suggested file name.
+    pub fn still_suggested_filename(&self) -> String {
+        self.still_modal.suggested_filename().to_string()
+    }
+
+    /// Take the finished still out and close the modal.
+    pub fn take_still_image(&mut self) -> Option<image::RgbaImage> {
+        self.still_modal.take_image()
     }
 }

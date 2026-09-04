@@ -249,7 +249,7 @@ fn project_to_pane(
     if !(-1.0..=1.0).contains(&ndc_z) {
         return None;
     }
-    let px = pane_rect.min.x + (ndc_x + 1.0) * 0.5 * pane_rect.width();
+    let px = pane_rect.min.x + f32::midpoint(ndc_x, 1.0) * pane_rect.width();
     let py = pane_rect.min.y + (1.0 - ndc_y) * 0.5 * pane_rect.height();
     if !pane_rect
         .expand(PIN_HIT_RADIUS)

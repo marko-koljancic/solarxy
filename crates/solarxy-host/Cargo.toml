@@ -29,6 +29,11 @@ serde = { version = "1", features = ["derive"] }
 # The display-defaults drift tests assert the parsed names against the enums'
 # own serde names, so they need a serializer to ask what those names are.
 serde_json = "1"
+# The performance probe times the hierarchy builder directly, by triangle
+# count, which is the figure the milestone promises rather than a proxy for
+# it. The library reaches a built hierarchy only through the renderer, so this
+# edge exists for the example alone and never for the shipped crate.
+solarxy-bvh = { path = "../solarxy-bvh" }
 # The golden-capture harness lives here as an example: it drives the shared
 # pane path, which is what puts the extracted orchestration under the pixel
 # gate rather than beside it.

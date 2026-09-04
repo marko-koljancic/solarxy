@@ -36,7 +36,11 @@ struct CompositeParams {
     tone_mode: u32,
     exposure: f32,
     inspection_mode: u32,
-    _pad: u32,
+    // Whether the scene texture's alpha lane is a matte to carry through
+    // rather than a constant to drop. Zero on every path except a
+    // transparent still, and with it zero the arithmetic below is exactly
+    // what it was when this word was padding.
+    carry_alpha: u32,
 
     lut_a_enabled: u32,
     lut_a_strength: f32,
@@ -133,7 +137,8 @@ fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(1.0, 1.0, 1.0, 1.0);
     }
 
-    var color = textureSample(scene_texture, tex_sampler, in.uv).rgb;
+    let scene = textureSample(scene_texture, tex_sampler, in.uv);
+    var color = scene.rgb;
     if composite.bloom_enabled != 0u {
         let bloom_color = textureSample(bloom_texture, tex_sampler, in.uv).rgb;
         color = color + bloom_color * composite.bloom_strength;
@@ -142,6 +147,27 @@ fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
         let ao = textureSample(ssao_texture, ssao_sampler, in.uv).r;
         color = color * mix(1.0, ao, composite.ssao_strength);
     }
+
+    // A matte, when there is one, arrives with the colour already weighted
+    // by its own coverage: the traced mean counted a camera miss as black,
+    // and the MSAA resolve averaged covered subsamples against a zero
+    // clear. The nonlinear half of this chain is written for unassociated
+    // colour, so the coverage is divided out here, after the screen-space
+    // folds, which stay in the weighted domain where their energy lives. A
+    // partially covered pixel's colour therefore runs hot in exactly the
+    // proportion straight alpha expects, and re-multiplying by the matte
+    // recovers what was folded, so bloom that spilled onto an uncovered
+    // pixel is clipped by the matte rather than becoming a halo. The guard
+    // leaves a fully uncovered pixel's spill associated, and its alpha of
+    // zero is what clips it.
+    var alpha = 1.0;
+    if composite.carry_alpha != 0u {
+        alpha = scene.a;
+        if alpha > 0.0 {
+            color = color / alpha;
+        }
+    }
+
     color = color * composite.exposure;
 
     // Slot A: the tone-curve slot. Sampled here, on log-encoded linear
@@ -173,5 +199,9 @@ fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
         mapped = grade(mapped);
     }
 
-    return vec4<f32>(mapped, 1.0);
+    // The matte rides out beside the finished colour, untouched by
+    // everything above: exposure, the tables, the tone map and the grade
+    // shape light, and coverage is not light. Without a matte this is the
+    // constant one it always was.
+    return vec4<f32>(mapped, alpha);
 }

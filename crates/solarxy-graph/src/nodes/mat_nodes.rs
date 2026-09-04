@@ -710,6 +710,8 @@ fn cook_tex_ref(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact values constructed by the tests
+
     use super::*;
     use crate::cook::InputSlot;
     use std::collections::BTreeMap;

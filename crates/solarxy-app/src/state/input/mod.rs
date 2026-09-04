@@ -87,6 +87,40 @@ impl State {
         }
     }
 
+    /// Release the look-through binding on every pane the current gesture
+    /// targets (the same set `for_each_target_cam` mutates), keeping each
+    /// pane's followed pose as its free view's starting point. Navigating a
+    /// bound pane means taking the view over, not reframing the camera
+    /// node: the write-back the web's locked mode performs is authoring
+    /// machinery, and it waits for the desktop node canvas.
+    pub(super) fn release_look_through_for_gesture(&mut self) {
+        let count = self.view.display.layout.pane_count().min(4);
+        let active = self.view.active_pane;
+        let linked = self.view.cameras_linked;
+        let mut released = false;
+        for i in 0..count {
+            if (linked || i == active)
+                && self.view.pane_settings[i].pane_mode == PaneMode::Scene3D
+                && self.look_through[i].take().is_some()
+            {
+                released = true;
+            }
+        }
+        if released {
+            self.gui
+                .set_toast("Released to free view", crate::gui::ToastSeverity::Info);
+        }
+    }
+
+    /// Release one pane's binding, for the actions that reframe a single
+    /// camera: framing, fly-to-issue, fly-to-annotation.
+    pub(super) fn release_look_through_pane(&mut self, pane: usize) {
+        if pane < 4 && self.look_through[pane].take().is_some() {
+            self.gui
+                .set_toast("Released to free view", crate::gui::ToastSeverity::Info);
+        }
+    }
+
     pub fn set_modifiers(&mut self, modifiers: winit::keyboard::ModifiersState) {
         self.input.modifiers = modifiers;
     }
@@ -108,6 +142,7 @@ impl State {
                     self.show_all_meshes();
                 } else {
                     let bounds = self.scene_bounds();
+                    self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
                 }
             }
@@ -119,6 +154,7 @@ impl State {
                     self.toggle_tone_mode();
                 } else {
                     let bounds = self.scene_bounds();
+                    self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| {
                         cam.reset_to_bounds_axis(
                             &bounds,
@@ -130,6 +166,7 @@ impl State {
             }
             KeyCode::KeyF => {
                 let bounds = self.scene_bounds();
+                self.release_look_through_for_gesture();
                 self.for_each_target_cam(|cam| {
                     cam.reset_to_bounds_axis(
                         &bounds,
@@ -164,6 +201,7 @@ impl State {
                     self.gui.set_toast(msg, ToastSeverity::Success);
                 } else {
                     let bounds = self.scene_bounds();
+                    self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| {
                         cam.reset_to_bounds_axis(
                             &bounds,
@@ -178,6 +216,7 @@ impl State {
                     self.toggle_review_mode();
                 } else {
                     let bounds = self.scene_bounds();
+                    self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| {
                         cam.reset_to_bounds_axis(
                             &bounds,
@@ -188,6 +227,7 @@ impl State {
                 }
             }
             KeyCode::KeyP => {
+                self.release_look_through_for_gesture();
                 self.for_each_target_cam(|cam| {
                     cam.set_projection(ProjectionMode::Perspective);
                 });
@@ -208,6 +248,7 @@ impl State {
                 } else if self.input.modifiers.shift_key() {
                     self.toggle_ssao();
                 } else {
+                    self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| {
                         cam.set_projection(ProjectionMode::Orthographic);
                     });
@@ -427,6 +468,7 @@ impl State {
             KeyCode::F10 => self.toggle_dev_environment(),
             _ => {
                 if let Some(key) = to_camera_key(code) {
+                    self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| {
                         cam.handle_key(key, is_pressed);
                     });
@@ -444,6 +486,7 @@ impl State {
             &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
             &self.renderer.post.luts,
             active_inspection,
+            false,
         );
     }
 
@@ -548,7 +591,18 @@ impl State {
 
     /// Toggle review mode (`Shift+R` or the Review menu) — flips the bit,
     /// opens the panel on entry, and emits the matching toast.
+    ///
+    /// Refused, with the reason, when no model file is open: the desktop's
+    /// review anchors against the file-loaded model, so with a scene or
+    /// nothing open the mode would report itself active and then discard
+    /// every click in silence. Turning an already-active mode off is always
+    /// allowed, so a stale bit can never wedge the shell.
     pub(super) fn toggle_review_mode(&mut self) {
+        if self.scene.is_none() && !self.review.active {
+            self.gui
+                .set_toast("Review needs an open model file", ToastSeverity::Warning);
+            return;
+        }
         let now_active = self.review.toggle_active();
         if now_active {
             self.review.panel_open = true;
@@ -616,20 +670,22 @@ impl State {
     fn scene_issue_aabb(&self, idx: usize) -> Option<solarxy_core::AABB> {
         let info = self.engine_scene.as_ref()?;
         let (id, local) = info.validation.owners.get(idx).copied()?;
-        let object = self.scene_objects.get(id)?;
+        let object = self.raster.scene().get(id)?;
         let issue = self
-            .scene_objects
+            .raster
+            .scene()
             .validation(id)?
             .report
             .issues
             .get(local)?;
-        let raw_to_gpu = self.scene_objects.raw_to_gpu(id)?;
+        let raw_to_gpu = self.raster.scene().raw_to_gpu(id)?;
         resolve_issue_aabb(&issue.scope, &object.model, raw_to_gpu)
             .map(|b| b.transformed(&object.transform))
     }
 
     /// Smoothly fly the active pane's camera to frame `bounds`.
     fn frame_active_pane(&mut self, bounds: solarxy_core::AABB) {
+        self.release_look_through_pane(self.view.active_pane);
         if let Some(cam) = &mut self.view.cameras[self.view.active_pane] {
             cam.reset_to_bounds(&bounds);
         }
@@ -727,7 +783,8 @@ impl State {
                 // untransformed box would send the camera to the origin for
                 // anything the scene has moved.
                 let aabb = self
-                    .scene_objects
+                    .raster
+                    .scene()
                     .get(id)
                     .map(|o| o.model.bounds.transformed(&o.transform));
                 if let Some(aabb) = aabb {
@@ -735,7 +792,7 @@ impl State {
                 }
             }
             OutlinerAction::FrameObjectMesh(id, mesh) => {
-                let aabb = self.scene_objects.get(id).and_then(|o| {
+                let aabb = self.raster.scene().get(id).and_then(|o| {
                     o.model
                         .mesh_bounds
                         .get(mesh)
@@ -780,7 +837,11 @@ impl State {
                 // Absent or hidden objects are filtered out of the draw
                 // list entirely, so pointing at one would outline nothing
                 // while claiming a selection is showing.
-                self.scene_objects.get(id).filter(|o| o.visible).map(|_| id)
+                self.raster
+                    .scene()
+                    .get(id)
+                    .filter(|o| o.visible)
+                    .map(|_| id)
             }
             GraphContext::Subflow(_) => None,
         };
@@ -794,7 +855,7 @@ impl State {
     /// the only durable place to put this. Routing it through the engine
     /// also puts the toggle in the undo stack for free.
     fn toggle_scene_object(&mut self, id: SceneObjectId) {
-        let Some(visible) = self.scene_objects.get(id).map(|o| o.visible) else {
+        let Some(visible) = self.raster.scene().get(id).map(|o| o.visible) else {
             return;
         };
         let Some(engine) = self.engine.as_mut() else {
@@ -978,6 +1039,9 @@ impl State {
         self.preferences.display.exposure = self.renderer.post.exposure;
         self.preferences.display.inspection_mode = pds.inspection_mode;
         self.preferences.display.texel_density_target = pds.texel_density_target;
+        self.preferences
+            .display
+            .set_post_strengths(self.renderer.post.strengths());
         preferences::save(&self.preferences)
     }
 
@@ -1049,6 +1113,12 @@ impl State {
             }
         } else {
             let mapped = to_pointer_button(button);
+            // Only the buttons the camera navigates with count: a right or
+            // side button is ignored by the controller, so a drag with one
+            // held must not read as navigation and release a binding.
+            if matches!(mapped, PointerButton::Left | PointerButton::Middle) {
+                self.input.nav_button_down = pressed;
+            }
             self.for_each_target_cam(|cam| cam.handle_mouse_button(mapped, pressed));
         }
     }
@@ -1201,6 +1271,12 @@ impl State {
             }
         } else {
             let ap = self.view.active_pane;
+            // A move with a camera button held is a navigation drag, and a
+            // drag on a bound pane takes the view over. A plain move or a
+            // click-release never releases anything.
+            if self.input.nav_button_down {
+                self.release_look_through_for_gesture();
+            }
             let orbiting = self.view.cameras[ap]
                 .as_ref()
                 .is_some_and(CameraState::is_orbiting);
@@ -1225,6 +1301,7 @@ impl State {
             let pds = &mut self.view.pane_settings[ap];
             pds.uv_zoom = (pds.uv_zoom * (1.0 + delta * 0.1)).clamp(0.1, 50.0);
         } else {
+            self.release_look_through_for_gesture();
             self.for_each_target_cam(|cam| cam.handle_scroll(delta));
         }
     }

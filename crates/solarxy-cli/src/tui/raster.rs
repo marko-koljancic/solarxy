@@ -229,6 +229,8 @@ const BRAILLE_BITS: [(u16, u16, u8); 8] = [
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // clamped inputs must evaluate bit-identically
+
     use super::*;
 
     fn render(points: &[Point], w: u16, h: u16, style: PlotStyle) -> Vec<String> {
@@ -240,7 +242,7 @@ mod tests {
     /// Not an assertion: projects a real model so the legibility question the
     /// design leaves open can actually be looked at.
     #[test]
-    #[ignore]
+    #[ignore = "manual preview over a model on disk, not an assertion"]
     fn preview_a_real_model() {
         // Resolved from the manifest rather than the working directory, so
         // the tool works from wherever the test runner happens to start.
@@ -255,7 +257,7 @@ mod tests {
         let mut points = Vec::new();
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
         for mesh in &analyzer.meshes {
-            for xyz in mesh.positions.chunks_exact(3) {
+            for xyz in mesh.positions.as_chunks::<3>().0 {
                 for axis in 0..3 {
                     lo[axis] = lo[axis].min(xyz[axis]);
                     hi[axis] = hi[axis].max(xyz[axis]);
@@ -264,7 +266,7 @@ mod tests {
         }
         let span = |axis: usize| (hi[axis] - lo[axis]).max(f32::EPSILON);
         for mesh in &analyzer.meshes {
-            for xyz in mesh.positions.chunks_exact(3) {
+            for xyz in mesh.positions.as_chunks::<3>().0 {
                 points.push(Point {
                     x: (xyz[0] - lo[0]) / span(0),
                     y: 1.0 - (xyz[1] - lo[1]) / span(1),
@@ -295,7 +297,7 @@ mod tests {
     #[test]
     fn every_dot_of_the_block_lands_on_its_own_bit() {
         for (across, down, bit) in BRAILLE_BITS {
-            let x = (f32::from(across) + 0.5) / 2.0;
+            let x = f32::midpoint(f32::from(across), 0.5);
             let y = (f32::from(down) + 0.5) / 4.0;
             let rows = render(&[Point::flat(x, y)], 1, 1, PlotStyle::Braille);
             let drawn = rows[0].chars().next().expect("one cell");
@@ -321,7 +323,7 @@ mod tests {
             .iter()
             .map(|(across, down, _)| {
                 Point::flat(
-                    (f32::from(*across) + 0.5) / 2.0,
+                    f32::midpoint(f32::from(*across), 0.5),
                     (f32::from(*down) + 0.5) / 4.0,
                 )
             })
@@ -401,6 +403,7 @@ mod tests {
     /// splat of a point cloud produces. A disc has to leave its corners empty.
     #[test]
     fn a_round_body_does_not_render_as_a_filled_rectangle() {
+        const FULL: char = '\u{28ff}';
         let mut points = Vec::new();
         for xi in 0..64u16 {
             for yi in 0..64u16 {
@@ -414,7 +417,6 @@ mod tests {
         }
 
         let rows = render(&points, 8, 4, PlotStyle::Braille);
-        const FULL: char = '\u{28ff}';
 
         // The corners clip one dot each, because a disc inscribed in the grid
         // genuinely reaches into those cells. What must not happen is their

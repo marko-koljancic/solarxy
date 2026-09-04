@@ -7,7 +7,13 @@
 // import action (the widget's setParam or the drop flow's node creation).
 
 import { useRef } from "react";
-import { completeModelImport, dispatch, stagedManifestNames, stageFile } from "../engine/session";
+import {
+  completeModelImport,
+  dispatch,
+  refsWithMtlTextures,
+  stagedManifestNames,
+  stageFile,
+} from "../engine/session";
 import { hasMissing, missingSidecars } from "../engine/sidecars";
 import { useUi } from "../store/ui";
 import { Modal } from "./Modal";
@@ -38,7 +44,12 @@ export function MissingSidecarsModal() {
 
   const onAddFiles = async (files: File[]) => {
     for (const file of files) await stageFile(file);
-    const missing = missingSidecars(prompt.missing, stagedManifestNames());
+    // A material library added HERE names textures the parse will also
+    // want, so the wanted set widens before the re-diff: adding the .mtl
+    // alone keeps the dialog open asking for its maps rather than
+    // completing into a silently untextured import.
+    const wanted = await refsWithMtlTextures(prompt.missing, files);
+    const missing = missingSidecars(wanted, stagedManifestNames());
     if (hasMissing(missing)) {
       useUi.getState().setSidecarPrompt({ ...prompt, missing });
     } else {
@@ -50,7 +61,34 @@ export function MissingSidecarsModal() {
   const optional = prompt.missing.optional;
 
   return (
-    <Modal title="Missing companion files" onClose={close}>
+    <Modal
+      title="Missing companion files"
+      onClose={close}
+      footer={
+        <div className="modal-actions">
+          <button className="btn" onClick={close}>
+            Cancel
+          </button>
+          <button className="btn" onClick={complete}>
+            Import Anyway
+          </button>
+          <button className="btn primary" onClick={() => inputRef.current?.click()}>
+            Add Files…
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              if (files.length > 0) void onAddFiles(files);
+              e.target.value = "";
+            }}
+          />
+        </div>
+      }
+    >
         <p className="sidecar-intro">
           <strong>{prompt.primaryName}</strong> references files that were not imported. The
           browser can only read files you select, so add them below. Tip: dragging the
@@ -79,28 +117,6 @@ export function MissingSidecarsModal() {
             </ul>
           </div>
         )}
-        <div className="modal-actions">
-          <button className="btn" onClick={close}>
-            Cancel
-          </button>
-          <button className="btn" onClick={complete}>
-            Import Anyway
-          </button>
-          <button className="btn primary" onClick={() => inputRef.current?.click()}>
-            Add Files…
-          </button>
-          <input
-            ref={inputRef}
-            type="file"
-            multiple
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              if (files.length > 0) void onAddFiles(files);
-              e.target.value = "";
-            }}
-          />
-        </div>
     </Modal>
   );
 }

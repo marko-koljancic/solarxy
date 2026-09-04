@@ -12,6 +12,7 @@ import type {
   AttrVizState,
   AttributePage,
   AttributeSummary,
+  BackendCapsSet,
   CameraCommand,
   CameraPose,
   Command,
@@ -36,6 +37,12 @@ import type {
   ResolvedParam,
   ScreenshotOpts,
   ScreenshotResult,
+  RenderSettings,
+  StillFormat,
+  StillPass,
+  StillPasses,
+  StillSpace,
+  StillTileDto,
   SaveExtra,
   SlxyLoadResult,
   ValidateJob,
@@ -158,6 +165,100 @@ export class SolarxyClient {
     return (this.app.poll_screenshot() ?? undefined) as ScreenshotResult | undefined;
   }
 
+  /** Starts a still render. Throws if one is already running.
+   *
+   * The job then advances one chunk per frame on its own: nothing here drives
+   * it. Progress arrives as `renderProgress` host events and finished tiles
+   * through `takeStillTile`, which is why this returns nothing. */
+  startStillRender(
+    ctx: GraphContext,
+    node: number,
+    format: StillFormat,
+    space: StillSpace,
+  ): void {
+    this.app.startStillRender(ctx, node, format, space);
+  }
+
+  /** The finished float still, EXR-encoded.
+   *
+   * Encoded by the same writer the headless command uses, so a file saved here
+   * and one rendered on the command line are the same file. Throws when the
+   * still was not rendered as a float image, which the dialog prevents by only
+   * offering the save for a render that was. */
+  saveStillExr(): Uint8Array {
+    return this.app.saveStillExr() as Uint8Array;
+  }
+
+  /** Which space the running or finished still's float image is in, or
+   * undefined when it has none. Read from the render rather than from what the
+   * dialog asked for, so a label cannot drift from the file. */
+  stillFloatSpace(): StillSpace | undefined {
+    return (this.app.stillFloatSpace() ?? undefined) as StillSpace | undefined;
+  }
+
+  /** PNG-encodes an assembled RGBA8 still through the engine's own encoder.
+   *
+   * The transparent render's save path: a canvas stores its backing
+   * premultiplied, so toBlob round-trips straight alpha through a multiply
+   * and a divide and corrupts every partially covered pixel. The window keeps
+   * a pristine copy of the finished tiles and hands it here, so the browser's
+   * file and the command line's carry the same values. */
+  encodeStillPng(pixels: Uint8Array, width: number, height: number): Uint8Array {
+    return this.app.encodeStillPng(pixels, width, height) as Uint8Array;
+  }
+
+  /** What a `render` node is asking for, for the dialog to show before
+   * anything renders.
+   *
+   * The same resolver the start runs, so the confirmation screen and the job
+   * cannot hold two opinions about one node. */
+  renderSettings(ctx: GraphContext, node: number): RenderSettings {
+    return this.app.renderSettings(ctx, node) as RenderSettings;
+  }
+
+  /** Cancels the running still render. Safe when nothing is running. */
+  cancelStillRender(): void {
+    this.app.cancelStillRender();
+  }
+
+  /** What each render backend can do. Constants on the Rust side, so one
+   * read at boot is the whole cost. */
+  backendCaps(): BackendCapsSet {
+    return this.app.backendCaps() as BackendCapsSet;
+  }
+
+  /** A finished tile, or undefined when none is waiting. Drain in a loop:
+   * more than one can land between frames. */
+  takeStillTile(): StillTileDto | undefined {
+    return (this.app.takeStillTile() ?? undefined) as StillTileDto | undefined;
+  }
+
+  /** The picture so far, or undefined when none is waiting.
+   *
+   * The same shape a tile crosses in, so it paints through the same call. It is
+   * a look at a tile that has not finished: the finished tile overwrites it at
+   * the same coordinates, and it never reaches the file that is saved. */
+  takeStillPreview(): StillTileDto | undefined {
+    return (this.app.takeStillPreview() ?? undefined) as StillTileDto | undefined;
+  }
+
+  /** Which passes the running render produces, and whether its engine could
+   * produce any at all. */
+  stillPasses(): StillPasses {
+    return this.app.stillPasses() as StillPasses;
+  }
+
+  /** One pass as display pixels, RGBA8 over the whole image, mapped by the
+   * same functions the terminal's watch window draws with. */
+  stillPassDisplay(pass: StillPass): Uint8Array | undefined {
+    return (this.app.stillPassDisplay(pass) ?? undefined) as Uint8Array | undefined;
+  }
+
+  /** One pass as the floating-point file it is saved as. */
+  stillPassFile(pass: StillPass): Uint8Array {
+    return this.app.stillPassFile(pass) as Uint8Array;
+  }
+
   /** Marks the picked node's scene object as selected (viewport tint). */
   setSceneSelection(node: NodeId | undefined): void {
     this.app.set_scene_selection(node);
@@ -222,6 +323,13 @@ export class SolarxyClient {
       d.pointSize,
       d.ssaoEnabled,
       d.bloomEnabled,
+      // Named at the call site because the three that follow are all
+      // numbers of the same kind and the boundary takes them positionally;
+      // a swap here would be silent. Rust clamps them.
+      d.bloomStrength,
+      d.bloomThreshold,
+      d.ssaoStrength,
+      d.previewDenoise,
       applyWireframe,
       applyBackground,
     );

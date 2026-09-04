@@ -7,14 +7,21 @@
 //! `solarxy-web`'s `app.rs`, whose own header said so. This crate is the one
 //! copy.
 //!
-//! # What this crate is not
+//! # Where the backend trait sits
 //!
-//! **There is no renderer trait here, and no dynamic dispatch.** This is
-//! deduplication validated by two callers of one implementation, not an
-//! abstraction over two backends. A trait would have to be designed against a
-//! backend that does not exist yet, then changed when the real one arrives,
-//! refactoring every host twice. When a second *implementation* exists, it
-//! shapes the trait.
+//! Through 0.8.2 this crate deliberately had no renderer trait: one
+//! implementation with two callers is deduplication, and a trait designed
+//! against a backend that does not exist yet gets redesigned when the real one
+//! arrives, refactoring every host twice. 0.9.0 is when the second
+//! implementation shows up, so the trait was written then, from three call
+//! sites rather than one guess.
+//!
+//! **It is declared in `solarxy_renderer::backend`, not here**, so a backend
+//! living in the renderer can implement it without depending on this crate.
+//! What lives here is [`RasterBackend`], the implementation that wraps
+//! [`pane::encode_pane_passes`], because that is where the pass chain is.
+//!
+//! # What this crate is not
 //!
 //! **It does not depend on `solarxy-graph`.** The engine and the renderer
 //! meet only at `solarxy_core::scene::SceneDelta`, and this crate sits on
@@ -70,17 +77,26 @@
 pub mod attr_labels;
 pub mod attr_viz;
 pub mod cameras;
+pub mod compare;
 pub mod display_defaults;
 pub mod gizmo;
+pub mod headless;
 pub mod lighting;
 pub mod pane;
+pub mod passes;
+pub mod raster;
+pub mod still;
 pub mod view;
 
 pub use cameras::{depth_bounds, ensure_pane_cameras};
+pub use compare::{ImageDifference, compare_rgba8};
 pub use lighting::{active_ibl, rebuild_light_bind_group};
 pub use pane::{
-    PaneComposite, PaneScene, PaneUniforms, composite_and_submit, render_3d_passes,
-    render_overdraw_pane, setup_pane_lighting, write_inspection_block, write_pane_uniforms,
-    write_wireframe_params,
+    EncodedPane, PaneComposite, PaneScene, PaneUniforms, apply_viewer_rig, composite_and_submit,
+    encode_pane_passes, render_3d_passes, render_overdraw_pane, setup_pane_lighting,
+    write_inspection_block, write_pane_uniforms, write_wireframe_params,
 };
+pub use passes::{AovKind, PassKind, PassSelector};
+pub use raster::RasterBackend;
+pub use still::{StillCtx, StillRenderJob, StillSpec, StillStep};
 pub use view::HostViewState;

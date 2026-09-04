@@ -48,18 +48,37 @@ pub mod validation;
 ///
 /// Handed in rather than held, so a panel owns only its own view state and
 /// cannot accumulate a private copy of the model that drifts from the report.
-pub struct Ctx<'a> {
-    pub report: &'a AnalysisReport,
-    /// The raw arrays the plots project, borrowed from the analyzer rather
-    /// than copied into the report.
-    pub model: &'a ModelView<'a>,
+///
+/// `C` is what the surface is *about*: the analysis for the analyze surface, a
+/// render's progress for the dashboard. Everything else here is chrome and is
+/// the same whatever the subject, which is the whole reason the split is worth
+/// a type parameter.
+pub struct Ctx<'a, C: ?Sized> {
+    /// What this surface is about.
+    pub subject: &'a C,
     pub theme: &'a Slots,
     pub glyphs: &'a Glyphs,
     pub caps: Capabilities,
     pub focused: bool,
 }
 
-impl Ctx<'_> {
+/// What the analyze surface's panels read.
+pub struct Analysis<'a> {
+    pub report: &'a AnalysisReport,
+    /// The raw arrays the plots project, borrowed from the analyzer rather
+    /// than copied into the report.
+    pub model: &'a ModelView<'a>,
+}
+
+/// The context an analyze panel is handed.
+///
+/// One lifetime rather than two, so a panel returning rows borrowed from the
+/// report says so in the ordinary way: `fn rows<'a>(&self, ctx: &AnalyzeCtx<'a>)
+/// -> Vec<&'a Row>`. The surface holds its subject for longer than any one
+/// frame's borrow, and the shorter of the two is the one that reaches here.
+pub type AnalyzeCtx<'a> = Ctx<'a, Analysis<'a>>;
+
+impl<C: ?Sized> Ctx<'_, C> {
     /// The ink a panel's own chrome takes: the accent when it holds focus,
     /// dim otherwise. Focus is carried by border weight first; this is the
     /// second signal, not the only one.
@@ -82,23 +101,30 @@ pub enum Action {
 }
 
 /// Anything that can occupy a leaf.
-pub trait Panel {
+///
+/// Two parameters rather than one and an associated type. An associated type
+/// would have to be named at every boxed panel, which is where the surfaces
+/// keep theirs, and naming it there is exactly what a second parameter does
+/// with less ceremony. `A` is what a key press asks the surface to do, and it
+/// is the surface's own vocabulary: the analyze surface can jump to a subject,
+/// and a surface with nothing to ask uses the unit type.
+pub trait Panel<C: ?Sized, A: Default> {
     /// The words this panel puts in its own top border.
     fn menu(&self) -> &'static [&'static str] {
         &[]
     }
 
     /// Draw into the area inside the border.
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>);
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_, C>);
 
     /// Handle a key while focused.
-    fn handle(&mut self, _key: KeyEvent, _ctx: &Ctx<'_>) -> Action {
-        Action::None
+    fn handle(&mut self, _key: KeyEvent, _ctx: &Ctx<'_, C>) -> A {
+        A::default()
     }
 
     /// The right-hand end of the panel's bottom border, when it has something
     /// to count.
-    fn status(&self, _ctx: &Ctx<'_>) -> Option<String> {
+    fn status(&self, _ctx: &Ctx<'_, C>) -> Option<String> {
         None
     }
 
@@ -122,13 +148,16 @@ pub trait Panel {
     ///
     /// Shown live in the border while a query is being typed, which is what
     /// makes filtering feel like narrowing rather than guessing.
-    fn filter_counts(&self, _ctx: &Ctx<'_>) -> Option<(usize, usize)> {
+    fn filter_counts(&self, _ctx: &Ctx<'_, C>) -> Option<(usize, usize)> {
         None
     }
 }
 
+/// One analyze panel, boxed for a leaf to hold.
+pub type BoxedAnalyzePanel<'a> = Box<dyn Panel<Analysis<'a>, Action> + 'a>;
+
 /// Build the panel for a type.
-pub fn make(kind: PanelType) -> Box<dyn Panel> {
+pub fn make<'a>(kind: PanelType) -> BoxedAnalyzePanel<'a> {
     match kind {
         PanelType::Geometry => Box::new(geometry::Geometry),
         PanelType::Health => Box::new(health::Health::default()),
@@ -150,8 +179,10 @@ pub fn make(kind: PanelType) -> Box<dyn Panel> {
 /// so it says what it is waiting for instead of sitting blank.
 pub struct Catalogue;
 
-impl Panel for Catalogue {
-    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
+/// The empty leaf says the same thing to any surface, so it is written for
+/// any subject and any action rather than for the analyze pair.
+impl<C: ?Sized, A: Default> Panel<C, A> for Catalogue {
+    fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_, C>) {
         let (line, rect) = super::widgets::empty_state("pick a panel", area, ctx.theme);
         frame.render_widget(ratatui::widgets::Paragraph::new(line), rect);
     }

@@ -1,15 +1,50 @@
 //! One pane's render: the uniform writes, the pass chain, and the composite.
+//!
+//! [`encode_pane_passes`] is the whole body, 3D and UV alike. It arrived after the
+//! pieces below did, and collapsing the last two hand-rolled copies onto it
+//! meant settling five places where the shells had quietly drifted apart.
+//! Recording them here, because each one is a decision and four of them look
+//! like accidents:
+//!
+//! - **Point size on the UV path.** One shell carried the compile-time default
+//!   and the other the live setting, with comments making contradictory claims
+//!   about the same shared uniform. The live setting wins: it is the only one
+//!   that stays right after the value is changed, and the shell that never
+//!   changes it reads the same number either way.
+//! - **The aspect guard.** One shell divided by a raw pane height and could
+//!   produce a non-finite aspect on a zero-height pane. The floor is kept.
+//! - **The outline predicate.** One shell asked only whether something was
+//!   selected, the other whether the selection resolves to a drawable object.
+//!   The stricter one wins, and it is what the pass chain already gates on, so
+//!   the looser one only ever submitted a blit that painted nothing.
+//! - **The dark-background write's position** in the UV chain differed. It is
+//!   a queue write, applied ahead of the encoder's commands at submit either
+//!   way, so the two orders were always the same picture.
+//! - **`scene_present` at the composite.** One shell computed it and the other
+//!   passed a constant `true`, so a pane with a camera and an empty scene had
+//!   bloom and ambient occlusion folded into its composite on one shell and not
+//!   the other. The computed answer wins; see the scene-present field on the
+//!   frame context.
+//!
+//! A sixth was recorded here and left alone, and has since been settled: the UV
+//! overlap statistics pass wrote the identity camera, encoded, and wrote the
+//! pane camera back, all before one submit, so the last write won and the
+//! statistic was measured at the pane's zoom. It now has a camera of its own
+//! that nothing writes.
 
 use solarxy_core::AABB;
-use solarxy_core::preferences::{InspectionMode, ResolvedBackground};
+use solarxy_core::preferences::{InspectionMode, ResolvedBackground, UvMapBackground};
 use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings};
+use solarxy_renderer::backend::{FrameCtx, PaneContent, UvSource};
+use solarxy_renderer::scene_objects::SceneObjects;
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, SelectionStyle, WireframeParams};
 use solarxy_renderer::panes::PaneRect;
-use solarxy_renderer::scene::{BackgroundModeExt, lights_from_camera};
+use solarxy_core::scene::{SceneDelta, SceneOp};
+use solarxy_renderer::scene::{BackgroundModeExt, lights_from_camera, viewer_rig};
 use solarxy_renderer::visualization::GridUniform;
 
 /// What a pane needs written before its passes encode.
@@ -17,6 +52,17 @@ use solarxy_renderer::visualization::GridUniform;
 /// Several of these are `Option` because one shell has a capability the other
 /// does not, and in every case the `None` arm is what that shell already did.
 pub struct PaneUniforms<'a> {
+    /// Set when this pane is one tile of a larger image, so the background
+    /// gradient draws its slice of the picture's sweep rather than a whole
+    /// sweep of its own.
+    ///
+    /// This is what `uv_y_offset` and `uv_y_scale` on the gradient uniform have
+    /// always been for; nothing needed them until a tile did, so both call
+    /// sites wrote the identity.
+    pub window: Option<solarxy_renderer::backend::ImageWindow>,
+    /// This pane's height in pixels, which the window needs and the rect the
+    /// caller already has carries.
+    pub tile_height: f32,
     /// The pane's background, already resolved against whatever registry of
     /// user backgrounds the shell keeps.
     pub background: ResolvedBackground,
@@ -76,15 +122,37 @@ pub fn write_pane_uniforms(queue: &wgpu::Queue, renderer: &Renderer, u: &PaneUni
     write_wireframe_params(queue, renderer, u.background, u.pds, u.display);
 
     let (top, bottom) = u.background.sky_colors();
+    // A tile takes its slice of the whole image's gradient. Without this every
+    // tile sweeps top to bottom within itself, which assembles into a picture
+    // banded once per tile row -- and it is invisible in a single-tile render,
+    // which is every render there was before the still job.
+    //
+    // The offset is measured from the **bottom**, because the background's
+    // `uv.y` is: its vertex stage maps `uv` straight onto clip space, where
+    // `-1` is the bottom of the target, so `uv.y` of zero is the bottom row.
+    // Tile rectangles are measured from the top like every other rect here, so
+    // the two have to be reconciled exactly once, and this is the place.
+    #[allow(clippy::cast_precision_loss)]
+    let (uv_y_offset, uv_y_scale) = match u.window {
+        Some(w) => {
+            let full = w.full[1].max(1) as f32;
+            let from_top = w.origin[1] as f32;
+            (
+                1.0 - (from_top + u.tile_height) / full,
+                u.tile_height / full,
+            )
+        }
+        None => (0.0, 1.0),
+    };
     let gradient = GradientUniform {
         top_color: [top[0], top[1], top[2], 1.0],
         bottom_color: [bottom[0], bottom[1], bottom[2], 1.0],
-        uv_y_offset: 0.0,
-        uv_y_scale: 1.0,
+        uv_y_offset,
+        uv_y_scale,
         _pad: [0.0; 2],
     };
     queue.write_buffer(
-        &renderer.wire._gradient_buffer,
+        &renderer.wire.gradient_buffer,
         0,
         bytemuck::bytes_of(&gradient),
     );
@@ -260,6 +328,14 @@ pub struct PaneComposite {
     /// Whether to blit the selection rim after tone mapping. `false` on a
     /// shell with no selection concept.
     pub outline: bool,
+    /// [`solarxy_renderer::backend::BackendCaps::writes_occlusion`] of the backend
+    /// that drew this pane.
+    ///
+    /// Carried per pane rather than read once per frame because panes may run
+    /// different backends in the same layout, and the buffer the chain would
+    /// multiply by is shared between them: a traced pane compositing against
+    /// it would be darkened by its raster neighbour's answer.
+    pub writes_occlusion: bool,
 }
 
 /// Composite one pane into the surface and submit its encoder.
@@ -274,7 +350,8 @@ pub fn composite_and_submit(
     c: &PaneComposite,
 ) {
     let pane_bloom = renderer.post.bloom_enabled && !c.is_uv_map && c.scene_present;
-    let pane_ssao = renderer.post.ssao_enabled && !c.is_uv_map && c.scene_present;
+    let pane_ssao =
+        renderer.post.ssao_enabled && !c.is_uv_map && c.scene_present && c.writes_occlusion;
     renderer.post.composite.write_params(
         queue,
         pane_bloom,
@@ -282,6 +359,9 @@ pub fn composite_and_submit(
         &c.look,
         &renderer.post.luts,
         c.inspection,
+        // A pane never carries a matte: transparency is a property of a
+        // render, not a display mode.
+        false,
     );
 
     let viewport = Some([c.rect.x, c.rect.y, c.rect.width, c.rect.height]);
@@ -293,6 +373,7 @@ pub fn composite_and_submit(
         &renderer.post.ssao,
         viewport,
         c.index == 0,
+        None,
     );
 
     // The selection rim lands after tone mapping, so it never blooms and AO
@@ -302,6 +383,285 @@ pub fn composite_and_submit(
     }
 
     queue.submit(std::iter::once(encoder.finish()));
+}
+
+/// What a pane's passes decided, and what its composite needs to know.
+///
+/// Distinct from [`solarxy_renderer::backend::FrameOutcome`], which answers a
+/// different question: that one says whether a progressive backend has
+/// converged, this one says how to parameterise the composite that follows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EncodedPane {
+    /// Whether this pane rendered a UV layout rather than a 3D scene.
+    pub is_uv_map: bool,
+    /// Whether the pane had scene content. `false` for a slot with no camera,
+    /// whatever [`FrameCtx::scene_present`] said.
+    pub scene_present: bool,
+}
+
+/// Encode one pane's uniform writes and pass chain into the context's encoder,
+/// without compositing or submitting.
+///
+/// This is the raster pass chain both shells drive, and the body the raster
+/// backend adapter wraps. It stops short of the composite for two reasons: the
+/// encoder has to be submitted by whoever owns it, and the web shell's
+/// offscreen capture runs this identical chain and then composites differently,
+/// always clearing, into a full-rect target, and without the selection rim.
+pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>, scene: &SceneObjects) -> EncodedPane {
+    // Destructured rather than reached through `ctx.`, because the renderer,
+    // the encoder and the camera are all borrowed mutably at once and only
+    // field-level bindings let the compiler see they are disjoint.
+    let FrameCtx {
+        device,
+        queue,
+        renderer,
+        encoder,
+        rect,
+        is_split,
+        pds,
+        display,
+        background,
+        camera,
+        env,
+        bounds,
+        grid_plane,
+        scene_present,
+        content,
+        window,
+        ..
+    } = ctx;
+
+    // The 3D scene renders the full pane; the per-pane toolbar labels float on
+    // top of it, so no strip is reserved. The floor guards a zero-height pane,
+    // which the desktop shell used to let through as a division by zero.
+    let pane_aspect = rect.width / rect.height.max(1.0);
+
+    let (is_uv_map, present) = match (&*content, camera.as_deref_mut()) {
+        (
+            PaneContent::Scene {
+                extra,
+                selected,
+                cam_data,
+                shadow,
+            },
+            Some(camera),
+        ) => {
+            let objects = &build_draw_list(scene, *extra, *selected);
+            // A tile of a larger image gets an asymmetric frustum cut from that
+            // image's, and the image's aspect rather than its own: the two
+            // differ for every tile that is not the same shape as the picture,
+            // and using the tile's would render a different shot per tile.
+            if let Some(w) = *window {
+                #[allow(clippy::cast_precision_loss)]
+                let full = [w.full[0] as f32, w.full[1] as f32];
+                #[allow(clippy::cast_precision_loss)]
+                let origin = [w.origin[0] as f32, w.origin[1] as f32];
+                camera.write_windowed(
+                    queue,
+                    full[0] / full[1].max(1.0),
+                    origin,
+                    [rect.width, rect.height],
+                    full,
+                );
+            } else {
+                camera.write_with_aspect(queue, pane_aspect);
+            }
+            write_pane_uniforms(
+                queue,
+                renderer,
+                &PaneUniforms {
+                    background: *background,
+                    pds,
+                    display,
+                    camera: Some(&*camera),
+                    env,
+                    bounds: *bounds,
+                    grid_plane: *grid_plane,
+                    window: *window,
+                    tile_height: rect.height,
+                },
+            );
+            if pds.inspection_mode == InspectionMode::Overdraw {
+                render_overdraw_pane(
+                    renderer,
+                    encoder,
+                    objects,
+                    &camera.bind_group,
+                    *rect,
+                    *is_split,
+                );
+            } else {
+                render_3d_passes(
+                    renderer,
+                    queue,
+                    encoder,
+                    &PaneScene {
+                        objects,
+                        env,
+                        cam_bg: &camera.bind_group,
+                        cam_data,
+                        pds,
+                        background: *background,
+                        shadow: *shadow,
+                        // Asked of the list rather than of the shell's
+                        // selection, because a selection that resolves to
+                        // nothing drawable must not switch on the mask and
+                        // jump-flood stages for an empty silhouette.
+                        selected: objects.iter().any(|o| o.selected),
+                    },
+                );
+            }
+            (false, *scene_present)
+        }
+        (PaneContent::Uv { source }, Some(_)) => {
+            let resolved = match source {
+                UvSource::External(object) => Some(*object),
+                UvSource::Scene { preferred } => preferred
+                    .and_then(|id| scene.draw_object(id))
+                    .or_else(|| scene.draw_objects().next()),
+                UvSource::None => None,
+            };
+            render_uv_pane(
+                &UvPane {
+                    device,
+                    queue,
+                    pane_aspect,
+                    pds,
+                    display,
+                    background: *background,
+                    object: resolved.as_ref(),
+                },
+                renderer,
+                encoder,
+            );
+            (true, *scene_present)
+        }
+        // No camera in this slot, whatever the pane mode says.
+        _ => {
+            renderer.render_empty_pass(encoder, *background);
+            (false, false)
+        }
+    };
+
+    EncodedPane {
+        is_uv_map,
+        scene_present: present,
+    }
+}
+
+/// Assemble the raster draw list: the host's extra object first, then every
+/// visible object the backend owns, with the selection flagged.
+///
+/// Order is load-bearing, not incidental. Overdraw counts fragments in
+/// submission order, and the depth-equal overlays (edge wireframe, validation
+/// lines) resolve against whatever landed first, so the host's own object
+/// stays ahead of the delta-fed ones exactly as it did when it was the only
+/// entry that could come first.
+///
+/// An empty list is a legitimate frame: the background, grid, floor and axes
+/// come from the environment, not from this list.
+///
+/// This was written twice, once per shell, with the selection loop duplicated
+/// character for character. It belongs to whichever component owns the scene,
+/// and that is now the backend.
+fn build_draw_list<'a>(
+    scene: &'a SceneObjects,
+    extra: Option<DrawObject<'a>>,
+    selected: Option<solarxy_core::scene::SceneObjectId>,
+) -> Vec<DrawObject<'a>> {
+    let mut objects = Vec::with_capacity(usize::from(extra.is_some()) + scene.len());
+    if let Some(extra) = extra {
+        objects.push(extra);
+    }
+    objects.extend(scene.draw_objects());
+    // `SceneObjects` hands out its draw objects unselected, so the flag is set
+    // here by matching on model identity, which is also why the lookup filters
+    // hidden objects: a hidden one is not in this list at all.
+    if let Some(id) = selected
+        && let Some(selected) = scene.draw_object(id)
+    {
+        for object in &mut objects {
+            if std::ptr::eq(object.model, selected.model) {
+                object.selected = true;
+            }
+        }
+    }
+    objects
+}
+
+/// The UV pane's chain: the UV camera and wireframe writes, the optional
+/// overlap count pass and its one-shot statistics readback, then the layout
+/// pass itself.
+struct UvPane<'a> {
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    pane_aspect: f32,
+    pds: &'a PaneDisplaySettings,
+    display: &'a DisplaySettings,
+    background: ResolvedBackground,
+    object: Option<&'a DrawObject<'a>>,
+}
+
+fn render_uv_pane(f: &UvPane<'_>, renderer: &mut Renderer, encoder: &mut wgpu::CommandEncoder) {
+    let (device, queue, pane_aspect) = (f.device, f.queue, f.pane_aspect);
+    renderer
+        .uv_cam
+        .write(queue, f.pds.uv_offset, f.pds.uv_zoom, pane_aspect);
+    let uv_wire = WireframeParams {
+        color: [0.8, 0.8, 0.8, 1.0],
+        line_width: f.pds.line_weight.width_px(),
+        screen_width: renderer.target_width as f32,
+        screen_height: renderer.target_height as f32,
+        // The UV pass draws no points, but this write clobbers the shared
+        // uniform, so it carries the live size for the next 3D pass rather
+        // than a constant that is only right while nothing has changed it.
+        point_size: f.display.point_size,
+    };
+    queue.write_buffer(
+        &renderer.wire.wireframe_params_buffer,
+        0,
+        bytemuck::bytes_of(&uv_wire),
+    );
+    if f.pds.uv_bg == UvMapBackground::Dark {
+        let dark = GradientUniform {
+            top_color: [0.10, 0.10, 0.10, 1.0],
+            bottom_color: [0.10, 0.10, 0.10, 1.0],
+            uv_y_offset: 0.0,
+            uv_y_scale: 1.0,
+            _pad: [0.0; 2],
+        };
+        queue.write_buffer(&renderer.wire.gradient_buffer, 0, bytemuck::bytes_of(&dark));
+    }
+    let stats_needed = f.pds.show_uv_overlap
+        && renderer.uv_overlap.stats_dirty
+        && !renderer.uv_overlap.readback_pending;
+
+    let Some(object) = f.object.filter(|o| o.model.has_uvs) else {
+        renderer.render_empty_pass(encoder, f.background);
+        return;
+    };
+
+    if f.pds.show_uv_overlap {
+        renderer.render_uv_overlap_count_pass(
+            encoder,
+            object,
+            &renderer.uv_cam.bind_group,
+            &renderer.uv_overlap.count_view,
+        );
+        if stats_needed {
+            // The one-shot statistics render, through the camera that is
+            // always the whole unit square. The percentage describes the
+            // layout, not how far into it the reader has zoomed.
+            renderer.render_uv_overlap_count_pass(
+                encoder,
+                object,
+                &renderer.uv_cam_stats.bind_group,
+                &renderer.uv_overlap.stats_view,
+            );
+            renderer.uv_overlap.request_readback(device, encoder);
+        }
+    }
+    renderer.render_uv_map_pass(encoder, object, &renderer.uv_cam.bind_group, f.pds);
 }
 
 /// Recompute the camera-relative light rig for a pane before it renders, so
@@ -332,4 +692,44 @@ pub fn setup_pane_lighting(
         bounds.center(),
         bounds.diagonal() / 2.0,
     );
+}
+
+/// Hands the viewer rig to a backend that reads its lights from the scene.
+///
+/// The rasterizer takes the rig through [`setup_pane_lighting`] above, which
+/// writes the lights uniform its passes bind. A tracer binds no such uniform:
+/// it walks a light array that came from the scene, so a scene with no light
+/// nodes contributed none, and a file that looked lit in the viewport came out
+/// of a traced still lit by the environment alone. Both now read the same three
+/// definitions, [`solarxy_renderer::scene::viewer_rig`], each by the route it
+/// already had.
+///
+/// Applies on exactly the condition the shells already apply the rig on: a
+/// scene that authored lights of its own keeps them untouched. The camera is
+/// the shot's, not a viewport's, so a still through an authored camera is lit
+/// relative to that camera.
+///
+/// Callers pass the traced backend. The rasterizer must not be given these as
+/// scene data: its `SceneObjects` is the live viewport scene, and lights
+/// written into it would make the condition above answer differently ever
+/// after.
+///
+/// Returns whether the rig was applied.
+pub fn apply_viewer_rig(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    backend: &mut dyn solarxy_renderer::backend::RenderBackend,
+    scene: &SceneObjects,
+    camera: &Camera,
+) -> bool {
+    if scene.authored_lights().is_some() {
+        return false;
+    }
+    let delta = SceneDelta {
+        ops: vec![SceneOp::SetLights {
+            lights: viewer_rig(camera).to_vec(),
+        }],
+    };
+    backend.apply(device, queue, &delta);
+    true
 }

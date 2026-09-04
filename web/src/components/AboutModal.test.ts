@@ -4,7 +4,13 @@
 
 import { describe, expect, it } from "vitest";
 import pkg from "../../package.json";
-import { DOC_LINKS, aboutCopyrightLine, aboutVersionLine, docUrl } from "./AboutModal";
+import {
+  DOC_LINKS,
+  aboutCopyrightLine,
+  aboutSourceUrl,
+  aboutVersionLine,
+  docUrl,
+} from "./AboutModal";
 
 describe("AboutModal lines", () => {
   it("renders the package version, not a hardcoded one", () => {
@@ -14,6 +20,19 @@ describe("AboutModal lines", () => {
   it("renders the copyright holder with the current year", () => {
     expect(aboutCopyrightLine(new Date("2026-07-23"))).toBe("© 2026 Marko Koljancic");
     expect(aboutCopyrightLine(new Date("2031-01-01"))).toBe("© 2031 Marko Koljancic");
+  });
+
+  // The source offer has to name the build that is running. A link to the
+  // default branch would satisfy nothing once that branch moves, which is the
+  // failure this pins: the tag, with its `v` prefix, and the package version
+  // rather than a string typed here.
+  it("offers source pinned to the running version's tag", () => {
+    expect(aboutSourceUrl()).toBe(
+      `https://github.com/marko-koljancic/solarxy/tree/v${pkg.version}`,
+    );
+    expect(aboutSourceUrl("1.2.3")).toBe(
+      "https://github.com/marko-koljancic/solarxy/tree/v1.2.3",
+    );
   });
 });
 

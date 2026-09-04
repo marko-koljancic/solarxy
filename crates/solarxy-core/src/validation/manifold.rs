@@ -31,7 +31,7 @@ pub(super) fn check_non_manifold_edges(
     allow_open_mesh: bool,
 ) -> Vec<ValidationIssue> {
     let mut edges: HashMap<(u32, u32), u32> = HashMap::new();
-    for tri in mesh.indices.chunks_exact(3) {
+    for tri in mesh.indices.as_chunks::<3>().0 {
         let (a, b, c) = (tri[0], tri[1], tri[2]);
         if a == b || b == c || a == c {
             continue;

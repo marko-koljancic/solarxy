@@ -61,6 +61,80 @@ pub const MAX_HDRI_INTENSITY: f32 = 8.0;
 /// Each pane's 3D content is the pane rect minus this strip at the top.
 pub const PANE_TOOLBAR_HEIGHT: f32 = 22.0;
 
+/// How much of the blurred bright pass is added back. Neutral is not zero:
+/// these are the values the two effects shipped with as compiled-in
+/// constants, so a configuration that has never touched a control has to
+/// render exactly what the previous release rendered.
+pub const DEFAULT_BLOOM_STRENGTH: f32 = 0.8;
+/// Luminance above which a pixel contributes to the bright pass.
+pub const DEFAULT_BLOOM_THRESHOLD: f32 = 0.8;
+/// How far the composite blends towards the occlusion buffer.
+pub const DEFAULT_SSAO_STRENGTH: f32 = 0.8;
+
+/// The usable ranges. Zero on any of the three is the effect turned off by
+/// another name, which the existing toggles already express, so it is a
+/// legitimate floor rather than a degenerate one. The bloom ceiling is
+/// where the add stops reading as glow and starts reading as a blown
+/// image; occlusion is a blend factor and so cannot exceed one.
+pub const MIN_BLOOM_STRENGTH: f32 = 0.0;
+pub const MAX_BLOOM_STRENGTH: f32 = 4.0;
+pub const MIN_BLOOM_THRESHOLD: f32 = 0.0;
+pub const MAX_BLOOM_THRESHOLD: f32 = 4.0;
+pub const MIN_SSAO_STRENGTH: f32 = 0.0;
+pub const MAX_SSAO_STRENGTH: f32 = 1.0;
+
+/// The three post-processing intensities, as one value.
+///
+/// Renderer-global rather than per pane, which is the same shape the two
+/// effects themselves have: one post-processing state and one set of
+/// targets. The per-pane look the camera owns (exposure, tone, grade)
+/// deliberately excludes these, because a strength describes how the
+/// effect is built rather than how the shot is graded.
+///
+/// [`Default`] is the shipped look. That is load-bearing in the same way
+/// [`crate::scene::CameraLook`]'s neutral default is: it is what lets the
+/// controls ship without moving a single golden capture.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostStrengths {
+    pub bloom_strength: f32,
+    pub bloom_threshold: f32,
+    pub ssao_strength: f32,
+}
+
+impl Default for PostStrengths {
+    fn default() -> Self {
+        Self {
+            bloom_strength: DEFAULT_BLOOM_STRENGTH,
+            bloom_threshold: DEFAULT_BLOOM_THRESHOLD,
+            ssao_strength: DEFAULT_SSAO_STRENGTH,
+        }
+    }
+}
+
+impl PostStrengths {
+    /// Clamped into the usable ranges.
+    ///
+    /// Applied where the value enters the renderer rather than where a
+    /// control writes it, because the value arrives from three places (two
+    /// preference files and a slider) and only one of them is a widget with
+    /// a range of its own.
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            bloom_strength: self
+                .bloom_strength
+                .clamp(MIN_BLOOM_STRENGTH, MAX_BLOOM_STRENGTH),
+            bloom_threshold: self
+                .bloom_threshold
+                .clamp(MIN_BLOOM_THRESHOLD, MAX_BLOOM_THRESHOLD),
+            ssao_strength: self
+                .ssao_strength
+                .clamp(MIN_SSAO_STRENGTH, MAX_SSAO_STRENGTH),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisplaySettings {
@@ -175,6 +249,13 @@ fn default_exposure() -> f32 {
     1.0
 }
 
+/// For a serde default that has to be on rather than off. `#[serde(default)]`
+/// on a `bool` gives false, which for a visibility flag means the feature
+/// silently disappears for everyone with a saved layout.
+fn default_true() -> bool {
+    true
+}
+
 fn unit_vec3() -> [f32; 3] {
     [1.0; 3]
 }
@@ -204,6 +285,59 @@ impl PaneLook {
     }
 }
 
+impl PaneDisplaySettings {
+    /// The view a delivered still is drawn with: the scene, and nothing that
+    /// exists to help someone work on it.
+    ///
+    /// No grid, no axis gizmo, no local axes, no bounds, no normals, no
+    /// validation tint, no material override. A still is a photograph of the
+    /// scene rather than a screenshot of the viewport, which is what the render
+    /// node's own help promises, and it is the one view both a browser and a
+    /// terminal can produce without agreeing about anything else first.
+    ///
+    /// Named rather than a `Default` impl, and the distinction is deliberate:
+    /// neither this struct nor [`DisplaySettings`] carries a `Default`, because
+    /// the two shells genuinely disagree about several fields and a default
+    /// would quietly pick one shell's answer for both. This picks nobody's
+    /// answer. It states what a *still* is.
+    ///
+    /// The background rides in rather than being fixed here, because a scene
+    /// that authored a sky should be shot against it.
+    #[must_use]
+    pub fn for_still(background_mode: BackgroundMode) -> Self {
+        Self {
+            view_mode: ViewMode::Shaded,
+            prev_non_ghosted_mode: ViewMode::Shaded,
+            ghosted_wireframe: false,
+            normals_mode: NormalsMode::Off,
+            background_mode,
+            uv_mode: UvMode::Off,
+            bounds_mode: BoundsMode::Off,
+            line_weight: LineWeight::Medium,
+            show_grid: false,
+            show_axis_gizmo: false,
+            show_local_axes: false,
+            inspection_mode: InspectionMode::Shaded,
+            material_override: MaterialOverride::None,
+            texel_density_target: 1.0,
+            pane_mode: PaneMode::Scene3D,
+            uv_bg: UvMapBackground::Dark,
+            uv_offset: [0.0, 0.0],
+            uv_zoom: 1.0,
+            show_uv_overlap: false,
+            show_validation: false,
+            // A still is a photograph of the scene. A light marker is a thing
+            // you aim with, not a thing in the scene, so it stays out for the
+            // same reason the grid does.
+            show_light_markers: false,
+            turntable_active: false,
+            // A still's engine is authored on the render node and carried
+            // by the job's spec, never by these settings.
+            pane_engine: PaneEngine::Raster,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaneDisplaySettings {
@@ -227,9 +361,84 @@ pub struct PaneDisplaySettings {
     pub uv_zoom: f32,
     pub show_uv_overlap: bool,
     pub show_validation: bool,
+    /// Draw a screen-constant marker at every light, so a light can be found
+    /// and aimed at without knowing where it already is.
+    ///
+    /// On by default, because a light with no marker is invisible and the
+    /// alternative is hunting for it in the parameter panel. Distinct from a
+    /// light's own `show_helper`, which draws the world-scaled wireframe
+    /// describing that light's *extent*: the two answer different questions
+    /// and coexist.
+    ///
+    /// Serde default so older pane blobs deserialize, and it defaults to
+    /// **true** rather than to `bool`'s false, which is why it names a
+    /// function rather than taking the bare attribute.
+    #[serde(default = "default_true")]
+    pub show_light_markers: bool,
     /// Live per-pane turntable spin. Session-temporary: the web host
     /// resets it on load, so it is never restored from a saved scene. Serde
     /// default so older pane blobs deserialize.
     #[serde(default)]
     pub turntable_active: bool,
+    /// Which backend draws this pane's 3D content.
+    ///
+    /// A field on the display settings rather than a [`PaneMode`] variant,
+    /// deliberately: a traced pane is still a 3D pane, with the same
+    /// navigation, picking, review and toolbar semantics, and only the
+    /// encode differs. A mode variant would change the meaning of every
+    /// `pane_mode == Scene3D` comparison in both shells. Serde default so
+    /// older pane blobs deserialize.
+    #[serde(default)]
+    pub pane_engine: PaneEngine,
+}
+
+/// Which renderer draws a 3D pane: the viewport rasterizer, or the path
+/// tracer converging a preview while the pane is quiescent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PaneEngine {
+    #[default]
+    Raster,
+    Traced,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::preferences::BackgroundMode;
+
+    /// What a still is, asserted rather than left to the struct literal.
+    ///
+    /// The literal is exhaustive, so a new field cannot be forgotten; what it
+    /// cannot catch is a field added with the wrong answer. Every flag here is
+    /// a working aid, and a delivered still is a photograph of the scene.
+    #[test]
+    fn a_still_draws_the_scene_and_none_of_the_aids_for_working_on_it() {
+        let pds = PaneDisplaySettings::for_still(BackgroundMode::GRADIENT);
+        assert!(!pds.show_grid, "grid");
+        assert!(!pds.show_axis_gizmo, "axis gizmo");
+        assert!(!pds.show_local_axes, "local axes");
+        assert!(!pds.show_validation, "validation overlay");
+        assert!(!pds.show_light_markers, "light markers");
+        assert_eq!(pds.bounds_mode, BoundsMode::Off);
+        assert_eq!(pds.normals_mode, NormalsMode::Off);
+        assert_eq!(pds.material_override, MaterialOverride::None);
+    }
+
+    /// A pane blob saved before markers existed has to come back with them on,
+    /// or the feature silently disappears for everyone with a saved layout.
+    #[test]
+    fn an_older_pane_blob_deserializes_with_markers_on() {
+        let mut v = serde_json::to_value(PaneDisplaySettings::for_still(BackgroundMode::GRADIENT))
+            .expect("serializes");
+        v.as_object_mut()
+            .expect("an object")
+            .remove("showLightMarkers")
+            .expect("the field was there to remove");
+        let back: PaneDisplaySettings = serde_json::from_value(v).expect("deserializes");
+        assert!(
+            back.show_light_markers,
+            "a missing flag must default on, not to bool's false"
+        );
+    }
 }

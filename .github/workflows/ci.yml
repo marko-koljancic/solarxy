@@ -61,8 +61,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92
       - uses: Swatinem/rust-cache@v2
-      - name: renderer tests with a real adapter
-        run: cargo test -p solarxy-renderer --all-features
+      # Three crates, not one. The renderer's tests were the only ones ever run
+      # against a real adapter, which meant the shared host's still and traced
+      # backend tests skipped silently here and were only ever run by hand. One
+      # of them had been failing for a while before anyone noticed, which is the
+      # reason this list grew.
+      - name: renderer, host and render tests with a real adapter
+        run: cargo test -p solarxy-renderer -p solarxy-host -p solarxy-render --all-features
+        env:
+          SOLARXY_REQUIRE_GPU: "1"
+      # And again optimized, because the two builds are not the same test run.
+      # A tiled traced still passed here in debug and failed in release for a
+      # release, on a harness whose patience was counted in iterations rather
+      # than in seconds: a poll that finds nothing costs a microsecond optimized
+      # and far more unoptimized, so the same bound is a different amount of
+      # waiting in each. Release is also the build every user runs.
+      - name: the same three crates, optimized
+        run: cargo test --release -p solarxy-renderer -p solarxy-host -p solarxy-render --all-features
         env:
           SOLARXY_REQUIRE_GPU: "1"
 
@@ -126,13 +141,13 @@ jobs:
             cargo run --release -p solarxy-host --example golden -- \
               compare /tmp/golden-base/dragon /tmp/golden-head/dragon --tolerance 0 || true
             cargo run --release -p solarxy-host --example golden -- \
-              compare /tmp/golden-base/frog /tmp/golden-head/frog --tolerance 0 || true
+              compare /tmp/golden-base/knot /tmp/golden-head/knot --tolerance 0 || true
             exit 0
           fi
           cargo run --release -p solarxy-host --example golden -- \
             compare /tmp/golden-base/dragon /tmp/golden-head/dragon --tolerance 0
           cargo run --release -p solarxy-host --example golden -- \
-            compare /tmp/golden-base/frog /tmp/golden-head/frog --tolerance 0
+            compare /tmp/golden-base/knot /tmp/golden-head/knot --tolerance 0
 
       - name: Upload captures on failure
         if: failure()
