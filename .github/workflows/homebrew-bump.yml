@@ -73,6 +73,19 @@ jobs:
           fi
           echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
 
+      # This repository, at the tag being released. The bump reads the licence
+      # out of the formula template shipped here rather than assuming one, so
+      # the job needs the source tree and not only the tap. Nothing checked it
+      # out: the licence step landed after the last release and a release branch
+      # never reaches this workflow, so its first run was the v0.9.0 tag, where
+      # it failed on a path that had never existed in the job's workspace.
+      - name: Checkout this repository at the tag
+        if: steps.gate.outputs.proceed == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 1
+
       - name: Checkout tap
         if: steps.gate.outputs.proceed == 'true'
         uses: actions/checkout@v4
