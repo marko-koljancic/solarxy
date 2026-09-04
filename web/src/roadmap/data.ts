@@ -76,7 +76,7 @@ export const HERO_CHIPS: string[] = [
 ];
 
 export const FOOTER_META: string[] = [
-  "Updated August 2026",
+  "Updated September 2026",
   `${LIVE_VERSION}, live on solarxy.koljam.com`,
   `${NODE_TYPE_COUNT} node types, ${CRATE_COUNT} crates`,
 ];
