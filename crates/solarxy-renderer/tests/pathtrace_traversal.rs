@@ -189,10 +189,18 @@ fn spin(
     device: &wgpu::Device,
     readback: &mut solarxy_renderer::pathtrace::probe::HitReadback,
 ) -> Vec<CorpusHit> {
+    // Sleeping rather than yielding, which is what the seven sibling spins in
+    // this suite already do. The bound is a count of polls, so the wait it
+    // actually buys is the count times whatever one poll costs: with a yield
+    // that is a few milliseconds on an idle machine, and it is nothing at all
+    // on a loaded one, where ten thousand yields can pass before a queue that
+    // is sharing its GPU has retired the copy. This gave up on a busy CI runner
+    // while the readback was still perfectly healthy. A millisecond a poll
+    // makes the same bound ten seconds of real time.
     for _ in 0..10_000 {
         match readback.poll(device) {
             HitPoll::Ready(hits) => return hits,
-            HitPoll::Pending => std::thread::yield_now(),
+            HitPoll::Pending => std::thread::sleep(std::time::Duration::from_millis(1)),
             HitPoll::Failed => panic!("corpus readback failed"),
         }
     }
