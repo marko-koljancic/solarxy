@@ -97,13 +97,31 @@ const SHADOW_MAX_STEPS: u32 = 16u;
 // which is the whole point: the samples that blow up are the ones a technique
 // was unlikely to have taken.
 fn mis_power(a: f32, b: f32) -> f32 {
-    let aa = a * a;
-    let bb = b * b;
-    let total = aa + bb;
-    if total <= 0.0 {
+    // Written as 1 / (1 + (b/a)^2) rather than a^2 / (a^2 + b^2). The two are
+    // the same number and the second one is not safe: a density near a delta
+    // lobe, which is exactly what a refractive solid produces, passes 1.8e19,
+    // and squaring it in f32 gives infinity. Then `aa / total` is `x / inf`,
+    // which is **zero**, and the contribution disappears silently rather than
+    // becoming a NaN anything would have caught.
+    //
+    // Dividing before squaring keeps the ratio in range whatever the two
+    // densities are, so the answer no longer depends on which side of the
+    // overflow threshold a pdf happens to land. That dependence was real and
+    // hardware-visible: this file's estimator comparison agreed to 0.015% on
+    // one GPU and disagreed by 85% on another, from the same bit-identical
+    // scatter estimate, because only the weighted estimator calls this.
+    //
+    // Both limits are the ones the algebra asks for. b >> a sends the ratio to
+    // infinity and the weight to zero; b << a sends it to zero and the weight
+    // to one; a of zero keeps the old answer of zero.
+    if a <= 0.0 {
         return 0.0;
     }
-    return aa / total;
+    if b <= 0.0 {
+        return 1.0;
+    }
+    let r = b / a;
+    return 1.0 / (1.0 + r * r);
 }
 
 // One drawn connection to a light.
