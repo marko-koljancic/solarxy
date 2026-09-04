@@ -64,7 +64,7 @@
   </provides>
 
   <releases>
-    <release version="0.9.0" date="2026-09-03">
+    <release version="0.9.0" date="2026-09-04">
       <description>
         <p>
           Path-traced rendering. A second renderer joins the real-time one: a
