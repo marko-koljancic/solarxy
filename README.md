@@ -50,6 +50,12 @@ Full user documentation lives in the [Solarxy Wiki](https://github.com/marko-kol
 
 Where the project is going, release by release: the public [roadmap](https://solarxy.koljam.com/roadmap).
 
+Contributors and anyone curious how the system is put together: the solution architecture lives
+in [`docs/architecture/`](docs/architecture/README.md). It covers the crate layering and its
+current violations, the target architecture and what each crate is allowed to own and depend on,
+the boundary contracts including the WebAssembly seam, the rendering and shading pipeline, the
+engineering standards, and the decision record.
+
 ## Features
 
 ### Modeling and geometry (Solarxy Web)

@@ -2,6 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Read the architecture first
+
+The solution architecture of record lives in [`docs/architecture/`](docs/architecture/README.md).
+Read it before changing anything structural. It carries the layering as it actually is, the
+target architecture with a responsibility card per crate and per frontend module, the boundary
+contracts and the dependency allow-matrix, the rendering and shading pipeline with its quality
+bar, the engineering standards a reviewer points at, and the decision record in
+[`docs/architecture/adr/`](docs/architecture/adr/).
+
+**Architecture changes are proposed in `docs/architecture/` and approved before implementation,
+not discovered afterwards.** A change that adds or removes a crate, alters a boundary contract,
+adds a platform target, changes the persistence format, adds a render pass or a material
+parameter, or reverses a recorded decision is incomplete until that set is updated in the same
+pass. The set's README lists the full update triggers.
+
+This file remains the source of truth for *current-state* facts: crate roles, feature flags,
+enum variants, pass order, build commands, and the named plumbing rules. The architecture set is
+the source of truth for *boundaries, responsibilities, decisions and standards*. Where the two
+disagree, that is a defect in one of them and worth fixing rather than working around.
+
 ## Project Overview
 
 Solarxy is a cross-platform 3D model viewer, visual debugger, and validator built in Rust with wgpu (WebGPU). It ships as **two separate binaries**:
