@@ -23,7 +23,12 @@ gh project item-list <number> --owner <owner> --format json --limit 200
 
 Built-in fields already present and sufficient: Title, Assignees, Status, Labels, Milestone,
 Repository, Parent issue, Sub-issues progress, plus the timestamps. Status carries Backlog,
-To Do, In Progress, In Testing, Done.
+To Do, In Progress, In Testing, Ready for Release, Done.
+
+`Ready for Release` sits between In Testing and Done and means the work is verified but the
+release carrying it has not shipped. It is currently used by nothing, which is why this file
+described five states for a board that has six until 0.10.0 corrected it. A column the
+documentation does not name is a column nobody uses on purpose.
 
 **Two custom fields are worth adding, and only two.** Effort (S, M, L) and Priority (P0, P1,
 P2). Deliberately not added: an Area field, because area is a label and two sources of truth
