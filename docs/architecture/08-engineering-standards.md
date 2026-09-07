@@ -1198,8 +1198,6 @@ sees none of it.
 - On a renderer change: the golden job green, or `[golden-accept]` in the pull request title
   with the diff justified in the body.
 - On a change under `web/`: `npm run typecheck` and `npm test` green.
-- On a boundary change: the shape assertion updated on both sides in the same change.
-- On a schema change: the migration path and its test, in the same change.
 
 ### 7.3 What is deliberately not tested, and what is a gap
 
@@ -1240,6 +1238,30 @@ rather than an aspiration.
 
 **Rule.** A test that can silently no-op is not a gate. Either it fails when its input is
 missing, or it is marked `#[ignore]` and named as a measurement.
+
+### 7.4 Reading a red graphics job
+
+The `GPU tests (macOS)` job runs against a virtual machine with no dedicated graphics device, and
+between 2026-08 and 2026-09-07 it failed 13 of 25 runs while every other job in those runs passed.
+The failing tests were different every time, and the same files run thirty times on a machine with
+a real adapter produced zero failures. So a red result from that job has historically been more
+likely to be the runner than the change, and it was read as a real failure by nobody, which is the
+worse outcome: a gate that is red half the time teaches a reader to merge through red.
+
+Its tests are serialised as of 2026-09-07 on the hypothesis that concurrent graphics work on one
+device is the cause. Until the rate over subsequent runs says otherwise:
+
+- **Re-run once.** A failure that does not recur on the same tests is the runner.
+- **A failure that recurs on the same tests is real**, and is investigated as a regression rather
+  than re-run again.
+- **Never widen a tolerance to make this job green.** The tests are deterministic on real
+  hardware, which is the evidence that a wide tolerance would be hiding a runner problem behind a
+  weaker assertion.
+- **The golden job is separate and is not affected by any of this.** It compares the same two
+  models on the same runner at the merge base and at the change, so hardware cancels out. A red
+  golden job means the render moved.
+- On a boundary change: the shape assertion updated on both sides in the same change.
+- On a schema change: the migration path and its test, in the same change.
 
 ## 8. Performance
 

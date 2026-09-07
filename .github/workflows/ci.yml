@@ -66,8 +66,31 @@ jobs:
       # backend tests skipped silently here and were only ever run by hand. One
       # of them had been failing for a while before anyone noticed, which is the
       # reason this list grew.
+      # `--test-threads=1`, and it is the whole reason this job stopped being
+      # trustworthy. Between 2026-08 and 2026-09-07 it failed 13 of 25 runs:
+      # always this job, never another in the same run, and a different test
+      # each time. `pathtrace_environment` on one, `pathtrace_denoise` on the
+      # next, `pathtrace_light` on the release merge. Running the three
+      # implicated files five times each on a machine with a real adapter,
+      # under both default and serialised execution, gave thirty runs and zero
+      # failures, so the tests are deterministic and the tracer is not
+      # returning different answers.
+      #
+      # What differs is the runner: a virtual machine with no dedicated
+      # graphics device, running several graphics tests at once. This project
+      # has already recorded that shape of failure once, when two concurrent
+      # tests read primary-ray throughput 2.3x low and the fix was to
+      # serialise them. The failures here read the same way: a 65,536-sample
+      # reference comes back as zero rather than as a wrong number.
+      #
+      # The cost is wall clock. Serialised, the environment file took roughly
+      # 1.8x its parallel time locally, which is minutes rather than a budget
+      # problem. Nothing local can prove this fixes it, because nothing local
+      # fails; the evidence is the failure rate over the runs after this
+      # lands. If it does not fall, the finding stands and the next hypothesis
+      # is the adapter itself rather than concurrency.
       - name: renderer, host and render tests with a real adapter
-        run: cargo test -p solarxy-renderer -p solarxy-host -p solarxy-render --all-features
+        run: cargo test -p solarxy-renderer -p solarxy-host -p solarxy-render --all-features -- --test-threads=1
         env:
           SOLARXY_REQUIRE_GPU: "1"
       # And again optimized, because the two builds are not the same test run.
@@ -77,7 +100,7 @@ jobs:
       # and far more unoptimized, so the same bound is a different amount of
       # waiting in each. Release is also the build every user runs.
       - name: the same three crates, optimized
-        run: cargo test --release -p solarxy-renderer -p solarxy-host -p solarxy-render --all-features
+        run: cargo test --release -p solarxy-renderer -p solarxy-host -p solarxy-render --all-features -- --test-threads=1
         env:
           SOLARXY_REQUIRE_GPU: "1"
 
