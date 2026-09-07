@@ -85,6 +85,19 @@ assume it: today `solarxy-app` depends on `solarxy-graph`, `solarxy-host`, `sola
 measure of how much application logic still sits in the shells. They shrink as the migration
 in [09](09-evolution-and-roadmap.md) proceeds, and the matrix above is what "done" looks like.
 
+### Dated exceptions
+
+An exception carries a date and the release that closes it. That is what separates it from a
+rule nobody holds: the assertion below still fails on any edge not listed here or in the matrix,
+so an unargued edge is caught even while an argued one stands.
+
+| Edge | Why it stands | Opened | Closes |
+|---|---|---|---|
+| `solarxy-app` to `solarxy-graph` | 0.10.0 takes the desktop from 4 dispatched commands to substantially all 35, which is the release's reason to exist. Routing them through `solarxy-studio` first means moving menus, keymap, dock model, selection, tool state, autosave and the command model out of both shells at once, which is a release of its own. The target in [04](04-target-architecture.md) is unchanged | 2026-09-07 | The release that completes Group E's command and menu model. Not yet scheduled |
+
+`solarxy-web`'s extra edges are not listed here because they are not an exception: they are the
+present state that the migration shrinks, and nothing in 0.10.0 argues for keeping them.
+
 Two present-day edges are also absent from the target and should be read as intentional
 removals rather than oversights. `solarxy-renderer` depends on `solarxy-formats` today so it
 can decode texture and environment bytes; the target moves that decode to the caller so the
@@ -304,10 +317,11 @@ is a specification rather than a description.
 
 ## Open questions
 
-- Whether the frontend mirror should stay hand-written with an exhaustiveness check, or become
-  generated. Generation removes the class of error entirely and adds a build step and a
-  generated file to review. The exhaustiveness check is cheaper and leaves the readable
-  hand-written types in place. This document proposes the check; the choice is not settled.
+- ~~Whether the frontend mirror should stay hand-written with an exhaustiveness check, or become
+  generated.~~ **Settled 2026-09-07 in favour of the check**, which is what this document
+  proposed. Recorded in
+  [adr/0015-the-boundary-mirror-is-checked-not-generated.md](adr/0015-the-boundary-mirror-is-checked-not-generated.md).
+  The 0.10.0 milestone had specified generation and was reversed to match.
 - Whether `solarxy-cli` should depend on `solarxy-studio` at all. The terminal surfaces share
   a keymap and a progress view model with the graphical shells, which argues yes, and nothing
   else, which argues that two small duplications are cheaper than a dependency.

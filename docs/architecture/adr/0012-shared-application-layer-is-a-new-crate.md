@@ -87,6 +87,12 @@ its consumers is a WebAssembly build. And it inherits the hardest part of the cu
 which is that view state is host-owned today and document state is engine-owned, so every
 moved behaviour has to decide which side of that line it sits on.
 
+[adr/0016](0016-interface-derivation-splits-between-registry-and-application-layer.md) settles
+what the crate holds first, and it is not session state: the shared interface derivation's
+presentation half lands here before any of the behaviours listed above, because 0.10.0 has a
+second consumer waiting on it. The semantics half goes to the registry instead. That refines this
+decision rather than reversing it: the crate, its name and its position are unchanged.
+
 The crate does not exist yet. Creating a workspace crate is a gated addition under this
 repository's working agreement, so this ADR records the direction and
 [09-evolution-and-roadmap.md](../09-evolution-and-roadmap.md) sizes the migration. Until that

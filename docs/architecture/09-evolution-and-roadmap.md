@@ -28,6 +28,15 @@ The whole of [05-boundaries-and-contracts.md](05-boundaries-and-contracts.md) is
 specification that nothing enforces. Four small checks turn it into a gate. This group is
 first because it is the cheapest work in the document and it protects everything after it.
 
+**Adopted into the 0.10.0 milestone on 2026-09-07**, as its item 1G and as a board epic
+sequenced before the host extraction. A1 and A4 are scheduled there. Two things drove it: that
+release moves behaviour between crates, which is the case A1's "Unblocks" note names, and the
+continuous integration gate it would be judged against was found to be failing 13 of its last 25
+runs, always the GPU job and always different tests, while thirty local runs of the same files
+passed. So the gate could not have discharged the release's own acceptance criteria. The triage
+of that rides with this group because it is the same question: whether a rule the project states
+is actually checked.
+
 ### A1. Dependency allow-list assertion
 
 **What.** A test that reads the allow-matrix in
@@ -98,6 +107,12 @@ from a small example binary.
 
 **If skipped.** A variant added in Rust and forgotten in TypeScript compiles cleanly on both
 sides and fails at runtime.
+
+**Settled 2026-09-07.** This item is now the decision rather than one of two options.
+[adr/0015](adr/0015-the-boundary-mirror-is-checked-not-generated.md) rules that the mirror stays
+hand-written and is checked, closing the open question [05](05-boundaries-and-contracts.md) left
+standing. The 0.10.0 milestone had specified generation and was reversed to match, so this item
+is scheduled in that release rather than unscheduled.
 
 ## Group B: close the silent correctness defects
 
