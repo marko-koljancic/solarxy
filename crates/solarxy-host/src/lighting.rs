@@ -1,10 +1,16 @@
-//! The single IBL and lighting chokepoint.
+//! The single IBL and lighting chokepoint, and the one place a scene's
+//! environment reaches it.
 
-use solarxy_core::preferences::IblMode;
-use solarxy_renderer::environment::SceneEnvironment;
+use solarxy_core::preferences::{BackgroundMode, CustomBackground, IblMode};
+use solarxy_core::scene::{BackgroundKind, SceneDelta, SceneOp};
+use solarxy_renderer::environment::{EnvironmentOutcome, EnvironmentTracker, SceneEnvironment};
 use solarxy_renderer::frame::Renderer;
 use solarxy_renderer::ibl::IblState;
-use solarxy_renderer::scene::{create_light_bind_group, create_light_bind_group_selective};
+use solarxy_renderer::scene::{
+    BackgroundModeExt, create_light_bind_group, create_light_bind_group_selective,
+};
+
+use crate::view::HostViewState;
 
 /// The IBL the current mode actually shades with.
 #[must_use]
@@ -91,4 +97,100 @@ pub fn rebuild_light_bind_group(
         0,
         bytemuck::bytes_of(&env.lights_uniform),
     );
+}
+
+/// What applying a scene's environment changed, for the caller to act on.
+///
+/// Returned rather than written, because the two things a shell does with it
+/// are the two things that are genuinely per shell: one holds a traced
+/// backend whose environment copy is now stale, and one has to tell a
+/// JavaScript frontend that the view moved. Neither belongs in this crate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EnvironmentApplied {
+    /// A `SetEnvironment` op was present, so the environment was applied.
+    /// False means the delta carried none and nothing was touched.
+    pub applied: bool,
+    /// The environment actually moved, so a traced backend's copy of it is
+    /// stale. Distinct from `applied`: an op that installs the same image at
+    /// the same rotation applies and changes nothing.
+    pub tracer_dirty: bool,
+}
+
+/// Apply a scene delta's environment to the renderer, the scene environment
+/// and the view state, then run the lighting chokepoint.
+///
+/// This was written twice, once per graphical shell, in bodies that differed
+/// only in a comment, the order of one assignment, and the two per-shell
+/// reactions that are now the return value. It is one function as of 0.10.0.
+///
+/// `custom_backgrounds` is the shell's user-defined background registry, used
+/// only when the environment clears and the fallback sky has to be resolved.
+/// The browser has none and passes an empty slice; when the desktop's are
+/// retired the parameter goes with them.
+///
+/// # Why the headless renderer does not call this
+///
+/// `crate::headless` has its own environment application and keeps it. It has
+/// no view state to write rotation and intensity into, no panes whose
+/// background follows the scene, and it renders once rather than continuously,
+/// so "the last op wins and there is no dedupe" is correct there and wrong
+/// here. Sharing them would mean a parameter that is `None` on one caller and
+/// the whole point on the other.
+pub fn apply_scene_environment(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    renderer: &mut Renderer,
+    env: &mut SceneEnvironment,
+    tracker: &mut EnvironmentTracker,
+    view: &mut HostViewState,
+    custom_backgrounds: &[CustomBackground],
+    delta: &SceneDelta,
+) -> EnvironmentApplied {
+    let mut result = EnvironmentApplied::default();
+
+    for op in &delta.ops {
+        let SceneOp::SetEnvironment {
+            hdri,
+            rotation,
+            intensity,
+            background,
+        } = op
+        else {
+            continue;
+        };
+        result.applied = true;
+
+        // Rotation and intensity write through to the display settings the
+        // shell's own sliders read, so the node and the sliders show one
+        // value rather than fighting over two.
+        view.display.hdri_rotation = *rotation;
+        view.display.hdri_intensity = *intensity;
+
+        match tracker.apply(device, queue, &mut renderer.ibl_res, hdri.as_ref()) {
+            // Fall through to the rebuild anyway: rotation or intensity may
+            // have moved even when the image did not.
+            EnvironmentOutcome::Unchanged => {}
+            EnvironmentOutcome::HdriInstalled => {
+                result.tracer_dirty = true;
+                if *background == BackgroundKind::HdriSky {
+                    view.pane_settings[0].background_mode = BackgroundMode::HDRI_SKY;
+                }
+            }
+            // "No environment" is not "a black environment": fall back to the
+            // procedural sky the pane's own background derives, which is what
+            // clearing the environment by hand does on either shell.
+            EnvironmentOutcome::Cleared => {
+                result.tracer_dirty = true;
+                let (top, bottom) = view.pane_settings[0]
+                    .background_mode
+                    .resolve(custom_backgrounds)
+                    .sky_colors();
+                renderer.ibl_res.ibl = IblState::from_sky_colors(device, queue, top, bottom);
+            }
+        }
+
+        rebuild_light_bind_group(device, queue, renderer, env, view.display.hdri_intensity);
+    }
+
+    result
 }

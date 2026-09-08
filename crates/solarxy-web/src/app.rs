@@ -4528,61 +4528,29 @@ impl SolarxyApp {
     /// Separate from `SceneObjects::apply` because the environment is the
     /// IBL and the skybox, which that type cannot reach. The desktop shell
     /// runs the same tracker over the same op.
+    /// Apply a scene delta's environment. The body is
+    /// [`solarxy_host::apply_scene_environment`], shared with the desktop
+    /// shell since 0.10.0; what stays here are the two reactions that are
+    /// this shell's, which are marking a traced backend's environment copy
+    /// stale and telling the frontend the view moved.
+    ///
+    /// The empty custom-background slice is not an oversight: this shell has
+    /// no user-defined background registry.
     fn apply_scene_environment(&mut self, delta: &solarxy_core::scene::SceneDelta) {
-        use solarxy_core::scene::{BackgroundKind, SceneOp};
-        use solarxy_renderer::environment::EnvironmentOutcome;
-
-        for op in &delta.ops {
-            let SceneOp::SetEnvironment {
-                hdri,
-                rotation,
-                intensity,
-                background,
-            } = op
-            else {
-                continue;
-            };
-
-            // Rotation and intensity write through to the display settings
-            // the Environment modal's sliders read, so the node and the
-            // sliders show one value rather than fighting over two.
-            self.view.display.hdri_rotation = *rotation;
-            self.view.display.hdri_intensity = *intensity;
-
-            let outcome = self.environment.apply(
-                &self.device,
-                &self.queue,
-                &mut self.renderer.ibl_res,
-                hdri.as_ref(),
-            );
-            match outcome {
-                // Still rebuild: rotation or intensity may have moved even
-                // when the HDRI did not.
-                EnvironmentOutcome::Unchanged => {}
-                EnvironmentOutcome::HdriInstalled => {
-                    self.traced_env_dirty = true;
-                    if *background == BackgroundKind::HdriSky {
-                        self.view.pane_settings[0].background_mode =
-                            solarxy_core::preferences::BackgroundMode::HDRI_SKY;
-                    }
-                }
-                // "No environment" is not "a black environment": fall back
-                // to the procedural sky, exactly as `clear_environment`
-                // does for the host-driven route.
-                EnvironmentOutcome::Cleared => {
-                    let (top, bottom) = self
-                        .resolve_background(&self.view.pane_settings[0])
-                        .sky_colors();
-                    self.renderer.ibl_res.ibl = solarxy_renderer::ibl::IblState::from_sky_colors(
-                        &self.device,
-                        &self.queue,
-                        top,
-                        bottom,
-                    );
-                    self.traced_env_dirty = true;
-                }
-            }
-            self.rebuild_light_bind_group();
+        let applied = solarxy_host::apply_scene_environment(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            &mut self.env,
+            &mut self.environment,
+            &mut self.view,
+            &[],
+            delta,
+        );
+        if applied.tracer_dirty {
+            self.traced_env_dirty = true;
+        }
+        if applied.applied {
             self.host_events.push(HostEvent::ViewChanged);
         }
     }

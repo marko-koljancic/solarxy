@@ -164,61 +164,23 @@ impl State {
     /// engine until the desktop gains one, so the only producer today is
     /// the `F9` developer harness. That is deliberate rather than dead
     /// code, and the harness is what makes it verifiable now.
+    /// Apply a scene delta's environment. The body is
+    /// [`solarxy_host::apply_scene_environment`], shared with the web shell
+    /// since 0.10.0; what stays here is the one reaction that is this
+    /// shell's, which is marking a traced backend's environment copy stale.
     pub(super) fn apply_scene_environment(&mut self, delta: &solarxy_core::scene::SceneDelta) {
-        use solarxy_core::scene::SceneOp;
-        use solarxy_renderer::environment::EnvironmentOutcome;
-
-        for op in &delta.ops {
-            let SceneOp::SetEnvironment {
-                hdri,
-                rotation,
-                intensity,
-                background,
-            } = op
-            else {
-                continue;
-            };
-
-            // Rotation and intensity write through to the display settings
-            // the existing Properties sliders read, so the node and the
-            // sliders show one value rather than fighting over two.
-            self.view.display.hdri_rotation = *rotation;
-            self.view.display.hdri_intensity = *intensity;
-
-            let outcome = self.environment.apply(
-                &self.device,
-                &self.queue,
-                &mut self.renderer.ibl_res,
-                hdri.as_ref(),
-            );
-            match outcome {
-                // Still rebuild the bind group: rotation or intensity may
-                // have moved even when the HDRI did not.
-                EnvironmentOutcome::Unchanged => {}
-                EnvironmentOutcome::HdriInstalled => {
-                    self.traced_env_dirty = true;
-                    if *background == solarxy_core::scene::BackgroundKind::HdriSky {
-                        self.view.pane_settings[0].background_mode =
-                            solarxy_core::preferences::BackgroundMode::HDRI_SKY;
-                    }
-                }
-                // "No environment" is not "a black environment": fall back
-                // to the procedural sky the pane's own background derives,
-                // which is exactly what the Clear HDRI button does.
-                EnvironmentOutcome::Cleared => {
-                    self.traced_env_dirty = true;
-                    let (top, bottom) = self
-                        .resolve_background(&self.view.pane_settings[0])
-                        .sky_colors();
-                    self.renderer.ibl_res.ibl = solarxy_renderer::ibl::IblState::from_sky_colors(
-                        &self.device,
-                        &self.queue,
-                        top,
-                        bottom,
-                    );
-                }
-            }
-            self.rebuild_light_bind_group();
+        let applied = solarxy_host::apply_scene_environment(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            &mut self.env,
+            &mut self.environment,
+            &mut self.view,
+            &self.preferences.view.custom_backgrounds,
+            delta,
+        );
+        if applied.tracer_dirty {
+            self.traced_env_dirty = true;
         }
     }
 
