@@ -31,6 +31,84 @@
 //! plain data — see [`gizmo::GizmoPose`], which is the drag solver's whole
 //! view of its target.
 //!
+//! # What belongs here
+//!
+//! The section below says how a shared item is written. It did not say what
+//! qualifies as one, and that omission is why this extraction happened twice:
+//! 0.8.2 moved the pass chain, and the orchestration one layer above it was
+//! written twice again afterwards, by people following a shape rule that had
+//! nothing to say about membership.
+//!
+//! **The test.** A behaviour belongs here when all four hold.
+//!
+//! 1. **Both graphical shells need it**, or one needs it and the other is
+//!    about to. A behaviour with one consumer and no second one coming is not
+//!    shared, it is misplaced.
+//! 2. **It can be expressed without naming a document.** If the signature
+//!    wants a node, a parameter, a command or a graph, it belongs above this
+//!    crate rather than in it. Passing the same information as plain data is
+//!    the usual fix and is what [`gizmo::GizmoPose`] is.
+//! 3. **It can be expressed without naming a widget.** No egui, no DOM, no
+//!    `web_sys`, no winit. A function that takes a rect and returns a rect is
+//!    fine; one that takes a `Ui` is a shell's.
+//! 4. **The two shells want the same answer.** Where they want different
+//!    answers from the same arithmetic, share the arithmetic and leave the
+//!    policy at the call site, which is the rule the shape section already
+//!    states.
+//!
+//! **What does not belong**, stated so a reader stops rather than tries: a
+//! clock, because this crate compiles for the browser and has no `Instant`; a
+//! device or an adapter, because three callers want three request policies; a
+//! surface, because acquiring one is a shell's job; logging; anything that
+//! decides what a menu item does.
+//!
+//! **Single-consumer code here is legitimate and is not an oversight.**
+//! `gizmo.rs`, `attr_viz.rs` and `attr_labels.rs` are 2,574 lines read only by
+//! the browser today. They were placed here for 0.10.0, which lights them up
+//! from the desktop, and rule 1's second clause is written for exactly them. A
+//! tidy-up that moves them back would be undoing the work rather than
+//! finishing it.
+//!
+//! # The exceptions, and why each one resists the rule
+//!
+//! Named as exceptions so a later reader does not conclude the rule is wrong
+//! and collapse them.
+//!
+//! **The render-settings translation exists three times and cannot be shared.**
+//! `trace_settings_for` is written once per shell, in `solarxy-app`,
+//! `solarxy-web` and `solarxy-render`. It reads a document to produce renderer
+//! settings, so it needs both sides of a boundary that refuses it in both
+//! directions: this crate must not see the engine, and the engine must not see
+//! the renderer. The mitigation is that each copy destructures `RenderSettings`
+//! exhaustively, so a field added to the settings stops all three compiling
+//! until each says what it does with it. That is a compiler tripwire standing
+//! in for a shared home, and it exists because a camera's aperture once
+//! resolved correctly out of a document and reached no renderer for a whole
+//! release.
+//!
+//! **The still job takes its clock rather than reading one.** `StillCtx`
+//! carries `now_ms`, supplied by the caller at every `advance` from five sites.
+//! It is a field rather than an argument precisely so a caller that forgets it
+//! does not compile.
+//!
+//! **The browser's float-still ceiling stays in the browser.**
+//! `MAX_FLOAT_STILL_PIXELS` exists because wasm is a 32-bit address space where
+//! an allocation failure takes the tab. It is a platform limit its shell
+//! imposes on itself, not a property of a still, and applying it here would
+//! refuse a render the desktop makes comfortably.
+//!
+//! # Deciding where a new host behaviour goes
+//!
+//! - Does it name a node, a parameter or a command? Then it is the application
+//!   layer's, not this crate's.
+//! - Does it name a widget, a window or an event loop? Then it is a shell's.
+//! - Do both shells want it, or will the second want it this release? If
+//!   neither, leave it where it is and write down why.
+//! - Do they want the same answer, or the same arithmetic and different
+//!   answers? The second means the body moves and the guard stays.
+//! - Can it be written as a free function over borrowed values? If it needs a
+//!   host type to hang off, the state it wants is probably the shell's.
+//!
 //! # How the shared functions are shaped
 //!
 //! Free functions over explicit borrowed parameters, never methods on a host

@@ -1,10 +1,19 @@
 //! Shared screenshot capture: encode a texture sub-rect copy into a
 //! CPU-mappable staging buffer, then poll the readback WITHOUT blocking
 //! (the `UvOverlapResources` pattern: `map_async` + mpsc + `PollType::Poll`,
-//! wasm-safe because WebGPU has no blocking wait). The web host drives this
-//! for its screenshot modal; the desktop shell's `state/capture.rs` predates
-//! the module and migrates in a later cleanup (TODO), so desktop behavior is
-//! untouched this phase.
+//! wasm-safe because WebGPU has no blocking wait).
+//!
+//! Both shells drive this. The desktop carried its own copy of the encode,
+//! the arm, the unpad and the swizzle until 0.10.0, because it predated this
+//! module; that copy is gone and what remains in `solarxy-app`'s
+//! `state/capture.rs` is the shell's own half, which is choosing the rect,
+//! naming the file and running the save dialog.
+//!
+//! **The capture ceiling is the browser's and is not here.** A large capture
+//! can nondeterministically lose the WebGPU device, which has no recovery on
+//! that platform, so its host refuses one above a limit it sets. That is a
+//! property of the platform rather than of a screenshot, and the desktop has
+//! no such limit.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 
@@ -301,5 +310,54 @@ mod tests {
         assert_eq!(padded_row_bytes(63), 256); // rounds up
         assert_eq!(padded_row_bytes(65), 512);
         assert_eq!(padded_row_bytes(1920), 7680); // already aligned
+    }
+
+    /// Deriving the pixel size from the texture agrees with assuming four
+    /// bytes, on every surface format a shell actually presents.
+    ///
+    /// The desktop hard-coded the four until 0.10.0 and now takes this path
+    /// instead. The two agree for every format below, which is what makes
+    /// that migration a no-op in the pixels rather than merely a tidy one,
+    /// and this test is here so a future format that breaks the equivalence
+    /// says so rather than shifting every row of a screenshot by a few bytes.
+    #[test]
+    fn the_format_derived_row_width_agrees_with_four_bytes_on_every_surface_format() {
+        let surface_formats = [
+            wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ];
+        for format in surface_formats {
+            let bytes = format
+                .block_copy_size(Some(wgpu::TextureAspect::All))
+                .expect("a colour surface has a block copy size");
+            assert_eq!(bytes, 4, "{format:?} is not four bytes per pixel");
+            for width in [1u32, 63, 64, 65, 800, 1920, 3841] {
+                assert_eq!(
+                    padded_row_bytes_for(width, bytes),
+                    padded_row_bytes(width),
+                    "{format:?} at width {width}"
+                );
+            }
+        }
+    }
+
+    /// The float targets are the reason the arithmetic stopped assuming, and
+    /// the padding is why they are not simply four times as wide.
+    #[test]
+    fn a_float_row_is_not_four_eight_bit_rows() {
+        let bytes = wgpu::TextureFormat::Rgba32Float
+            .block_copy_size(Some(wgpu::TextureAspect::All))
+            .expect("a colour target has a block copy size");
+        assert_eq!(bytes, 16);
+        // 800 float pixels is 12,800 bytes and needs no padding. The same
+        // width in eight-bit is 3,200 unpadded and pads up to 3,328, so the
+        // float row is not four eight-bit rows and never was. That is the
+        // whole reason `padded_row_bytes_for` takes the size rather than
+        // assuming it.
+        assert_eq!(padded_row_bytes_for(800, bytes), 12_800);
+        assert_eq!(padded_row_bytes(800), 3_328);
+        assert_ne!(padded_row_bytes(800) * 4, padded_row_bytes_for(800, bytes));
     }
 }

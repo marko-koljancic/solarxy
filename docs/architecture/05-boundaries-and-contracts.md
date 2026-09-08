@@ -85,6 +85,27 @@ assume it: today `solarxy-app` depends on `solarxy-graph`, `solarxy-host`, `sola
 measure of how much application logic still sits in the shells. They shrink as the migration
 in [09](09-evolution-and-roadmap.md) proceeds, and the matrix above is what "done" looks like.
 
+### Test-only edges
+
+The matrix above governs the shipped artifact. A dependency that exists only for a test or an
+example is a different class: it cannot reach a user, it cannot make the engine link a GPU stack,
+and it cannot stop the import worker compiling GPU-free. What it can still do is hide a design
+smell, because a crate whose tests need another crate's types may have put its abstraction in the
+wrong place. So these edges are permitted and listed rather than permitted and unexamined, and an
+unlisted one fails the assertion like any other.
+
+| Edge | For |
+|---|---|
+| `solarxy-core` to `solarxy-formats` | The raycast performance test loads its mesh fixture through the loaders. A dependency cycle, which cargo permits in this direction only because it is a development one |
+| `solarxy-host` to `solarxy-bvh` | The still-render example reports a hierarchy's node count, which is the figure the milestone promises rather than a proxy for it. The library reaches a built hierarchy only through the renderer |
+| `solarxy-host` to `solarxy-formats` | The same example loads a model from a path, which the library above deliberately cannot do |
+| `solarxy-render` to `solarxy-scenefile` | Its tests build scene archives to render, which is the input the crate exists to take |
+| `solarxy-app` to `solarxy-render` | A cross-shell comparison neither crate can make alone. Both crates it adds are already dependencies of this one |
+
+This table was empty until 2026-09-07, when the assertion below was first written and found five
+edges the gap list in this document had never counted, because that list was compiled from normal
+dependencies alone. That omission is the reason the assertion covers every dependency kind.
+
 ### Dated exceptions
 
 An exception carries a date and the release that closes it. That is what separates it from a
@@ -94,9 +115,18 @@ so an unargued edge is caught even while an argued one stands.
 | Edge | Why it stands | Opened | Closes |
 |---|---|---|---|
 | `solarxy-app` to `solarxy-graph` | 0.10.0 takes the desktop from 4 dispatched commands to substantially all 35, which is the release's reason to exist. Routing them through `solarxy-studio` first means moving menus, keymap, dock model, selection, tool state, autosave and the command model out of both shells at once, which is a release of its own. The target in [04](04-target-architecture.md) is unchanged | 2026-09-07 | The release that completes Group E's command and menu model. Not yet scheduled |
+| `solarxy-app` to `solarxy-host` | The desktop shell drives the pass chain directly because no application layer exists to drive it for them | 2026-09-07 | Group E3, the pane and layout model |
+| `solarxy-app` to `solarxy-renderer` | The device request and the surface configuration are genuinely the shell's, and [04](04-target-architecture.md) names them as exceptions; the rest of this edge is not | 2026-09-07 | Group E3 |
+| `solarxy-app` to `solarxy-formats` | The shell loads model files itself | 2026-09-07 | Group E, when document lifecycle moves |
+| `solarxy-app` to `solarxy-scenefile` | The shell opens scene archives itself | 2026-09-07 | Group E, when document lifecycle moves |
+| `solarxy-web` to `solarxy-graph` | The browser host holds the engine and dispatches to it directly, for the same reason the desktop will | 2026-09-07 | Group E6 |
+| `solarxy-web` to `solarxy-formats` | The worker exports parse model bytes | 2026-09-07 | Group E, when the job pump moves |
+| `solarxy-web` to `solarxy-bvh` | The worker exports build hierarchies | 2026-09-07 | Group E, when the job pump moves |
 
-`solarxy-web`'s extra edges are not listed here because they are not an exception: they are the
-present state that the migration shrinks, and nothing in 0.10.0 argues for keeping them.
+Every row above is the same debt described in prose two paragraphs up: application logic sitting in
+a shell because there is nowhere else for it yet. Enumerating it rather than describing it is what
+lets the assertion pass today and fail on anything new, which is the only arrangement in which a
+layering rule survives contact with a release.
 
 Two present-day edges are also absent from the target and should be read as intentional
 removals rather than oversights. `solarxy-renderer` depends on `solarxy-formats` today so it

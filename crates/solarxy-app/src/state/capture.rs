@@ -1,65 +1,30 @@
-//! Screenshot capture: blits a sub-rect of the current frame into a
-//! one-shot CPU-mappable buffer and reads it back into an `RgbaImage`.
+//! Screenshot capture: the shell's half of a screenshot, which is choosing
+//! the rect, naming the file, and running the save dialog.
+//!
+//! The readback is `solarxy_renderer::capture`: encoding the copy, stripping
+//! the row padding, swizzling a BGRA surface and polling the map without
+//! blocking. This shell carried a private copy of all of that until 0.10.0,
+//! for no better reason than that it predated the shared module, and the
+//! shared module's own header said so.
 //!
 //! The capture is cropped to the **active pane's content rect** (toolbar
-//! strip excluded). Writing the PNG is the screenshot modal's job — this
+//! strip excluded). Writing the PNG is the screenshot modal's job; this
 //! module only produces the in-memory image.
+//!
+//! **The browser's capture ceiling is deliberately not inherited.** It exists
+//! because a large capture can lose the WebGPU device with no recovery, which
+//! is a limit that platform imposes on itself rather than a property of a
+//! screenshot. This shell has never had one and does not gain one here.
+
+use solarxy_renderer::capture::{CapturePoll, encode_capture};
 
 use super::*;
 
 impl State {
-    /// Blit `rect` (physical pixels: `x, y, w, h`) of `texture` into a
-    /// fresh staging buffer. Pair with [`State::read_capture`] once the
-    /// encoder's submission has completed.
-    pub(super) fn encode_capture(
-        &self,
-        texture: &wgpu::Texture,
-        encoder: &mut wgpu::CommandEncoder,
-        rect: (u32, u32, u32, u32),
-    ) -> (wgpu::Buffer, u32, u32, u32) {
-        let (x, y, width, height) = rect;
-        let bytes_per_pixel = 4u32;
-        let unpadded_row_bytes = width * bytes_per_pixel;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_row_bytes = unpadded_row_bytes.div_ceil(align) * align;
-
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Capture Staging Buffer"),
-            size: u64::from(padded_row_bytes * height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x, y, z: 0 },
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_row_bytes),
-                    rows_per_image: Some(height),
-                },
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        (buffer, padded_row_bytes, width, height)
-    }
-
-    /// Arm the async readback on a freshly-encoded capture: request the
-    /// map (after the copy's submission) and stash the buffer plus the
-    /// modal context. Completion is polled by [`State::poll_pending_capture`]
-    /// on later frames — no blocking wait (WebGPU has none, and desktop
-    /// avoids the frame hitch).
+    /// Arm the async readback on a freshly-encoded capture: request the map
+    /// (after the copy's submission) and stash it with the modal context.
+    /// Completion is polled by [`State::poll_pending_capture`] on later
+    /// frames, never waited on, so a screenshot costs no frame hitch.
     pub(super) fn arm_pending_capture(
         &mut self,
         buffer: wgpu::Buffer,
@@ -67,97 +32,49 @@ impl State {
         width: u32,
         height: u32,
     ) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        buffer
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |result| {
-                let _ = tx.send(result);
-            });
         self.pending_capture = Some(super::PendingCapture {
-            buffer,
-            padded_row_bytes,
-            width,
-            height,
-            receiver: rx,
+            readback: solarxy_renderer::capture::PendingCapture::arm(
+                buffer,
+                padded_row_bytes,
+                width,
+                height,
+            ),
             filename: self.screenshot_filename(),
             review_active: self.review.active,
             expand_review: self.screenshot_expand_review,
         });
     }
 
-    /// Check the in-flight capture readback; on completion hand the image
-    /// to the screenshot modal. Called once per frame.
+    /// Check the in-flight capture readback; on completion hand the image to
+    /// the screenshot modal. Called once per frame.
     pub(super) fn poll_pending_capture(&mut self) {
-        if self.pending_capture.is_none() {
+        let Some(pending) = &self.pending_capture else {
             return;
-        }
-        let _ = self.device.poll(wgpu::PollType::Poll);
-
-        let ready = match &self.pending_capture {
-            Some(pending) => match pending.receiver.try_recv() {
-                Ok(Ok(())) => true,
-                // Not resolved yet — try again next frame.
-                Err(std::sync::mpsc::TryRecvError::Empty) => return,
-                Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    tracing::error!("Failed to map capture buffer");
-                    false
+        };
+        // The surface format decides the swizzle, exactly as it did when this
+        // shell did the swizzling itself.
+        let (width, height) = (pending.readback.width, pending.readback.height);
+        match pending.readback.poll(&self.device, self.config.format) {
+            // Not resolved yet; the buffer stays armed and the next frame
+            // asks again.
+            CapturePoll::Pending => {}
+            CapturePoll::Failed => self.pending_capture = None,
+            CapturePoll::Ready(pixels) => {
+                let Some(pending) = self.pending_capture.take() else {
+                    return;
+                };
+                if let Some(image) = image::RgbaImage::from_raw(width, height, pixels) {
+                    self.gui.set_screenshot_capture(
+                        image,
+                        pending.filename,
+                        pending.review_active,
+                        pending.expand_review,
+                    );
+                } else {
+                    tracing::error!("Failed to create image from captured pixel data");
                 }
-            },
-            None => false,
-        };
-
-        let Some(pending) = self.pending_capture.take() else {
-            return;
-        };
-        if !ready {
-            return;
-        }
-
-        if let Some(image) = Self::process_mapped_capture(&pending, self.config.format) {
-            self.gui.set_screenshot_capture(
-                image,
-                pending.filename,
-                pending.review_active,
-                pending.expand_review,
-            );
-        }
-    }
-
-    /// Strip row padding from the (already mapped) staging buffer, swizzle
-    /// BGRA→RGBA if the surface needs it, and return the captured image.
-    /// `None` on a malformed pixel buffer.
-    fn process_mapped_capture(
-        pending: &super::PendingCapture,
-        surface_format: wgpu::TextureFormat,
-    ) -> Option<image::RgbaImage> {
-        let data = pending.buffer.slice(..).get_mapped_range();
-        let bytes_per_pixel = 4u32;
-        let unpadded_row_bytes = pending.width * bytes_per_pixel;
-
-        let mut pixels = Vec::with_capacity((unpadded_row_bytes * pending.height) as usize);
-        for row in 0..pending.height {
-            let start = (row * pending.padded_row_bytes) as usize;
-            let end = start + unpadded_row_bytes as usize;
-            pixels.extend_from_slice(&data[start..end]);
-        }
-        drop(data);
-        pending.buffer.unmap();
-
-        let needs_swizzle = matches!(
-            surface_format,
-            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
-        );
-        if needs_swizzle {
-            for chunk in pixels.as_chunks_mut::<4>().0 {
-                chunk.swap(0, 2);
             }
         }
-
-        let image = image::RgbaImage::from_raw(pending.width, pending.height, pixels);
-        if image.is_none() {
-            tracing::error!("Failed to create image from captured pixel data");
-        }
-        image
     }
 
     /// Encode a capture of the active pane's content rect (toolbar strip
@@ -171,10 +88,11 @@ impl State {
         let pane = panes.get(self.view.active_pane)?;
         let content = pane.content(self.pane_toolbar_height_px());
         let rect = clamp_capture_rect(&content, self.config.width, self.config.height);
-        Some(self.encode_capture(texture, encoder, rect))
+        let (buffer, padded) = encode_capture(&self.device, encoder, texture, rect);
+        Some((buffer, padded, rect.2, rect.3))
     }
 
-    /// Suggested screenshot file name — `<model-stem>_<YYYYMMDD-HHMMSS>`
+    /// Suggested screenshot file name: `<model-stem>_<YYYYMMDD-HHMMSS>`
     /// (`solarxy_…` when no model is loaded).
     pub(super) fn screenshot_filename(&self) -> String {
         let stem = self

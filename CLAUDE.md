@@ -116,7 +116,7 @@ Version is single-sourced in `[workspace.package]` and inherited via `version.wo
   - `render.rs` — `State::render`, surface handling, per-pane orchestration (delegates draws into `solarxy-renderer`).
   - `panes.rs` — split-viewport geometry (`compute_panes`, layout math for F1–F5, including Quad and Three-Left-Big; each pane's content rect excludes the per-pane toolbar strip).
   - `overlap.rs` — UV overlap GPU readback polling.
-  - `capture.rs` — screenshot capture.
+  - `capture.rs`, the shell's half of a screenshot: the pane rect, the file name and the save dialog. The readback is `solarxy_renderer::capture`, shared with the web host since 0.10.0; the private 243-line copy this shell carried before that is gone, and the browser's capture ceiling is deliberately not inherited.
   - `input/` — `mod.rs` for keyboard/mouse, `dialogs.rs` (native file pickers via `rfd`), `menu_actions.rs` (menu bar → state).
   - `view_state.rs` — `ViewState` (the app-side bundle), re-exporting `ViewLayout`, `DisplaySettings`, `PaneDisplaySettings`, `BoundsMode` **from** `solarxy-core::view_config`.
   - `review.rs` — `ReviewState` + `EditDraft` (in-memory mirror of the open `.solarxy-review.json`). `load_review_for_model` / `save_review_sidecar` handle disk I/O via `solarxy-core::review::ReviewFile`. Owns the **marker hit-test** (`marker_at_screen_pos`, 20 px screen-space threshold) and the **re-anchor sub-mode** (`begin_reanchor` / `cancel_reanchor` / `complete_reanchor` keyed by `reanchor_target: Option<String>`). Author defaults to anonymous; sidecar location honors `ProjectConfig.review.sidecar_dir` from `solarxy.toml`.

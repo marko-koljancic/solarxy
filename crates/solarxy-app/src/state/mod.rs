@@ -72,16 +72,17 @@ pub(super) struct PendingHdri {
     pub(super) path: std::path::PathBuf,
 }
 
-/// In-flight screenshot readback: the staging buffer with a `map_async`
-/// request armed, polled non-blocking each frame (`poll_pending_capture`).
-/// The modal context (filename, review flags) is captured at arm time so
-/// the image lands with the state the user triggered it under.
+/// In-flight screenshot readback: the shared readback, plus the modal
+/// context captured at arm time so the image lands with the state the user
+/// triggered it under.
+///
+/// The readback itself is `solarxy_renderer::capture`, which is where it
+/// always belonged: the padded-row arithmetic and the non-blocking poll are
+/// the same on both shells, and this shell carried its own copy only because
+/// it predated the shared module. What stays here is the part that is
+/// genuinely the desktop's, which is the three fields below.
 pub(super) struct PendingCapture {
-    pub(super) buffer: wgpu::Buffer,
-    pub(super) padded_row_bytes: u32,
-    pub(super) width: u32,
-    pub(super) height: u32,
-    pub(super) receiver: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    pub(super) readback: solarxy_renderer::capture::PendingCapture,
     pub(super) filename: String,
     pub(super) review_active: bool,
     pub(super) expand_review: bool,
