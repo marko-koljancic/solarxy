@@ -18,8 +18,8 @@ use cgmath::{Matrix4, Vector4};
 use solarxy_core::review::ReviewAnnotation;
 use solarxy_renderer::model::Model;
 
-use super::review_visuals::{category_color, category_label, category_letter};
-use super::theme::Theme;
+use crate::gui::panels::review::visuals::{category_color, category_label, category_letter};
+use crate::gui::theme::Theme;
 use crate::state::review::ReviewState;
 
 /// Per-3D-pane data the overlay needs: the egui-logical rect the pane

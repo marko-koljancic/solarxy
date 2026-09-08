@@ -6,24 +6,24 @@ use crate::console::{ConsoleState, LogBuffer};
 use crate::state::hdri_info::HdriInfo;
 use solarxy_core::preferences::PaneMode;
 
-use super::about::draw_about_modal;
+use super::modals::about::draw_about_modal;
 use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
-use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
-use super::material_inspector::MaterialInspectorState;
+use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
+use super::panels::material_inspector::MaterialInspectorState;
 use super::intent::{Intent, Intents, LayoutIntent, PanelIntent, ReviewIntent};
-use super::node_tree::NodeTreeState;
-use super::menu::{MenuContext, draw_menu_bar};
-use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
-use super::status_bar::{self, StatusBarData};
-use super::viewport_context_menu::{ViewportContextMenu, draw_viewport_context_menu};
-use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
-use super::review_panel::draw_delete_confirm_modal;
-use super::review_popup::draw_review_popup;
-use super::screenshot_modal::{ScreenshotModal, draw_screenshot_modal};
-use super::still_modal::{StillRenderModal, draw_still_modal};
-use super::properties::ModelInfo;
+use super::panels::node_tree::NodeTreeState;
+use super::chrome::menu::{MenuContext, draw_menu_bar};
+use super::chrome::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
+use super::chrome::status_bar::{self, StatusBarData};
+use super::chrome::viewport_context_menu::{ViewportContextMenu, draw_viewport_context_menu};
+use super::modals::preferences::{PreferencesModal, draw_preferences_modal};
+use super::panels::review::panel::draw_delete_confirm_modal;
+use super::panels::review::popup::draw_review_popup;
+use super::modals::screenshot::{ScreenshotModal, draw_screenshot_modal};
+use super::modals::still::{StillRenderModal, draw_still_modal};
+use super::panels::properties::ModelInfo;
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
-use super::update_modal::{UpdateModalState, draw_update_modal};
+use super::modals::update::{UpdateModalState, draw_update_modal};
 use egui_dock::{DockArea, DockState};
 use solarxy_core::preferences::{Preferences, ThemeChoice};
 
@@ -567,7 +567,7 @@ impl EguiRenderer {
             // `markers_hidden` suppresses the 3D overlay while the panel
             // keeps listing every annotation.
             let suppress_markers = suppress_overlay || review.markers_hidden;
-            super::review_overlay::draw_review_overlay(
+            super::panels::review::overlay::draw_review_overlay(
                 ctx,
                 chrome.review_panes,
                 review,

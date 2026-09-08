@@ -299,29 +299,56 @@ mod tests {
     ///
     /// Scoped to the two known-safe exceptions:
     ///
-    /// - `overlays.rs` paints white on its OWN `from_black_alpha` chip
+    /// - `chrome/overlays.rs` paints white on its OWN `from_black_alpha` chip
     ///   (`overlay_frame`), so it is self-grounded and floats over the 3D
     ///   scene rather than over themed chrome.
-    /// - `review_overlay.rs`/`review_panel.rs` put ink on a saturated
-    ///   category hue, which is the `ink_on_attention` pattern.
+    /// - `panels/review/panel.rs` puts ink on a saturated category hue, which
+    ///   is the `ink_on_attention` pattern.
+    ///
+    /// The marker overlay was exempt here too and no longer needs to be, which
+    /// only showed up when the exemptions became paths. A stale exemption is a
+    /// hole nobody is watching.
+    ///
+    /// **It walks the tree rather than one directory, and the exemptions are
+    /// paths rather than bare file names.** Before the interface split it read
+    /// `src/gui` with `read_dir` and matched exemptions on `file_name`, so a
+    /// panel moved into a subdirectory would have left the test passing while
+    /// checking almost nothing, and a moved exempt file would have lost its
+    /// exemption without anyone noticing either way. A test that fails open is
+    /// worse than no test, because it also reports success.
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("src/gui must exist") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                out.push(path);
+            }
+        }
+    }
+
     #[test]
     fn gui_chrome_does_not_hardcode_ink() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/gui");
-        let exempt = [
-            "overlays.rs",
-            "review_overlay.rs",
-            "review_panel.rs",
-            "theme.rs",
-        ];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/gui");
+        let exempt = ["chrome/overlays.rs", "panels/review/panel.rs", "theme.rs"];
+
+        let mut files = Vec::new();
+        walk(&root, &mut files);
+        assert!(
+            files.len() > 20,
+            "the walk found {} files under src/gui, which is too few to be \
+             scanning the interface: it has been pointed at the wrong place",
+            files.len()
+        );
 
         let mut offenders = Vec::new();
-        for entry in std::fs::read_dir(&dir).expect("src/gui must exist") {
-            let path = entry.expect("dir entry").path();
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default();
-            if path.extension().and_then(|e| e.to_str()) != Some("rs") || exempt.contains(&name) {
+        for path in files {
+            let rel = path
+                .strip_prefix(&root)
+                .expect("under the root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if exempt.contains(&rel.as_str()) {
                 continue;
             }
             let src = std::fs::read_to_string(&path).expect("read");
@@ -332,7 +359,7 @@ mod tests {
                     continue;
                 }
                 if code.contains("from_white_alpha") || code.contains("Color32::WHITE") {
-                    offenders.push(format!("{name}:{}", i + 1));
+                    offenders.push(format!("{rel}:{}", i + 1));
                 }
             }
         }

@@ -16,7 +16,7 @@
 
 use image::RgbaImage;
 
-use super::theme::Theme;
+use crate::gui::theme::Theme;
 
 /// Longest edge of the in-modal preview, logical px.
 const PREVIEW_MAX_EDGE: f32 = 480.0;
@@ -122,7 +122,7 @@ fn build_preview(ctx: &egui::Context, image: &RgbaImage) -> egui::TextureHandle 
 
 /// Draw the screenshot modal. `Esc` / `Cancel` discards; the save and
 /// re-capture are deferred to the state layer via the drained flags.
-pub(super) fn draw_screenshot_modal(
+pub(in crate::gui) fn draw_screenshot_modal(
     ctx: &egui::Context,
     modal: &mut ScreenshotModal,
     theme: &Theme,

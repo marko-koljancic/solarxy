@@ -14,7 +14,7 @@ notes on geometry, reply, resolve, and re-anchor as your meshes evolve.";
 
 const TECH_LINE: &str = "Built in Rust with wgpu — macOS, Linux, Windows.";
 
-pub(super) fn draw_about_modal(ctx: &egui::Context, open: &mut bool) {
+pub(in crate::gui) fn draw_about_modal(ctx: &egui::Context, open: &mut bool) {
     if !*open {
         return;
     }

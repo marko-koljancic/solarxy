@@ -11,10 +11,10 @@
 
 use solarxy_core::review::AnnotationCategory;
 
-use super::dock::SolarxyTab;
-use super::intent::{Intent, Intents, LayoutIntent};
-use super::review_visuals::{category_color, category_letter as category_label_short};
-use super::theme::Theme;
+use crate::gui::dock::SolarxyTab;
+use crate::gui::intent::{Intent, Intents, LayoutIntent};
+use crate::gui::panels::review::visuals::{category_color, category_letter as category_label_short};
+use crate::gui::theme::Theme;
 use crate::state::review::ReviewState;
 
 fn category_index(c: AnnotationCategory) -> usize {
@@ -59,7 +59,7 @@ fn draw_category_chip(
 /// Review-panel content for hosting inside an `egui_dock` tab. Header
 /// `×` closes the panel (writes `*visible = false`); dock placement is
 /// owned by `gui::dock`.
-pub(super) fn draw_review_panel_content(
+pub(in crate::gui) fn draw_review_panel_content(
     ui: &mut egui::Ui,
     review: &mut ReviewState,
     intents: &mut Intents,
@@ -419,7 +419,7 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState, theme: Them
 /// replies. Drawn in `gui::renderer::render_ui` after the panel itself
 /// so it overlays correctly. No-op when `review.delete_confirm` is
 /// `None`.
-pub(super) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mut ReviewState) {
+pub(in crate::gui) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mut ReviewState) {
     let Some(target_id) = review.delete_confirm.clone() else {
         return;
     };

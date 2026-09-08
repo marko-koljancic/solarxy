@@ -16,8 +16,8 @@ use solarxy_renderer::resources::ModelStats;
 use crate::state::engine_scene::SceneGeometryCounts;
 use crate::state::hdri_info::HdriInfo;
 
-use super::intent::{DisplayChange, Intent, Intents, PanelIntent};
-use super::settings::PanelSettings;
+use crate::gui::intent::{DisplayChange, Intent, Intents, PanelIntent};
+use crate::gui::settings::PanelSettings;
 
 /// The Validation section's input: the report to list, plus the owning
 /// object's name per issue.
@@ -35,7 +35,7 @@ pub(crate) struct ValidationView<'a> {
 /// File + geometry stats for the open document. Owned by `EguiRenderer`,
 /// populated via `EguiRenderer::update_model_info` for a model file and
 /// `EguiRenderer::update_scene_info` for a scene.
-pub(super) struct ModelInfo {
+pub(in crate::gui) struct ModelInfo {
     pub filename: String,
     pub file_path: String,
     pub file_size: u64,
@@ -96,7 +96,7 @@ fn format_file_size(bytes: u64) -> String {
 
 /// Render the Properties panel content into `ui` (the `egui_dock`
 /// `Properties` tab supplies the `Ui`).
-pub(super) fn draw_properties_content(
+pub(in crate::gui) fn draw_properties_content(
     ui: &mut egui::Ui,
     model_info: Option<&ModelInfo>,
     hdri_info: Option<&HdriInfo>,

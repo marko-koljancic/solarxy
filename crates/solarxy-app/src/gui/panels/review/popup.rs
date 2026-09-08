@@ -13,7 +13,7 @@ use crate::state::review::ReviewState;
 /// Draw the new-annotation popup if a draft is open.
 /// Returns `true` when the user committed a new/updated annotation this
 /// frame — callers use that signal to mark the marker buffer dirty.
-pub(super) fn draw_review_popup(ctx: &egui::Context, review: &mut ReviewState) -> bool {
+pub(in crate::gui) fn draw_review_popup(ctx: &egui::Context, review: &mut ReviewState) -> bool {
     let Some(draft) = review.editing.as_mut() else {
         return false;
     };

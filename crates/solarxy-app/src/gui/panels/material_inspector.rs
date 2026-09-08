@@ -39,8 +39,8 @@ use std::collections::HashMap;
 use image::{ImageBuffer, Rgba, imageops};
 use solarxy_renderer::model::{MaterialThumbnails, Model, TextureThumbnail};
 
-use super::overlays::ToastSeverity;
-use super::theme::Theme;
+use crate::gui::chrome::overlays::ToastSeverity;
+use crate::gui::theme::Theme;
 
 /// Decode resolution for cached thumbnails.
 const THUMBNAIL_SIZE: u32 = 128;
@@ -67,7 +67,7 @@ const SPLIT_MIN_WIDTH: f32 = 360.0;
 /// texture, but artists author them separately and want to inspect each
 /// independently).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum TextureRole {
+pub(in crate::gui) enum TextureRole {
     Albedo,
     Normal,
     MetallicRoughness,
@@ -111,7 +111,7 @@ impl TextureRole {
 /// `EguiRenderer::render_ui` after the egui frame closes, where
 /// `push_toast` access is available).
 #[derive(Default)]
-pub(super) struct MaterialInspectorState {
+pub(in crate::gui) struct MaterialInspectorState {
     thumbnail_cache: HashMap<(usize, TextureRole), egui::TextureHandle>,
     /// Index of the material shown in the detail pane. Reset to 0 on
     /// model swap and clamped into range each frame.
@@ -146,7 +146,7 @@ fn use_side_by_side(width: f32, height: f32) -> bool {
 /// Render the Material Inspector's content into the provided `ui`.
 /// The hosting Window / dock tab is the caller's job (`egui_dock` tab in
 /// `gui::dock`).
-pub(super) fn draw_material_inspector_content(
+pub(in crate::gui) fn draw_material_inspector_content(
     ui: &mut egui::Ui,
     model: &Model,
     state: &mut MaterialInspectorState,

@@ -1,7 +1,7 @@
-use super::MOD;
+use crate::gui::MOD;
 
 #[derive(Default)]
-pub(super) struct KeyboardShortcutsModalState {
+pub(in crate::gui) struct KeyboardShortcutsModalState {
     pub open: bool,
 }
 
@@ -290,7 +290,7 @@ const SECTIONS: &[Section] = &[
     },
 ];
 
-pub(super) fn draw_keyboard_shortcuts_modal(
+pub(in crate::gui) fn draw_keyboard_shortcuts_modal(
     ctx: &egui::Context,
     state: &mut KeyboardShortcutsModalState,
 ) {

@@ -16,13 +16,13 @@ use egui_wgpu::ScreenDescriptor;
 use crate::console::ConsoleState;
 use crate::state::hdri_info::HdriInfo;
 
-use super::divider::DividerInfo;
-use super::material_inspector::MaterialInspectorState;
-use super::node_tree::{NodeTreeSource, NodeTreeState};
-use super::outliner::OutlinerSource;
-use super::overlays::HudInfo;
-use super::properties::{ModelInfo, ValidationView};
-use super::review_overlay::ReviewPaneOverlay;
+use super::chrome::divider::DividerInfo;
+use super::panels::material_inspector::MaterialInspectorState;
+use super::panels::node_tree::{NodeTreeSource, NodeTreeState};
+use super::panels::outliner::OutlinerSource;
+use super::chrome::overlays::HudInfo;
+use super::panels::properties::{ModelInfo, ValidationView};
+use super::panels::review::overlay::ReviewPaneOverlay;
 use super::settings::PanelSettings;
 
 /// The graphics handles and the surface one pass paints into.
@@ -44,7 +44,7 @@ pub(crate) struct ViewportChrome<'a> {
     pub pane_gaps: &'a [egui::Rect],
     pub active_pane_rect: Option<egui::Rect>,
     pub review_panes: &'a [ReviewPaneOverlay],
-    pub toolbars: super::pane_toolbar::PaneToolbarData<'a>,
+    pub toolbars: super::chrome::pane_toolbar::PaneToolbarData<'a>,
 }
 
 /// What the panels read about the open document and the session.

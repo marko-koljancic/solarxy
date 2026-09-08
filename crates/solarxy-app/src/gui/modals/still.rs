@@ -11,7 +11,7 @@
 
 use image::RgbaImage;
 
-use super::theme::Theme;
+use crate::gui::theme::Theme;
 
 /// What the render is doing, which is what the modal shows.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -272,7 +272,11 @@ impl StillRenderModal {
 }
 
 /// Draw the still-render modal.
-pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal, theme: &Theme) {
+pub(in crate::gui) fn draw_still_modal(
+    ctx: &egui::Context,
+    modal: &mut StillRenderModal,
+    theme: &Theme,
+) {
     if !modal.open {
         return;
     }
@@ -333,7 +337,7 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
         // Locked once tiles start arriving, because the format decides what the
         // renderer reads back and cannot be changed under a running job.
         ui.add_enabled_ui(!running, |ui| {
-            if let Some(v) = super::sidebar::combo_with_tooltip(
+            if let Some(v) = crate::gui::widgets::combo_with_tooltip(
                 ui,
                 "Format",
                 "What the still is written as. Eight-bit PNG, or floating-point \
@@ -344,7 +348,7 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
                 modal.format = v;
             }
             if modal.format == StillFormat::Exr
-                && let Some(v) = super::sidebar::combo_with_tooltip(
+                && let Some(v) = crate::gui::widgets::combo_with_tooltip(
                     ui,
                     "Space",
                     StillSpace::doc_pair(),

@@ -15,7 +15,7 @@ use solarxy_core::scene::SceneObjectId;
 use solarxy_renderer::model::Model;
 use solarxy_renderer::scene_objects::SceneObjects;
 
-use super::intent::{Intents, PanelIntent};
+use crate::gui::intent::{Intents, PanelIntent};
 
 /// One Outliner interaction, raised during an egui pass.
 ///
@@ -73,7 +73,7 @@ pub(crate) enum OutlinerSource<'a> {
 
 /// Render the Outliner content into `ui` (the `egui_dock` `Outliner` tab
 /// supplies the `Ui`).
-pub(super) fn draw_outliner_content(
+pub(in crate::gui) fn draw_outliner_content(
     ui: &mut egui::Ui,
     source: OutlinerSource<'_>,
     intents: &mut Intents,

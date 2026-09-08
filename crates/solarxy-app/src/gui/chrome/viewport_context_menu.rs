@@ -8,7 +8,7 @@
 //! [`OutlinerAction`] (reused — the actions are identical to the
 //! Outliner's).
 
-use super::outliner::OutlinerAction;
+use crate::gui::panels::outliner::OutlinerAction;
 
 /// A pending viewport context menu — set by `State` on a right-click that
 /// hit a mesh, cleared once the menu is dismissed.
@@ -24,7 +24,7 @@ pub(crate) struct ViewportContextMenu {
 }
 
 /// Result of painting the context menu for one frame.
-pub(super) struct ContextMenuOutcome {
+pub(in crate::gui) struct ContextMenuOutcome {
     /// The action chosen, if a menu item was clicked.
     pub action: Option<OutlinerAction>,
     /// `true` once the menu should be dismissed (item clicked, click
@@ -34,7 +34,7 @@ pub(super) struct ContextMenuOutcome {
 
 /// Paint the viewport context menu. Returns the chosen action (if any)
 /// and whether the menu should now close.
-pub(super) fn draw_viewport_context_menu(
+pub(in crate::gui) fn draw_viewport_context_menu(
     ctx: &egui::Context,
     menu: &mut ViewportContextMenu,
 ) -> ContextMenuOutcome {

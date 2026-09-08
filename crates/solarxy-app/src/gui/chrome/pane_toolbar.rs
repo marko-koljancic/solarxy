@@ -22,48 +22,14 @@ use solarxy_core::preferences::{
 };
 use solarxy_core::view_config::PANE_TOOLBAR_HEIGHT;
 
-use super::intent::{Intent, Intents, PaneChange};
-use super::settings::PanelSettings;
-use super::theme::Theme;
+use crate::gui::intent::{Intent, Intents, PaneChange};
+use crate::gui::settings::PanelSettings;
+use crate::gui::theme::Theme;
 use crate::state::view_state::{BoundsMode, PaneDisplaySettings};
 
 const PANE_MODES: [PaneMode; 2] = [PaneMode::Scene3D, PaneMode::UvMap];
 const PROJECTIONS: [ProjectionMode; 2] =
     [ProjectionMode::Perspective, ProjectionMode::Orthographic];
-
-/// A `ComboBox` listing the builtin backgrounds (`HDRI Sky` gated on an
-/// HDRI being loaded) then, under a separator, every user custom
-/// background. Used by the Preferences modal's custom-background editor.
-pub(super) fn background_combo(
-    ui: &mut egui::Ui,
-    id: impl std::hash::Hash,
-    current: &mut BackgroundMode,
-    customs: &[CustomBackground],
-    hdri_available: bool,
-) {
-    egui::ComboBox::from_id_salt(id)
-        .selected_text(current.label(customs))
-        .show_ui(ui, |ui| {
-            for &builtin in BuiltinBg::ALL {
-                if builtin == BuiltinBg::HdriSky && !hdri_available {
-                    continue;
-                }
-                ui.selectable_value(
-                    current,
-                    BackgroundMode::Builtin(builtin),
-                    builtin.to_string(),
-                );
-            }
-            if !customs.is_empty() {
-                ui.separator();
-                for custom in customs {
-                    ui.selectable_value(current, BackgroundMode::Custom(custom.id), &custom.name);
-                }
-            }
-        })
-        .response
-        .on_hover_text("Background");
-}
 
 /// Per-frame data the per-pane toolbars need. `rects` are the full pane
 /// rects (toolbar strip + 3D content) in egui-logical space.
@@ -96,7 +62,7 @@ pub(crate) enum LookThroughChange {
 
 /// Draw the toolbar strip atop every pane. Called inside the Viewport
 /// dock-tab's `ui()` callback.
-pub(super) fn draw_pane_toolbars(
+pub(in crate::gui) fn draw_pane_toolbars(
     ui: &mut egui::Ui,
     data: &PaneToolbarData,
     settings: PanelSettings<'_>,

@@ -30,8 +30,8 @@ use solarxy_graph::document::{Document, GraphContext, NodeId};
 use solarxy_graph::naming::node_name;
 use solarxy_graph::registry::Registry;
 
-use super::intent::{Intents, PanelIntent};
-use super::theme::Theme;
+use crate::gui::intent::{Intents, PanelIntent};
+use crate::gui::theme::Theme;
 
 /// A malformed document (a container recurring inside its own subtree)
 /// would recurse forever. Real documents are a few levels deep.
@@ -218,7 +218,7 @@ pub(crate) enum NodeTreeAction {
 }
 
 /// Render the Node Tree into `ui` (the `egui_dock` tab supplies the `Ui`).
-pub(super) fn draw_node_tree_content(
+pub(in crate::gui) fn draw_node_tree_content(
     ui: &mut egui::Ui,
     source: NodeTreeSource<'_>,
     state: &mut NodeTreeState,

@@ -1,10 +1,14 @@
-use super::theme::Theme;
+use crate::gui::theme::Theme;
 use crate::console::ConsoleState;
 
 /// Console content for hosting inside an `egui_dock` tab. The dock owns
 /// docked/floating placement; this function paints the level filter,
 /// search bar, and the scrolling log entries.
-pub(super) fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState, theme: &Theme) {
+pub(in crate::gui) fn draw_console_content(
+    ui: &mut egui::Ui,
+    console: &mut ConsoleState,
+    theme: &Theme,
+) {
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt("console_filter")
             .selected_text(console.min_level.as_str())

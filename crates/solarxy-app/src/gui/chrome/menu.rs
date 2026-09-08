@@ -18,16 +18,16 @@ use solarxy_core::preferences::{
 };
 use crate::state::view_state::{BoundsMode, ViewLayout};
 
-use super::MOD;
-use super::dock::SolarxyTab;
-use super::intent::{
+use crate::gui::MOD;
+use crate::gui::dock::SolarxyTab;
+use crate::gui::intent::{
     CaptureIntent, EditIntent, FileIntent, HelpIntent, Intent, Intents, LayoutIntent, PanelIntent,
     ReviewIntent,
 };
-use super::intent::{DisplayChange, PaneChange, PostChange};
-use super::outliner::OutlinerAction;
-use super::settings::PanelSettings;
-use super::theme::Theme;
+use crate::gui::intent::{DisplayChange, PaneChange, PostChange};
+use crate::gui::panels::outliner::OutlinerAction;
+use crate::gui::settings::PanelSettings;
+use crate::gui::theme::Theme;
 
 /// A checkbox with a shortcut hint, returning the new value when the user
 /// flipped it.
@@ -43,7 +43,7 @@ fn checkbox(ui: &mut egui::Ui, current: bool, label: &str, hover: &str) -> Optio
 /// What the menu bar needs to know about the shell to draw itself, as
 /// against what it asks the shell to do, which travels as an [`Intent`].
 #[derive(Clone, Copy)]
-pub(super) struct MenuContext<'a> {
+pub(in crate::gui) struct MenuContext<'a> {
     pub has_model: bool,
     pub still_renderable: bool,
     pub recent_files: &'a [String],
@@ -59,7 +59,7 @@ pub(super) struct MenuContext<'a> {
     pub theme: Theme,
 }
 
-pub(super) fn draw_menu_bar(
+pub(in crate::gui) fn draw_menu_bar(
     ctx: &egui::Context,
     settings: PanelSettings<'_>,
     intents: &mut Intents,

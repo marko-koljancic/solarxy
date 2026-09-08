@@ -2,15 +2,15 @@
 //!
 //! Single source of truth for the four category colors + their letter
 //! glyphs. Consumed by `review_panel` (chips) and `review_overlay` (pins,
-//! cards). The colors are theme-scoped (see [`super::theme::ReviewColors`])
+//! cards). The colors are theme-scoped (see [`crate::gui::theme::ReviewColors`])
 //! so they re-contrast on the light theme — keep marker color and panel
 //! chip color in sync (the user's #1 visual-correlation cue).
 
 use solarxy_core::review::AnnotationCategory;
 
-use super::theme::Theme;
+use crate::gui::theme::Theme;
 
-pub(super) fn category_color(theme: Theme, c: AnnotationCategory) -> egui::Color32 {
+pub(in crate::gui) fn category_color(theme: Theme, c: AnnotationCategory) -> egui::Color32 {
     match c {
         AnnotationCategory::Info => theme.review.info,
         AnnotationCategory::Warning => theme.review.warning,
@@ -19,7 +19,7 @@ pub(super) fn category_color(theme: Theme, c: AnnotationCategory) -> egui::Color
     }
 }
 
-pub(super) fn category_letter(c: AnnotationCategory) -> &'static str {
+pub(in crate::gui) fn category_letter(c: AnnotationCategory) -> &'static str {
     match c {
         AnnotationCategory::Info => "i",
         AnnotationCategory::Warning => "!",
@@ -28,7 +28,7 @@ pub(super) fn category_letter(c: AnnotationCategory) -> &'static str {
     }
 }
 
-pub(super) fn category_label(c: AnnotationCategory) -> &'static str {
+pub(in crate::gui) fn category_label(c: AnnotationCategory) -> &'static str {
     match c {
         AnnotationCategory::Info => "Info",
         AnnotationCategory::Warning => "Warning",

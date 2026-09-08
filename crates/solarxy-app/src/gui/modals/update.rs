@@ -1,6 +1,6 @@
 use solarxy_core::install_source::{InstallSource, UpdateHint, detect, releases_url, update_hint};
 
-pub(super) struct UpdateModalState {
+pub(in crate::gui) struct UpdateModalState {
     pub open: bool,
     source: InstallSource,
     hint: UpdateHint,
@@ -24,7 +24,7 @@ impl UpdateModalState {
     }
 }
 
-pub(super) fn draw_update_modal(ctx: &egui::Context, state: &mut UpdateModalState) {
+pub(in crate::gui) fn draw_update_modal(ctx: &egui::Context, state: &mut UpdateModalState) {
     if !state.open {
         return;
     }

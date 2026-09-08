@@ -11,7 +11,7 @@ pub enum ToastSeverity {
 }
 
 #[derive(Debug)]
-pub(super) struct Toast {
+pub(in crate::gui) struct Toast {
     pub id: u64,
     pub message: String,
     pub severity: ToastSeverity,
@@ -22,18 +22,18 @@ pub(super) struct Toast {
 /// Context for the always-on viewport overlays (toasts, loading
 /// indicator, overdraw legend). The frame-time / validation / pane
 /// readout moved to the bottom status bar (`gui::status_bar`).
-pub(super) struct HudCtx<'a> {
+pub(in crate::gui) struct HudCtx<'a> {
     pub toasts: &'a VecDeque<Toast>,
     pub loading_message: Option<&'a String>,
     pub overdraw_active: bool,
 }
 
 #[derive(Debug, Default)]
-pub(super) struct HudResult {
+pub(in crate::gui) struct HudResult {
     pub dismissed_toast_id: Option<u64>,
 }
 
-pub(super) fn overlay_frame() -> egui::Frame {
+pub(in crate::gui) fn overlay_frame() -> egui::Frame {
     egui::Frame::NONE
         .fill(egui::Color32::from_black_alpha(160))
         .corner_radius(egui::CornerRadius::same(3))
@@ -102,7 +102,7 @@ fn draw_toast_queue(ctx: &egui::Context, toasts: &VecDeque<Toast>) -> Option<u64
     dismissed
 }
 
-pub(super) fn draw_hud_overlays(ctx: &egui::Context, hud: &HudCtx) -> HudResult {
+pub(in crate::gui) fn draw_hud_overlays(ctx: &egui::Context, hud: &HudCtx) -> HudResult {
     let result = HudResult {
         dismissed_toast_id: draw_toast_queue(ctx, hud.toasts),
     };

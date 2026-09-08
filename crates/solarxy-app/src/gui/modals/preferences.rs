@@ -121,7 +121,7 @@ impl PreferencesModal {
     }
 }
 
-pub(super) fn draw_preferences_modal(ctx: &egui::Context, modal: &mut PreferencesModal) {
+pub(in crate::gui) fn draw_preferences_modal(ctx: &egui::Context, modal: &mut PreferencesModal) {
     if !modal.open {
         return;
     }
@@ -311,7 +311,7 @@ fn draw_view_tab(ui: &mut egui::Ui, draft: &mut Preferences, editing: &mut Optio
         ui.label("Default background");
         // No HDRI is loaded at startup, so `HDRI Sky` is not offered as a
         // default — `false` hides it from the dropdown.
-        super::pane_toolbar::background_combo(
+        crate::gui::widgets::background_combo(
             ui,
             "prefs_default_background",
             &mut draft.display.background,

@@ -11,17 +11,17 @@
 //! string drops below 1200 px, the perf readout below 900 px, the pane
 //! label below 600 px.
 
-use super::theme::Theme;
+use crate::gui::theme::Theme;
 
 /// Height of the status-bar strip, in logical pixels.
-pub(super) const STATUS_BAR_HEIGHT: f32 = 22.0;
+pub(in crate::gui) const STATUS_BAR_HEIGHT: f32 = 22.0;
 
 const COLLAPSE_BACKEND: f32 = 1200.0;
 const COLLAPSE_PERF: f32 = 900.0;
 const COLLAPSE_PANE: f32 = 600.0;
 
 /// Per-frame data the status bar renders. Borrowed for the call only.
-pub(super) struct StatusBarData<'a> {
+pub(in crate::gui) struct StatusBarData<'a> {
     pub model: Option<(&'a str, &'a str)>,
     pub validation: (usize, usize),
     pub review_active: bool,
@@ -36,12 +36,16 @@ pub(super) struct StatusBarData<'a> {
 
 /// Clicks the caller must act on after drawing.
 #[derive(Debug, Default)]
-pub(super) struct StatusBarResponse {
+pub(in crate::gui) struct StatusBarResponse {
     /// The `● Review` badge was clicked — caller should exit review mode.
     pub review_badge_clicked: bool,
 }
 
-pub(super) fn draw(ctx: &egui::Context, data: &StatusBarData, theme: Theme) -> StatusBarResponse {
+pub(in crate::gui) fn draw(
+    ctx: &egui::Context,
+    data: &StatusBarData,
+    theme: Theme,
+) -> StatusBarResponse {
     let mut response = StatusBarResponse::default();
 
     let frame = egui::Frame::NONE

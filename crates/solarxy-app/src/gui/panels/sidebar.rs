@@ -4,44 +4,8 @@ use solarxy_core::view_config::{
     MIN_BLOOM_THRESHOLD, MIN_SSAO_STRENGTH,
 };
 
-use super::intent::{DisplayChange, Intent, Intents, PostChange};
-use super::settings::PanelSettings;
-
-/// A labelled combo over `T::ALL`, returning the variant the user picked.
-///
-/// Returns rather than writing through a mutable borrow: a panel reads the
-/// current value and asks for a new one, and never holds a handle on the
-/// shell's state.
-pub(super) fn combo_with_tooltip<T>(
-    ui: &mut egui::Ui,
-    label: &str,
-    shortcut: &str,
-    current: T,
-    all: &[T],
-) -> Option<T>
-where
-    T: Copy + PartialEq + std::fmt::Display,
-{
-    let mut picked = None;
-    ui.horizontal(|ui| {
-        let mut value = current;
-        egui::ComboBox::from_id_salt(label)
-            .selected_text(current.to_string())
-            .width(140.0)
-            .show_ui(ui, |ui| {
-                for &variant in all {
-                    if ui
-                        .selectable_value(&mut value, variant, variant.to_string())
-                        .changed()
-                    {
-                        picked = Some(variant);
-                    }
-                }
-            });
-        ui.label(label).on_hover_text(shortcut);
-    });
-    picked
-}
+use crate::gui::intent::{DisplayChange, Intent, Intents, PostChange};
+use crate::gui::settings::PanelSettings;
 
 /// A labelled checkbox, returning the new value when the user flipped it.
 fn checkbox_with_tooltip(
@@ -83,7 +47,7 @@ fn slider(
 /// display / post-processing / material settings only. Per-pane view
 /// state lives on the per-pane toolbar; validation and HDRI/IBL moved to
 /// the Properties panel.
-pub(super) fn draw_sidebar_content(
+pub(in crate::gui) fn draw_sidebar_content(
     ui: &mut egui::Ui,
     settings: PanelSettings<'_>,
     intents: &mut Intents,
@@ -178,9 +142,13 @@ pub(super) fn draw_sidebar_content(
                         intents.raise(Intent::Post(PostChange::Strengths(next)));
                     }
                 });
-                if let Some(mode) =
-                    combo_with_tooltip(ui, "Tone Map", "Shift+T", post.tone_mode, ToneMode::ALL)
-                {
+                if let Some(mode) = crate::gui::widgets::combo_with_tooltip(
+                    ui,
+                    "Tone Map",
+                    "Shift+T",
+                    post.tone_mode,
+                    ToneMode::ALL,
+                ) {
                     intents.raise(Intent::Post(PostChange::ToneMode(mode)));
                 }
                 let mut exposure = post.exposure;

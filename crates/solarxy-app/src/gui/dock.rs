@@ -113,7 +113,7 @@ pub(super) struct SolarxyTabViewer<'a> {
     pub panels: PanelState<'a>,
     pub review: &'a mut crate::state::review::ReviewState,
     pub intents: &'a mut Intents,
-    pub toolbars: &'a super::pane_toolbar::PaneToolbarData<'a>,
+    pub toolbars: &'a super::chrome::pane_toolbar::PaneToolbarData<'a>,
     pub viewport_rect_out: &'a mut Option<egui::Rect>,
     pub theme: Theme,
 }
@@ -142,7 +142,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
         match tab {
             SolarxyTab::Viewport => {
                 *self.viewport_rect_out = Some(ui.max_rect());
-                super::pane_toolbar::draw_pane_toolbars(
+                super::chrome::pane_toolbar::draw_pane_toolbars(
                     ui,
                     self.toolbars,
                     self.sources.settings,
@@ -152,10 +152,14 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 ui.allocate_space(ui.available_size());
             }
             SolarxyTab::Sidebar => {
-                super::sidebar::draw_sidebar_content(ui, self.sources.settings, self.intents);
+                super::panels::sidebar::draw_sidebar_content(
+                    ui,
+                    self.sources.settings,
+                    self.intents,
+                );
             }
             SolarxyTab::ReviewPanel => {
-                super::review_panel::draw_review_panel_content(
+                super::panels::review::panel::draw_review_panel_content(
                     ui,
                     self.review,
                     self.intents,
@@ -163,11 +167,11 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 );
             }
             SolarxyTab::Console => {
-                super::console_view::draw_console_content(ui, self.panels.console, &self.theme);
+                super::panels::console::draw_console_content(ui, self.panels.console, &self.theme);
             }
             SolarxyTab::MaterialInspector => {
                 if let Some(model) = self.sources.model {
-                    super::material_inspector::draw_material_inspector_content(
+                    super::panels::material_inspector::draw_material_inspector_content(
                         ui,
                         model,
                         self.panels.material_inspector,
@@ -183,13 +187,13 @@ impl TabViewer for SolarxyTabViewer<'_> {
                         ui,
                         matches!(
                             self.sources.outliner,
-                            super::outliner::OutlinerSource::Scene { .. }
+                            super::panels::outliner::OutlinerSource::Scene { .. }
                         ),
                     );
                 }
             }
             SolarxyTab::Properties => {
-                super::properties::draw_properties_content(
+                super::panels::properties::draw_properties_content(
                     ui,
                     self.open_file.model_info,
                     self.open_file.hdri_info,
@@ -199,10 +203,14 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 );
             }
             SolarxyTab::Outliner => {
-                super::outliner::draw_outliner_content(ui, self.sources.outliner, self.intents);
+                super::panels::outliner::draw_outliner_content(
+                    ui,
+                    self.sources.outliner,
+                    self.intents,
+                );
             }
             SolarxyTab::NodeTree => {
-                super::node_tree::draw_node_tree_content(
+                super::panels::node_tree::draw_node_tree_content(
                     ui,
                     self.sources.node_tree,
                     self.panels.node_tree,

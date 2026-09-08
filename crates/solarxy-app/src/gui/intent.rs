@@ -46,9 +46,9 @@ use solarxy_core::view_config::PostStrengths;
 use crate::state::view_state::{BoundsMode, ViewLayout};
 
 use super::dock::SolarxyTab;
-use super::node_tree::NodeTreeAction;
-use super::outliner::OutlinerAction;
-use super::pane_toolbar::LookThroughChange;
+use super::panels::node_tree::NodeTreeAction;
+use super::panels::outliner::OutlinerAction;
+use super::chrome::pane_toolbar::LookThroughChange;
 
 /// One thing a panel asked for during an interface pass.
 ///
