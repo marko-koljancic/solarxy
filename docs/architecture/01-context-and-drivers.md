@@ -36,7 +36,7 @@ Two consequences follow, and both matter when reading the rest of this set.
 The authoring capability is not evenly available. The browser shell drives effectively all 35
 `Command` variants. The desktop shell holds an `Option<Box<Engine>>` and dispatches two of
 them in production code, a selection change at
-`crates/solarxy-app/src/state/input/mod.rs:827` and a parameter write at the same file's line
+`crates/solarxy-app/src/state/intents.rs:95` and a parameter write at the same file's line
 864. The desktop can open a `.slxy` scene and list its graph read-only; it cannot edit one.
 That gap is the subject of
 [adr/0012-shared-application-layer-is-a-new-crate.md](adr/0012-shared-application-layer-is-a-new-crate.md).

@@ -150,9 +150,9 @@ Implementation:
   annotation ID being re-anchored).
 - Click routing is documented in
   [`CLAUDE.md` § Review System click routing](../CLAUDE.md) and
-  implemented in `state/input/mod.rs::try_review_pick`.
+  implemented in `state/input/pointer.rs::try_review_pick`.
 - The new anchor uses the same raycast primitive
-  (`state/raycast.rs::raycast_scene`) as the initial placement, so
+  (`solarxy_core::raycast::raycast_scene`) as the initial placement, so
   the precision floor is identical.
 
 ---
@@ -276,7 +276,7 @@ Out of scope; flagged here so expectations are clear:
 
 - [`solarxy-core/src/review.rs`](../crates/solarxy-core/src/review.rs) —
   the canonical Rust type definitions
-- [`solarxy-app/src/state/raycast.rs`](../crates/solarxy-app/src/state/raycast.rs) —
+- [`solarxy-core/src/raycast.rs`](../crates/solarxy-core/src/raycast.rs) —
   the CPU raycaster underpinning both placement and re-anchor
 - [`CLAUDE.md` § Review System](../CLAUDE.md) — implementation
   architecture notes for maintainers

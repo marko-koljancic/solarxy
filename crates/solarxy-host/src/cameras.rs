@@ -203,6 +203,106 @@ pub fn lens_for(def: &solarxy_core::scene::CameraDef) -> solarxy_core::scene::Ca
     lens
 }
 
+/// Drive each bound pane's camera from its camera node's current pose.
+///
+/// Runs every frame in both shells, so a camera node moved by a scene edit,
+/// a parameter change or a reload carries its panes with it. A binding whose
+/// node no longer exists follows nothing and the pane keeps its last pose,
+/// which is what makes deleting a camera harmless mid-session.
+///
+/// `suppressed` is the per-pane guard, and it is a mask rather than a
+/// predicate on purpose. The two shells disagree about when a bound pane
+/// should stop following: the browser holds the follow off while a pane is
+/// mid-navigation and while a turntable spins its scratch camera, so the
+/// follow never fights a live orbit; the desktop has neither state and
+/// suppresses nothing. Passing that as data keeps the disagreement visible at
+/// the call sites and keeps this signature free of anything a shell owns. A
+/// closure here would let either shell hide policy inside the shared body,
+/// which is the failure the crate's membership rule exists to prevent.
+///
+/// Takes the definitions and the pane cameras as separate borrows, which is
+/// what lets a caller pass its scene and its view state in one expression
+/// without cloning a definition to end a borrow first.
+pub fn follow_camera_bindings(
+    defs: &[solarxy_core::scene::CameraDef],
+    bindings: &[Option<solarxy_core::scene::SceneObjectId>; 4],
+    suppressed: &[bool; 4],
+    cameras: &mut [Option<CameraState>; 4],
+) {
+    for (i, binding) in bindings.iter().enumerate() {
+        let (Some(id), false) = (binding, suppressed[i]) else {
+            continue;
+        };
+        let Some(def) = defs.iter().find(|c| c.id == *id) else {
+            continue;
+        };
+        if let Some(state) = cameras[i].as_mut() {
+            apply_camera_def(&mut state.camera, def);
+        }
+    }
+}
+
+/// Snap `cam` to a standard view fitted to `bounds`.
+///
+/// The one call site pairing [`StandardView::axis`] with the framing, so a
+/// caller names the view it wants and never the vectors behind it.
+pub fn reset_to_view(cam: &mut CameraState, bounds: &AABB, view: StandardView) {
+    let (dir, up) = view.axis();
+    cam.reset_to_bounds_axis(bounds, dir, up);
+}
+
+/// The look a pane's bound camera carries, if the pane is bound to one that
+/// exists.
+///
+/// Both shells resolve a pane's grade by starting here. The lookup is small,
+/// but it was written four times across the two shells and each copy had to
+/// remember that a binding can name a camera the document no longer has.
+#[must_use]
+pub fn camera_look_for(
+    defs: Option<&[solarxy_core::scene::CameraDef]>,
+    binding: Option<solarxy_core::scene::SceneObjectId>,
+) -> Option<&solarxy_core::scene::CameraLook> {
+    let id = binding?;
+    defs?.iter().find(|c| c.id == id).map(|c| &c.look)
+}
+
+/// Bind the pair of grading tables a look asks for, before whatever is about
+/// to composite.
+///
+/// There is one pair of table textures for the whole renderer while a look is
+/// per shot, so the pair follows whichever pane or still is next. `set_lut`
+/// dedupes on content hash, so the common case, no tables at all or every
+/// pane through one camera, costs two comparisons and rebuilds nothing.
+///
+/// A `None` look clears both slots rather than leaving them, which is the
+/// behaviour that matters: an empty slot binds an identity table, so a pane
+/// with no camera composites ungraded instead of inheriting the grade of
+/// whichever pane drew before it.
+///
+/// This existed four times, three of them inside one shell, because the
+/// viewport path, the still path and the still's look preparation each needed
+/// it and none of them could reach the others.
+pub fn bind_look_luts(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    renderer: &mut solarxy_renderer::frame::Renderer,
+    look: Option<&solarxy_core::scene::CameraLook>,
+) {
+    let (a, b) = look.map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
+    renderer.set_lut(
+        device,
+        queue,
+        solarxy_renderer::lut::LutSlot::A,
+        a.as_deref(),
+    );
+    renderer.set_lut(
+        device,
+        queue,
+        solarxy_renderer::lut::LutSlot::B,
+        b.as_deref(),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use solarxy_core::scene::{CameraDef, CameraLens};
@@ -334,104 +434,4 @@ mod tests {
             );
         }
     }
-}
-
-/// Drive each bound pane's camera from its camera node's current pose.
-///
-/// Runs every frame in both shells, so a camera node moved by a scene edit,
-/// a parameter change or a reload carries its panes with it. A binding whose
-/// node no longer exists follows nothing and the pane keeps its last pose,
-/// which is what makes deleting a camera harmless mid-session.
-///
-/// `suppressed` is the per-pane guard, and it is a mask rather than a
-/// predicate on purpose. The two shells disagree about when a bound pane
-/// should stop following: the browser holds the follow off while a pane is
-/// mid-navigation and while a turntable spins its scratch camera, so the
-/// follow never fights a live orbit; the desktop has neither state and
-/// suppresses nothing. Passing that as data keeps the disagreement visible at
-/// the call sites and keeps this signature free of anything a shell owns. A
-/// closure here would let either shell hide policy inside the shared body,
-/// which is the failure the crate's membership rule exists to prevent.
-///
-/// Takes the definitions and the pane cameras as separate borrows, which is
-/// what lets a caller pass its scene and its view state in one expression
-/// without cloning a definition to end a borrow first.
-pub fn follow_camera_bindings(
-    defs: &[solarxy_core::scene::CameraDef],
-    bindings: &[Option<solarxy_core::scene::SceneObjectId>; 4],
-    suppressed: &[bool; 4],
-    cameras: &mut [Option<CameraState>; 4],
-) {
-    for (i, binding) in bindings.iter().enumerate() {
-        let (Some(id), false) = (binding, suppressed[i]) else {
-            continue;
-        };
-        let Some(def) = defs.iter().find(|c| c.id == *id) else {
-            continue;
-        };
-        if let Some(state) = cameras[i].as_mut() {
-            apply_camera_def(&mut state.camera, def);
-        }
-    }
-}
-
-/// Snap `cam` to a standard view fitted to `bounds`.
-///
-/// The one call site pairing [`StandardView::axis`] with the framing, so a
-/// caller names the view it wants and never the vectors behind it.
-pub fn reset_to_view(cam: &mut CameraState, bounds: &AABB, view: StandardView) {
-    let (dir, up) = view.axis();
-    cam.reset_to_bounds_axis(bounds, dir, up);
-}
-
-/// The look a pane's bound camera carries, if the pane is bound to one that
-/// exists.
-///
-/// Both shells resolve a pane's grade by starting here. The lookup is small,
-/// but it was written four times across the two shells and each copy had to
-/// remember that a binding can name a camera the document no longer has.
-#[must_use]
-pub fn camera_look_for(
-    defs: Option<&[solarxy_core::scene::CameraDef]>,
-    binding: Option<solarxy_core::scene::SceneObjectId>,
-) -> Option<&solarxy_core::scene::CameraLook> {
-    let id = binding?;
-    defs?.iter().find(|c| c.id == id).map(|c| &c.look)
-}
-
-/// Bind the pair of grading tables a look asks for, before whatever is about
-/// to composite.
-///
-/// There is one pair of table textures for the whole renderer while a look is
-/// per shot, so the pair follows whichever pane or still is next. `set_lut`
-/// dedupes on content hash, so the common case, no tables at all or every
-/// pane through one camera, costs two comparisons and rebuilds nothing.
-///
-/// A `None` look clears both slots rather than leaving them, which is the
-/// behaviour that matters: an empty slot binds an identity table, so a pane
-/// with no camera composites ungraded instead of inheriting the grade of
-/// whichever pane drew before it.
-///
-/// This existed four times, three of them inside one shell, because the
-/// viewport path, the still path and the still's look preparation each needed
-/// it and none of them could reach the others.
-pub fn bind_look_luts(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    renderer: &mut solarxy_renderer::frame::Renderer,
-    look: Option<&solarxy_core::scene::CameraLook>,
-) {
-    let (a, b) = look.map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
-    renderer.set_lut(
-        device,
-        queue,
-        solarxy_renderer::lut::LutSlot::A,
-        a.as_deref(),
-    );
-    renderer.set_lut(
-        device,
-        queue,
-        solarxy_renderer::lut::LutSlot::B,
-        b.as_deref(),
-    );
 }

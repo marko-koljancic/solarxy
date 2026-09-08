@@ -130,7 +130,7 @@ this repository, all verified.
 ```
 
 There is no `solarxy_host::render_pane`. A workspace-wide search for `fn render_pane` returns
-exactly two definitions, `crates/solarxy-app/src/state/render.rs:165` and
+exactly two definitions, `crates/solarxy-app/src/state/render.rs:160` and
 `crates/solarxy-web/src/app/render.rs:1197`, which is to say the function the comment claims is shared
 is implemented separately in each shell. The shared function that does exist is
 `solarxy_host::pane::encode_pane_passes` at `crates/solarxy-host/src/pane.rs:410`, and it is a
@@ -217,7 +217,7 @@ that matters.
 
 **Today, and this is a real gap.** The two largest shell crates have no crate-level
 documentation at all. `crates/solarxy-app/src/lib.rs:1` and `crates/solarxy-cli/src/lib.rs:1`
-both begin directly with `#![warn(clippy::pedantic)]`, with no `//!` line anywhere, at 17,324
+both begin directly with `#![warn(clippy::pedantic)]`, with no `//!` line anywhere, at 17,980
 and 18,082 lines respectively. Meanwhile `crates/solarxy-bvh/src/lib.rs` gives 38 header lines
 for a 2,788-line crate and `crates/solarxy-render/src/lib.rs` gives 27 for 4,293. Documentation
 effort is inversely correlated with crate size, so the two crates a newcomer most needs
@@ -705,7 +705,7 @@ adding one is a deliberate edit to the crate root rather than an unremarked line
 manifest. Instead `#![warn(clippy::pedantic)]` plus a hand-maintained `#![allow(...)]` block is
 copied into all 15 crate roots, in **12 distinct configurations**. Only four are identical
 (`solarxy-core`, `solarxy-formats`, `solarxy-graph`, `solarxy-kernel`, 21 lints each).
-`solarxy-renderer` allows 22; `solarxy-host` 20; `solarxy-app` 19; `solarxy-bvh` and
+`solarxy-renderer` allows 22; `solarxy-host` 20; `solarxy-app` 20; `solarxy-bvh` and
 `solarxy-cli` 15 each with different contents; `solarxy-validate` 10; `solarxy-web` 9;
 `solarxy-imaging` 6; the root binary 5; `solarxy-scenefile` 2; `solarxy-render` exactly one,
 `module_name_repetitions`, making the newest crate the strictest in the workspace.
@@ -721,7 +721,7 @@ which this workspace does routinely, produces clippy failures unrelated to the c
 `too_many_lines` and `too_many_arguments` are allowed 12 and 28 times respectively across the
 workspace, at the site rather than centrally, which makes both a convention that is opted out
 of per function rather than a signal. `render_ui` at
-`crates/solarxy-app/src/gui/renderer.rs:418` is 533 lines with over twenty parameters under an
+`crates/solarxy-app/src/gui/renderer.rs:423` is 533 lines with over twenty parameters under an
 explicit allow at `:417`.
 
 **CI is weaker than the documented local command.** `.github/workflows/ci.yml:22` runs
@@ -1132,7 +1132,7 @@ version. A blob handed to the wrong `unpack` is silently misinterpreted rather t
 **Rule.** Every interactive element is reachable and operable by keyboard. Focus is visible.
 Any element with a role has the state that role implies. Colour is never the only carrier of
 meaning; the review category glyphs at
-`crates/solarxy-app/src/gui/review_visuals.rs` are the pattern, where each category has a letter
+`crates/solarxy-app/src/gui/panels/review/visuals.rs` are the pattern, where each category has a letter
 as well as a colour.
 
 **Rule.** Motion respects `prefers-reduced-motion`. `web/src/styles/tokens.css:46` has the

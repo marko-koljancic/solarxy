@@ -5,7 +5,7 @@ release tag, and whenever the still job, the tracer, or a shell's render
 surface changes.
 
 The automated half is `both_native_shells_resolve_one_scene_the_same_way` in
-`crates/solarxy-app/src/state/still.rs`, which runs on every `cargo test` and
+`crates/solarxy-app/src/state/still/settings.rs`, which runs on every `cargo test` and
 proves the desktop and the headless command read one document identically. This
 file covers what that cannot: pixels, on three surfaces, one of which is a
 browser.

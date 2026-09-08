@@ -608,16 +608,16 @@ restore and its panic hook to standard output, and the render dashboard can pain
 error so it coexists with JSON output.
 
 **The toast rule, and the one place it is broken.** `EguiRenderer::push_toast`
-(`crates/solarxy-app/src/gui/renderer.rs:181-192`) emits a `tracing` event on
+(`crates/solarxy-app/src/gui/renderer.rs:177-188`) emits a `tracing` event on
 `target: "solarxy::toast"` for every toast, at the level matching the severity. The rule
 recorded at `crates/solarxy-app/src/gui/mod.rs:21` is that callers must not also emit their own
 log for the same message, or the console records it twice.
 
 There is exactly one violation, and it is real.
-`crates/solarxy-app/src/state/review.rs:634-644` emits
+`crates/solarxy-app/src/state/review/sidecar.rs:92-102` emits
 `tracing::info!(target: "solarxy::toast", "Saved {} annotations to {}", count, path.display())`
 and then calls `self.gui.set_toast(&format!("Saved {count} annotations"), ...)`. `set_toast`
-(`gui/renderer.rs:206-208`) routes straight through `push_toast`. Saving review notes therefore
+(`gui/renderer.rs:202-204`) routes straight through `push_toast`. Saving review notes therefore
 writes two console lines with different text for one event. Nothing enforces the rule
 mechanically; a lint or a source-scan test in the style of the existing drift tests would.
 

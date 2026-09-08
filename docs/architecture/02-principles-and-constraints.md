@@ -227,7 +227,7 @@ because they all used an aperture of zero.
 a new copy has one.
 
 **Where it holds.** `trace_settings_for` exists once per shell, at
-`crates/solarxy-app/src/state/still.rs:753`, `crates/solarxy-web/src/trace_settings.rs:28` and
+`crates/solarxy-app/src/state/still/settings.rs:113`, `crates/solarxy-web/src/trace_settings.rs:28` and
 `crates/solarxy-render/src/lib.rs:887`, and each opens by destructuring `RenderSettings`
 exhaustively with no rest pattern, so a new settings field stops all three compiling. The
 three render-engine enums are each matched exhaustively with no wildcard arm at all four map

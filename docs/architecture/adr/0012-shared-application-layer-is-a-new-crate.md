@@ -22,13 +22,13 @@ cannot hold anything that references a document, a node, or a command.
 
 The result is measurable. `solarxy_graph::Command` has 35 variants. The browser shell drives
 effectively all of them. `solarxy-app` production code dispatches two: a `SetSelection` at
-`crates/solarxy-app/src/state/input/mod.rs:827` and a `SetParam` at the same file's line 864.
+`crates/solarxy-app/src/state/intents.rs:95` and a `SetParam` at the same file's line 864.
 Everything above the engine, meaning menus, keymap, dock and workspace arrangement, modals,
 toasts, parameter widget selection, parameter visibility, preferences, autosave, save and
 open, copy and paste, and the export flows, is written once per shell.
 
 The duplication this produces is not hypothetical. `render_pane` is implemented separately in
-`crates/solarxy-app/src/state/render.rs:165` and `crates/solarxy-web/src/app.rs:5458` while
+`crates/solarxy-app/src/state/render.rs:160` and `crates/solarxy-web/src/app.rs:5458` while
 `crates/solarxy-app/src/state/render.rs:2` claims it delegates to a `solarxy_host::render_pane`
 that does not exist. The still-render pump loop is written three times. `denoise_settings_for`
 is byte-identical in three crates.

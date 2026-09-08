@@ -70,7 +70,7 @@ that case; the caller then calls `snapshot()` and replaces wholesale
 The decision is honoured by one shell and not yet by the other, and this is the honest state
 rather than a nuance. `solarxy_graph::Command` has 35 variants. The browser drives effectively
 all of them. `solarxy-app` production code dispatches two: a `SetSelection` at
-`crates/solarxy-app/src/state/input/mod.rs:827` and a `SetParam` writing the `visible` key at
+`crates/solarxy-app/src/state/intents.rs:95` and a `SetParam` writing the `visible` key at
 the same file's line 864. The desktop is a viewer of documents the browser authors. Reaching
 parity is not a matter of porting a UI, and that is the argument of
 [0012](0012-shared-application-layer-is-a-new-crate.md).

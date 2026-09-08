@@ -28,7 +28,7 @@ Sizes below are total Rust under each crate, including its tests and examples.
 | `solarxy-graph` | 50,087 | The studio core: document, topology, cook driver, node registry of 77 types, expression language, undo, review, migration, and the `Engine` facade | Engine |
 | `solarxy-renderer` | 42,159 | Every wgpu pipeline and pass, the path tracer compute path, the `RenderBackend` contract declaration, split-pane layout maths | Renderer |
 | `solarxy-host` | 10,153 | Per-pane pass orchestration and composite, cameras, lighting, the raster backend implementation, the tiled still job, the gizmo drag solver | Shared render host |
-| `solarxy-app` | 17,324 | The winit plus egui desktop shell | Shell |
+| `solarxy-app` | 17,980 | The winit plus egui desktop shell | Shell |
 | `solarxy-web` | 7,604 | The wasm-bindgen boundary and the browser WebGPU host | Shell |
 | `solarxy-render` | 4,293 | Headless rendering: loads a scene or a model, brings up a device with no surface, drives the still job | Shell, despite the name |
 | `solarxy-validate` | 1,402 | Validation orchestration plus CI pipeline adapters | Library |
@@ -219,7 +219,7 @@ model is absent, meaning a green run proves nothing about raycast performance.
 allow block is copied into all fifteen crate roots, in twelve distinct configurations. Only
 four are identical: `solarxy-core`, `solarxy-formats`, `solarxy-graph` and `solarxy-kernel`
 share the same twenty-one allows. `solarxy-renderer` allows twenty-two, `solarxy-host` twenty,
-`solarxy-app` nineteen, `solarxy-bvh` and `solarxy-cli` fifteen, `solarxy-validate` ten,
+`solarxy-app` twenty, `solarxy-bvh` and `solarxy-cli` fifteen, `solarxy-validate` ten,
 `solarxy-web` nine, `solarxy-imaging` six, the root binary five, `solarxy-scenefile` two and
 `solarxy-render` exactly one. Five lints appear in exactly one crate each. There is no `deny`
 or `forbid` anywhere in the workspace, including no `forbid(unsafe_code)`, while three real
@@ -358,7 +358,7 @@ is edits, not correctness.
 **`render_pane` is implemented twice while a doc comment claims it is shared.**
 `crates/solarxy-app/src/state/render.rs:2` states that the module "assembles each pane's
 parameters and hands them to `solarxy_host::render_pane`". No such symbol exists. A workspace
-search finds `render_pane` at `crates/solarxy-app/src/state/render.rs:165` and
+search finds `render_pane` at `crates/solarxy-app/src/state/render.rs:160` and
 `crates/solarxy-web/src/app/render.rs:1197`, plus comment references in the renderer and the host.
 The two shells each build the full nineteen-field `FrameCtx` literal themselves and share only
 the composite tail, `solarxy_host::composite_and_submit`. They have already diverged: the
@@ -366,7 +366,7 @@ desktop passes no grid plane and writes no manipulator or light markers per pane
 both. Roughly 340 lines of duplicated frame driver with no test covering the pair.
 
 **`denoise_settings_for` is byte-identical in three crates.** It appears at
-`crates/solarxy-app/src/state/still.rs:811`, `crates/solarxy-web/src/trace_settings.rs:104` and
+`crates/solarxy-app/src/state/still/settings.rs:130`, `crates/solarxy-web/src/trace_settings.rs:104` and
 `crates/solarxy-render/src/lib.rs:942`, with the same four-field body character for character.
 Its sibling `trace_settings_for`, in the same three files, opens with an exhaustive
 `let RenderSettings { ... } = *settings;` naming every field with no rest pattern, so a field
@@ -375,7 +375,7 @@ added to the settings halts compilation in all three shells and forces the autho
 of that guarantee itself. The guard is one function above it, not in it.
 
 **The still-render pump loop is written three times.**
-`crates/solarxy-app/src/state/still.rs:385`, `crates/solarxy-web/src/app/still.rs:501` and
+`crates/solarxy-app/src/state/still/mod.rs:394`, `crates/solarxy-web/src/app/still.rs:501` and
 `crates/solarxy-render/src/lib.rs:1087` each read the job's current tile, resize the shared
 targets to it, build the twelve-field context, dispatch through the backend trait, match five
 ways on the resulting step, drain tiles and previews, and compute progress. The desktop
@@ -421,7 +421,7 @@ are pushed one way into Rust so those values are held twice. The desktop toast q
 bounded double-ended queue painted by egui; the web's is a store array with per-severity
 timeouts, a different cap and a different dismissal model. The web has one typed keymap table
 driving both its dispatcher and its generated shortcuts modal; the desktop has a hand-written
-display table in `crates/solarxy-app/src/gui/keyboard_shortcuts_modal.rs` and a dispatcher
+display table in `crates/solarxy-app/src/gui/modals/shortcuts.rs` and a dispatcher
 split across `crates/solarxy-app/src/app.rs` and `crates/solarxy-app/src/state/input/mod.rs`,
 with nothing comparing the three.
 
@@ -1519,7 +1519,7 @@ caller anywhere in the repository.
 
 `solarxy-app` production code dispatches two:
 
-- `Command::SetSelection` at `crates/solarxy-app/src/state/input/mod.rs:827`, from a node-tree
+- `Command::SetSelection` at `crates/solarxy-app/src/state/intents.rs:95`, from a node-tree
   row click.
 - `Command::SetParam` with the key literal `"visible"` at the same file's line 864, the outliner
   visibility toggle. The comment above it explains why it routes through the engine at all: a
@@ -1579,9 +1579,9 @@ production TypeScript or TSX files reach 250 lines and 8 reach 500.
 | `crates/solarxy-core/src/preferences.rs` | 1,514 | Desktop application preference structs; every shared display and shading enum the shaders switch on; TOML load and save with atomic rename; platform config-path resolution. A shader-facing enum and a config-file writer share one module in the crate thirteen members depend on. |
 | `crates/solarxy-cli/src/tui/layout.rs` | 1,390 | A panel-kind trait; a split tree generic over any panel vocabulary; geometry solving against a terminal rectangle; arrange-mode mutations; preset decoding from an arrangement grammar; minimum-size negotiation. Genuinely generic, and the most rigorously deduplicated application layer in the product. |
 | `crates/solarxy-core/src/geometry.rs` | 1,320 | Loader mesh and model types; sRGB transfer functions; a decoded image container with a private hash implementation; an HDR image container; the colour-grading cube type and its constants; a 240-line material record with seventeen texture slots and two enums; and four free-standing geometry kernels. Five unrelated concerns. |
-| `crates/solarxy-app/src/state/input/mod.rs` | 1,312 | Keyboard dispatch for inspection modes, layouts, overlays and debug keys; mouse and camera routing; the three-step review click ladder; marker hit testing; outliner action handling; node-tree selection dispatch; the object-visibility command; camera framing helpers; preference write-back. One of two halves of a dispatcher whose other half is in `app.rs`. |
+| `crates/solarxy-app/src/state/input/keyboard.rs` | 512 | Keyboard dispatch for inspection modes, layouts, overlays and debug keys, and the display toggles it drives. One of two halves of a dispatcher whose other half is in `app.rs`. The file this replaced was 1,312 lines and also held mouse routing, the review click ladder, outliner and node-tree dispatch, camera framing and preference write-back, none of which is input; each went to a module named for it. |
 | `crates/solarxy-kernel/src/set.rs` | 1,168 | The mesh and set data model; the attribute domain, data and map vocabulary; the reserved-name registry and its prose type contracts; bounds computation including the instanced eight-corner union; placement semantics and the baking escape hatch; conversion to the renderer contract; conversion to and from the loader contract; emptiness predicates; the statistics measures. |
-| `crates/solarxy-app/src/gui/renderer.rs` | 1,090 | Per-frame egui orchestration; the toast queue; five modal states; console and material-inspector state; the persistent dock state and last viewport rectangle; menu-visibility mirroring from the dock tree; node-tree and still-progress state. |
+| `crates/solarxy-app/src/gui/renderer.rs` | 980 | Per-frame egui orchestration; the toast queue; five modal states; console and material-inspector state; the persistent dock state and last viewport rectangle; node-tree and still-progress state. The menu-visibility mirroring is gone: the window menu reads the dock directly. |
 | `crates/solarxy-graph/src/engine/scene.rs` | 924 | Full scene-delta rebuild from committed outputs, run on every call; root-node dispatch on hardcoded type-id strings; light, camera and environment construction; geo world-matrix and render-flag resolution, each re-resolving the node's entire parameter list; an effective-validation breadth-first search; raycast picking over world-transformed display geometry. All six of its evaluation contexts use a stopped clock. |
 | `web/src/engine/session.ts` | 1,248 | See section 7. The web shell's application layer, with eleven mutable module bindings, and it imports upward into the view. |
 | `web/src/engine/types.ts` | 931 | 80 hand-authored mirrors of Rust serde shapes, pinned for six variants. |
@@ -1619,10 +1619,10 @@ pages. `crates/solarxy-app` has a `tests/` directory containing only fixtures.
 | `Pipelines::new` | 983 | `crates/solarxy-renderer/src/pipelines.rs:233` |
 | `capture` | 612 | `crates/solarxy-host/examples/golden.rs:138` |
 | `render_descriptor` | 584 | `crates/solarxy-graph/src/nodes/export_nodes.rs:520` |
-| `render_ui` | 533 | `crates/solarxy-app/src/gui/renderer.rs:418` |
+| `render_ui` | 397 | `crates/solarxy-app/src/gui/renderer.rs:423` |
 | `upsert_geometry` | 381 | `crates/solarxy-renderer/src/scene_objects.rs:463` |
 | `upload_model` | 358 | `crates/solarxy-renderer/src/resources.rs:136` |
-| `handle_key` | 351 | `crates/solarxy-app/src/state/input/mod.rs:128` |
+| `handle_key` | 351 | `crates/solarxy-app/src/state/input/keyboard.rs:50` |
 | `dispatch` | 257 | `crates/solarxy-graph/src/engine/mod.rs:1122` |
 
 Three of these are declarative and long for a defensible reason: `Pipelines::new` is 47 pipeline

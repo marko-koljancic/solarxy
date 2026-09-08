@@ -991,7 +991,7 @@ hand-built structures no shell ever requests.
 It has exactly one caller, a capability object serialized to the browser at
 `crates/solarxy-web/src/app/view_state.rs:206`, which is presentational. The four sites that actually
 construct a path-tracing backend do not call it: `crates/solarxy-web/src/app/render.rs:141`,
-`crates/solarxy-web/src/app/still.rs:36`, `crates/solarxy-app/src/state/still.rs:287` and
+`crates/solarxy-web/src/app/still.rs:36`, `crates/solarxy-app/src/state/still/mod.rs:295` and
 `crates/solarxy-render/src/lib.rs:1222`.
 
 So on a device that genuinely cannot host the tracer, the guard reports capable and
@@ -1262,7 +1262,7 @@ Recorded here rather than answered, because the code does not settle them.
 - Is multisampling at two samples supported on the adapters Solarxy ships to? The preference
   offers it, nothing validates it, and no evidence was found that anyone has selected it.
 - The desktop still render lights a traced scene with the resolved gradient sky when a document
-  has no environment image (`crates/solarxy-app/src/state/still.rs:611-635`), while the browser
+  has no environment image (`crates/solarxy-app/src/state/still/mod.rs:619-643`), while the browser
   still and the headless command both install black deliberately and by name
   (`crates/solarxy-web/src/app/render.rs:243-244`, `crates/solarxy-render/src/lib.rs:1258`). Two
   surfaces agree and one does not. Which is the intended answer for what "no environment image"
