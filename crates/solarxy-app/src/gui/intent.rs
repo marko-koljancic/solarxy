@@ -37,9 +37,13 @@
 //! The flag structs this replaces were immune to both by accident: they were
 //! built once outside the closure and every write was idempotent.
 
-use solarxy_core::preferences::ProjectionMode;
+use solarxy_core::preferences::{
+    BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
+    ProjectionMode, ToneMode, UvMapBackground, UvMode, ViewMode,
+};
+use solarxy_core::view_config::PostStrengths;
 
-use crate::state::view_state::ViewLayout;
+use crate::state::view_state::{BoundsMode, ViewLayout};
 
 use super::dock::SolarxyTab;
 use super::node_tree::NodeTreeAction;
@@ -60,6 +64,21 @@ pub(crate) enum Intent {
         pane: usize,
         change: LookThroughChange,
     },
+    /// One per-pane display setting, on the pane a widget was drawn for.
+    ///
+    /// One variant for every pane and not two, which is the point: the active
+    /// pane and the others were written through different paths before this,
+    /// with a fifteen-field borrow bundle and two constructors to choose
+    /// between them.
+    Pane { pane: usize, change: PaneChange },
+    /// One scene-global display setting.
+    Display(DisplayChange),
+    /// One post-processing setting.
+    Post(PostChange),
+    /// The image-based lighting mode.
+    Ibl(IblMode),
+    /// Whether the panes' cameras move together.
+    LinkCameras(bool),
     /// The View menu's projection, which follows the camera link rather than
     /// naming a pane.
     Projection(ProjectionMode),
@@ -77,6 +96,50 @@ pub(crate) enum Intent {
     Help(HelpIntent),
     /// A panel asked for something the shell does on its behalf.
     Panel(PanelIntent),
+}
+
+/// One of a pane's own display settings.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PaneChange {
+    PaneMode(PaneMode),
+    ViewMode(ViewMode),
+    InspectionMode(InspectionMode),
+    MaterialOverride(MaterialOverride),
+    BackgroundMode(BackgroundMode),
+    NormalsMode(NormalsMode),
+    UvMode(UvMode),
+    BoundsMode(BoundsMode),
+    LineWeight(LineWeight),
+    ShowGrid(bool),
+    ShowAxisGizmo(bool),
+    ShowLocalAxes(bool),
+    ShowValidation(bool),
+    UvBackground(UvMapBackground),
+    ShowUvOverlap(bool),
+}
+
+/// One scene-global display setting.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum DisplayChange {
+    TurntableActive(bool),
+    TurntableRpm(f32),
+    LightsLocked(bool),
+    RoughnessScale(f32),
+    MetallicScale(f32),
+    HdriRotation(f32),
+    HdriIntensity(f32),
+}
+
+/// One post-processing setting.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PostChange {
+    Bloom(bool),
+    Ssao(bool),
+    /// The three intensities together, because they reach the renderer
+    /// through one setter that clamps them and pushes both passes.
+    Strengths(PostStrengths),
+    ToneMode(ToneMode),
+    Exposure(f32),
 }
 
 /// The File menu.
@@ -184,18 +247,27 @@ impl Intent {
             // of them can be raised in a frame, because they are one click
             // each, so the order within this run is a reading order rather
             // than a behaviour.
-            Self::File(_) => 2,
-            Self::Edit(_) => 3,
-            Self::Capture(_) => 4,
-            Self::Review(_) => 5,
-            Self::Projection(_) => 6,
-            Self::Layout(_) => 7,
-            Self::Help(_) => 8,
-            Self::Panel(PanelIntent::FlyToIssue(_)) => 9,
-            Self::Panel(PanelIntent::ClearHdri) => 10,
-            Self::Panel(PanelIntent::LoadHdri) => 11,
-            Self::Panel(PanelIntent::Outliner(_)) => 12,
-            Self::Panel(PanelIntent::NodeTree(_)) => 13,
+            // Every setting shares one key. They wrote one struct that was
+            // applied in field order, and no two of them can be raised in a
+            // frame anyway, so a key each would invent an order rather than
+            // preserve one.
+            Self::Pane { .. }
+            | Self::Display(_)
+            | Self::Post(_)
+            | Self::Ibl(_)
+            | Self::LinkCameras(_) => 2,
+            Self::File(_) => 3,
+            Self::Edit(_) => 4,
+            Self::Capture(_) => 5,
+            Self::Review(_) => 6,
+            Self::Projection(_) => 7,
+            Self::Layout(_) => 8,
+            Self::Help(_) => 9,
+            Self::Panel(PanelIntent::FlyToIssue(_)) => 10,
+            Self::Panel(PanelIntent::ClearHdri) => 11,
+            Self::Panel(PanelIntent::LoadHdri) => 12,
+            Self::Panel(PanelIntent::Outliner(_)) => 13,
+            Self::Panel(PanelIntent::NodeTree(_)) => 14,
         }
     }
 }
@@ -215,6 +287,13 @@ impl Intents {
     /// is two constructors deep at every call site without it.
     pub(crate) fn panel(&mut self, intent: PanelIntent) {
         self.raise(Intent::Panel(intent));
+    }
+
+    /// Ask for one of a pane's display settings. The pane is the index the
+    /// caller stamps on, which is what lets one toolbar function serve all
+    /// four.
+    pub(crate) fn pane(&mut self, pane: usize, change: PaneChange) {
+        self.raise(Intent::Pane { pane, change });
     }
 
     /// Take everything raised, ordered for application, leaving the queue
@@ -256,12 +335,13 @@ mod tests {
         });
         intents.raise(Intent::Layout(LayoutIntent::ResetDock));
         intents.raise(Intent::File(FileIntent::Quit));
+        intents.raise(Intent::Post(PostChange::Bloom(true)));
         intents.raise(Intent::PaneProjection {
             pane: 0,
             mode: ProjectionMode::Orthographic,
         });
 
-        assert_eq!(keys(&mut intents), vec![0, 1, 2, 7, 9, 10, 11, 12, 13]);
+        assert_eq!(keys(&mut intents), vec![0, 1, 2, 3, 8, 10, 11, 12, 13, 14]);
     }
 
     /// Two intents in one category keep the order they were raised in, which

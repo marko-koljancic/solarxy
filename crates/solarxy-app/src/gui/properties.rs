@@ -5,9 +5,8 @@
 //!
 //! Replaced `gui::stats` in RC2 — `ModelInfo` moved here unchanged; file
 //! sizes format via `solarxy_core::format_number`. Read-only except the
-//! HDRI IBL-mode / rotation controls (which write through [`GuiSnapshot`])
-//! and the intents it raises, drained by `state/intents.rs` after the egui
-//! pass.
+//! HDRI IBL-mode and rotation controls, which raise intents like everything
+//! else, drained by `state/intents.rs` after the egui pass.
 
 use solarxy_core::format_number;
 use solarxy_core::preferences::IblMode;
@@ -17,8 +16,8 @@ use solarxy_renderer::resources::ModelStats;
 use crate::state::engine_scene::SceneGeometryCounts;
 use crate::state::hdri_info::HdriInfo;
 
-use super::intent::{Intents, PanelIntent};
-use super::snapshot::GuiSnapshot;
+use super::intent::{DisplayChange, Intent, Intents, PanelIntent};
+use super::settings::PanelSettings;
 
 /// The Validation section's input: the report to list, plus the owning
 /// object's name per issue.
@@ -102,7 +101,7 @@ pub(super) fn draw_properties_content(
     model_info: Option<&ModelInfo>,
     hdri_info: Option<&HdriInfo>,
     validation: ValidationView<'_>,
-    snap: &mut GuiSnapshot,
+    settings: PanelSettings<'_>,
     intents: &mut Intents,
 ) {
     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -128,7 +127,7 @@ pub(super) fn draw_properties_content(
 
         egui::CollapsingHeader::new("HDRI")
             .default_open(true)
-            .show(ui, |ui| draw_hdri_section(ui, hdri_info, snap, intents));
+            .show(ui, |ui| draw_hdri_section(ui, hdri_info, settings, intents));
 
         ui.separator();
 
@@ -236,7 +235,7 @@ fn draw_model_section(ui: &mut egui::Ui, info: &ModelInfo) {
 fn draw_hdri_section(
     ui: &mut egui::Ui,
     hdri_info: Option<&HdriInfo>,
-    snap: &mut GuiSnapshot,
+    settings: PanelSettings<'_>,
     intents: &mut Intents,
 ) {
     let Some(info) = hdri_info else {
@@ -280,17 +279,23 @@ fn draw_hdri_section(
 
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt("props_ibl_mode")
-            .selected_text(snap.ibl_mode.to_string())
+            .selected_text(settings.ibl_mode.to_string())
             .width(140.0)
             .show_ui(ui, |ui| {
-                for &mode in IblMode::ALL {
-                    ui.selectable_value(&mut snap.ibl_mode, mode, mode.to_string());
+                let mut mode = settings.ibl_mode;
+                for &variant in IblMode::ALL {
+                    if ui
+                        .selectable_value(&mut mode, variant, variant.to_string())
+                        .changed()
+                    {
+                        intents.raise(Intent::Ibl(variant));
+                    }
                 }
             });
         ui.label("IBL Mode").on_hover_text("I / Shift+I");
     });
 
-    let mut degrees = snap.hdri_rotation.to_degrees();
+    let mut degrees = settings.display.hdri_rotation.to_degrees();
     if ui
         .add(
             egui::Slider::new(&mut degrees, 0.0..=360.0)
@@ -300,18 +305,26 @@ fn draw_hdri_section(
         .on_hover_text("Yaw the HDRI sky and the IBL it derives")
         .changed()
     {
-        snap.hdri_rotation = degrees.to_radians();
+        intents.raise(Intent::Display(DisplayChange::HdriRotation(
+            degrees.to_radians(),
+        )));
     }
 
-    ui.add(
-        egui::Slider::new(
-            &mut snap.hdri_intensity,
-            solarxy_core::view_config::MIN_HDRI_INTENSITY
-                ..=solarxy_core::view_config::MAX_HDRI_INTENSITY,
+    let mut intensity = settings.display.hdri_intensity;
+    if ui
+        .add(
+            egui::Slider::new(
+                &mut intensity,
+                solarxy_core::view_config::MIN_HDRI_INTENSITY
+                    ..=solarxy_core::view_config::MAX_HDRI_INTENSITY,
+            )
+            .text("Intensity"),
         )
-        .text("Intensity"),
-    )
-    .on_hover_text("Scale the light the HDRI casts, without dimming the visible sky");
+        .on_hover_text("Scale the light the HDRI casts, without dimming the visible sky")
+        .changed()
+    {
+        intents.raise(Intent::Display(DisplayChange::HdriIntensity(intensity)));
+    }
 
     ui.add_space(4.0);
     if ui

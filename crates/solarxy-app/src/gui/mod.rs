@@ -11,9 +11,8 @@
 //! - `menu` — native-style menu bar (File / Edit / View / Window / Help).
 //!   The Window menu is the single source of truth for togglable panel
 //!   visibility.
-//! - `snapshot` — `GuiSnapshot` (crate-private; the sidebar ↔ state mirror)
-//!   and [`SidebarChanges`]; see that module's docs for the "adding a
-//!   sidebar control" recipe.
+//! - `settings`: the read-only display state panels draw from. Changing one
+//!   is an intent, not a write through a borrow.
 //! - `intent`: the typed intent queue panels raise into, drained by
 //!   `state/intents.rs` once the pass is over. Read its module docs before
 //!   raising from anywhere new: a queue fed from state rather than from an
@@ -49,8 +48,8 @@ mod review_panel;
 mod review_popup;
 mod review_visuals;
 mod screenshot_modal;
+mod settings;
 mod sidebar;
-mod snapshot;
 mod status_bar;
 mod still_modal;
 mod theme;
@@ -64,18 +63,18 @@ const MOD: &str = "Ctrl";
 
 pub use overlays::ToastSeverity;
 pub use renderer::EguiRenderer;
-pub use snapshot::SidebarChanges;
 
 pub(crate) use divider::DividerInfo;
 pub(crate) use dock::SolarxyTab;
+pub(crate) use settings::PanelSettings;
 pub(crate) use intent::{
-    CaptureIntent, EditIntent, FileIntent, HelpIntent, Intent, Intents, LayoutIntent, PanelIntent,
-    ReviewIntent,
+    CaptureIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
+    LayoutIntent, PaneChange, PanelIntent, PostChange, ReviewIntent,
 };
 pub(crate) use node_tree::{NodeTreeAction, NodeTreeSource};
 pub(crate) use outliner::{OutlinerAction, OutlinerSource};
 pub(crate) use pane_toolbar::{LookThroughChange, PaneToolbarData};
 pub(crate) use properties::ValidationView;
 pub(crate) use review_overlay::ReviewPaneOverlay;
-pub(crate) use snapshot::{GuiSnapshot, HudInfo};
+pub(crate) use overlays::HudInfo;
 pub(crate) use viewport_context_menu::ViewportContextMenu;

@@ -6,10 +6,9 @@
 //! shell's copy of the same call, which is the point: what remains in this file
 //! is the assembly only a desktop shell can do.
 //!
-//! Reads `GuiSnapshot::from_state` then calls `apply_to_state` after the
-//! sidebar has had a chance to mutate it; the resulting `SidebarChanges`
-//! drives any expensive recomputations (background, wireframe, composite,
-//! IBL).
+//! Hands the panels a read-only view of the display settings and drains the
+//! intents they raise afterwards; the drain is what triggers any expensive
+//! recomputation (background, wireframe, composite, IBL).
 
 use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, ResolvedBackground};
 use solarxy_host::EncodedPane;
@@ -32,10 +31,6 @@ impl State {
     /// per-pane scene/UV passes, paints the egui overlay (sidebar, menu,
     /// HUD, console, modals, toasts), and presents the swapchain frame.
     ///
-    /// Wraps `GuiSnapshot::from_state` → sidebar mutation → `apply_to_state`
-    /// each frame; the resulting [`crate::gui::SidebarChanges`] flags drive
-    /// any expensive recomputations (background gradient rebuild, wireframe
-    /// params upload, composite params upload, IBL bind-group rebuild).
     ///
     /// # Errors
     /// Returns `Err` if the surface texture is unavailable (e.g. the window
@@ -340,7 +335,7 @@ impl State {
         is_split: bool,
         frame_ms: f32,
     ) {
-        use crate::gui::{GuiSnapshot, HudInfo};
+        use crate::gui::{HudInfo, PanelSettings};
 
         let mut encoder = self
             .device
@@ -423,15 +418,18 @@ impl State {
             .map_or(self.preferences.display.projection_mode, |c| {
                 c.camera.projection
             });
-        let snap_before = GuiSnapshot::from_state(
-            pds,
-            &self.view.display,
-            &self.renderer.post,
-            self.renderer.ibl_res.ibl_mode,
-            self.view.cameras_linked,
+        // Borrowed rather than copied: the panels read the real settings and
+        // ask for changes, so there is nothing to write back afterwards.
+        let settings = PanelSettings {
+            panes: &self.view.pane_settings,
+            active: ap,
+            display: &self.view.display,
+            post: &self.renderer.post,
+            ibl_mode: self.renderer.ibl_res.ibl_mode,
+            cameras_linked: self.view.cameras_linked,
             is_split,
             projection_mode,
-        );
+        };
         let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
         let active_pane_mode = self.view.pane_settings[self.view.active_pane].pane_mode;
         let hud = HudInfo {
@@ -525,7 +523,6 @@ impl State {
         let pane_toolbar = crate::gui::PaneToolbarData {
             rects: &pane_rects,
             active: ap,
-            pane_settings: &mut self.view.pane_settings,
             projections: pane_projections,
             hdri_available,
             customs: &self.preferences.view.custom_backgrounds,
@@ -538,8 +535,8 @@ impl State {
         // review card open for that frame.
         let suppress_screenshot_modal = self.capture_requested;
         let force_expand_review = self.capture_requested && self.screenshot_expand_review;
-        let snap_after = self.gui.render_ui(
-            snap_before,
+        self.gui.render_ui(
+            settings,
             &hud,
             validation,
             &self.device,
@@ -565,30 +562,9 @@ impl State {
             suppress_screenshot_modal,
         );
 
-        let changes = snap_after.apply_to_state(
-            &snap_before,
-            &mut self.view.pane_settings[ap],
-            &mut self.view.display,
-            &mut self.renderer.post,
-            &mut self.renderer.ibl_res.ibl_mode,
-            &mut self.view.cameras_linked,
-        );
-
-        if changes.background_changed {
-            self.apply_background_change();
-        } else if changes.wireframe_params_changed {
-            self.update_wireframe_params();
-        }
-        if changes.composite_params_changed {
-            self.apply_composite_params();
-        }
-        if changes.ibl_changed {
-            self.apply_ibl_change();
-        }
-
-        // After the settings write-back, not before it: two of these arms
-        // write per-pane display settings that `apply_to_state` would
-        // overwrite from the snapshot taken at the top of this frame.
+        // Everything the pass raised, in one ordered pass: the settings the
+        // panels changed, then the actions the menus asked for, then what the
+        // panels asked the shell to do.
         self.drain_intents(&mut intents);
 
         // The review panel's open flag mirrors dock membership, and a panel

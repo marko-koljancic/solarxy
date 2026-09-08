@@ -22,8 +22,8 @@ use solarxy_core::preferences::{
 };
 use solarxy_core::view_config::PANE_TOOLBAR_HEIGHT;
 
-use super::intent::{Intent, Intents};
-use super::snapshot::GuiSnapshot;
+use super::intent::{Intent, Intents, PaneChange};
+use super::settings::PanelSettings;
 use super::theme::Theme;
 use crate::state::view_state::{BoundsMode, PaneDisplaySettings};
 
@@ -70,7 +70,6 @@ pub(super) fn background_combo(
 pub(crate) struct PaneToolbarData<'a> {
     pub rects: &'a [egui::Rect],
     pub active: usize,
-    pub pane_settings: &'a mut [PaneDisplaySettings; 4],
     pub projections: [ProjectionMode; 4],
     /// `true` once an HDRI is loaded — gates the `HDRI Sky` background.
     pub hdri_available: bool,
@@ -95,73 +94,12 @@ pub(crate) enum LookThroughChange {
     Free,
 }
 
-/// Mutable handles to the per-pane fields a toolbar edits.
-struct PaneFields<'a> {
-    pane_mode: &'a mut PaneMode,
-    view_mode: &'a mut ViewMode,
-    inspection_mode: &'a mut InspectionMode,
-    material_override: &'a mut MaterialOverride,
-    background_mode: &'a mut BackgroundMode,
-    normals_mode: &'a mut NormalsMode,
-    uv_mode: &'a mut UvMode,
-    bounds_mode: &'a mut BoundsMode,
-    line_weight: &'a mut LineWeight,
-    show_grid: &'a mut bool,
-    show_axis_gizmo: &'a mut bool,
-    show_local_axes: &'a mut bool,
-    show_validation: &'a mut bool,
-    uv_bg: &'a mut UvMapBackground,
-    show_uv_overlap: &'a mut bool,
-}
-
-impl<'a> PaneFields<'a> {
-    fn from_snapshot(s: &'a mut GuiSnapshot) -> Self {
-        Self {
-            pane_mode: &mut s.pane_mode,
-            view_mode: &mut s.view_mode,
-            inspection_mode: &mut s.inspection_mode,
-            material_override: &mut s.material_override,
-            background_mode: &mut s.background_mode,
-            normals_mode: &mut s.normals_mode,
-            uv_mode: &mut s.uv_mode,
-            bounds_mode: &mut s.bounds_mode,
-            line_weight: &mut s.line_weight,
-            show_grid: &mut s.show_grid,
-            show_axis_gizmo: &mut s.show_axis_gizmo,
-            show_local_axes: &mut s.show_local_axes,
-            show_validation: &mut s.show_validation,
-            uv_bg: &mut s.uv_bg,
-            show_uv_overlap: &mut s.show_uv_overlap,
-        }
-    }
-
-    fn from_pane(p: &'a mut PaneDisplaySettings) -> Self {
-        Self {
-            pane_mode: &mut p.pane_mode,
-            view_mode: &mut p.view_mode,
-            inspection_mode: &mut p.inspection_mode,
-            material_override: &mut p.material_override,
-            background_mode: &mut p.background_mode,
-            normals_mode: &mut p.normals_mode,
-            uv_mode: &mut p.uv_mode,
-            bounds_mode: &mut p.bounds_mode,
-            line_weight: &mut p.line_weight,
-            show_grid: &mut p.show_grid,
-            show_axis_gizmo: &mut p.show_axis_gizmo,
-            show_local_axes: &mut p.show_local_axes,
-            show_validation: &mut p.show_validation,
-            uv_bg: &mut p.uv_bg,
-            show_uv_overlap: &mut p.show_uv_overlap,
-        }
-    }
-}
-
 /// Draw the toolbar strip atop every pane. Called inside the Viewport
 /// dock-tab's `ui()` callback.
 pub(super) fn draw_pane_toolbars(
     ui: &mut egui::Ui,
-    data: &mut PaneToolbarData,
-    snap: &mut GuiSnapshot,
+    data: &PaneToolbarData,
+    settings: PanelSettings<'_>,
     intents: &mut Intents,
     theme: Theme,
 ) {
@@ -178,43 +116,33 @@ pub(super) fn draw_pane_toolbars(
         // labels float on top of it (3ds Max style).
 
         let projection = data.projections[i];
-        let mut new_projection: Option<ProjectionMode> = None;
-        let mut new_look_through: Option<LookThroughChange> = None;
         let bound_camera = data.look_through.get(i).copied().flatten();
-        {
-            let mut fields = if is_active {
-                PaneFields::from_snapshot(snap)
-            } else {
-                PaneFields::from_pane(&mut data.pane_settings[i])
-            };
-            ui.scope_builder(
-                egui::UiBuilder::new().max_rect(strip.shrink2(egui::vec2(8.0, 2.0))),
-                |ui| {
-                    style_frameless_labels(ui, theme);
-                    ui.horizontal_centered(|ui| {
-                        draw_controls(
-                            ui,
-                            i,
-                            &mut fields,
+        // Every pane goes through one path. The active pane and the others
+        // were written through two before this, chosen by a fifteen-field
+        // borrow bundle with a constructor each.
+        let pane = &settings.panes[i.min(3)];
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(strip.shrink2(egui::vec2(8.0, 2.0))),
+            |ui| {
+                style_frameless_labels(ui, theme);
+                ui.horizontal_centered(|ui| {
+                    draw_controls(
+                        ui,
+                        PaneControls {
+                            index: i,
+                            pane,
                             projection,
-                            &mut new_projection,
                             customs,
                             hdri_available,
                             uv_overlap_pct,
-                            data.cameras,
+                            cameras: data.cameras,
                             bound_camera,
-                            &mut new_look_through,
-                        );
-                    });
-                },
-            );
-        }
-        if let Some(mode) = new_projection {
-            intents.raise(Intent::PaneProjection { pane: i, mode });
-        }
-        if let Some(change) = new_look_through {
-            intents.raise(Intent::LookThrough { pane: i, change });
-        }
+                        },
+                        intents,
+                    );
+                });
+            },
+        );
 
         if is_active {
             ui.painter().rect_stroke(
@@ -248,62 +176,120 @@ fn style_frameless_labels(ui: &mut egui::Ui, theme: Theme) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn draw_controls(
-    ui: &mut egui::Ui,
-    idx: usize,
-    f: &mut PaneFields,
+/// One pane's worth of what its toolbar draws from.
+#[derive(Clone, Copy)]
+struct PaneControls<'a> {
+    index: usize,
+    pane: &'a PaneDisplaySettings,
     projection: ProjectionMode,
-    new_projection: &mut Option<ProjectionMode>,
-    customs: &[CustomBackground],
+    customs: &'a [CustomBackground],
     hdri_available: bool,
     uv_overlap_pct: Option<f32>,
-    cameras: &[(u64, String)],
+    cameras: &'a [(u64, String)],
     bound_camera: Option<u64>,
-    new_look_through: &mut Option<LookThroughChange>,
-) {
-    // Label 1 — pane mode.
-    let pane_mode = f.pane_mode.to_string();
-    label_menu(ui, (idx, "pm"), &pane_mode, |ui| {
-        for &pm in &PANE_MODES {
-            ui.radio_value(f.pane_mode, pm, pm.to_string());
+}
+
+/// A row of radio buttons over a variant set, returning what the user picked.
+///
+/// Returns rather than writing through a borrow, which is what lets one
+/// function serve every pane: the pane it acts on is the index the caller
+/// stamps onto the intent, not a handle it was handed.
+fn radio_pick<T, S>(
+    ui: &mut egui::Ui,
+    current: T,
+    all: impl IntoIterator<Item = T>,
+    label: impl Fn(T) -> S,
+) -> Option<T>
+where
+    T: Copy + PartialEq,
+    S: Into<egui::WidgetText>,
+{
+    let mut value = current;
+    let mut picked = None;
+    for variant in all {
+        if ui
+            .radio_value(&mut value, variant, label(variant))
+            .changed()
+        {
+            picked = Some(variant);
+        }
+    }
+    picked
+}
+
+/// A checkbox, returning the new value when the user flipped it. `hover` is
+/// empty for the rows that carry no tooltip.
+fn check(ui: &mut egui::Ui, current: bool, label: &str, hover: &str) -> Option<bool> {
+    let mut value = current;
+    let mut response = ui.checkbox(&mut value, label);
+    if !hover.is_empty() {
+        response = response.on_hover_text(hover);
+    }
+    response.changed().then_some(value)
+}
+
+fn draw_controls(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Intents) {
+    let PaneControls {
+        index,
+        pane,
+        projection,
+        customs,
+        hdri_available,
+        uv_overlap_pct,
+        cameras,
+        bound_camera,
+    } = cx;
+
+    // Label 1: pane mode.
+    let pane_mode = pane.pane_mode.to_string();
+    label_menu(ui, (index, "pm"), &pane_mode, |ui| {
+        if let Some(v) = radio_pick(ui, pane.pane_mode, PANE_MODES, |v| v.to_string()) {
+            intents.pane(index, PaneChange::PaneMode(v));
         }
     });
 
-    if *f.pane_mode == PaneMode::Scene3D {
-        // Label 2 — display: shading + inspection + override.
-        let display = display_label(f);
-        label_menu(ui, (idx, "disp"), &display, |ui| {
-            for &vm in ViewMode::ALL {
-                ui.radio_value(f.view_mode, vm, vm.to_string());
+    if pane.pane_mode == PaneMode::Scene3D {
+        // Label 2: display, which is shading plus inspection plus override.
+        let display = display_label(pane);
+        label_menu(ui, (index, "disp"), &display, |ui| {
+            if let Some(v) = radio_pick(ui, pane.view_mode, ViewMode::ALL.iter().copied(), |v| {
+                v.to_string()
+            }) {
+                intents.pane(index, PaneChange::ViewMode(v));
             }
             ui.separator();
             ui.menu_button("Inspection", |ui| {
-                for &im in InspectionMode::ALL {
-                    ui.radio_value(f.inspection_mode, im, im.to_string());
+                if let Some(v) = radio_pick(
+                    ui,
+                    pane.inspection_mode,
+                    InspectionMode::ALL.iter().copied(),
+                    |v| v.to_string(),
+                ) {
+                    intents.pane(index, PaneChange::InspectionMode(v));
                 }
             });
             ui.menu_button("Material Override", |ui| {
-                for &mo in MaterialOverride::ALL {
-                    ui.radio_value(f.material_override, mo, mo.to_string());
+                if let Some(v) = radio_pick(
+                    ui,
+                    pane.material_override,
+                    MaterialOverride::ALL.iter().copied(),
+                    |v| v.to_string(),
+                ) {
+                    intents.pane(index, PaneChange::MaterialOverride(v));
                 }
             });
         });
 
-        // Label 3 — view: projection + look-through + overlays + background.
-        // A bound pane's label is the camera's name, which is the visible
-        // cue that the pane is a shot rather than a free view.
+        // Label 3: view, which is projection plus look-through plus overlays
+        // plus background. A bound pane's label is the camera's name, which is
+        // the visible cue that the pane is a shot rather than a free view.
         let bound_name = bound_camera
             .and_then(|id| cameras.iter().find(|(cid, _)| *cid == id))
             .map(|(_, name)| name.as_str());
         let view_label = bound_name.map_or_else(|| projection.to_string(), str::to_owned);
-        label_menu(ui, (idx, "view"), &view_label, |ui| {
-            let mut proj = projection;
-            for &p in &PROJECTIONS {
-                ui.radio_value(&mut proj, p, p.to_string());
-            }
-            if proj != projection {
-                *new_projection = Some(proj);
+        label_menu(ui, (index, "view"), &view_label, |ui| {
+            if let Some(mode) = radio_pick(ui, projection, PROJECTIONS, |p| p.to_string()) {
+                intents.raise(Intent::PaneProjection { pane: index, mode });
             }
             if !cameras.is_empty() {
                 ui.separator();
@@ -311,42 +297,68 @@ fn draw_controls(
                     if ui.radio(bound_camera.is_none(), "Free View").clicked()
                         && bound_camera.is_some()
                     {
-                        *new_look_through = Some(LookThroughChange::Free);
+                        intents.raise(Intent::LookThrough {
+                            pane: index,
+                            change: LookThroughChange::Free,
+                        });
                         ui.close();
                     }
                     for (id, name) in cameras {
                         if ui.radio(bound_camera == Some(*id), name).clicked()
                             && bound_camera != Some(*id)
                         {
-                            *new_look_through = Some(LookThroughChange::Bind(*id));
+                            intents.raise(Intent::LookThrough {
+                                pane: index,
+                                change: LookThroughChange::Bind(*id),
+                            });
                             ui.close();
                         }
                     }
                 });
             }
             ui.separator();
-            ui.menu_button("Overlays", |ui| draw_overlays_menu(ui, f));
+            ui.menu_button("Overlays", |ui| {
+                draw_overlays_menu(ui, index, pane, intents);
+            });
             ui.menu_button("Background", |ui| {
-                background_menu_body(ui, f.background_mode, customs, hdri_available);
+                if let Some(v) =
+                    background_menu_body(ui, pane.background_mode, customs, hdri_available)
+                {
+                    intents.pane(index, PaneChange::BackgroundMode(v));
+                }
             });
         });
     } else {
-        // UV pane — pane mode + a consolidated Display menu.
-        let display = match (*f.show_uv_overlap, uv_overlap_pct) {
+        // UV pane: pane mode plus a consolidated Display menu.
+        let display = match (pane.show_uv_overlap, uv_overlap_pct) {
             (true, Some(pct)) => format!("Display \u{00b7} {pct:.0}%"),
             _ => "Display".to_string(),
         };
-        label_menu(ui, (idx, "uvd"), &display, |ui| {
+        label_menu(ui, (index, "uvd"), &display, |ui| {
             ui.menu_button("Background", |ui| {
-                for &b in UvMapBackground::ALL {
-                    ui.radio_value(f.uv_bg, b, b.to_string());
+                if let Some(v) =
+                    radio_pick(ui, pane.uv_bg, UvMapBackground::ALL.iter().copied(), |v| {
+                        v.to_string()
+                    })
+                {
+                    intents.pane(index, PaneChange::UvBackground(v));
                 }
             });
-            ui.checkbox(f.show_uv_overlap, "Overlap")
-                .on_hover_text("UV shell overlap heatmap");
+            if let Some(v) = check(
+                ui,
+                pane.show_uv_overlap,
+                "Overlap",
+                "UV shell overlap heatmap",
+            ) {
+                intents.pane(index, PaneChange::ShowUvOverlap(v));
+            }
             ui.menu_button("Wireframe weight", |ui| {
-                for &w in LineWeight::ALL {
-                    ui.radio_value(f.line_weight, w, w.descriptive_label());
+                if let Some(v) =
+                    radio_pick(ui, pane.line_weight, LineWeight::ALL.iter().copied(), |v| {
+                        v.descriptive_label()
+                    })
+                {
+                    intents.pane(index, PaneChange::LineWeight(v));
                 }
             });
         });
@@ -368,45 +380,83 @@ fn label_menu(
     });
 }
 
-/// The `Shaded` label's text — the dominant on-screen display mode:
-/// inspection mode if not the default, else material override if not
-/// `None`, else the shading mode.
-fn display_label(f: &PaneFields) -> String {
-    if *f.inspection_mode != InspectionMode::Shaded {
-        f.inspection_mode.to_string()
-    } else if *f.material_override != MaterialOverride::None {
-        f.material_override.to_string()
+/// The `Shaded` label's text: the dominant on-screen display mode, which is
+/// the inspection mode if it is not the default, else the material override
+/// if it is not `None`, else the shading mode.
+fn display_label(pane: &PaneDisplaySettings) -> String {
+    if pane.inspection_mode != InspectionMode::Shaded {
+        pane.inspection_mode.to_string()
+    } else if pane.material_override != MaterialOverride::None {
+        pane.material_override.to_string()
     } else {
-        f.view_mode.to_string()
+        pane.view_mode.to_string()
     }
 }
 
 /// Body of the `Overlays ▸` submenu: scene-overlay toggles plus the
 /// per-overlay mode submenus.
-fn draw_overlays_menu(ui: &mut egui::Ui, f: &mut PaneFields) {
-    ui.checkbox(f.show_grid, "Grid");
-    ui.checkbox(f.show_axis_gizmo, "Axis Gizmo");
-    ui.checkbox(f.show_local_axes, "Local Axes");
-    ui.checkbox(f.show_validation, "Validation Overlay");
+fn draw_overlays_menu(
+    ui: &mut egui::Ui,
+    index: usize,
+    pane: &PaneDisplaySettings,
+    intents: &mut Intents,
+) {
+    for (current, label, make) in [
+        (
+            pane.show_grid,
+            "Grid",
+            PaneChange::ShowGrid as fn(bool) -> PaneChange,
+        ),
+        (
+            pane.show_axis_gizmo,
+            "Axis Gizmo",
+            PaneChange::ShowAxisGizmo,
+        ),
+        (
+            pane.show_local_axes,
+            "Local Axes",
+            PaneChange::ShowLocalAxes,
+        ),
+        (
+            pane.show_validation,
+            "Validation Overlay",
+            PaneChange::ShowValidation,
+        ),
+    ] {
+        if let Some(v) = check(ui, current, label, "") {
+            intents.pane(index, make(v));
+        }
+    }
     ui.separator();
     ui.menu_button("Normals", |ui| {
-        for &m in NormalsMode::ALL {
-            ui.radio_value(f.normals_mode, m, m.to_string());
+        if let Some(v) = radio_pick(
+            ui,
+            pane.normals_mode,
+            NormalsMode::ALL.iter().copied(),
+            |v| v.to_string(),
+        ) {
+            intents.pane(index, PaneChange::NormalsMode(v));
         }
     });
     ui.menu_button("UV Overlay", |ui| {
-        for &m in UvMode::ALL {
-            ui.radio_value(f.uv_mode, m, m.to_string());
+        if let Some(v) = radio_pick(ui, pane.uv_mode, UvMode::ALL.iter().copied(), |v| {
+            v.to_string()
+        }) {
+            intents.pane(index, PaneChange::UvMode(v));
         }
     });
     ui.menu_button("Bounds", |ui| {
-        for &m in BoundsMode::ALL {
-            ui.radio_value(f.bounds_mode, m, m.to_string());
+        if let Some(v) = radio_pick(ui, pane.bounds_mode, BoundsMode::ALL.iter().copied(), |v| {
+            v.to_string()
+        }) {
+            intents.pane(index, PaneChange::BoundsMode(v));
         }
     });
     ui.menu_button("Wireframe Weight", |ui| {
-        for &w in LineWeight::ALL {
-            ui.radio_value(f.line_weight, w, w.descriptive_label());
+        if let Some(v) = radio_pick(ui, pane.line_weight, LineWeight::ALL.iter().copied(), |v| {
+            v.descriptive_label()
+        }) {
+            intents.pane(index, PaneChange::LineWeight(v));
         }
     });
 }
@@ -415,24 +465,37 @@ fn draw_overlays_menu(ui: &mut egui::Ui, f: &mut PaneFields) {
 /// loaded HDRI) then, under a separator, every user custom background.
 fn background_menu_body(
     ui: &mut egui::Ui,
-    current: &mut BackgroundMode,
+    current: BackgroundMode,
     customs: &[CustomBackground],
     hdri_available: bool,
-) {
+) -> Option<BackgroundMode> {
+    let mut value = current;
+    let mut picked = None;
     for &builtin in BuiltinBg::ALL {
         if builtin == BuiltinBg::HdriSky && !hdri_available {
             continue;
         }
-        ui.radio_value(
-            current,
-            BackgroundMode::Builtin(builtin),
-            builtin.to_string(),
-        );
+        if ui
+            .radio_value(
+                &mut value,
+                BackgroundMode::Builtin(builtin),
+                builtin.to_string(),
+            )
+            .changed()
+        {
+            picked = Some(BackgroundMode::Builtin(builtin));
+        }
     }
     if !customs.is_empty() {
         ui.separator();
         for custom in customs {
-            ui.radio_value(current, BackgroundMode::Custom(custom.id), &custom.name);
+            if ui
+                .radio_value(&mut value, BackgroundMode::Custom(custom.id), &custom.name)
+                .changed()
+            {
+                picked = Some(BackgroundMode::Custom(custom.id));
+            }
         }
     }
+    picked
 }

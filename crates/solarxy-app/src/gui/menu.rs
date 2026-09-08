@@ -3,10 +3,9 @@
 //! `Review` sits between `Render` and `View` — it is a viewport mode.
 //!
 //! Per-pane controls (Shading, Inspection, Material Override, Background,
-//! Projection) write through [`GuiSnapshot`], which mirrors the **active
-//! pane**, so a menu click acts on whichever pane the cursor last selected.
-//! Scene-global controls (post-processing, IBL, turntable) write the same
-//! snapshot's global fields.
+//! Projection) act on the **active pane**, so a menu click applies to
+//! whichever pane the cursor last selected. Scene-global controls
+//! (post-processing, IBL, turntable) raise scene-global intents.
 //!
 //! Everything that is an action rather than a setting is raised as an
 //! [`Intent`] and applied after the pass. The Window menu is a table of
@@ -25,9 +24,21 @@ use super::intent::{
     CaptureIntent, EditIntent, FileIntent, HelpIntent, Intent, Intents, LayoutIntent, PanelIntent,
     ReviewIntent,
 };
+use super::intent::{DisplayChange, PaneChange, PostChange};
 use super::outliner::OutlinerAction;
-use super::snapshot::GuiSnapshot;
+use super::settings::PanelSettings;
 use super::theme::Theme;
+
+/// A checkbox with a shortcut hint, returning the new value when the user
+/// flipped it.
+fn checkbox(ui: &mut egui::Ui, current: bool, label: &str, hover: &str) -> Option<bool> {
+    let mut value = current;
+    let changed = ui
+        .checkbox(&mut value, label)
+        .on_hover_text(hover)
+        .changed();
+    changed.then_some(value)
+}
 
 /// What the menu bar needs to know about the shell to draw itself, as
 /// against what it asks the shell to do, which travels as an [`Intent`].
@@ -50,7 +61,7 @@ pub(super) struct MenuContext<'a> {
 
 pub(super) fn draw_menu_bar(
     ctx: &egui::Context,
-    snap: &mut GuiSnapshot,
+    settings: PanelSettings<'_>,
     intents: &mut Intents,
     present: &dyn Fn(SolarxyTab) -> bool,
     cx: MenuContext<'_>,
@@ -59,11 +70,11 @@ pub(super) fn draw_menu_bar(
         egui::MenuBar::new().ui(ui, |ui| {
             draw_file_menu(ui, intents, cx.has_model, cx.recent_files);
             draw_edit_menu(ui, intents);
-            draw_render_menu(ui, snap, intents, cx);
+            draw_render_menu(ui, settings, intents, cx);
             // Review is a viewport mode, so it belongs between Render and
             // View rather than stranded out past Help.
             draw_review_menu(ui, intents, cx);
-            draw_view_menu(ui, snap, intents);
+            draw_view_menu(ui, settings, intents);
             draw_layout_menu(ui, intents, cx.has_saved_layout);
             draw_window_menu(ui, intents, present, cx);
             draw_help_menu(ui, intents);
@@ -131,39 +142,42 @@ fn draw_review_menu(ui: &mut egui::Ui, intents: &mut Intents, cx: MenuContext<'_
     });
 }
 
-/// Submenu of `T::ALL`-style variants as selectable rows writing the
-/// chosen variant into `current`. Covers every plain enum-pick submenu;
-/// the Inspection + Projection submenus stay inline (special behaviour).
+/// Submenu of `T::ALL`-style variants as selectable rows, returning the one
+/// the user picked. Covers every plain enum-pick submenu; the Inspection and
+/// Projection submenus stay inline, because they do more than pick.
 fn variant_submenu<T: PartialEq + Copy + std::fmt::Display>(
     ui: &mut egui::Ui,
     label: &str,
     hover: &str,
-    current: &mut T,
+    current: T,
     all: &[T],
-) {
+) -> Option<T> {
+    let mut picked = None;
     ui.menu_button(label, |ui| {
         for &variant in all {
             if ui
-                .selectable_label(*current == variant, variant.to_string())
+                .selectable_label(current == variant, variant.to_string())
                 .clicked()
             {
-                *current = variant;
+                picked = Some(variant);
                 ui.close();
             }
         }
     })
     .response
     .on_hover_text(hover);
+    picked
 }
 
 /// Background submenu — builtins (`HDRI Sky` gated on an HDRI being
 /// loaded) then, under a separator, every user custom background.
 fn background_submenu(
     ui: &mut egui::Ui,
-    current: &mut BackgroundMode,
+    current: BackgroundMode,
     customs: &[CustomBackground],
     hdri_available: bool,
-) {
+) -> Option<BackgroundMode> {
+    let mut picked = None;
     ui.menu_button("Background", |ui| {
         for &builtin in BuiltinBg::ALL {
             if builtin == BuiltinBg::HdriSky && !hdri_available {
@@ -171,10 +185,10 @@ fn background_submenu(
             }
             let mode = BackgroundMode::Builtin(builtin);
             if ui
-                .selectable_label(*current == mode, builtin.to_string())
+                .selectable_label(current == mode, builtin.to_string())
                 .clicked()
             {
-                *current = mode;
+                picked = Some(mode);
                 ui.close();
             }
         }
@@ -182,11 +196,8 @@ fn background_submenu(
             ui.separator();
             for custom in customs {
                 let mode = BackgroundMode::Custom(custom.id);
-                if ui
-                    .selectable_label(*current == mode, &custom.name)
-                    .clicked()
-                {
-                    *current = mode;
+                if ui.selectable_label(current == mode, &custom.name).clicked() {
+                    picked = Some(mode);
                     ui.close();
                 }
             }
@@ -194,6 +205,7 @@ fn background_submenu(
     })
     .response
     .on_hover_text("B");
+    picked
 }
 
 fn draw_file_menu(
@@ -277,7 +289,7 @@ fn draw_edit_menu(ui: &mut egui::Ui, intents: &mut Intents) {
 
 fn draw_render_menu(
     ui: &mut egui::Ui,
-    snap: &mut GuiSnapshot,
+    settings: PanelSettings<'_>,
     intents: &mut Intents,
     cx: MenuContext<'_>,
 ) {
@@ -287,6 +299,8 @@ fn draw_render_menu(
         customs,
         ..
     } = cx;
+    let active = settings.active;
+    let pane = settings.active_pane();
     ui.menu_button("Render", |ui| {
         // The still renders either root through the render node's
         // authority: a scene the engine cooked, or an open model through
@@ -301,11 +315,13 @@ fn draw_render_menu(
         }
         ui.separator();
 
-        variant_submenu(ui, "Shading", "W", &mut snap.view_mode, ViewMode::ALL);
+        if let Some(v) = variant_submenu(ui, "Shading", "W", pane.view_mode, ViewMode::ALL) {
+            intents.pane(active, PaneChange::ViewMode(v));
+        }
 
         ui.menu_button("Inspection", |ui| {
             for mode in InspectionMode::ALL {
-                let selected = snap.pane_mode == PaneMode::Scene3D && snap.inspection_mode == *mode;
+                let selected = pane.pane_mode == PaneMode::Scene3D && pane.inspection_mode == *mode;
                 let shortcut = match mode {
                     InspectionMode::Shaded => "1",
                     InspectionMode::MaterialId => "2",
@@ -319,58 +335,70 @@ fn draw_render_menu(
                     .on_hover_text(shortcut)
                     .clicked()
                 {
-                    snap.inspection_mode = *mode;
-                    snap.pane_mode = PaneMode::Scene3D;
+                    intents.pane(active, PaneChange::InspectionMode(*mode));
+                    intents.pane(active, PaneChange::PaneMode(PaneMode::Scene3D));
                     ui.close();
                 }
             }
-            let uv_selected = snap.pane_mode == PaneMode::UvMap;
+            let uv_selected = pane.pane_mode == PaneMode::UvMap;
             if ui
                 .selectable_label(uv_selected, "UV Map")
                 .on_hover_text("3")
                 .clicked()
             {
-                snap.pane_mode = PaneMode::UvMap;
+                intents.pane(active, PaneChange::PaneMode(PaneMode::UvMap));
                 ui.close();
             }
         });
 
-        variant_submenu(
+        if let Some(v) = variant_submenu(
             ui,
             "Material Override",
             "M / Shift+M",
-            &mut snap.material_override,
+            pane.material_override,
             MaterialOverride::ALL,
-        );
+        ) {
+            intents.pane(active, PaneChange::MaterialOverride(v));
+        }
 
         ui.separator();
 
-        variant_submenu(
+        if let Some(v) = variant_submenu(
             ui,
             "Tone Mapping",
             "Shift+T",
-            &mut snap.tone_mode,
+            settings.post.tone_mode,
             ToneMode::ALL,
-        );
-        ui.checkbox(&mut snap.bloom_enabled, "Bloom")
-            .on_hover_text("Shift+D");
-        ui.checkbox(&mut snap.ssao_enabled, "SSAO")
-            .on_hover_text("Shift+O");
+        ) {
+            intents.raise(Intent::Post(PostChange::ToneMode(v)));
+        }
+        if let Some(v) = checkbox(ui, settings.post.bloom_enabled, "Bloom", "Shift+D") {
+            intents.raise(Intent::Post(PostChange::Bloom(v)));
+        }
+        if let Some(v) = checkbox(ui, settings.post.ssao_enabled, "SSAO", "Shift+O") {
+            intents.raise(Intent::Post(PostChange::Ssao(v)));
+        }
 
         ui.separator();
 
         ui.menu_button("Lighting", |ui| {
-            variant_submenu(
+            if let Some(v) = variant_submenu(
                 ui,
                 "IBL Mode",
                 "I / Shift+I",
-                &mut snap.ibl_mode,
+                settings.ibl_mode,
                 IblMode::ALL,
-            );
-            ui.checkbox(&mut snap.lights_locked, "Lock Lights")
-                .on_hover_text("Shift+L");
+            ) {
+                intents.raise(Intent::Ibl(v));
+            }
+            if let Some(v) = checkbox(ui, settings.display.lights_locked, "Lock Lights", "Shift+L")
+            {
+                intents.raise(Intent::Display(DisplayChange::LightsLocked(v)));
+            }
         });
-        background_submenu(ui, &mut snap.background_mode, customs, hdri_available);
+        if let Some(v) = background_submenu(ui, pane.background_mode, customs, hdri_available) {
+            intents.pane(active, PaneChange::BackgroundMode(v));
+        }
 
         ui.separator();
 
@@ -384,7 +412,9 @@ fn draw_render_menu(
     });
 }
 
-fn draw_view_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, intents: &mut Intents) {
+fn draw_view_menu(ui: &mut egui::Ui, settings: PanelSettings<'_>, intents: &mut Intents) {
+    let active = settings.active;
+    let pane = settings.active_pane();
     ui.menu_button("View", |ui| {
         ui.menu_button("Projection", |ui| {
             for (mode, shortcut) in [
@@ -392,7 +422,7 @@ fn draw_view_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, intents: &mut Inten
                 (ProjectionMode::Orthographic, "O"),
             ] {
                 if ui
-                    .selectable_label(snap.projection_mode == mode, mode.to_string())
+                    .selectable_label(settings.projection_mode == mode, mode.to_string())
                     .on_hover_text(shortcut)
                     .clicked()
                 {
@@ -401,40 +431,76 @@ fn draw_view_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, intents: &mut Inten
                 }
             }
         });
-        ui.checkbox(&mut snap.turntable_active, "Turntable")
-            .on_hover_text("V");
-        if snap.is_split {
-            ui.checkbox(&mut snap.cameras_linked, "Link Cameras")
-                .on_hover_text(format!("{MOD}+L"));
+        if let Some(v) = checkbox(ui, settings.display.turntable_active, "Turntable", "V") {
+            intents.raise(Intent::Display(DisplayChange::TurntableActive(v)));
+        }
+        if settings.is_split
+            && let Some(v) = checkbox(
+                ui,
+                settings.cameras_linked,
+                "Link Cameras",
+                &format!("{MOD}+L"),
+            )
+        {
+            intents.raise(Intent::LinkCameras(v));
         }
 
         ui.separator();
 
         ui.menu_button("Show", |ui| {
-            ui.checkbox(&mut snap.show_grid, "Grid").on_hover_text("G");
-            ui.checkbox(&mut snap.show_axis_gizmo, "Axis Gizmo")
-                .on_hover_text("A");
-            ui.checkbox(&mut snap.show_local_axes, "Local Axes")
-                .on_hover_text("Shift+A");
-            ui.checkbox(&mut snap.show_validation, "Validation Overlay")
-                .on_hover_text("Shift+V");
+            for (current, label, hover, make) in [
+                (
+                    pane.show_grid,
+                    "Grid",
+                    "G",
+                    PaneChange::ShowGrid as fn(bool) -> PaneChange,
+                ),
+                (
+                    pane.show_axis_gizmo,
+                    "Axis Gizmo",
+                    "A",
+                    PaneChange::ShowAxisGizmo,
+                ),
+                (
+                    pane.show_local_axes,
+                    "Local Axes",
+                    "Shift+A",
+                    PaneChange::ShowLocalAxes,
+                ),
+                (
+                    pane.show_validation,
+                    "Validation Overlay",
+                    "Shift+V",
+                    PaneChange::ShowValidation,
+                ),
+            ] {
+                if let Some(v) = checkbox(ui, current, label, hover) {
+                    intents.pane(active, make(v));
+                }
+            }
             ui.separator();
-            variant_submenu(ui, "Normals", "N", &mut snap.normals_mode, NormalsMode::ALL);
-            variant_submenu(ui, "UV Overlay", "U", &mut snap.uv_mode, UvMode::ALL);
-            variant_submenu(
-                ui,
-                "Bounds",
-                "Shift+B",
-                &mut snap.bounds_mode,
-                BoundsMode::ALL,
-            );
-            variant_submenu(
+            if let Some(v) =
+                variant_submenu(ui, "Normals", "N", pane.normals_mode, NormalsMode::ALL)
+            {
+                intents.pane(active, PaneChange::NormalsMode(v));
+            }
+            if let Some(v) = variant_submenu(ui, "UV Overlay", "U", pane.uv_mode, UvMode::ALL) {
+                intents.pane(active, PaneChange::UvMode(v));
+            }
+            if let Some(v) =
+                variant_submenu(ui, "Bounds", "Shift+B", pane.bounds_mode, BoundsMode::ALL)
+            {
+                intents.pane(active, PaneChange::BoundsMode(v));
+            }
+            if let Some(v) = variant_submenu(
                 ui,
                 "Wireframe Weight",
                 "Shift+W",
-                &mut snap.line_weight,
+                pane.line_weight,
                 LineWeight::ALL,
-            );
+            ) {
+                intents.pane(active, PaneChange::LineWeight(v));
+            }
         });
 
         ui.separator();

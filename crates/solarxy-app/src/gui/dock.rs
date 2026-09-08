@@ -33,7 +33,7 @@ use crate::state::hdri_info::HdriInfo;
 use super::intent::Intents;
 use super::material_inspector::MaterialInspectorState;
 use super::properties::ModelInfo;
-use super::snapshot::GuiSnapshot;
+use super::settings::PanelSettings;
 use super::theme::Theme;
 
 /// The eight tab variants in the Solarxy dock. The `Viewport` variant is
@@ -109,7 +109,7 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
 /// Per-frame `TabViewer` carrying mutable borrows into every tab's state.
 /// Constructed fresh inside `render_ui`'s egui closure each frame.
 pub(super) struct SolarxyTabViewer<'a> {
-    pub snap: &'a mut GuiSnapshot,
+    pub settings: PanelSettings<'a>,
     pub review: &'a mut crate::state::review::ReviewState,
     pub console: &'a mut ConsoleState,
     pub model: Option<&'a solarxy_renderer::model::Model>,
@@ -153,15 +153,15 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 *self.viewport_rect_out = Some(ui.max_rect());
                 super::pane_toolbar::draw_pane_toolbars(
                     ui,
-                    &mut self.pane_toolbar,
-                    self.snap,
+                    &self.pane_toolbar,
+                    self.settings,
                     self.intents,
                     self.theme,
                 );
                 ui.allocate_space(ui.available_size());
             }
             SolarxyTab::Sidebar => {
-                super::sidebar::draw_sidebar_content(ui, self.snap);
+                super::sidebar::draw_sidebar_content(ui, self.settings, self.intents);
             }
             SolarxyTab::ReviewPanel => {
                 super::review_panel::draw_review_panel_content(
@@ -203,7 +203,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.model_info,
                     self.hdri_info,
                     self.validation,
-                    self.snap,
+                    self.settings,
                     self.intents,
                 );
             }

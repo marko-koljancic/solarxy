@@ -333,22 +333,26 @@ pub(super) fn draw_still_modal(ctx: &egui::Context, modal: &mut StillRenderModal
         // Locked once tiles start arriving, because the format decides what the
         // renderer reads back and cannot be changed under a running job.
         ui.add_enabled_ui(!running, |ui| {
-            super::sidebar::combo_with_tooltip(
+            if let Some(v) = super::sidebar::combo_with_tooltip(
                 ui,
                 "Format",
                 "What the still is written as. Eight-bit PNG, or floating-point \
                  EXR for a compositor.",
-                &mut modal.format,
+                modal.format,
                 &[StillFormat::Png, StillFormat::Exr],
-            );
-            if modal.format == StillFormat::Exr {
-                super::sidebar::combo_with_tooltip(
+            ) {
+                modal.format = v;
+            }
+            if modal.format == StillFormat::Exr
+                && let Some(v) = super::sidebar::combo_with_tooltip(
                     ui,
                     "Space",
                     StillSpace::doc_pair(),
-                    &mut modal.space,
+                    modal.space,
                     &[StillSpace::SceneLinear, StillSpace::Display],
-                );
+                )
+            {
+                modal.space = v;
             }
         });
         ui.add_space(6.0);

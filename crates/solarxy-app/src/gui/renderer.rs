@@ -25,7 +25,7 @@ use super::review_popup::draw_review_popup;
 use super::screenshot_modal::{ScreenshotModal, draw_screenshot_modal};
 use super::still_modal::{StillRenderModal, draw_still_modal};
 use super::properties::ModelInfo;
-use super::snapshot::{GuiSnapshot, HudInfo};
+use super::overlays::HudInfo;
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
 use super::update_modal::{UpdateModalState, draw_update_modal};
 use egui_dock::{DockArea, DockState};
@@ -420,7 +420,7 @@ impl EguiRenderer {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_ui(
         &mut self,
-        mut snap: GuiSnapshot,
+        settings: super::settings::PanelSettings<'_>,
         hud: &HudInfo,
         validation: super::properties::ValidationView<'_>,
         device: &wgpu::Device,
@@ -452,7 +452,7 @@ impl EguiRenderer {
         viewport_context_menu: &mut Option<ViewportContextMenu>,
         force_expand_review: bool,
         suppress_screenshot_modal: bool,
-    ) -> GuiSnapshot {
+    ) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
         }
@@ -515,7 +515,6 @@ impl EguiRenderer {
         let super::pane_toolbar::PaneToolbarData {
             rects: pt_rects,
             active: pt_active,
-            pane_settings: pt_pane_settings,
             projections: pt_projections,
             hdri_available: pt_hdri_available,
             customs: pt_customs,
@@ -548,9 +547,13 @@ impl EguiRenderer {
                 intents.raise(Intent::Edit(super::EditIntent::OpenPreferences));
             }
             if menu_bar_visible {
-                draw_menu_bar(ctx, &mut snap, intents, &|tab| {
-                    present_at_start.contains(&tab)
-                }, menu_cx);
+                draw_menu_bar(
+                    ctx,
+                    settings,
+                    intents,
+                    &|tab| present_at_start.contains(&tab),
+                    menu_cx,
+                );
             }
 
             if status_bar_visible {
@@ -578,7 +581,7 @@ impl EguiRenderer {
             }
 
             let mut tab_viewer = SolarxyTabViewer {
-                snap: &mut snap,
+                settings,
                 review,
                 console,
                 model,
@@ -597,7 +600,6 @@ impl EguiRenderer {
                 pane_toolbar: super::pane_toolbar::PaneToolbarData {
                     rects: pt_rects,
                     active: pt_active,
-                    pane_settings: pt_pane_settings,
                     projections: pt_projections,
                     hdri_available: pt_hdri_available,
                     customs: pt_customs,
@@ -807,7 +809,7 @@ impl EguiRenderer {
                     )));
                 }
             }
-            if snap.pane_mode == PaneMode::UvMap && !hud.has_uvs {
+            if settings.active_pane().pane_mode == PaneMode::UvMap && !hud.has_uvs {
                 let screen_rect = ctx.input(egui::InputState::viewport_rect);
                 let pane_center = active_pane_rect.unwrap_or(screen_rect).center();
                 let offset = pane_center - screen_rect.center();
@@ -884,8 +886,6 @@ impl EguiRenderer {
         for id in &full_output.textures_delta.free {
             self.renderer.free_texture(id);
         }
-
-        snap
     }
 
     pub fn open_about(&mut self) {

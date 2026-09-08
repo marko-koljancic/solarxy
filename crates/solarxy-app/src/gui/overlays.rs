@@ -170,3 +170,13 @@ fn draw_overdraw_legend(ctx: &egui::Context) {
             });
         });
 }
+
+/// What the status bar and the viewport overlays need to say about the frame,
+/// assembled by the state layer once per frame.
+#[derive(Debug)]
+pub(crate) struct HudInfo {
+    pub pane_label: String,
+    pub cameras_linked: Option<bool>,
+    pub has_uvs: bool,
+    pub overdraw_active: bool,
+}
