@@ -3,11 +3,15 @@
 //! # One root, one adoption
 //!
 //! There is one kind of open document. A scene file already is a document; a
-//! model file becomes one through [`solarxy_graph::model_document`], the
-//! synthesis the terminal's render command and this shell's still render
-//! already stand on. So both kinds arrive at [`State::adopt_document`], which
-//! is the only place `engine` is assigned, and nothing downstream asks which
-//! file was opened.
+//! model file becomes one through [`solarxy_graph::model_document`], the same
+//! synthesis the terminal's render command stands on. Both kinds arrive at
+//! [`State::adopt_document`], which is the only place `engine` is assigned, and
+//! nothing downstream asks which file was opened.
+//!
+//! The still render used to build its own throwaway document at the moment
+//! Render was pressed, because the thing on screen was not one. It renders the
+//! open document now, so the picture is of what the viewport is showing rather
+//! than of a second reading of the same file.
 //!
 //! # The build runs off the interface thread
 //!
