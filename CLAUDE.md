@@ -131,9 +131,17 @@ step any more.
     change made stale, applied once at the end.
   - `camera.rs` - where the pane cameras point. `for_each_target_cam` is the one answer to which
     cameras a gesture moves: the active pane, or every pane when they are linked.
-  - `visibility.rs` - what is shown and hidden. A file model's meshes are the shell's own, so
-    hiding one is a direct write; a scene object's visibility belongs to the engine and is
-    re-emitted on every cook, so it travels as a parameter change instead.
+  - `open.rs` - **how a file becomes the open document, and the only place `engine` is
+    assigned.** A scene file already is a document; a model file becomes one through
+    `solarxy_graph::model_document`, the synthesis the terminal's render command stands on too.
+    The model build runs on a worker because natively an import parses *inside* the cook, so
+    cooking to quiescence blocks for the whole parse; a scene file is cheap to load and cooks
+    progressively on the frame loop instead. `pending_frame` is what reconciles the two: one
+    rule, a pane frames on the cooked scene's visible bounds, and only the moment those bounds
+    exist differs.
+  - `visibility.rs` - what is shown and hidden. **Hiding is a parameter change, never a direct
+    write**: an object's visibility is re-emitted from its owning node on every cook, so writing
+    the renderer's copy would look right for one frame and be undone by the next edit.
   - `persist.rs` - preference write-back and the two flushes on the way out. Named for what it
     does because `state::preferences` is already the re-exported core module.
   - `panes.rs` - split-viewport geometry (`compute_panes`, F1 to F5). `overlap.rs` - the UV
@@ -141,15 +149,18 @@ step any more.
   - `capture.rs` - the shell's half of a screenshot: the pane rect, the file name, the dialog.
     The readback is `solarxy_renderer::capture`, shared with the web host since 0.10.0.
   - `input/` - `keyboard.rs` (the key map and the display toggles it drives), `pointer.rs` (what
-    a click, a drag and a wheel mean, plus the three-step review click ladder), `dialogs.rs`
-    (native pickers via `rfd`).
+    a click, a drag and a wheel mean; picking answers with a scene object, ray transformed into
+    each object's space rather than geometry into the world), `dialogs.rs` (native pickers via
+    `rfd`).
   - `still/` - `mod.rs` the job's lifecycle, `settings.rs` what a document says a render should
     be (a pure function of the document, and where the cross-shell parity test lives),
     `pixels.rs` the tile blit, the preview downscale and the file write. Not `image.rs`: a module
     of that name shadows the crate of that name in every sibling.
   - `review/` - `mod.rs` the annotation state, `anchor.rs` the marker hit test and the re-anchor
     sub-mode, `sidecar.rs` the only half that touches disk. Sidecar location honours
-    `ProjectConfig.review.sidecar_dir` from `solarxy.toml`.
+    `ProjectConfig.review.sidecar_dir` from `solarxy.toml`. **Review cannot arm in 0.10.0**: it
+    anchors against a file-loaded model's meshes, and there is no second root holding one. It
+    returns pointed at `solarxy-graph::review`, which is where the browser's already is.
   - `view_state.rs` - `ViewState`, re-exporting `ViewLayout`, `DisplaySettings`,
     `PaneDisplaySettings` and `BoundsMode` **from** `solarxy-core::view_config`.
   - `hdri_info.rs` - what the Properties panel says about the loaded HDRI.

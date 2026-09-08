@@ -332,18 +332,22 @@ domain concept: anchored, categorised, threaded, resolvable notes on geometry. T
 schemes, two hashing schemes, two persistence stories, no bridge. An annotation authored on one
 shell is invisible on the other.
 
-**The desktop carries two mutually exclusive scene representations.**
-`crates/solarxy-app/src/state/mod.rs` holds both `scene: Option<ModelScene>`, a file-loaded
-model with its own GPU buffers, and `engine: Option<Box<solarxy_graph::Engine>>`. The field
-comment states they are never both `Some`, and adds that they could coexist because the draw
-list already chains both sources. Every downstream consumer branches on the pair: validation,
-the outliner's data source, the scene-present flag at composite, the UV pane's source, and the
-review focus scale. `crates/solarxy-app/src/state/engine_scene.rs`, 276 lines, exists purely to
-collapse the engine's N objects back into the single-model shapes those panels were written
-for. The headless command proves this is avoidable:
-`crates/solarxy-render/src/input.rs` turns a bare model into a one-node document and has one
-representation. The desktop already calls that synthesis, but only when starting a still
-render.
+**The desktop carried two mutually exclusive scene representations, and does not any more.**
+`crates/solarxy-app/src/state/mod.rs` held both `scene: Option<ModelScene>`, a file-loaded model
+with its own GPU buffers, and `engine: Option<Box<solarxy_graph::Engine>>`, with a field comment
+stating they were never both `Some`. Twenty-nine sites across twelve files read the first, the
+invariant was upheld by exactly two mirrored lines with no test, and every downstream consumer
+branched on the pair: validation, the outliner's data source, the scene-present flag at
+composite, the UV pane's source, and the review focus scale.
+
+**0.10.0 deleted the second root.** A model file is staged, synthesized into a document holding
+one import node, and cooked to quiescence on a worker thread, through
+`crates/solarxy-graph/src/model_document.rs`, which the headless command
+(`crates/solarxy-render/src/input.rs`) already stood on and which the desktop already called for
+its still render. `crates/solarxy-app/src/state/open.rs` is now the only place `engine` is
+assigned, and nothing in the shell branches on which kind of file was opened.
+`crates/solarxy-app/src/state/engine_scene.rs` remains, no longer as an adapter back to
+single-model shapes but as what the inspection panels read about the one document.
 
 **The same two-valued render-engine concept is modelled three times.**
 `crates/solarxy-graph/src/nodes/export_nodes.rs:31` declares `RenderEngine { Raster, PathTraced }`.
@@ -1646,9 +1650,9 @@ appear in [10-risks-and-open-questions.md](10-risks-and-open-questions.md).
   prose inside comments was not individually classified here; a targeted read of the same
   directory found the non-generated hits to be comment text, and the two measurements have not
   been reconciled.
-- **Whether the desktop's separate file-model representation is intended to survive.** The whole
-  two-representation branch set and the 276-line adapter that collapses engine objects back into
-  single-model shapes turn on the answer, and nothing in the code states it.
+- ~~**Whether the desktop's separate file-model representation is intended to survive.**~~
+  **Answered in 0.10.0: it does not.** The milestone's decision 23 deleted it, and the shell now
+  holds one document root whatever file was opened. The branch set went with it.
 - **Which review model is intended to win.** Both the sidecar model and the engine model are
   actively maintained, and neither has an adapter to the other.
 - **Whether the colour-grading table cache was deliberately excluded from cook reset.** The
