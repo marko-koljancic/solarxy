@@ -23,7 +23,6 @@ use solarxy_host::{StillCtx, StillRenderJob};
 use solarxy_renderer::backend::RenderBackend;
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::{CompositeLook, resolve_look};
-use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
 use solarxy_renderer::pathtrace::denoise::DenoiseSettings;
 use solarxy_renderer::scene::BackgroundModeExt;
@@ -252,13 +251,12 @@ impl State {
         let pane_look =
             PaneLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure);
         let look = resolve_look(cam_look.as_ref(), &pane_look);
-        let (lut_a, lut_b) = cam_look
-            .as_ref()
-            .map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
-        self.renderer
-            .set_lut(&self.device, &self.queue, LutSlot::A, lut_a.as_deref());
-        self.renderer
-            .set_lut(&self.device, &self.queue, LutSlot::B, lut_b.as_deref());
+        solarxy_host::cameras::bind_look_luts(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            cam_look.as_ref(),
+        );
 
         let engine_kind = match settings.engine {
             RenderEngine::PathTraced => StillEngine::PathTraced,

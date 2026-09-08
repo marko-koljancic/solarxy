@@ -186,28 +186,20 @@ impl State {
 
     /// Snap every bound pane's camera to its camera node's current pose.
     ///
-    /// Runs every frame, so a camera node moved by a scene edit or reload
-    /// carries its panes with it, matching the web shell. The clone ends
-    /// the `raster` borrow before the pane cameras are mutated. A binding
-    /// whose node no longer exists follows nothing and keeps its last
-    /// pose, exactly as on the web.
+    /// The body is [`solarxy_host::cameras::follow_camera_bindings`], shared
+    /// with the web shell. This shell suppresses no pane: it has neither of
+    /// the two states the browser holds the follow off for, so the mask is
+    /// all false and every bound pane follows every frame.
     fn follow_look_through_cameras(&mut self) {
-        let updates: Vec<(usize, solarxy_core::scene::CameraDef)> = {
-            let Some(cams) = self.raster.scene().cameras() else {
-                return;
-            };
-            (0..4)
-                .filter_map(|i| {
-                    let id = self.look_through[i]?;
-                    cams.iter().find(|c| c.id == id).map(|d| (i, d.clone()))
-                })
-                .collect()
+        let Some(defs) = self.raster.scene().cameras() else {
+            return;
         };
-        for (i, def) in updates {
-            if let Some(cam) = self.view.cameras.get_mut(i).and_then(Option::as_mut) {
-                solarxy_host::cameras::apply_camera_def(&mut cam.camera, &def);
-            }
-        }
+        solarxy_host::cameras::follow_camera_bindings(
+            defs,
+            &self.look_through,
+            &[false; 4],
+            &mut self.view.cameras,
+        );
     }
 
     pub(super) fn update_wireframe_params(&self) {

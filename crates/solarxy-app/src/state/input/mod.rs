@@ -156,10 +156,10 @@ impl State {
                     let bounds = self.scene_bounds();
                     self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| {
-                        cam.reset_to_bounds_axis(
+                        solarxy_host::cameras::reset_to_view(
+                            cam,
                             &bounds,
-                            cgmath::Vector3::unit_y(),
-                            -cgmath::Vector3::unit_z(),
+                            solarxy_host::cameras::StandardView::Top,
                         );
                     });
                 }
@@ -168,10 +168,10 @@ impl State {
                 let bounds = self.scene_bounds();
                 self.release_look_through_for_gesture();
                 self.for_each_target_cam(|cam| {
-                    cam.reset_to_bounds_axis(
+                    solarxy_host::cameras::reset_to_view(
+                        cam,
                         &bounds,
-                        cgmath::Vector3::unit_z(),
-                        cgmath::Vector3::unit_y(),
+                        solarxy_host::cameras::StandardView::Front,
                     );
                 });
             }
@@ -203,10 +203,10 @@ impl State {
                     let bounds = self.scene_bounds();
                     self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| {
-                        cam.reset_to_bounds_axis(
+                        solarxy_host::cameras::reset_to_view(
+                            cam,
                             &bounds,
-                            -cgmath::Vector3::unit_x(),
-                            cgmath::Vector3::unit_y(),
+                            solarxy_host::cameras::StandardView::Left,
                         );
                     });
                 }
@@ -218,10 +218,10 @@ impl State {
                     let bounds = self.scene_bounds();
                     self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| {
-                        cam.reset_to_bounds_axis(
+                        solarxy_host::cameras::reset_to_view(
+                            cam,
                             &bounds,
-                            cgmath::Vector3::unit_x(),
-                            cgmath::Vector3::unit_y(),
+                            solarxy_host::cameras::StandardView::Right,
                         );
                     });
                 }

@@ -190,14 +190,17 @@ impl State {
         // a free pane keeps its own. `set_lut` dedupes on content, so the
         // common case (free panes, or every pane through one camera) costs
         // two comparisons per pane and rebuilds nothing.
-        let cam_look: Option<solarxy_core::scene::CameraLook> = self.look_through[i.min(3)]
-            .and_then(|id| {
-                self.raster
-                    .scene()
-                    .cameras()
-                    .and_then(|cams| cams.iter().find(|c| c.id == id))
-                    .map(|c| c.look.clone())
-            });
+        let cam_look = solarxy_host::cameras::camera_look_for(
+            self.raster.scene().cameras(),
+            self.look_through[i.min(3)],
+        )
+        .cloned();
+        // The camera's look wins where it has one; what it falls back to is
+        // the one thing the two shells still answer differently. The browser
+        // falls back to the pane's own look, and this shell derives one from
+        // the global tone and exposure, because it has no per-pane look to
+        // fall back to yet. The two converge when per-pane look replaces the
+        // global post state here and the Sidebar is retired with it.
         let look = solarxy_renderer::composite::resolve_look(
             cam_look.as_ref(),
             &solarxy_core::view_config::PaneLook::from_tone(
@@ -205,20 +208,11 @@ impl State {
                 self.renderer.post.exposure,
             ),
         );
-        let (lut_a, lut_b) = cam_look
-            .as_ref()
-            .map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
-        self.renderer.set_lut(
+        solarxy_host::cameras::bind_look_luts(
             &self.device,
             &self.queue,
-            solarxy_renderer::lut::LutSlot::A,
-            lut_a.as_deref(),
-        );
-        self.renderer.set_lut(
-            &self.device,
-            &self.queue,
-            solarxy_renderer::lut::LutSlot::B,
-            lut_b.as_deref(),
+            &mut self.renderer,
+            cam_look.as_ref(),
         );
         let scene_present = self.scene_present();
         let outline = self.renderer.selection_style

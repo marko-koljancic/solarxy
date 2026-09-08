@@ -50,7 +50,6 @@ use solarxy_host::gizmo::{self, GizmoPose, GizmoState, ToolMode};
 use solarxy_renderer::camera::{turntable_up, Camera};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
-use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::backend::{FrameCtx, FrameOutcome, PaneContent, RenderBackend, UvSource};
 use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
@@ -3259,16 +3258,10 @@ impl SolarxyApp {
             // `fit` does and never a camera that goes nowhere.
             "fitSelection" => cam.reset_to_bounds(&selection),
             "view" => {
-                let (dir, up) = match cmd.axis.as_str() {
-                    "top" => (Vector3::unit_y(), -Vector3::unit_z()),
-                    "bottom" => (-Vector3::unit_y(), Vector3::unit_z()),
-                    "front" => (Vector3::unit_z(), Vector3::unit_y()),
-                    "back" => (-Vector3::unit_z(), Vector3::unit_y()),
-                    "left" => (-Vector3::unit_x(), Vector3::unit_y()),
-                    "right" => (Vector3::unit_x(), Vector3::unit_y()),
-                    other => return Err(JsError::new(&format!("bad view axis: {other}"))),
+                let Some(view) = solarxy_host::cameras::StandardView::from_name(&cmd.axis) else {
+                    return Err(JsError::new(&format!("bad view axis: {}", cmd.axis)));
                 };
-                cam.reset_to_bounds_axis(&bounds, dir, up);
+                solarxy_host::cameras::reset_to_view(cam, &bounds, view);
             }
             "projection" => {
                 let mode = if cmd.mode == "orthographic" {
@@ -5038,34 +5031,28 @@ impl SolarxyApp {
 
     /// Drives each look-through pane's camera from its bound `camera` node, so
     /// param-panel edits (and non-navigating panes) always show the node's
-    /// saved pose. Suppressed for a pane mid-navigation (`camera_editing`) so
-    /// the follow never fights live orbit/pan on a locked pane.
+    /// saved pose.
+    ///
+    /// The body is [`solarxy_host::cameras::follow_camera_bindings`], shared
+    /// with the desktop shell. What stays here is this shell's suppression:
+    /// a pane mid-navigation, so the follow never fights a live orbit or pan
+    /// on a locked pane, and a pane whose turntable is spinning its scratch
+    /// camera.
     fn follow_look_through_cameras(&mut self) {
-        // Snapshot the cloned defs first, ending the scene_objects borrow before
-        // the pane cameras are mutated.
-        let updates: Vec<(usize, solarxy_core::scene::CameraDef)> = {
-            let Some(cams) = self.raster.scene().cameras() else {
-                return;
-            };
-            (0..4)
-                .filter_map(|i| {
-                    let node = self.look_through[i]?;
-                    // Suppressed while navigating, or while a turntable spins
-                    // this pane's scratch camera.
-                    if self.camera_editing[i] || self.view.pane_settings[i].turntable_active {
-                        return None;
-                    }
-                    cams.iter()
-                        .find(|c| c.id == SceneObjectId(node.0))
-                        .map(|def| (i, def.clone()))
-                })
-                .collect()
+        let bindings: [Option<SceneObjectId>; 4] =
+            std::array::from_fn(|i| self.look_through[i].map(|node| SceneObjectId(node.0)));
+        let suppressed: [bool; 4] = std::array::from_fn(|i| {
+            self.camera_editing[i] || self.view.pane_settings[i].turntable_active
+        });
+        let Some(defs) = self.raster.scene().cameras() else {
+            return;
         };
-        for (i, def) in updates {
-            if let Some(cam) = self.view.cameras[i].as_mut() {
-                solarxy_host::cameras::apply_camera_def(&mut cam.camera, &def);
-            }
-        }
+        solarxy_host::cameras::follow_camera_bindings(
+            defs,
+            &bindings,
+            &suppressed,
+            &mut self.view.cameras,
+        );
     }
 
     /// Whether pane `pane` is a locked look-through pane (navigation reframes
@@ -5532,7 +5519,8 @@ impl SolarxyApp {
     /// exactly what the last delta carried, including the tables the
     /// camera's cook decoded.
     fn pane_camera_look(&self, pane: usize) -> Option<&solarxy_core::scene::CameraLook> {
-        self.pane_camera_def(pane).map(|c| &c.look)
+        let binding = (*self.look_through.get(pane)?).map(|node| SceneObjectId(node.0));
+        solarxy_host::cameras::camera_look_for(self.raster.scene().cameras(), binding)
     }
 
     /// The camera definition a pane is bound to, if it is looking through one.
@@ -5615,23 +5603,22 @@ impl SolarxyApp {
         self.still_look =
             solarxy_renderer::composite::resolve_look(camera_look.as_ref(), &pane_fallback);
 
-        let (lut_a, lut_b) = camera_look
-            .as_ref()
-            .map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
-        self.renderer
-            .set_lut(&self.device, &self.queue, LutSlot::A, lut_a.as_deref());
-        self.renderer
-            .set_lut(&self.device, &self.queue, LutSlot::B, lut_b.as_deref());
+        solarxy_host::cameras::bind_look_luts(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            camera_look.as_ref(),
+        );
     }
 
     fn bind_pane_luts(&mut self, pane: usize) {
-        let (a, b) = self
-            .pane_camera_look(pane)
-            .map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
-        self.renderer
-            .set_lut(&self.device, &self.queue, LutSlot::A, a.as_deref());
-        self.renderer
-            .set_lut(&self.device, &self.queue, LutSlot::B, b.as_deref());
+        let look = self.pane_camera_look(pane).cloned();
+        solarxy_host::cameras::bind_look_luts(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            look.as_ref(),
+        );
     }
 
     /// The tracer's half of the viewer rig, before a still starts.
