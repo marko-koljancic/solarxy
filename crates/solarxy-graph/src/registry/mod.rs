@@ -218,8 +218,14 @@ pub enum NodeRole {
 /// [`ContextKind`]. This generalizes the older two-bool
 /// root/subflow mask; legality is judged against the target graph's
 /// `kind`, never against its address.
+///
+/// The width is `u16` rather than the `u8` this started as, because the
+/// constructor shifts by the kind's ordinal inside a `const`: the member one
+/// past what the width holds is a compile error, not a runtime surprise, so
+/// the release that adds it stops rather than being inconvenienced. Four
+/// kinds exist and the platform ladder plans twelve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ContextSet(u8);
+pub struct ContextSet(u16);
 
 impl ContextSet {
     pub const OBJ: Self = Self::of(ContextKind::Obj);
@@ -231,7 +237,18 @@ impl ContextSet {
 
     #[must_use]
     pub const fn of(kind: ContextKind) -> Self {
-        Self(1 << kind as u8)
+        Self::of_ordinal(kind as u8)
+    }
+
+    /// One member, addressed by its [`ContextKind`] ordinal rather than by a
+    /// variant.
+    ///
+    /// Split out of [`ContextSet::of`] because the width is the thing worth
+    /// testing and the typed constructor cannot reach it: with four variants
+    /// there is no way to ask for a ninth member, which is exactly the member
+    /// whose absence used to be a ceiling.
+    pub(crate) const fn of_ordinal(ordinal: u8) -> Self {
+        Self(1 << ordinal)
     }
 
     /// Set union, `const` so descriptor literals can compose
@@ -243,7 +260,12 @@ impl ContextSet {
 
     #[must_use]
     pub const fn contains(self, kind: ContextKind) -> bool {
-        self.0 & (1 << kind as u8) != 0
+        self.contains_ordinal(kind as u8)
+    }
+
+    /// Membership by ordinal, the read half of [`ContextSet::of_ordinal`].
+    pub(crate) const fn contains_ordinal(self, ordinal: u8) -> bool {
+        self.0 & (1 << ordinal) != 0
     }
 
     /// The member kinds in [`ContextKind::ALL`] order (the snapshot's
@@ -563,5 +585,53 @@ impl Registry {
             }
         }
         violations
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The ninth member is the point of the width.
+    ///
+    /// Before this, the set was a `u8` and `of` shifted by the kind's ordinal
+    /// inside a `const`, so the ninth context would not have been a bug to
+    /// find at runtime: it would have stopped the build of whichever release
+    /// added it. Nine is one past what the old width held, which is the only
+    /// number that proves anything.
+    #[test]
+    fn a_context_set_holds_at_least_nine_members() {
+        let mut set = ContextSet::of_ordinal(0);
+        for ordinal in 1..9 {
+            set = set.or(ContextSet::of_ordinal(ordinal));
+        }
+        for ordinal in 0..9 {
+            assert!(
+                set.contains_ordinal(ordinal),
+                "member {ordinal} is missing from a nine-member set"
+            );
+        }
+        assert!(
+            !set.contains_ordinal(9),
+            "a member nothing added is present, so the fold is not what it looks like"
+        );
+    }
+
+    /// The widening must not have moved anything that already existed.
+    #[test]
+    fn every_named_constant_holds_exactly_its_own_kind() {
+        for (set, kind) in [
+            (ContextSet::OBJ, ContextKind::Obj),
+            (ContextSet::GEO, ContextKind::Geo),
+            (ContextSet::MAT, ContextKind::Mat),
+            (ContextSet::TEX, ContextKind::Tex),
+        ] {
+            assert_eq!(
+                set.kinds(),
+                vec![kind],
+                "{kind:?}'s constant no longer holds exactly that kind"
+            );
+        }
+        assert_eq!(ContextSet::ALL.kinds(), ContextKind::ALL.to_vec());
     }
 }

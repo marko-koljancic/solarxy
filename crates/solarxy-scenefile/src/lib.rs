@@ -48,9 +48,23 @@ pub const MIN_READER_CURRENT: u32 = 1;
 /// exceeds this is refused with an upgrade message.
 ///
 /// Moves in lockstep with [`MIN_READER_CURRENT`]. If it did not, this build
-/// would write files (`min_reader: 1`) that its own reader then rejected as
+/// would write files whose `min_reader` its own reader then rejected as
 /// "too new".
 pub const READER_VERSION: u32 = 1;
+
+/// The lockstep above, enforced rather than only described.
+///
+/// Two unit tests already cover it, `this_build_can_read_what_it_writes` and
+/// `a_scene_needing_a_newer_reader_is_refused`. A `const` assert is worth
+/// having beside them because it fails the build of anything that links this
+/// crate, rather than of whoever remembers to run its tests, and because the
+/// two constants are edited together exactly once per format version, which
+/// is precisely when nobody is looking at the tests.
+const _: () = assert!(
+    MIN_READER_CURRENT == READER_VERSION,
+    "MIN_READER_CURRENT and READER_VERSION drifted: this build would write \
+     files its own reader refuses as too new"
+);
 
 /// The two required archive entries.
 const MANIFEST_ENTRY: &str = "manifest.json";
