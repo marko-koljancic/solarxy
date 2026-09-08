@@ -40,6 +40,10 @@ pub struct DocumentData {
     pub subflows: Vec<(NodeId, GraphData)>,
     #[serde(default)]
     pub annotations: Vec<crate::review::Annotation>,
+    /// The id last handed out by the mint, **not** the next one to hand out:
+    /// [`Document::mint_node_id`] and its siblings increment before returning.
+    /// A reader recomputing it from a document's contents wants
+    /// `max(all ids)`, not `max + 1`.
     pub next_id: u64,
 }
 

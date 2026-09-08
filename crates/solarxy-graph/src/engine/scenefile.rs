@@ -8,7 +8,8 @@
 //! the raw JSON goes through [`crate::migration::load_node`], which types
 //! each param under the registry's `ParamSpec` (and migrates or
 //! placeholder-marks as needed). Ids are decimal strings of the engine's
-//! `u64` ids; `next_id` is recomputed as `max(all ids) + 1` on load.
+//! `u64` ids; the id mint is recomputed from the largest id present on load,
+//! because the file does not carry it.
 
 use std::collections::BTreeMap;
 
@@ -357,7 +358,14 @@ pub fn scene_to_document(
         root,
         subflows,
         annotations,
-        next_id: max_id + 1,
+        // The mint pre-increments, so this field holds the id last handed out
+        // rather than the one to hand out next: `max_id + 1` would skip an id
+        // on every save and reload, and a document would not be a fixed point
+        // of its own round trip. Nothing depended on the values, which is why
+        // it went unnoticed; the one-document-root change made it visible by
+        // asserting that a model file and the scene it saves as are the same
+        // document.
+        next_id: max_id,
     };
     (data, warnings)
 }
