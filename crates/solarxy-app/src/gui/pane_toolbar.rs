@@ -210,7 +210,7 @@ pub(super) fn draw_pane_toolbars(
             );
         }
         if let Some(mode) = new_projection {
-            intents.raise(Intent::Projection { pane: i, mode });
+            intents.raise(Intent::PaneProjection { pane: i, mode });
         }
         if let Some(change) = new_look_through {
             intents.raise(Intent::LookThrough { pane: i, change });

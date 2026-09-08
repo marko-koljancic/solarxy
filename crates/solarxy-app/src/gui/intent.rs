@@ -22,16 +22,26 @@
 //!   the first pass has to survive into the drain, and clearing at the top of
 //!   each pass would throw it away on every frame that runs twice.
 //! - **An intent is raised only from a widget response or a consumed key**,
-//!   never from a condition that is merely true while a panel is open. An
-//!   event-driven raise cannot repeat on the second pass, because the events
-//!   are gone by then; a state-driven one repeats on every pass and lands in
-//!   the queue twice.
+//!   never from a condition that is merely true while a panel is open. A
+//!   click cannot repeat on the second pass, because the events are gone by
+//!   then; a state-driven raise repeats on every pass and lands in the queue
+//!   twice.
+//!
+//! The one raise that does repeat is the split divider's, because a drag is a
+//! gesture in progress rather than an event and the pointer stays down across
+//! both passes. That is safe only because the intent it raises sets a ratio to
+//! a value it computes from the same pointer position, so raising it twice
+//! lands the same number twice. A repeating raise that accumulated, or that
+//! opened a dialog, would not be.
 //!
 //! The flag structs this replaces were immune to both by accident: they were
 //! built once outside the closure and every write was idempotent.
 
 use solarxy_core::preferences::ProjectionMode;
 
+use crate::state::view_state::ViewLayout;
+
+use super::dock::SolarxyTab;
 use super::node_tree::NodeTreeAction;
 use super::outliner::OutlinerAction;
 use super::pane_toolbar::LookThroughChange;
@@ -41,17 +51,100 @@ use super::pane_toolbar::LookThroughChange;
 /// Grouped by the area a panel belongs to rather than flattened, so a new
 /// panel adds a variant to the enum that is already about its area instead of
 /// widening one list that every panel shares.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) enum Intent {
-    /// A pane's projection was picked from that pane's own toolbar.
-    Projection { pane: usize, mode: ProjectionMode },
+    /// A pane's projection, picked from that pane's own toolbar.
+    PaneProjection { pane: usize, mode: ProjectionMode },
     /// A pane was bound to a scene camera, or released back to a free view.
     LookThrough {
         pane: usize,
         change: LookThroughChange,
     },
+    /// The View menu's projection, which follows the camera link rather than
+    /// naming a pane.
+    Projection(ProjectionMode),
+    /// The File menu.
+    File(FileIntent),
+    /// The Edit menu.
+    Edit(EditIntent),
+    /// The Render menu's two image-producing actions.
+    Capture(CaptureIntent),
+    /// The Review menu, the status bar's review badge, and the escape chain.
+    Review(ReviewIntent),
+    /// The Layout and Window menus, and the split divider.
+    Layout(LayoutIntent),
+    /// The Help menu.
+    Help(HelpIntent),
     /// A panel asked for something the shell does on its behalf.
     Panel(PanelIntent),
+}
+
+/// The File menu.
+#[derive(Debug, Clone)]
+pub(crate) enum FileIntent {
+    OpenModel,
+    OpenHdri,
+    /// One entry from the recent list. Routed through the file router
+    /// rather than the model loader, because the one list holds scenes and
+    /// models and the routing on extension exists once.
+    OpenRecent(String),
+    Close,
+    Quit,
+}
+
+/// The Edit menu.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum EditIntent {
+    OpenPreferences,
+    /// Persist the current display, rendering and lighting settings.
+    SaveViewDefaults,
+}
+
+/// The two things the Render menu produces a file from.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CaptureIntent {
+    Screenshot,
+    Still,
+}
+
+/// Review mode and its notes.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ReviewIntent {
+    ToggleMode,
+    ToggleMarkers,
+    SaveNotes,
+    /// The mode was left through the escape chain or the status badge. The
+    /// state that ends it is already written; this asks only for the toast,
+    /// which is the shell's to give rather than a panel's.
+    Exited,
+    /// A pending re-anchor was cancelled, likewise already written.
+    ReanchorCancelled,
+}
+
+/// Everything about the arrangement: which panels are up, how the viewport
+/// is split, and the saved dock layout.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LayoutIntent {
+    /// Show or hide one dock panel. The Window menu's rows are this variant,
+    /// and so is the review panel's own close button, which is why adding a
+    /// panel is a row in one table rather than a field on a shared struct.
+    ToggleTab(SolarxyTab),
+    ToggleMenuBar,
+    ToggleStatusBar,
+    SetLayout(ViewLayout),
+    SetSplitRatio(f32),
+    SaveDock,
+    RestoreDock,
+    ResetDock,
+}
+
+/// The Help menu.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum HelpIntent {
+    OpenWiki,
+    OpenShortcuts,
+    CheckForUpdates,
+    OpenAbout,
 }
 
 /// What a panel asked for.
@@ -84,13 +177,25 @@ impl Intent {
     /// the test that pins the sequence.
     pub(crate) fn order(&self) -> u8 {
         match self {
-            Self::Projection { .. } => 0,
+            Self::PaneProjection { .. } => 0,
             Self::LookThrough { .. } => 1,
-            Self::Panel(PanelIntent::FlyToIssue(_)) => 2,
-            Self::Panel(PanelIntent::ClearHdri) => 3,
-            Self::Panel(PanelIntent::LoadHdri) => 4,
-            Self::Panel(PanelIntent::Outliner(_)) => 5,
-            Self::Panel(PanelIntent::NodeTree(_)) => 6,
+            // Everything a menu raises sat in one block before the queue
+            // existed, in the field order of the struct it wrote. Only one
+            // of them can be raised in a frame, because they are one click
+            // each, so the order within this run is a reading order rather
+            // than a behaviour.
+            Self::File(_) => 2,
+            Self::Edit(_) => 3,
+            Self::Capture(_) => 4,
+            Self::Review(_) => 5,
+            Self::Projection(_) => 6,
+            Self::Layout(_) => 7,
+            Self::Help(_) => 8,
+            Self::Panel(PanelIntent::FlyToIssue(_)) => 9,
+            Self::Panel(PanelIntent::ClearHdri) => 10,
+            Self::Panel(PanelIntent::LoadHdri) => 11,
+            Self::Panel(PanelIntent::Outliner(_)) => 12,
+            Self::Panel(PanelIntent::NodeTree(_)) => 13,
         }
     }
 }
@@ -149,12 +254,14 @@ mod tests {
             pane: 0,
             change: LookThroughChange::Free,
         });
-        intents.raise(Intent::Projection {
+        intents.raise(Intent::Layout(LayoutIntent::ResetDock));
+        intents.raise(Intent::File(FileIntent::Quit));
+        intents.raise(Intent::PaneProjection {
             pane: 0,
             mode: ProjectionMode::Orthographic,
         });
 
-        assert_eq!(keys(&mut intents), vec![0, 1, 2, 3, 4, 5, 6]);
+        assert_eq!(keys(&mut intents), vec![0, 1, 2, 7, 9, 10, 11, 12, 13]);
     }
 
     /// Two intents in one category keep the order they were raised in, which

@@ -133,7 +133,7 @@ impl ApplicationHandler<State> for App {
             };
             match event.physical_key {
                 PhysicalKey::Code(KeyCode::Tab) if !state.gui.wants_keyboard_input() => {
-                    state.gui.toggle_sidebar_tab();
+                    state.gui.toggle_tab(crate::gui::SolarxyTab::Sidebar);
                 }
                 PhysicalKey::Code(KeyCode::F10) => {
                     state.gui.menu_bar_visible = !state.gui.menu_bar_visible;
@@ -149,12 +149,12 @@ impl ApplicationHandler<State> for App {
                     }
                 }
                 PhysicalKey::Code(KeyCode::Backquote) if !state.gui.wants_keyboard_input() => {
-                    state.gui.console.visible = !state.gui.console.visible;
+                    state.gui.toggle_tab(crate::gui::SolarxyTab::Console);
                 }
                 PhysicalKey::Code(KeyCode::Digit1)
                     if cmd_or_ctrl && !state.gui.wants_keyboard_input() =>
                 {
-                    state.gui.toggle_viewport_tab();
+                    state.gui.toggle_tab(crate::gui::SolarxyTab::Viewport);
                 }
                 _ => {}
             }

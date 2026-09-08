@@ -9,13 +9,13 @@ use crate::state::hdri_info::HdriInfo;
 use solarxy_core::preferences::PaneMode;
 
 use super::about::draw_about_modal;
-use super::actions::{DividerInfo, MenuActions, MenuBarVisibility};
+use super::divider::DividerInfo;
 use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::material_inspector::MaterialInspectorState;
-use super::intent::{Intents, PanelIntent};
+use super::intent::{Intent, Intents, LayoutIntent, PanelIntent, ReviewIntent};
 use super::node_tree::{NodeTreeSource, NodeTreeState};
-use super::menu::draw_menu_bar;
+use super::menu::{MenuContext, draw_menu_bar};
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::status_bar::{self, StatusBarData};
 use super::viewport_context_menu::{ViewportContextMenu, draw_viewport_context_menu};
@@ -233,16 +233,19 @@ impl EguiRenderer {
         self.shortcuts_modal.open = true;
     }
 
-    pub fn toggle_sidebar_tab(&mut self) {
-        toggle_tab(&mut self.dock_state, SolarxyTab::Sidebar);
+    /// Show a panel if it is hidden, hide it if it is shown.
+    ///
+    /// One method rather than one per panel: the Window menu, the panel
+    /// shortcuts and a panel's own close button all mean the same thing, and
+    /// three of these existed with one of them never called.
+    pub(crate) fn toggle_tab(&mut self, tab: SolarxyTab) {
+        toggle_tab(&mut self.dock_state, tab);
     }
 
-    pub fn toggle_console_tab(&mut self) {
-        toggle_tab(&mut self.dock_state, SolarxyTab::Console);
-    }
-
-    pub fn toggle_viewport_tab(&mut self) {
-        toggle_tab(&mut self.dock_state, SolarxyTab::Viewport);
+    /// Whether a panel is currently mounted anywhere in the dock.
+    #[must_use]
+    pub(crate) fn tab_present(&self, tab: SolarxyTab) -> bool {
+        tab_present(&self.dock_state, tab)
     }
 
     #[must_use]
@@ -266,7 +269,7 @@ impl EguiRenderer {
     /// doesn't burn GPU work behind opaque docked panels.
     #[must_use]
     pub fn viewport_tab_present(&self) -> bool {
-        tab_present(&self.dock_state, SolarxyTab::Viewport)
+        self.tab_present(SolarxyTab::Viewport)
     }
 
     /// `true` iff the Node Tree tab is currently mounted in the dock. The
@@ -276,7 +279,7 @@ impl EguiRenderer {
     /// latency no one can see.
     #[must_use]
     pub fn node_tree_tab_present(&self) -> bool {
-        tab_present(&self.dock_state, SolarxyTab::NodeTree)
+        self.tab_present(SolarxyTab::NodeTree)
     }
 
     /// Return the Node Tree to the root context with everything unfolded.
@@ -449,7 +452,7 @@ impl EguiRenderer {
         viewport_context_menu: &mut Option<ViewportContextMenu>,
         force_expand_review: bool,
         suppress_screenshot_modal: bool,
-    ) -> (GuiSnapshot, MenuActions) {
+    ) -> GuiSnapshot {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
         }
@@ -474,28 +477,21 @@ impl EguiRenderer {
             .report
             .map_or((0, 0), |r| (r.error_count(), r.warning_count()));
 
-        let mut actions = MenuActions::default();
-
+        // The review panel's open flag is written by the state layer when
+        // review mode starts, so it is reconciled into the dock before the
+        // pass; the reverse direction is synced after the drain, where the
+        // toggles it raises have already landed.
         if review.panel_open != tab_present(&self.dock_state, SolarxyTab::ReviewPanel) {
             toggle_tab(&mut self.dock_state, SolarxyTab::ReviewPanel);
         }
 
+        // Read from the dock rather than mirrored into a struct: the Window
+        // menu's ticks are a question about the dock, and mirroring them was
+        // what made a panel cost a field in four places.
         let present_at_start: std::collections::HashSet<SolarxyTab> =
             self.dock_state.iter_all_tabs().map(|(_, t)| *t).collect();
-        let mut menu_vis = MenuBarVisibility {
-            sidebar_visible: present_at_start.contains(&SolarxyTab::Sidebar),
-            outliner_visible: present_at_start.contains(&SolarxyTab::Outliner),
-            node_tree_visible: present_at_start.contains(&SolarxyTab::NodeTree),
-            menu_bar_visible: self.menu_bar_visible,
-            properties_visible: present_at_start.contains(&SolarxyTab::Properties),
-            status_bar_visible: self.status_bar_visible,
-            console_visible: present_at_start.contains(&SolarxyTab::Console),
-            review_panel_visible: present_at_start.contains(&SolarxyTab::ReviewPanel),
-            material_inspector_visible: present_at_start.contains(&SolarxyTab::MaterialInspector),
-            viewport_visible: present_at_start.contains(&SolarxyTab::Viewport),
-            has_saved_layout: self.has_saved_layout,
-        };
-        let menu_vis_before = menu_vis;
+        let menu_bar_visible = self.menu_bar_visible;
+        let status_bar_visible = self.status_bar_visible;
         let mut about_open = self.about_open;
         let mut dismissed_toast_id: Option<u64> = None;
         let console = &mut self.console;
@@ -527,35 +523,37 @@ impl EguiRenderer {
             cameras: pt_cameras,
             look_through: pt_look_through,
         } = pane_toolbar;
+        let menu_cx = MenuContext {
+            has_model,
+            still_renderable,
+            recent_files,
+            hdri_available: pt_hdri_available,
+            customs: pt_customs,
+            // Review anchors against the file-loaded model, so its
+            // availability is the model's presence rather than `has_model`,
+            // which a scene also satisfies.
+            review_available,
+            review_active: review.active,
+            review_markers_hidden: review.markers_hidden,
+            review_dirty: review.dirty,
+            menu_bar_visible,
+            status_bar_visible,
+            has_saved_layout: self.has_saved_layout,
+            theme,
+        };
         let mut viewport_rect_logical: Option<egui::Rect> = None;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
-                actions.open_preferences = true;
+                intents.raise(Intent::Edit(super::EditIntent::OpenPreferences));
             }
-            if menu_vis.menu_bar_visible {
-                draw_menu_bar(
-                    ctx,
-                    &mut snap,
-                    &mut actions,
-                    &mut menu_vis,
-                    has_model,
-                    still_renderable,
-                    recent_files,
-                    pt_hdri_available,
-                    pt_customs,
-                    // Review anchors against the file-loaded model, so its
-                    // availability is the model's presence, not has_model
-                    // (which a scene also satisfies).
-                    review_available,
-                    review.active,
-                    review.markers_hidden,
-                    review.dirty,
-                    theme,
-                );
+            if menu_bar_visible {
+                draw_menu_bar(ctx, &mut snap, intents, &|tab| {
+                    present_at_start.contains(&tab)
+                }, menu_cx);
             }
 
-            if menu_vis.status_bar_visible {
+            if status_bar_visible {
                 let status = status_bar::draw(
                     ctx,
                     &StatusBarData {
@@ -575,7 +573,7 @@ impl EguiRenderer {
                 );
                 if status.review_badge_clicked {
                     review.toggle_active();
-                    actions.exit_review_mode = true;
+                    intents.raise(Intent::Review(ReviewIntent::Exited));
                 }
             }
 
@@ -741,10 +739,10 @@ impl EguiRenderer {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 if review.reanchor_target.is_some() {
                     review.cancel_reanchor();
-                    actions.cancel_reanchor = true;
+                    intents.raise(Intent::Review(ReviewIntent::ReanchorCancelled));
                 } else if review.active {
                     review.toggle_active();
-                    actions.exit_review_mode = true;
+                    intents.raise(Intent::Review(ReviewIntent::Exited));
                 }
             }
             let hud_ctx = HudCtx {
@@ -801,13 +799,12 @@ impl EguiRenderer {
                         }
                         _ => 0.5,
                     };
-                    actions.set_split_ratio = Some(
-                        solarxy_core::view_config::DisplaySettings::clamp_split_ratio(raw_ratio),
-                    );
+                    intents.raise(Intent::Layout(LayoutIntent::SetSplitRatio(raw_ratio)));
                 }
                 if resp.double_clicked() {
-                    actions.set_split_ratio =
-                        Some(solarxy_core::view_config::DisplaySettings::DEFAULT_SPLIT_RATIO);
+                    intents.raise(Intent::Layout(LayoutIntent::SetSplitRatio(
+                        solarxy_core::view_config::DisplaySettings::DEFAULT_SPLIT_RATIO,
+                    )));
                 }
             }
             if snap.pane_mode == PaneMode::UvMap && !hud.has_uvs {
@@ -828,63 +825,6 @@ impl EguiRenderer {
                     });
             }
         });
-
-        self.menu_bar_visible = menu_vis.menu_bar_visible;
-        self.status_bar_visible = menu_vis.status_bar_visible;
-
-        let menu_intents: [(SolarxyTab, bool, bool); 8] = [
-            (
-                SolarxyTab::NodeTree,
-                menu_vis_before.node_tree_visible,
-                menu_vis.node_tree_visible,
-            ),
-            (
-                SolarxyTab::Viewport,
-                menu_vis_before.viewport_visible,
-                menu_vis.viewport_visible,
-            ),
-            (
-                SolarxyTab::Sidebar,
-                menu_vis_before.sidebar_visible,
-                menu_vis.sidebar_visible,
-            ),
-            (
-                SolarxyTab::Outliner,
-                menu_vis_before.outliner_visible,
-                menu_vis.outliner_visible,
-            ),
-            (
-                SolarxyTab::Console,
-                menu_vis_before.console_visible,
-                menu_vis.console_visible,
-            ),
-            (
-                SolarxyTab::ReviewPanel,
-                menu_vis_before.review_panel_visible,
-                menu_vis.review_panel_visible,
-            ),
-            (
-                SolarxyTab::MaterialInspector,
-                menu_vis_before.material_inspector_visible,
-                menu_vis.material_inspector_visible,
-            ),
-            (
-                SolarxyTab::Properties,
-                menu_vis_before.properties_visible,
-                menu_vis.properties_visible,
-            ),
-        ];
-        for &(tab, before, after) in &menu_intents {
-            if before != after {
-                toggle_tab(&mut self.dock_state, tab);
-            }
-        }
-
-        let present_after: std::collections::HashSet<SolarxyTab> =
-            self.dock_state.iter_all_tabs().map(|(_, t)| *t).collect();
-
-        self.console.visible = present_after.contains(&SolarxyTab::Console);
-        review.panel_open = present_after.contains(&SolarxyTab::ReviewPanel);
 
         if let Some(rect) = viewport_rect_logical {
             self.last_viewport_rect = Some(CachedViewportRect {
@@ -945,7 +885,7 @@ impl EguiRenderer {
             self.renderer.free_texture(id);
         }
 
-        (snap, actions)
+        snap
     }
 
     pub fn open_about(&mut self) {

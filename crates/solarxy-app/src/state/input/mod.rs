@@ -4,9 +4,6 @@
 //! - `dialogs` — native file pickers (model open, HDRI import,
 //!   screenshot save) via the `rfd` crate. Returns to the event loop;
 //!   results land in `State::pending_load`.
-//! - `menu_actions` — menu-bar event flags ([`super::super::gui::MenuActions`])
-//!   draining: file/HDRI dialogs, preferences modal, view layout,
-//!   recent-file opens, etc.
 //!
 //! The keyboard map lives in this module's `handle_key_pressed`; see
 //! `gui::keyboard_shortcuts_modal` for the user-facing reference. Adding
@@ -14,7 +11,6 @@
 //! modal — they should never disagree.
 
 mod dialogs;
-mod menu_actions;
 
 use winit::event::MouseButton;
 use winit::event_loop::ActiveEventLoop;
@@ -73,7 +69,7 @@ impl State {
     /// Apply `f` to each pane camera the current gesture targets: the
     /// active pane, or — when cameras are linked — every pane the layout
     /// uses. UV-map panes are skipped.
-    fn for_each_target_cam(&mut self, mut f: impl FnMut(&mut CameraState)) {
+    pub(in crate::state) fn for_each_target_cam(&mut self, mut f: impl FnMut(&mut CameraState)) {
         let count = self.view.display.layout.pane_count();
         let active = self.view.active_pane;
         let linked = self.view.cameras_linked;
@@ -1016,7 +1012,7 @@ impl State {
     /// `self.preferences` and write the config file. Returns the I/O
     /// result so callers can toast a context-appropriate message —
     /// [`Self::save_preferences`] is the standard toasting wrapper.
-    fn persist_preferences(&mut self) -> Result<(), String> {
+    pub(in crate::state) fn persist_preferences(&mut self) -> Result<(), String> {
         let pds = &self.view.pane_settings[0];
         self.preferences.display.background = pds.background_mode;
         self.preferences.display.view_mode = pds.view_mode;
@@ -1045,7 +1041,7 @@ impl State {
         preferences::save(&self.preferences)
     }
 
-    fn save_preferences(&mut self) {
+    pub(in crate::state) fn save_preferences(&mut self) {
         match self.persist_preferences() {
             Ok(()) => {
                 self.gui

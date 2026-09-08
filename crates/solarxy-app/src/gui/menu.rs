@@ -4,9 +4,14 @@
 //!
 //! Per-pane controls (Shading, Inspection, Material Override, Background,
 //! Projection) write through [`GuiSnapshot`], which mirrors the **active
-//! pane** — so a menu click acts on whichever pane the cursor last
-//! selected. Scene-global controls (post-processing, IBL, turntable)
-//! write the same snapshot's global fields.
+//! pane**, so a menu click acts on whichever pane the cursor last selected.
+//! Scene-global controls (post-processing, IBL, turntable) write the same
+//! snapshot's global fields.
+//!
+//! Everything that is an action rather than a setting is raised as an
+//! [`Intent`] and applied after the pass. The Window menu is a table of
+//! panel rows rather than a struct with a flag per panel, so adding a panel
+//! is adding a row.
 
 use solarxy_core::preferences::{
     BackgroundMode, BuiltinBg, CustomBackground, IblMode, InspectionMode, LineWeight,
@@ -15,46 +20,53 @@ use solarxy_core::preferences::{
 use crate::state::view_state::{BoundsMode, ViewLayout};
 
 use super::MOD;
-use super::actions::{MenuActions, MenuBarVisibility};
+use super::dock::SolarxyTab;
+use super::intent::{
+    CaptureIntent, EditIntent, FileIntent, HelpIntent, Intent, Intents, LayoutIntent, PanelIntent,
+    ReviewIntent,
+};
+use super::outliner::OutlinerAction;
 use super::snapshot::GuiSnapshot;
 use super::theme::Theme;
+
+/// What the menu bar needs to know about the shell to draw itself, as
+/// against what it asks the shell to do, which travels as an [`Intent`].
+#[derive(Clone, Copy)]
+pub(super) struct MenuContext<'a> {
+    pub has_model: bool,
+    pub still_renderable: bool,
+    pub recent_files: &'a [String],
+    pub hdri_available: bool,
+    pub customs: &'a [CustomBackground],
+    pub review_available: bool,
+    pub review_active: bool,
+    pub review_markers_hidden: bool,
+    pub review_dirty: bool,
+    pub menu_bar_visible: bool,
+    pub status_bar_visible: bool,
+    pub has_saved_layout: bool,
+    pub theme: Theme,
+}
 
 pub(super) fn draw_menu_bar(
     ctx: &egui::Context,
     snap: &mut GuiSnapshot,
-    actions: &mut MenuActions,
-    vis: &mut MenuBarVisibility,
-    has_model: bool,
-    still_renderable: bool,
-    recent_files: &[String],
-    hdri_available: bool,
-    customs: &[CustomBackground],
-    review_available: bool,
-    review_active: bool,
-    review_markers_hidden: bool,
-    review_dirty: bool,
-    theme: Theme,
+    intents: &mut Intents,
+    present: &dyn Fn(SolarxyTab) -> bool,
+    cx: MenuContext<'_>,
 ) {
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
-            draw_file_menu(ui, actions, has_model, recent_files);
-            draw_edit_menu(ui, actions);
-            draw_render_menu(ui, snap, actions, still_renderable, hdri_available, customs);
-            // Review is a viewport mode — it belongs between Render and
-            // View, not stranded out past Help.
-            draw_review_menu(
-                ui,
-                actions,
-                review_available,
-                review_active,
-                review_markers_hidden,
-                review_dirty,
-                theme,
-            );
-            draw_view_menu(ui, snap, actions);
-            draw_layout_menu(ui, actions, vis);
-            draw_window_menu(ui, vis, has_model);
-            draw_help_menu(ui, actions);
+            draw_file_menu(ui, intents, cx.has_model, cx.recent_files);
+            draw_edit_menu(ui, intents);
+            draw_render_menu(ui, snap, intents, cx);
+            // Review is a viewport mode, so it belongs between Render and
+            // View rather than stranded out past Help.
+            draw_review_menu(ui, intents, cx);
+            draw_view_menu(ui, snap, intents);
+            draw_layout_menu(ui, intents, cx.has_saved_layout);
+            draw_window_menu(ui, intents, present, cx);
+            draw_help_menu(ui, intents);
         });
     });
 }
@@ -62,15 +74,15 @@ pub(super) fn draw_menu_bar(
 /// `Review` menu, sat between `Render` and `View` — Review is a viewport
 /// mode, not a utility. The button label turns amber `● Review` while
 /// review mode is active.
-fn draw_review_menu(
-    ui: &mut egui::Ui,
-    actions: &mut MenuActions,
-    review_available: bool,
-    review_active: bool,
-    review_markers_hidden: bool,
-    review_dirty: bool,
-    theme: Theme,
-) {
+fn draw_review_menu(ui: &mut egui::Ui, intents: &mut Intents, cx: MenuContext<'_>) {
+    let MenuContext {
+        review_available,
+        review_active,
+        review_markers_hidden,
+        review_dirty,
+        theme,
+        ..
+    } = cx;
     let label: egui::WidgetText = if review_active {
         egui::RichText::new("\u{25CF} Review")
             .color(theme.accent)
@@ -92,7 +104,7 @@ fn draw_review_menu(
             .on_disabled_hover_text("Review needs an open model file")
             .clicked()
         {
-            actions.toggle_review_mode = true;
+            intents.raise(Intent::Review(ReviewIntent::ToggleMode));
             ui.close();
         }
         if ui
@@ -104,7 +116,7 @@ fn draw_review_menu(
             .on_disabled_hover_text("Review needs an open model file")
             .clicked()
         {
-            actions.toggle_review_markers = true;
+            intents.raise(Intent::Review(ReviewIntent::ToggleMarkers));
             ui.close();
         }
         ui.separator();
@@ -113,7 +125,7 @@ fn draw_review_menu(
             .on_hover_text("Write review notes to the sidecar file (Cmd/Ctrl+S)")
             .clicked()
         {
-            actions.save_review_notes = true;
+            intents.raise(Intent::Review(ReviewIntent::SaveNotes));
             ui.close();
         }
     });
@@ -186,7 +198,7 @@ fn background_submenu(
 
 fn draw_file_menu(
     ui: &mut egui::Ui,
-    actions: &mut MenuActions,
+    intents: &mut Intents,
     has_model: bool,
     recent_files: &[String],
 ) {
@@ -195,14 +207,14 @@ fn draw_file_menu(
             .add(egui::Button::new("Open\u{2026}").shortcut_text(format!("{MOD}+O")))
             .clicked()
         {
-            actions.open_model = true;
+            intents.raise(Intent::File(FileIntent::OpenModel));
             ui.close();
         }
         if ui
             .add(egui::Button::new("Import HDRI\u{2026}").shortcut_text(format!("{MOD}+Shift+O")))
             .clicked()
         {
-            actions.open_hdri = true;
+            intents.raise(Intent::File(FileIntent::OpenHdri));
             ui.close();
         }
         if !recent_files.is_empty() {
@@ -221,7 +233,7 @@ fn draw_file_menu(
                         raw.to_string()
                     };
                     if ui.button(&label).on_hover_text(path).clicked() {
-                        actions.open_recent = Some(path.clone());
+                        intents.raise(Intent::File(FileIntent::OpenRecent(path.clone())));
                         ui.close();
                     }
                 }
@@ -232,23 +244,23 @@ fn draw_file_menu(
             .add_enabled(has_model, egui::Button::new("Close"))
             .clicked()
         {
-            actions.close_model = true;
+            intents.raise(Intent::File(FileIntent::Close));
             ui.close();
         }
         if ui.button("Quit").clicked() {
-            actions.quit = true;
+            intents.raise(Intent::File(FileIntent::Quit));
             ui.close();
         }
     });
 }
 
-fn draw_edit_menu(ui: &mut egui::Ui, actions: &mut MenuActions) {
+fn draw_edit_menu(ui: &mut egui::Ui, intents: &mut Intents) {
     ui.menu_button("Edit", |ui| {
         if ui
             .add(egui::Button::new("Preferences\u{2026}").shortcut_text(format!("{MOD}+,")))
             .clicked()
         {
-            actions.open_preferences = true;
+            intents.raise(Intent::Edit(EditIntent::OpenPreferences));
             ui.close();
         }
         ui.separator();
@@ -257,7 +269,7 @@ fn draw_edit_menu(ui: &mut egui::Ui, actions: &mut MenuActions) {
             .on_hover_text("Persist the current display, rendering and lighting settings")
             .clicked()
         {
-            actions.save_view_defaults = true;
+            intents.raise(Intent::Edit(EditIntent::SaveViewDefaults));
             ui.close();
         }
     });
@@ -266,11 +278,15 @@ fn draw_edit_menu(ui: &mut egui::Ui, actions: &mut MenuActions) {
 fn draw_render_menu(
     ui: &mut egui::Ui,
     snap: &mut GuiSnapshot,
-    actions: &mut MenuActions,
-    still_renderable: bool,
-    hdri_available: bool,
-    customs: &[CustomBackground],
+    intents: &mut Intents,
+    cx: MenuContext<'_>,
 ) {
+    let MenuContext {
+        still_renderable,
+        hdri_available,
+        customs,
+        ..
+    } = cx;
     ui.menu_button("Render", |ui| {
         // The still renders either root through the render node's
         // authority: a scene the engine cooked, or an open model through
@@ -280,7 +296,7 @@ fn draw_render_menu(
             .on_disabled_hover_text("Open a scene or a model to render a still")
             .clicked()
         {
-            actions.render_still = true;
+            intents.raise(Intent::Capture(CaptureIntent::Still));
             ui.close();
         }
         ui.separator();
@@ -362,13 +378,13 @@ fn draw_render_menu(
             .add(egui::Button::new("Save Screenshot\u{2026}").shortcut_text("C"))
             .clicked()
         {
-            actions.save_screenshot = true;
+            intents.raise(Intent::Capture(CaptureIntent::Screenshot));
             ui.close();
         }
     });
 }
 
-fn draw_view_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, actions: &mut MenuActions) {
+fn draw_view_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, intents: &mut Intents) {
     ui.menu_button("View", |ui| {
         ui.menu_button("Projection", |ui| {
             for (mode, shortcut) in [
@@ -380,7 +396,7 @@ fn draw_view_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, actions: &mut MenuA
                     .on_hover_text(shortcut)
                     .clicked()
                 {
-                    actions.set_projection = Some(mode);
+                    intents.raise(Intent::Projection(mode));
                     ui.close();
                 }
             }
@@ -427,13 +443,13 @@ fn draw_view_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, actions: &mut MenuA
             .on_hover_text("Make every mesh visible (Alt+H)")
             .clicked()
         {
-            actions.show_all_meshes = true;
+            intents.panel(PanelIntent::Outliner(OutlinerAction::ShowAll));
             ui.close();
         }
     });
 }
 
-fn draw_layout_menu(ui: &mut egui::Ui, actions: &mut MenuActions, vis: &MenuBarVisibility) {
+fn draw_layout_menu(ui: &mut egui::Ui, intents: &mut Intents, has_saved_layout: bool) {
     ui.menu_button("Layout", |ui| {
         for (layout, label, shortcut) in [
             (ViewLayout::Single, "Single", "F1"),
@@ -446,149 +462,179 @@ fn draw_layout_menu(ui: &mut egui::Ui, actions: &mut MenuActions, vis: &MenuBarV
                 .add(egui::Button::new(label).shortcut_text(shortcut))
                 .clicked()
             {
-                actions.set_layout = Some(layout);
+                intents.raise(Intent::Layout(LayoutIntent::SetLayout(layout)));
                 ui.close();
             }
         }
         ui.separator();
         if ui.button("Save Layout").clicked() {
-            actions.save_dock_layout = true;
+            intents.raise(Intent::Layout(LayoutIntent::SaveDock));
             ui.close();
         }
         if ui
-            .add_enabled(
-                vis.has_saved_layout,
-                egui::Button::new("Restore Saved Layout"),
-            )
+            .add_enabled(has_saved_layout, egui::Button::new("Restore Saved Layout"))
             .clicked()
         {
-            actions.restore_saved_layout = true;
+            intents.raise(Intent::Layout(LayoutIntent::RestoreDock));
             ui.close();
         }
         if ui.button("Reset Layout to Default").clicked() {
-            actions.reset_dock_layout = true;
+            intents.raise(Intent::Layout(LayoutIntent::ResetDock));
             ui.close();
         }
     });
 }
 
-fn draw_window_menu(ui: &mut egui::Ui, vis: &mut MenuBarVisibility, has_model: bool) {
+/// A panel's row in the Window menu.
+///
+/// **This table is the registration a new panel needs.** Before it, every
+/// panel cost a field on a shared visibility struct, a line building that
+/// struct, a line in a diff table, and a line applying the diff. Now it costs
+/// a row, and the tick state is read from the dock rather than mirrored.
+struct PanelRow {
+    tab: SolarxyTab,
+    label: &'static str,
+    accel: Accel,
+    /// Panels that inspect an imported file are disabled without one.
+    needs_model: bool,
+}
+
+/// A row's accelerator. `Mod` is separate because the platform key is a
+/// runtime string, so the label cannot be a plain constant.
+enum Accel {
+    None,
+    Key(&'static str),
+    Mod(&'static str),
+}
+
+impl Accel {
+    fn label(&self) -> Option<String> {
+        match self {
+            Self::None => None,
+            Self::Key(k) => Some((*k).to_string()),
+            Self::Mod(k) => Some(format!("{MOD}+{k}")),
+        }
+    }
+}
+
+const PANEL_ROWS: &[PanelRow] = &[
+    PanelRow {
+        tab: SolarxyTab::Viewport,
+        label: "Viewport",
+        accel: Accel::Mod("1"),
+        needs_model: false,
+    },
+    PanelRow {
+        tab: SolarxyTab::Sidebar,
+        label: "Sidebar",
+        accel: Accel::Key("Tab"),
+        needs_model: false,
+    },
+    PanelRow {
+        tab: SolarxyTab::Outliner,
+        label: "Outliner",
+        accel: Accel::None,
+        needs_model: false,
+    },
+    PanelRow {
+        tab: SolarxyTab::NodeTree,
+        label: "Node Tree",
+        accel: Accel::None,
+        needs_model: false,
+    },
+    PanelRow {
+        tab: SolarxyTab::Properties,
+        label: "Properties",
+        accel: Accel::None,
+        needs_model: false,
+    },
+    PanelRow {
+        tab: SolarxyTab::ReviewPanel,
+        label: "Review Panel",
+        accel: Accel::None,
+        needs_model: false,
+    },
+    PanelRow {
+        tab: SolarxyTab::MaterialInspector,
+        label: "Material Inspector",
+        accel: Accel::None,
+        needs_model: true,
+    },
+    PanelRow {
+        tab: SolarxyTab::Console,
+        label: "Console",
+        accel: Accel::Key("`"),
+        needs_model: false,
+    },
+];
+
+fn draw_window_menu(
+    ui: &mut egui::Ui,
+    intents: &mut Intents,
+    present: &dyn Fn(SolarxyTab) -> bool,
+    cx: MenuContext<'_>,
+) {
     ui.menu_button("Window", |ui| {
-        if ui
-            .add(
-                egui::Button::new("Viewport")
-                    .selected(vis.viewport_visible)
-                    .shortcut_text(format!("{MOD}+1")),
-            )
-            .clicked()
-        {
-            vis.viewport_visible = !vis.viewport_visible;
-            ui.close();
-        }
-        if ui
-            .add(
-                egui::Button::new("Sidebar")
-                    .selected(vis.sidebar_visible)
-                    .shortcut_text("Tab"),
-            )
-            .clicked()
-        {
-            vis.sidebar_visible = !vis.sidebar_visible;
-            ui.close();
-        }
-        if ui
-            .add(egui::Button::new("Outliner").selected(vis.outliner_visible))
-            .clicked()
-        {
-            vis.outliner_visible = !vis.outliner_visible;
-            ui.close();
-        }
-        if ui
-            .add(egui::Button::new("Node Tree").selected(vis.node_tree_visible))
-            .clicked()
-        {
-            vis.node_tree_visible = !vis.node_tree_visible;
-            ui.close();
-        }
-        if ui
-            .add(egui::Button::new("Properties").selected(vis.properties_visible))
-            .clicked()
-        {
-            vis.properties_visible = !vis.properties_visible;
-            ui.close();
-        }
-        if ui
-            .add(egui::Button::new("Review Panel").selected(vis.review_panel_visible))
-            .clicked()
-        {
-            vis.review_panel_visible = !vis.review_panel_visible;
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                has_model,
-                egui::Button::new("Material Inspector").selected(vis.material_inspector_visible),
-            )
-            .clicked()
-        {
-            vis.material_inspector_visible = !vis.material_inspector_visible;
-            ui.close();
-        }
-        if ui
-            .add(
-                egui::Button::new("Console")
-                    .selected(vis.console_visible)
-                    .shortcut_text("`"),
-            )
-            .clicked()
-        {
-            vis.console_visible = !vis.console_visible;
-            ui.close();
+        for row in PANEL_ROWS {
+            let mut button = egui::Button::new(row.label).selected(present(row.tab));
+            if let Some(accel) = row.accel.label() {
+                button = button.shortcut_text(accel);
+            }
+            if ui
+                .add_enabled(!row.needs_model || cx.has_model, button)
+                .clicked()
+            {
+                intents.raise(Intent::Layout(LayoutIntent::ToggleTab(row.tab)));
+                ui.close();
+            }
         }
 
         ui.separator();
 
+        // The status bar and the menu bar are chrome the shell owns rather
+        // than panels the dock holds, so they are written out rather than
+        // squeezed into the table above.
         if ui
-            .add(egui::Button::new("Status Bar").selected(vis.status_bar_visible))
+            .add(egui::Button::new("Status Bar").selected(cx.status_bar_visible))
             .clicked()
         {
-            vis.status_bar_visible = !vis.status_bar_visible;
+            intents.raise(Intent::Layout(LayoutIntent::ToggleStatusBar));
             ui.close();
         }
         if ui
             .add(
                 egui::Button::new("Menu Bar")
-                    .selected(vis.menu_bar_visible)
+                    .selected(cx.menu_bar_visible)
                     .shortcut_text("F10"),
             )
             .clicked()
         {
-            vis.menu_bar_visible = !vis.menu_bar_visible;
+            intents.raise(Intent::Layout(LayoutIntent::ToggleMenuBar));
             ui.close();
         }
     });
 }
 
-fn draw_help_menu(ui: &mut egui::Ui, actions: &mut MenuActions) {
+fn draw_help_menu(ui: &mut egui::Ui, intents: &mut Intents) {
     ui.menu_button("Help", |ui| {
         if ui.button("Solarxy Wiki").clicked() {
-            actions.open_wiki = true;
+            intents.raise(Intent::Help(HelpIntent::OpenWiki));
             ui.close();
         }
         if ui
             .add(egui::Button::new("Keyboard Shortcuts").shortcut_text("?"))
             .clicked()
         {
-            actions.open_shortcuts_modal = true;
+            intents.raise(Intent::Help(HelpIntent::OpenShortcuts));
             ui.close();
         }
         ui.separator();
         if ui.button("Check for Updates\u{2026}").clicked() {
-            actions.check_for_updates = true;
+            intents.raise(Intent::Help(HelpIntent::CheckForUpdates));
             ui.close();
         }
         if ui.button("About Solarxy").clicked() {
-            actions.open_about = true;
+            intents.raise(Intent::Help(HelpIntent::OpenAbout));
             ui.close();
         }
     });

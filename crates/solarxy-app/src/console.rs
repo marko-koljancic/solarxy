@@ -95,7 +95,6 @@ pub struct ConsoleState {
     pub(crate) buffer: LogBuffer,
     pub auto_scroll: bool,
     pub min_level: Level,
-    pub visible: bool,
     pub(crate) search: String,
 }
 
@@ -105,7 +104,6 @@ impl ConsoleState {
             buffer,
             auto_scroll: true,
             min_level: Level::INFO,
-            visible: false,
             search: String::new(),
         }
     }

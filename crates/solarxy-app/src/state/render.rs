@@ -538,7 +538,7 @@ impl State {
         // review card open for that frame.
         let suppress_screenshot_modal = self.capture_requested;
         let force_expand_review = self.capture_requested && self.screenshot_expand_review;
-        let (snap_after, actions) = self.gui.render_ui(
+        let snap_after = self.gui.render_ui(
             snap_before,
             &hud,
             validation,
@@ -586,12 +586,17 @@ impl State {
             self.apply_ibl_change();
         }
 
-        self.handle_menu_actions(actions);
-
         // After the settings write-back, not before it: two of these arms
         // write per-pane display settings that `apply_to_state` would
         // overwrite from the snapshot taken at the top of this frame.
         self.drain_intents(&mut intents);
+
+        // The review panel's open flag mirrors dock membership, and a panel
+        // toggle the drain just applied is what changes it. Synced here
+        // rather than at the end of the egui pass, which runs before the
+        // drain: a toggle raised this frame would otherwise not be visible
+        // until the next one, and the pre-pass reconciliation would undo it.
+        self.review.panel_open = self.gui.tab_present(crate::gui::SolarxyTab::ReviewPanel);
 
         // Review panel: clicking a note row flies the camera to its anchor.
         if let Some(id) = self.review.focus_request.take() {

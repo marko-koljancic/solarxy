@@ -14,8 +14,6 @@
 //! - `snapshot` — `GuiSnapshot` (crate-private; the sidebar ↔ state mirror)
 //!   and [`SidebarChanges`]; see that module's docs for the "adding a
 //!   sidebar control" recipe.
-//! - `actions` — `MenuActions` (crate-private) event flags drained by
-//!   `state/render.rs` after each frame.
 //! - `intent`: the typed intent queue panels raise into, drained by
 //!   `state/intents.rs` once the pass is over. Read its module docs before
 //!   raising from anywhere new: a queue fed from state rather than from an
@@ -32,8 +30,8 @@
 //! used in menu shortcut labels.
 
 mod about;
-mod actions;
 mod console_view;
+mod divider;
 mod dock;
 mod intent;
 mod keyboard_shortcuts_modal;
@@ -68,8 +66,12 @@ pub use overlays::ToastSeverity;
 pub use renderer::EguiRenderer;
 pub use snapshot::SidebarChanges;
 
-pub(crate) use actions::{DividerInfo, MenuActions};
-pub(crate) use intent::{Intent, Intents, PanelIntent};
+pub(crate) use divider::DividerInfo;
+pub(crate) use dock::SolarxyTab;
+pub(crate) use intent::{
+    CaptureIntent, EditIntent, FileIntent, HelpIntent, Intent, Intents, LayoutIntent, PanelIntent,
+    ReviewIntent,
+};
 pub(crate) use node_tree::{NodeTreeAction, NodeTreeSource};
 pub(crate) use outliner::{OutlinerAction, OutlinerSource};
 pub(crate) use pane_toolbar::{LookThroughChange, PaneToolbarData};

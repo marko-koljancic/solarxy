@@ -49,7 +49,7 @@ use super::theme::Theme;
 /// without being told. `layout_saved_before_the_node_tree_still_restores`
 /// pins this against a real pre-`NodeTree` blob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub(super) enum SolarxyTab {
+pub(crate) enum SolarxyTab {
     Viewport,
     Sidebar,
     ReviewPanel,
@@ -62,7 +62,7 @@ pub(super) enum SolarxyTab {
 
 impl SolarxyTab {
     /// Stable kebab-case slug used for menu wiring + serde tags.
-    pub(super) fn slug(self) -> &'static str {
+    pub(crate) fn slug(self) -> &'static str {
         match self {
             Self::Viewport => "viewport",
             Self::Sidebar => "sidebar",
@@ -164,11 +164,10 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 super::sidebar::draw_sidebar_content(ui, self.snap);
             }
             SolarxyTab::ReviewPanel => {
-                let mut visible = true;
                 super::review_panel::draw_review_panel_content(
                     ui,
                     self.review,
-                    &mut visible,
+                    self.intents,
                     self.theme,
                 );
             }

@@ -11,6 +11,8 @@
 
 use solarxy_core::review::AnnotationCategory;
 
+use super::dock::SolarxyTab;
+use super::intent::{Intent, Intents, LayoutIntent};
 use super::review_visuals::{category_color, category_letter as category_label_short};
 use super::theme::Theme;
 use crate::state::review::ReviewState;
@@ -60,7 +62,7 @@ fn draw_category_chip(
 pub(super) fn draw_review_panel_content(
     ui: &mut egui::Ui,
     review: &mut ReviewState,
-    visible: &mut bool,
+    intents: &mut Intents,
     theme: Theme,
 ) {
     ui.horizontal(|ui| {
@@ -76,7 +78,12 @@ pub(super) fn draw_review_panel_content(
                 .on_hover_text("Close panel")
                 .clicked()
             {
-                *visible = false;
+                // The same toggle the Window menu raises. Before the intent
+                // queue this wrote an out-parameter the dock declared and
+                // never read back, so the button did nothing.
+                intents.raise(Intent::Layout(LayoutIntent::ToggleTab(
+                    SolarxyTab::ReviewPanel,
+                )));
             }
             if ui
                 .add_enabled(review.dirty, egui::Button::new("Save").small())
