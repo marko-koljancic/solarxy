@@ -1,9 +1,10 @@
 //! The per-mesh visualization overlays, built once for both shells.
 //!
 //! Two overlays read this: the normal arrows and the per-mesh bounds boxes.
-//! Both are drawn from buffers baked into [`VisualizationState`], flattened in
-//! the renderer's own draw order, because the renderer zips its segments
-//! against the flattened scene meshes.
+//! Both are drawn from buffers baked into the renderer's
+//! [`VisualizationState`](solarxy_renderer::visualization::VisualizationState),
+//! flattened in the renderer's own draw order, because the renderer zips its
+//! segments against the flattened scene meshes.
 //!
 //! # Why it reads the cooked geometry rather than the GPU meshes
 //!
