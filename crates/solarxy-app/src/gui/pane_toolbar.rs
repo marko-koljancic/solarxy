@@ -22,6 +22,7 @@ use solarxy_core::preferences::{
 };
 use solarxy_core::view_config::PANE_TOOLBAR_HEIGHT;
 
+use super::intent::{Intent, Intents};
 use super::snapshot::GuiSnapshot;
 use super::theme::Theme;
 use crate::state::view_state::{BoundsMode, PaneDisplaySettings};
@@ -71,9 +72,6 @@ pub(crate) struct PaneToolbarData<'a> {
     pub active: usize,
     pub pane_settings: &'a mut [PaneDisplaySettings; 4],
     pub projections: [ProjectionMode; 4],
-    /// Set to `(pane, mode)` when a toolbar changes a pane's projection;
-    /// the state layer applies it to that pane's camera after `render_ui`.
-    pub projection_change: &'a mut Option<(usize, ProjectionMode)>,
     /// `true` once an HDRI is loaded — gates the `HDRI Sky` background.
     pub hdri_available: bool,
     /// User custom backgrounds, listed in every Background dropdown.
@@ -87,14 +85,11 @@ pub(crate) struct PaneToolbarData<'a> {
     pub cameras: &'a [(u64, String)],
     /// Which camera each pane looks through, mirroring the state field.
     pub look_through: [Option<u64>; 4],
-    /// The look-through change a toolbar requested this frame; the state
-    /// layer applies it after `render_ui`, like a projection change.
-    pub look_through_change: &'a mut Option<(usize, LookThroughChange)>,
 }
 
 /// A toolbar's requested look-through change for one pane: bind to a
 /// camera node, or return to a free view.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum LookThroughChange {
     Bind(u64),
     Free,
@@ -167,6 +162,7 @@ pub(super) fn draw_pane_toolbars(
     ui: &mut egui::Ui,
     data: &mut PaneToolbarData,
     snap: &mut GuiSnapshot,
+    intents: &mut Intents,
     theme: Theme,
 ) {
     let hdri_available = data.hdri_available;
@@ -213,11 +209,11 @@ pub(super) fn draw_pane_toolbars(
                 },
             );
         }
-        if let Some(p) = new_projection {
-            *data.projection_change = Some((i, p));
+        if let Some(mode) = new_projection {
+            intents.raise(Intent::Projection { pane: i, mode });
         }
-        if let Some(binding) = new_look_through {
-            *data.look_through_change = Some((i, binding));
+        if let Some(change) = new_look_through {
+            intents.raise(Intent::LookThrough { pane: i, change });
         }
 
         if is_active {

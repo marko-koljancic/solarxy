@@ -16,6 +16,10 @@
 //!   sidebar control" recipe.
 //! - `actions` — `MenuActions` (crate-private) event flags drained by
 //!   `state/render.rs` after each frame.
+//! - `intent`: the typed intent queue panels raise into, drained by
+//!   `state/intents.rs` once the pass is over. Read its module docs before
+//!   raising from anywhere new: a queue fed from state rather than from an
+//!   event double-raises on a twice-run frame.
 //! - `overlays` — toast queue + FPS HUD + loading indicator + severities.
 //!   Every `push_toast` emits a matching `tracing` event on
 //!   `target: "solarxy::toast"` — callers must NOT also emit their own
@@ -31,6 +35,7 @@ mod about;
 mod actions;
 mod console_view;
 mod dock;
+mod intent;
 mod keyboard_shortcuts_modal;
 mod material_inspector;
 mod menu;
@@ -64,10 +69,11 @@ pub use renderer::EguiRenderer;
 pub use snapshot::SidebarChanges;
 
 pub(crate) use actions::{DividerInfo, MenuActions};
-pub(crate) use node_tree::{NodeTreeAction, NodeTreeEvents, NodeTreeSource};
-pub(crate) use outliner::{OutlinerAction, OutlinerEvents, OutlinerSource};
+pub(crate) use intent::{Intent, Intents, PanelIntent};
+pub(crate) use node_tree::{NodeTreeAction, NodeTreeSource};
+pub(crate) use outliner::{OutlinerAction, OutlinerSource};
 pub(crate) use pane_toolbar::{LookThroughChange, PaneToolbarData};
-pub(crate) use properties::{PropertiesEvents, ValidationView};
+pub(crate) use properties::ValidationView;
 pub(crate) use review_overlay::ReviewPaneOverlay;
 pub(crate) use snapshot::{GuiSnapshot, HudInfo};
 pub(crate) use viewport_context_menu::ViewportContextMenu;

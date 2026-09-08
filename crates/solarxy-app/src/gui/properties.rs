@@ -6,8 +6,8 @@
 //! Replaced `gui::stats` in RC2 — `ModelInfo` moved here unchanged; file
 //! sizes format via `solarxy_core::format_number`. Read-only except the
 //! HDRI IBL-mode / rotation controls (which write through [`GuiSnapshot`])
-//! and the out-events in [`PropertiesEvents`], drained by
-//! `state/render.rs` after the egui pass.
+//! and the intents it raises, drained by `state/intents.rs` after the egui
+//! pass.
 
 use solarxy_core::format_number;
 use solarxy_core::preferences::IblMode;
@@ -17,6 +17,7 @@ use solarxy_renderer::resources::ModelStats;
 use crate::state::engine_scene::SceneGeometryCounts;
 use crate::state::hdri_info::HdriInfo;
 
+use super::intent::{Intents, PanelIntent};
 use super::snapshot::GuiSnapshot;
 
 /// The Validation section's input: the report to list, plus the owning
@@ -53,19 +54,6 @@ pub(super) struct ModelInfo {
     /// file. Carries the counters a multi-object scene has and a file model
     /// does not, and its presence is what switches this section's wording.
     pub scene: Option<SceneGeometryCounts>,
-}
-
-/// Events raised by the Properties panel during an egui pass, drained by
-/// `state/render.rs` after `render_ui` returns.
-#[derive(Debug, Default)]
-pub(crate) struct PropertiesEvents {
-    /// Index into `ValidationReport::issues` whose row was clicked — the
-    /// state layer flies the active pane's camera to frame it.
-    pub fly_to_issue: Option<usize>,
-    /// The HDRI `[Clear]` button was pressed.
-    pub clear_hdri: bool,
-    /// The `[Load HDRI…]` button (shown when none is loaded) was pressed.
-    pub load_hdri: bool,
 }
 
 /// A drawn count, with the source count beside it when instancing makes
@@ -115,7 +103,7 @@ pub(super) fn draw_properties_content(
     hdri_info: Option<&HdriInfo>,
     validation: ValidationView<'_>,
     snap: &mut GuiSnapshot,
-    events: &mut PropertiesEvents,
+    intents: &mut Intents,
 ) {
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add_space(2.0);
@@ -140,13 +128,13 @@ pub(super) fn draw_properties_content(
 
         egui::CollapsingHeader::new("HDRI")
             .default_open(true)
-            .show(ui, |ui| draw_hdri_section(ui, hdri_info, snap, events));
+            .show(ui, |ui| draw_hdri_section(ui, hdri_info, snap, intents));
 
         ui.separator();
 
         egui::CollapsingHeader::new("Validation")
             .default_open(true)
-            .show(ui, |ui| draw_validation_section(ui, validation, events));
+            .show(ui, |ui| draw_validation_section(ui, validation, intents));
 
         ui.add_space(8.0);
     });
@@ -249,7 +237,7 @@ fn draw_hdri_section(
     ui: &mut egui::Ui,
     hdri_info: Option<&HdriInfo>,
     snap: &mut GuiSnapshot,
-    events: &mut PropertiesEvents,
+    intents: &mut Intents,
 ) {
     let Some(info) = hdri_info else {
         ui.label(egui::RichText::new("No HDRI loaded").weak());
@@ -259,7 +247,7 @@ fn draw_hdri_section(
             .on_hover_text("Open an .hdr / .exr environment map")
             .clicked()
         {
-            events.load_hdri = true;
+            intents.panel(PanelIntent::LoadHdri);
         }
         return;
     };
@@ -331,14 +319,14 @@ fn draw_hdri_section(
         .on_hover_text("Drop the HDRI — IBL falls back to the background gradient")
         .clicked()
     {
-        events.clear_hdri = true;
+        intents.panel(PanelIntent::ClearHdri);
     }
 }
 
 fn draw_validation_section(
     ui: &mut egui::Ui,
     validation: ValidationView<'_>,
-    events: &mut PropertiesEvents,
+    intents: &mut Intents,
 ) {
     let Some(report) = validation.report else {
         ui.label(egui::RichText::new("Nothing open").weak());
@@ -407,7 +395,7 @@ fn draw_validation_section(
             .selectable_label(false, job)
             .on_hover_text("Click to frame this issue in the active viewport");
         if resp.clicked() {
-            events.fly_to_issue = Some(idx);
+            intents.panel(PanelIntent::FlyToIssue(idx));
         }
     }
 }

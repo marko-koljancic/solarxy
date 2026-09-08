@@ -30,10 +30,9 @@ use egui_dock::{DockState, NodeIndex, TabViewer};
 use crate::console::ConsoleState;
 use crate::state::hdri_info::HdriInfo;
 
+use super::intent::Intents;
 use super::material_inspector::MaterialInspectorState;
-use super::node_tree::NodeTreeEvents;
-use super::outliner::OutlinerEvents;
-use super::properties::{ModelInfo, PropertiesEvents};
+use super::properties::ModelInfo;
 use super::snapshot::GuiSnapshot;
 use super::theme::Theme;
 
@@ -120,9 +119,8 @@ pub(super) struct SolarxyTabViewer<'a> {
     pub validation: super::properties::ValidationView<'a>,
     pub node_tree_source: super::node_tree::NodeTreeSource<'a>,
     pub node_tree_state: &'a mut super::node_tree::NodeTreeState,
-    pub node_tree_events: &'a mut NodeTreeEvents,
-    pub properties_events: &'a mut PropertiesEvents,
-    pub outliner_events: &'a mut OutlinerEvents,
+    /// Everything the panels ask for this pass, drained once it is over.
+    pub intents: &'a mut Intents,
     pub material_inspector: &'a mut MaterialInspectorState,
     pub viewport_rect_out: &'a mut Option<egui::Rect>,
     pub theme: Theme,
@@ -157,6 +155,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     ui,
                     &mut self.pane_toolbar,
                     self.snap,
+                    self.intents,
                     self.theme,
                 );
                 ui.allocate_space(ui.available_size());
@@ -206,22 +205,18 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.hdri_info,
                     self.validation,
                     self.snap,
-                    self.properties_events,
+                    self.intents,
                 );
             }
             SolarxyTab::Outliner => {
-                super::outliner::draw_outliner_content(
-                    ui,
-                    self.outliner_source,
-                    self.outliner_events,
-                );
+                super::outliner::draw_outliner_content(ui, self.outliner_source, self.intents);
             }
             SolarxyTab::NodeTree => {
                 super::node_tree::draw_node_tree_content(
                     ui,
                     self.node_tree_source,
                     self.node_tree_state,
-                    self.node_tree_events,
+                    self.intents,
                     self.theme,
                 );
             }

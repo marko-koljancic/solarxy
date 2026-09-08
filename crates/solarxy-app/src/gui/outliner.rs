@@ -8,12 +8,14 @@
 //! rig, not scene data (deferred to a later release).
 //!
 //! The panel is read-only over `&Model`; mutations are raised as
-//! [`OutlinerAction`]s in [`OutlinerEvents`], drained by `state/render.rs`
+//! [`OutlinerAction`]s onto the intent queue, drained by `state/intents.rs`
 //! after the egui pass.
 
 use solarxy_core::scene::SceneObjectId;
 use solarxy_renderer::model::Model;
 use solarxy_renderer::scene_objects::SceneObjects;
+
+use super::intent::{Intents, PanelIntent};
 
 /// One Outliner interaction, raised during an egui pass.
 ///
@@ -69,19 +71,12 @@ pub(crate) enum OutlinerSource<'a> {
     },
 }
 
-/// Outliner out-events, drained by `state/render.rs` after `render_ui`.
-/// At most one action per frame — the user clicks one thing.
-#[derive(Debug, Default)]
-pub(crate) struct OutlinerEvents {
-    pub action: Option<OutlinerAction>,
-}
-
 /// Render the Outliner content into `ui` (the `egui_dock` `Outliner` tab
 /// supplies the `Ui`).
 pub(super) fn draw_outliner_content(
     ui: &mut egui::Ui,
     source: OutlinerSource<'_>,
-    events: &mut OutlinerEvents,
+    intents: &mut Intents,
 ) {
     match source {
         OutlinerSource::Empty => {
@@ -90,9 +85,9 @@ pub(super) fn draw_outliner_content(
                 ui.label(egui::RichText::new("Nothing open").weak());
             });
         }
-        OutlinerSource::Model(model) => draw_model_outliner(ui, model, events),
+        OutlinerSource::Model(model) => draw_model_outliner(ui, model, intents),
         OutlinerSource::Scene { objects, names } => {
-            draw_scene_outliner(ui, objects, names, events);
+            draw_scene_outliner(ui, objects, names, intents);
         }
     }
 }
@@ -107,7 +102,7 @@ fn draw_scene_outliner(
     ui: &mut egui::Ui,
     objects: &SceneObjects,
     names: &[(SceneObjectId, String)],
-    events: &mut OutlinerEvents,
+    intents: &mut Intents,
 ) {
     if objects.is_empty() {
         ui.add_space(20.0);
@@ -125,7 +120,7 @@ fn draw_scene_outliner(
                 .iter()
                 .find(|(oid, _)| oid == id)
                 .map_or_else(|| format!("Object {}", id.0), |(_, n)| n.clone());
-            draw_object_section(ui, *id, &name, object, events);
+            draw_object_section(ui, *id, &name, object, intents);
         }
         ui.add_space(8.0);
     });
@@ -136,7 +131,7 @@ fn draw_object_section(
     id: SceneObjectId,
     name: &str,
     object: &solarxy_renderer::scene_objects::SceneObject,
-    events: &mut OutlinerEvents,
+    intents: &mut Intents,
 ) {
     let model = &object.model;
     let summary = format!(
@@ -157,7 +152,7 @@ fn draw_object_section(
                 .default_open(true)
                 .show(ui, |ui| {
                     for (i, mesh) in model.meshes.iter().enumerate() {
-                        draw_scene_mesh_row(ui, id, i, mesh, model, events);
+                        draw_scene_mesh_row(ui, id, i, mesh, model, intents);
                     }
                 });
         }
@@ -186,15 +181,15 @@ fn draw_object_section(
         .on_hover_text("Toggle object visibility")
         .changed()
     {
-        events.action = Some(OutlinerAction::ToggleObject(id));
+        intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleObject(id)));
     }
 
     if response.header_response.clicked() {
-        events.action = Some(OutlinerAction::FrameObject(id));
+        intents.panel(PanelIntent::Outliner(OutlinerAction::FrameObject(id)));
     }
     response.header_response.context_menu(|ui| {
         if ui.button("Frame").clicked() {
-            events.action = Some(OutlinerAction::FrameObject(id));
+            intents.panel(PanelIntent::Outliner(OutlinerAction::FrameObject(id)));
             ui.close();
         }
     });
@@ -221,7 +216,7 @@ fn draw_scene_mesh_row(
     idx: usize,
     mesh: &solarxy_renderer::model::Mesh,
     model: &Model,
-    events: &mut OutlinerEvents,
+    intents: &mut Intents,
 ) {
     ui.horizontal(|ui| {
         let mut visible = true;
@@ -237,7 +232,9 @@ fn draw_scene_mesh_row(
             .on_hover_text("Click to frame")
             .clicked()
         {
-            events.action = Some(OutlinerAction::FrameObjectMesh(object, idx));
+            intents.panel(PanelIntent::Outliner(OutlinerAction::FrameObjectMesh(
+                object, idx,
+            )));
         }
 
         if let Some(material) = model.materials.get(mesh.material)
@@ -265,7 +262,7 @@ fn draw_scene_material_row(ui: &mut egui::Ui, idx: usize, name: &str, model: &Mo
     });
 }
 
-fn draw_model_outliner(ui: &mut egui::Ui, model: &Model, events: &mut OutlinerEvents) {
+fn draw_model_outliner(ui: &mut egui::Ui, model: &Model, intents: &mut Intents) {
     // Bulk-visibility action. "Show All" previously lived only in a
     // right-click menu and was undiscoverable — a persistent button is
     // the obvious recovery path after hiding meshes.
@@ -277,7 +274,7 @@ fn draw_model_outliner(ui: &mut egui::Ui, model: &Model, events: &mut OutlinerEv
             .on_hover_text("Make every mesh visible (Alt+H)")
             .clicked()
         {
-            events.action = Some(OutlinerAction::ShowAll);
+            intents.panel(PanelIntent::Outliner(OutlinerAction::ShowAll));
         }
     });
     ui.separator();
@@ -290,7 +287,7 @@ fn draw_model_outliner(ui: &mut egui::Ui, model: &Model, events: &mut OutlinerEv
                 .default_open(true)
                 .show(ui, |ui| {
                     for (i, mesh) in model.meshes.iter().enumerate() {
-                        draw_mesh_row(ui, i, mesh, model, events);
+                        draw_mesh_row(ui, i, mesh, model, intents);
                     }
                 });
             ui.separator();
@@ -301,7 +298,7 @@ fn draw_model_outliner(ui: &mut egui::Ui, model: &Model, events: &mut OutlinerEv
                 .default_open(true)
                 .show(ui, |ui| {
                     for (m, material) in model.materials.iter().enumerate() {
-                        draw_material_row(ui, m, &material.name, model, events);
+                        draw_material_row(ui, m, &material.name, model, intents);
                     }
                 });
         }
@@ -325,7 +322,7 @@ fn draw_mesh_row(
     idx: usize,
     mesh: &solarxy_renderer::model::Mesh,
     model: &Model,
-    events: &mut OutlinerEvents,
+    intents: &mut Intents,
 ) {
     let row = ui.horizontal(|ui| {
         let mut visible = mesh.visible;
@@ -334,7 +331,7 @@ fn draw_mesh_row(
             .on_hover_text("Toggle mesh visibility")
             .changed()
         {
-            events.action = Some(OutlinerAction::ToggleMesh(idx));
+            intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleMesh(idx)));
         }
 
         let name = mesh_display_name(mesh, idx);
@@ -343,7 +340,7 @@ fn draw_mesh_row(
             .on_hover_text("Click to frame \u{2014} right-click for actions")
             .clicked()
         {
-            events.action = Some(OutlinerAction::FrameMesh(idx));
+            intents.panel(PanelIntent::Outliner(OutlinerAction::FrameMesh(idx)));
         }
 
         if let Some(material) = model.materials.get(mesh.material)
@@ -358,19 +355,19 @@ fn draw_mesh_row(
     // else on the row did nothing.
     row.response.context_menu(|ui| {
         if ui.button("Frame").clicked() {
-            events.action = Some(OutlinerAction::FrameMesh(idx));
+            intents.panel(PanelIntent::Outliner(OutlinerAction::FrameMesh(idx)));
             ui.close();
         }
         if ui.button("Hide").clicked() {
-            events.action = Some(OutlinerAction::HideMesh(idx));
+            intents.panel(PanelIntent::Outliner(OutlinerAction::HideMesh(idx)));
             ui.close();
         }
         if ui.button("Isolate").clicked() {
-            events.action = Some(OutlinerAction::IsolateMesh(idx));
+            intents.panel(PanelIntent::Outliner(OutlinerAction::IsolateMesh(idx)));
             ui.close();
         }
         if ui.button("Show All").clicked() {
-            events.action = Some(OutlinerAction::ShowAll);
+            intents.panel(PanelIntent::Outliner(OutlinerAction::ShowAll));
             ui.close();
         }
     });
@@ -381,7 +378,7 @@ fn draw_material_row(
     idx: usize,
     name: &str,
     model: &Model,
-    events: &mut OutlinerEvents,
+    intents: &mut Intents,
 ) {
     let mesh_count = model.meshes.iter().filter(|m| m.material == idx).count();
     let all_visible = model
@@ -397,7 +394,7 @@ fn draw_material_row(
             .on_hover_text("Toggle visibility of every mesh using this material")
             .changed()
         {
-            events.action = Some(OutlinerAction::ToggleMaterial(idx));
+            intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleMaterial(idx)));
         }
 
         let label = if name.trim().is_empty() {
@@ -409,7 +406,7 @@ fn draw_material_row(
             .selectable_label(false, label)
             .on_hover_text("Click to frame this material's meshes");
         if resp.clicked() {
-            events.action = Some(OutlinerAction::FrameMaterial(idx));
+            intents.panel(PanelIntent::Outliner(OutlinerAction::FrameMaterial(idx)));
         }
 
         ui.label(egui::RichText::new(format!("({mesh_count})")).weak());

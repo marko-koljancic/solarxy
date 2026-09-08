@@ -16,6 +16,8 @@
 //! - `review.rs` — `ReviewState`: in-memory mirror of one review-file
 //!   plus transient UI state (draft, selection, panel visibility).
 //! - `input/` — keyboard/mouse, dialogs, menu actions.
+//! - `intents.rs`: the drain, one ordered application of everything an
+//!   interface pass raised.
 //! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
 
 mod capture;
@@ -26,6 +28,7 @@ pub(crate) mod engine_scene;
 pub(crate) mod hdri_info;
 mod init;
 mod input;
+mod intents;
 mod overlap;
 mod panes;
 pub(crate) use solarxy_core::raycast;

@@ -13,9 +13,9 @@ use super::actions::{DividerInfo, MenuActions, MenuBarVisibility};
 use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::material_inspector::MaterialInspectorState;
-use super::node_tree::{NodeTreeEvents, NodeTreeSource, NodeTreeState};
+use super::intent::{Intents, PanelIntent};
+use super::node_tree::{NodeTreeSource, NodeTreeState};
 use super::menu::draw_menu_bar;
-use super::outliner::OutlinerEvents;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::status_bar::{self, StatusBarData};
 use super::viewport_context_menu::{ViewportContextMenu, draw_viewport_context_menu};
@@ -24,7 +24,7 @@ use super::review_panel::draw_delete_confirm_modal;
 use super::review_popup::draw_review_popup;
 use super::screenshot_modal::{ScreenshotModal, draw_screenshot_modal};
 use super::still_modal::{StillRenderModal, draw_still_modal};
-use super::properties::{ModelInfo, PropertiesEvents};
+use super::properties::ModelInfo;
 use super::snapshot::{GuiSnapshot, HudInfo};
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
 use super::update_modal::{UpdateModalState, draw_update_modal};
@@ -442,9 +442,10 @@ impl EguiRenderer {
         // layer passes `Empty` for a closed tab so the fold is skipped.
         node_tree_source: NodeTreeSource<'_>,
         pane_toolbar: super::pane_toolbar::PaneToolbarData<'_>,
-        properties_events: &mut PropertiesEvents,
-        outliner_events: &mut OutlinerEvents,
-        node_tree_events: &mut NodeTreeEvents,
+        // Everything the panels ask for this pass. Raised during it, applied
+        // once it is over, and never cleared inside it: the pass can run
+        // twice, and clearing per pass would drop what the first one raised.
+        intents: &mut Intents,
         viewport_context_menu: &mut Option<ViewportContextMenu>,
         force_expand_review: bool,
         suppress_screenshot_modal: bool,
@@ -520,13 +521,11 @@ impl EguiRenderer {
             active: pt_active,
             pane_settings: pt_pane_settings,
             projections: pt_projections,
-            projection_change: pt_projection_change,
             hdri_available: pt_hdri_available,
             customs: pt_customs,
             uv_overlap_pct: pt_uv_overlap_pct,
             cameras: pt_cameras,
             look_through: pt_look_through,
-            look_through_change: pt_look_through_change,
         } = pane_toolbar;
         let mut viewport_rect_logical: Option<egui::Rect> = None;
 
@@ -591,9 +590,9 @@ impl EguiRenderer {
                 validation,
                 node_tree_source,
                 node_tree_state,
-                node_tree_events,
-                properties_events,
-                outliner_events,
+                // Reborrowed rather than moved: the queue outlives the tab
+                // viewer, and the context menu below raises into it.
+                intents: &mut *intents,
                 material_inspector,
                 viewport_rect_out: &mut viewport_rect_logical,
                 theme,
@@ -602,13 +601,11 @@ impl EguiRenderer {
                     active: pt_active,
                     pane_settings: pt_pane_settings,
                     projections: pt_projections,
-                    projection_change: pt_projection_change,
                     hdri_available: pt_hdri_available,
                     customs: pt_customs,
                     uv_overlap_pct: pt_uv_overlap_pct,
                     cameras: pt_cameras,
                     look_through: pt_look_through,
-                    look_through_change: pt_look_through_change,
                 },
             };
             DockArea::new(dock_state)
@@ -660,7 +657,9 @@ impl EguiRenderer {
                 .map(|menu| draw_viewport_context_menu(ctx, menu));
             if let Some(outcome) = menu_outcome {
                 if let Some(act) = outcome.action {
-                    outliner_events.action = Some(act);
+                    // The same actions the Outliner raises, deliberately: a
+                    // right-click in the viewport asks for the same things.
+                    intents.panel(PanelIntent::Outliner(act));
                 }
                 if outcome.close {
                     *viewport_context_menu = None;

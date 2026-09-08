@@ -30,6 +30,7 @@ use solarxy_graph::document::{Document, GraphContext, NodeId};
 use solarxy_graph::naming::node_name;
 use solarxy_graph::registry::Registry;
 
+use super::intent::{Intents, PanelIntent};
 use super::theme::Theme;
 
 /// A malformed document (a container recurring inside its own subtree)
@@ -209,16 +210,11 @@ impl NodeTreeState {
 }
 
 /// One Node Tree interaction, raised during an egui pass and drained by
-/// `state/render.rs` after it.
+/// `state/intents.rs` after it.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum NodeTreeAction {
     /// Select this node in the context it lives in.
     Select(GraphContext, NodeId),
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct NodeTreeEvents {
-    pub action: Option<NodeTreeAction>,
 }
 
 /// Render the Node Tree into `ui` (the `egui_dock` tab supplies the `Ui`).
@@ -226,7 +222,7 @@ pub(super) fn draw_node_tree_content(
     ui: &mut egui::Ui,
     source: NodeTreeSource<'_>,
     state: &mut NodeTreeState,
-    events: &mut NodeTreeEvents,
+    intents: &mut Intents,
     theme: Theme,
 ) {
     let (doc, registry) = match source {
@@ -269,7 +265,7 @@ pub(super) fn draw_node_tree_content(
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add_space(2.0);
         for row in visible {
-            draw_row(ui, row, 0, selection, state, events, theme);
+            draw_row(ui, row, 0, selection, state, intents, theme);
         }
         ui.add_space(8.0);
     });
@@ -316,7 +312,7 @@ fn draw_row(
     depth: usize,
     selection: &[NodeId],
     state: &mut NodeTreeState,
-    events: &mut NodeTreeEvents,
+    intents: &mut Intents,
     theme: Theme,
 ) {
     let key = (row.ctx, row.id);
@@ -358,7 +354,9 @@ fn draw_row(
                 "Click to select"
             });
         if response.clicked() {
-            events.action = Some(NodeTreeAction::Select(row.ctx, row.id));
+            intents.panel(PanelIntent::NodeTree(NodeTreeAction::Select(
+                row.ctx, row.id,
+            )));
         }
         if response.double_clicked() && row.is_container {
             state.ctx = row.opened_ctx();
@@ -392,7 +390,7 @@ fn draw_row(
 
     if row.is_container && expanded {
         for child in &row.children {
-            draw_row(ui, child, depth + 1, selection, state, events, theme);
+            draw_row(ui, child, depth + 1, selection, state, intents, theme);
         }
     }
 }
