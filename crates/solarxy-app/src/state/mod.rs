@@ -20,6 +20,7 @@
 //!   interface pass raised.
 //! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
 
+mod camera;
 mod capture;
 pub(crate) mod cook_health;
 #[cfg(debug_assertions)]
@@ -31,12 +32,14 @@ mod input;
 mod intents;
 mod overlap;
 mod panes;
+mod persist;
 pub(crate) use solarxy_core::raycast;
 mod render;
 pub(crate) mod review;
 mod still;
 mod update;
 pub(crate) mod view_state;
+mod visibility;
 
 pub(super) use view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, ViewLayout, ViewState};
 

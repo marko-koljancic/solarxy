@@ -6,13 +6,18 @@
 //! intent nothing applies is a build failure rather than a click that quietly
 //! does nothing.
 
+use solarxy_core::preferences::BackgroundMode;
+use solarxy_graph::document::GraphContext;
 use solarxy_core::scene::SceneObjectId;
+use solarxy_renderer::ibl::IblState;
+
+use super::BackgroundModeExt;
 
 use super::State;
 use crate::gui::{
     CaptureIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
     LayoutIntent, LookThroughChange, PaneChange, PanelIntent, PostChange, ReviewIntent,
-    ToastSeverity,
+    NodeTreeAction, ToastSeverity,
 };
 
 impl State {
@@ -351,6 +356,135 @@ impl State {
             HelpIntent::CheckForUpdates => self.gui.check_for_updates(),
             HelpIntent::OpenAbout => self.gui.open_about(),
         }
+    }
+}
+
+impl State {
+    /// Regenerate the scene-global gradient IBL from the **active pane's**
+    /// background. The viewer keeps one IBL but a background per pane, so
+    /// the active pane — the one being worked in — drives the lighting.
+    /// Switching the active pane does *not* relight (regenerating the IBL
+    /// as the cursor crossed panes would flicker); only changing the
+    /// active pane's background does. Changing a non-active pane's
+    /// background via its toolbar updates that pane's backdrop but leaves
+    /// the IBL until that pane is made active and edited.
+    pub(super) fn apply_background_change(&mut self) {
+        let bg = self.view.pane_settings[self.view.active_pane].background_mode;
+        // Once an HDRI is loaded it is the scene's light source — a
+        // background change never regenerates IBL from sky colours while
+        // an HDRI is active (that would discard the equirect the skybox
+        // pass needs). The background mode then only drives the backdrop.
+        if bg.is_hdri_sky() || self.renderer.ibl_res.ibl.equirect.is_some() {
+            return;
+        }
+        let (top, bottom) = bg
+            .resolve(&self.preferences.view.custom_backgrounds)
+            .sky_colors();
+        self.renderer.ibl_res.ibl =
+            IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        self.environment.invalidate();
+        self.rebuild_light_bind_group();
+    }
+
+    pub(super) fn apply_composite_params(&self) {
+        self.write_composite_params();
+    }
+
+    pub(super) fn apply_ibl_change(&mut self) {
+        self.rebuild_light_bind_group();
+    }
+
+    /// Toggle review mode (`Shift+R` or the Review menu) — flips the bit,
+    /// opens the panel on entry, and emits the matching toast.
+    ///
+    /// Refused, with the reason, when no model file is open: the desktop's
+    /// review anchors against the file-loaded model, so with a scene or
+    /// nothing open the mode would report itself active and then discard
+    /// every click in silence. Turning an already-active mode off is always
+    /// allowed, so a stale bit can never wedge the shell.
+    pub(super) fn toggle_review_mode(&mut self) {
+        if self.scene.is_none() && !self.review.active {
+            self.gui
+                .set_toast("Review needs an open model file", ToastSeverity::Warning);
+            return;
+        }
+        let now_active = self.review.toggle_active();
+        if now_active {
+            self.review.panel_open = true;
+        }
+        let msg = if now_active {
+            "Review mode: On (click a face to annotate)"
+        } else {
+            "Review mode: Off"
+        };
+        self.gui.set_toast(msg, ToastSeverity::Success);
+    }
+
+    /// Drop the loaded HDRI (Properties → HDRI → Clear). Full revert:
+    /// every pane still on the `HdriSky` background falls back to
+    /// `Gradient`, the IBL returns to the procedural sky-colour gradient,
+    /// and the skybox is released (`rebuild_light_bind_group` rebuilds it
+    /// as `None`).
+    pub(super) fn clear_hdri(&mut self) {
+        for pds in &mut self.view.pane_settings {
+            if pds.background_mode.is_hdri_sky() {
+                pds.background_mode = BackgroundMode::GRADIENT;
+            }
+        }
+        let (top, bottom) = self
+            .resolve_background(&self.view.pane_settings[0])
+            .sky_colors();
+        self.renderer.ibl_res.ibl =
+            IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        // The IBL just moved without the scene contract knowing, so forget
+        // what the tracker thinks is installed. Otherwise re-selecting the
+        // same HDRI through an environment node would match the stale hash
+        // and be skipped, leaving the procedural sky in place.
+        self.environment.invalidate();
+        self.rebuild_light_bind_group();
+        self.gui.clear_hdri_info();
+        self.gui.set_toast("HDRI cleared", ToastSeverity::Success);
+    }
+
+    /// Apply a Node Tree row click: select the node engine-side, and
+    /// outline its object if it has one.
+    ///
+    /// **Only a root-context selection can outline anything.** The scene
+    /// delta names a geo container's object `SceneObjectId(geo.0)`, so a
+    /// root node id maps straight onto one; a node inside a container owns
+    /// no object of its own. Selecting one still selects it in the engine
+    /// and still highlights the row, it just leaves the viewport alone —
+    /// the same behaviour the web shell has for the same gesture.
+    ///
+    /// Unlike [`Self::toggle_scene_object`], no delta is taken: selection
+    /// is neither a render flag nor a cook input, and the engine emits no
+    /// scene ops for it.
+    pub(super) fn handle_node_tree_action(&mut self, action: NodeTreeAction) {
+        let NodeTreeAction::Select(ctx, node) = action;
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        if let Err(e) = engine.apply(solarxy_graph::Command::SetSelection {
+            ctx,
+            ids: vec![node],
+        }) {
+            tracing::warn!("Could not select node: {e}");
+            return;
+        }
+        self.selected_object = match ctx {
+            GraphContext::Root => {
+                let id = SceneObjectId(node.0);
+                // Absent or hidden objects are filtered out of the draw
+                // list entirely, so pointing at one would outline nothing
+                // while claiming a selection is showing.
+                self.raster
+                    .scene()
+                    .get(id)
+                    .filter(|o| o.visible)
+                    .map(|_| id)
+            }
+            GraphContext::Subflow(_) => None,
+        };
     }
 }
 
