@@ -1,14 +1,14 @@
 //! What is drawn and what is hidden: the Outliner's actions, and the keyboard
 //! shortcuts that raise the same ones.
 //!
-//! The two roots differ here and the difference is load-bearing. A file model's
-//! meshes are the shell's own, so hiding one is a direct write. A scene
-//! object's visibility belongs to the engine and is re-emitted on every cook,
-//! so it travels as a parameter change instead; a direct write would be undone
-//! by the user's next edit.
+//! **Hiding is a parameter change, never a direct write.** An object's
+//! visibility belongs to the engine and is re-emitted from its owning node on
+//! every cook, so writing the renderer's copy would look right for one frame
+//! and be undone by the user's next edit. The shell wrote directly until
+//! 0.10.0, because a file model's meshes were the shell's own; with one root
+//! there is nothing the shell owns to write.
 
-use crate::gui::{OutlinerAction, ToastSeverity};
-use solarxy_renderer::validation::material_meshes_aabb;
+use crate::gui::OutlinerAction;
 use solarxy_core::scene::SceneObjectId;
 use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_graph::params::{ParamSource, ParamValue};
@@ -20,67 +20,6 @@ impl State {
     /// framing) raised by the Outliner panel.
     pub(super) fn handle_outliner_action(&mut self, action: OutlinerAction) {
         match action {
-            OutlinerAction::ToggleMesh(i) => {
-                if let Some(scene) = &mut self.scene
-                    && let Some(mesh) = scene.model.meshes.get_mut(i)
-                {
-                    mesh.visible = !mesh.visible;
-                }
-            }
-            OutlinerAction::HideMesh(i) => {
-                if let Some(scene) = &mut self.scene
-                    && let Some(mesh) = scene.model.meshes.get_mut(i)
-                {
-                    mesh.visible = false;
-                }
-            }
-            OutlinerAction::IsolateMesh(i) => {
-                if let Some(scene) = &mut self.scene {
-                    for (j, mesh) in scene.model.meshes.iter_mut().enumerate() {
-                        mesh.visible = j == i;
-                    }
-                }
-            }
-            OutlinerAction::ShowAll => {
-                if let Some(scene) = &mut self.scene {
-                    for mesh in &mut scene.model.meshes {
-                        mesh.visible = true;
-                    }
-                }
-            }
-            OutlinerAction::ToggleMaterial(mat) => {
-                if let Some(scene) = &mut self.scene {
-                    let all_visible = scene
-                        .model
-                        .meshes
-                        .iter()
-                        .filter(|m| m.material == mat)
-                        .all(|m| m.visible);
-                    for mesh in &mut scene.model.meshes {
-                        if mesh.material == mat {
-                            mesh.visible = !all_visible;
-                        }
-                    }
-                }
-            }
-            OutlinerAction::FrameMesh(i) => {
-                let aabb = self
-                    .scene
-                    .as_ref()
-                    .and_then(|s| s.model.mesh_bounds.get(i).copied());
-                if let Some(aabb) = aabb {
-                    self.frame_active_pane(aabb);
-                }
-            }
-            OutlinerAction::FrameMaterial(mat) => {
-                let aabb = self
-                    .scene
-                    .as_ref()
-                    .and_then(|s| material_meshes_aabb(&s.model, mat));
-                if let Some(aabb) = aabb {
-                    self.frame_active_pane(aabb);
-                }
-            }
             OutlinerAction::FrameObject(id) => {
                 // The object's own bounds are in its local space; the
                 // transform is what places it in the world, and framing the
@@ -145,40 +84,6 @@ impl State {
                 }
             }
             Err(e) => tracing::warn!("Could not toggle object visibility: {e}"),
-        }
-    }
-
-    /// `Shift+H` — hide the mesh under the cursor.
-    pub(in crate::state) fn hide_hovered_mesh(&mut self) {
-        if self.gui.any_popup_open() || self.viewport_context_menu.is_some() {
-            return;
-        }
-        match self.hovered_mesh() {
-            Some(mesh) => self.handle_outliner_action(OutlinerAction::HideMesh(mesh)),
-            None => self
-                .gui
-                .set_toast("No mesh under cursor", ToastSeverity::Info),
-        }
-    }
-
-    /// `Alt+H` — make every mesh visible again.
-    pub(in crate::state) fn show_all_meshes(&mut self) {
-        if self.gui.any_popup_open() || self.viewport_context_menu.is_some() {
-            return;
-        }
-        self.handle_outliner_action(OutlinerAction::ShowAll);
-    }
-
-    /// `/` — hide every mesh except the one under the cursor.
-    pub(in crate::state) fn isolate_hovered_mesh(&mut self) {
-        if self.gui.any_popup_open() || self.viewport_context_menu.is_some() {
-            return;
-        }
-        match self.hovered_mesh() {
-            Some(mesh) => self.handle_outliner_action(OutlinerAction::IsolateMesh(mesh)),
-            None => self
-                .gui
-                .set_toast("No mesh under cursor", ToastSeverity::Info),
         }
     }
 }

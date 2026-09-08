@@ -127,11 +127,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Sidebar => "Sidebar".into(),
             SolarxyTab::ReviewPanel => format!("Review ({})", self.review.annotations.len()).into(),
             SolarxyTab::Console => "Console".into(),
-            SolarxyTab::MaterialInspector => format!(
-                "Material Inspector ({})",
-                self.sources.model.map_or(0, |m| m.materials.len())
-            )
-            .into(),
+            SolarxyTab::MaterialInspector => "Material Inspector".into(),
             SolarxyTab::Properties => "Properties".into(),
             SolarxyTab::Outliner => "Outliner".into(),
             SolarxyTab::NodeTree => "Node Tree".into(),
@@ -170,27 +166,13 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 super::panels::console::draw_console_content(ui, self.panels.console, &self.theme);
             }
             SolarxyTab::MaterialInspector => {
-                if let Some(model) = self.sources.model {
-                    super::panels::material_inspector::draw_material_inspector_content(
-                        ui,
-                        model,
-                        self.panels.material_inspector,
-                        &self.theme,
-                    );
-                } else {
-                    // A scene gets its own wording rather than "Nothing
-                    // open", which would read as a bug when the viewport is
-                    // plainly full of geometry. This panel inspects an
-                    // imported file's materials; a scene's are node
-                    // parameters and are read where the nodes are.
-                    draw_material_inspector_placeholder(
-                        ui,
-                        matches!(
-                            self.sources.outliner,
-                            super::panels::outliner::OutlinerSource::Scene { .. }
-                        ),
-                    );
-                }
+                super::panels::material_inspector::draw_material_inspector_content(
+                    ui,
+                    matches!(
+                        self.sources.outliner,
+                        super::panels::outliner::OutlinerSource::Scene { .. }
+                    ),
+                );
             }
             SolarxyTab::Properties => {
                 super::panels::properties::draw_properties_content(
@@ -266,31 +248,6 @@ impl TabViewer for SolarxyTabViewer<'_> {
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
         egui::Id::new(("solarxy_tab", tab.slug()))
     }
-}
-
-/// The Material Inspector's two empty states.
-///
-/// With a scene open the panel is empty for a reason the user should be
-/// told, not because nothing is loaded: it inspects the textures an
-/// imported file carried, and a scene's materials are node parameters with
-/// no imported source to show.
-fn draw_material_inspector_placeholder(ui: &mut egui::Ui, scene_open: bool) {
-    ui.add_space(20.0);
-    ui.vertical_centered(|ui| {
-        if scene_open {
-            ui.label(egui::RichText::new("Scene materials live on their nodes").weak());
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(
-                    "This panel shows the textures an imported model file carried.",
-                )
-                .weak()
-                .small(),
-            );
-        } else {
-            ui.label(egui::RichText::new("Nothing open").weak());
-        }
-    });
 }
 
 /// Return `true` if `tab` is currently mounted anywhere in the dock

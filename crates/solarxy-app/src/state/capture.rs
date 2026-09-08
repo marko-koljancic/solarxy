@@ -96,9 +96,9 @@ impl State {
     /// (`solarxy_…` when no model is loaded).
     pub(super) fn screenshot_filename(&self) -> String {
         let stem = self
-            .scene
+            .engine_scene
             .as_ref()
-            .map(|s| s.model_path.as_str())
+            .map(|info| info.path.as_str())
             .and_then(|p| std::path::Path::new(p).file_stem())
             .and_then(std::ffi::OsStr::to_str)
             .unwrap_or("solarxy");

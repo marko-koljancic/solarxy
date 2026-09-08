@@ -325,7 +325,9 @@ mod tests {
             GraphContext::Root,
             NodeId(1),
         )));
-        intents.panel(PanelIntent::Outliner(OutlinerAction::ShowAll));
+        intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleObject(
+            solarxy_core::scene::SceneObjectId(1),
+        )));
         intents.panel(PanelIntent::LoadHdri);
         intents.panel(PanelIntent::ClearHdri);
         intents.panel(PanelIntent::FlyToIssue(3));
@@ -349,16 +351,20 @@ mod tests {
     /// like.
     #[test]
     fn two_intents_in_one_category_keep_their_raise_order() {
+        use solarxy_core::scene::SceneObjectId;
+
         let mut intents = Intents::default();
-        for mesh in [7_usize, 2, 5] {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::HideMesh(mesh)));
+        for object in [7_u64, 2, 5] {
+            intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleObject(
+                SceneObjectId(object),
+            )));
         }
 
-        let order: Vec<usize> = intents
+        let order: Vec<u64> = intents
             .take_ordered()
             .into_iter()
             .map(|i| match i {
-                Intent::Panel(PanelIntent::Outliner(OutlinerAction::HideMesh(m))) => m,
+                Intent::Panel(PanelIntent::Outliner(OutlinerAction::ToggleObject(id))) => id.0,
                 other => panic!("unexpected intent {other:?}"),
             })
             .collect();

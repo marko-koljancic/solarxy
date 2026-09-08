@@ -9,7 +9,6 @@ use solarxy_core::preferences::PaneMode;
 use super::modals::about::draw_about_modal;
 use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
-use super::panels::material_inspector::MaterialInspectorState;
 use super::intent::{Intent, Intents, LayoutIntent, PanelIntent, ReviewIntent};
 use super::panels::node_tree::NodeTreeState;
 use super::chrome::menu::{MenuContext, draw_menu_bar};
@@ -42,7 +41,6 @@ pub struct EguiRenderer {
     shortcuts_modal: KeyboardShortcutsModalState,
     screenshot_modal: ScreenshotModal,
     still_modal: StillRenderModal,
-    material_inspector: MaterialInspectorState,
     node_tree: NodeTreeState,
     toasts: VecDeque<Toast>,
     next_toast_id: u64,
@@ -107,7 +105,6 @@ impl EguiRenderer {
             shortcuts_modal: KeyboardShortcutsModalState::default(),
             screenshot_modal: ScreenshotModal::default(),
             still_modal: StillRenderModal::default(),
-            material_inspector: MaterialInspectorState::default(),
             node_tree: NodeTreeState::default(),
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             next_toast_id: 0,
@@ -131,12 +128,11 @@ impl EguiRenderer {
         apply_theme(&self.ctx, &self.theme);
     }
 
-    /// Drop the cached model info on model close. Panel visibility is
-    /// left untouched — panels are user-controlled (no auto open/close).
-    /// The HDRI is independent of the model, so `hdri_info` is kept.
+    /// Drop the cached document info on close. Panel visibility is left
+    /// untouched: panels are user-controlled, with no auto open or close. The
+    /// HDRI is independent of the document, so `hdri_info` is kept.
     pub fn clear_model_info(&mut self) {
         self.model_info = None;
-        self.material_inspector.clear_for_new_model();
     }
 
     /// Cache the loaded HDRI's metadata for the Properties panel.
@@ -403,16 +399,6 @@ impl EguiRenderer {
         });
     }
 
-    /// Drop the Material Inspector's per-model thumbnail cache and reset
-    /// its selection. Must be called alongside [`Self::update_model_info`]
-    /// on every model load: the cache is keyed by `(material_index,
-    /// texture_role)`, so without this a stale `TextureHandle` from the
-    /// previous model would be served for the new model's matching slot
-    /// (and the old handles would leak until app exit).
-    pub(crate) fn reset_material_inspector(&mut self) {
-        self.material_inspector.clear_for_new_model();
-    }
-
     /// Draw one interface pass.
     ///
     /// The context handle is cloned before the pass so the closure can borrow
@@ -471,10 +457,14 @@ impl EguiRenderer {
             recent_files: sources.recent_files,
             hdri_available: chrome.toolbars.hdri_available,
             customs: chrome.toolbars.customs,
-            // Review anchors against the file-loaded model, so its
-            // availability is the model's presence rather than `has_model`,
-            // which a scene also satisfies.
-            review_available: sources.model.is_some(),
+            // **Review is off for this release.** It anchors against a
+            // file-loaded model's meshes, and the second root that held one
+            // went away with the one-document-root change; repointing it at
+            // the engine's own review store is its own piece of work. The
+            // menu entries stay visible and disabled rather than vanishing,
+            // so the capability reads as absent rather than as never having
+            // existed.
+            review_available: false,
             review_active: review.active,
             review_markers_hidden: review.markers_hidden,
             review_dirty: review.dirty,
@@ -539,7 +529,6 @@ impl EguiRenderer {
                 panels: super::pass::PanelState {
                     console: &mut self.console,
                     node_tree: &mut self.node_tree,
-                    material_inspector: &mut self.material_inspector,
                 },
                 review,
                 // Reborrowed rather than moved: the queue outlives the tab
@@ -573,7 +562,6 @@ impl EguiRenderer {
                 review,
                 suppress_markers,
                 self.theme,
-                sources.model,
                 capture.expand_review,
             );
 
@@ -779,10 +767,6 @@ impl EguiRenderer {
             });
         }
 
-        let pending = std::mem::take(&mut self.material_inspector.pending_toasts);
-        for (msg, severity) in pending {
-            self.push_toast(severity, msg, Duration::from_secs(5));
-        }
         if let Some(id) = dismissed_toast_id {
             self.toasts.retain(|t| t.id != id);
         }

@@ -159,17 +159,11 @@ fn descend<'a>(
     None
 }
 
-/// What the panel draws.
-///
-/// The two roots are mutually exclusive on `State`, so this says which one
-/// is open rather than carrying both.
+/// What the panel draws: the open document, or nothing.
 #[derive(Clone, Copy)]
 pub(crate) enum NodeTreeSource<'a> {
     /// Nothing is open at all.
     Empty,
-    /// A plain model file is open. It has no graph, and saying so is not
-    /// the same as saying nothing is open.
-    ModelFile,
     /// A cooked scene's document.
     Scene {
         doc: &'a Document,
@@ -227,13 +221,6 @@ pub(in crate::gui) fn draw_node_tree_content(
 ) {
     let (doc, registry) = match source {
         NodeTreeSource::Empty => return draw_placeholder(ui, "No document open", None),
-        NodeTreeSource::ModelFile => {
-            return draw_placeholder(
-                ui,
-                "A model file has no node graph",
-                Some("This panel lists the nodes of an opened scene."),
-            );
-        }
         NodeTreeSource::Scene { doc, registry } => (doc, registry),
     };
 

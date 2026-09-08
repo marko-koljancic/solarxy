@@ -11,47 +11,6 @@ use solarxy_graph::nodes::RenderSettings;
 use solarxy_renderer::pathtrace::backend::TraceSettings;
 use solarxy_renderer::pathtrace::denoise::DenoiseSettings;
 
-/// A throwaway engine holding the open model as the one-node document the
-/// terminal renders through: companions collected and staged, the document
-/// synthesized, and the cook driven to quiescence, all before the job
-/// starts. Returns the staging warnings for the shell to surface.
-///
-/// Bytes are re-read from the model's path rather than reconstructed from
-/// the GPU-side scene, which is simpler and less surprising: the import
-/// cooks the same input the terminal would read.
-pub(super) fn engine_for_model(
-    path_str: &str,
-) -> Result<(Box<solarxy_graph::Engine>, Vec<String>), String> {
-    use solarxy_graph::model_document;
-
-    let path = std::path::Path::new(path_str);
-    let bytes =
-        std::fs::read(path).map_err(|e| format!("Couldn't read {}: {e}", path.display()))?;
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("model")
-        .to_string();
-
-    let mut engine = solarxy_graph::Engine::new().map_err(|e| e.to_string())?;
-    let companions =
-        solarxy_formats::companions::collect(path, &ext, &bytes).map_err(|e| e.to_string())?;
-    let warnings = companions.warnings;
-    for asset in companions.assets {
-        engine.stage_asset(asset.name, String::new(), asset.bytes);
-    }
-    model_document::synthesize_model_document(&mut engine, &name, &ext, bytes)
-        .map_err(|e| e.to_string())?;
-    model_document::cook_to_quiescence(&mut engine, &mut || false, &mut |_, _| {})
-        .map_err(|e| e.to_string())?;
-    Ok((Box::new(engine), warnings))
-}
-
 /// The render node's settings, or the defaults when the scene has none.
 ///
 /// The selection rule is the headless command's: zero render nodes means

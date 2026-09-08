@@ -17,7 +17,7 @@
 //! Three files, because they answer three questions. This one is the job's
 //! lifecycle. `settings` is what a document says a render should be, which is
 //! a pure function of the document and so is where the cross-shell parity
-//! check lives. `image` is what happens to the pixels once they arrive.
+//! check lives. `pixels` is what happens to the pixels once they arrive.
 
 use solarxy_core::preferences::BackgroundMode;
 use solarxy_core::view_config::{PaneDisplaySettings, PaneLook};
@@ -28,6 +28,7 @@ use solarxy_renderer::backend::RenderBackend;
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::{CompositeLook, resolve_look};
 use solarxy_renderer::pathtrace::backend::PathBackend;
+use solarxy_graph::Engine;
 use solarxy_renderer::scene::BackgroundModeExt;
 
 use super::State;
@@ -39,7 +40,7 @@ mod pixels;
 mod settings;
 
 use pixels::{blit_rect, blit_tile, preview_of, still_filename, write_exr};
-use settings::{denoise_settings_for, engine_for_model, resolve_still_settings, trace_settings_for};
+use settings::{denoise_settings_for, resolve_still_settings, trace_settings_for};
 
 /// The largest edge of the modal's live preview. Small enough that the
 /// per-tile nearest-neighbour downscale reads only preview-many pixels.
@@ -61,9 +62,6 @@ pub(crate) struct StillState {
     /// The assembled floating-point picture, when the render is one. `None`
     /// for an eight-bit still, which costs nothing.
     pub float: Option<solarxy_host::still::FloatImage>,
-    /// Whether the job ingested a synthesized model document into the
-    /// session's scene objects, which the teardown then clears.
-    pub synthesized_scene: bool,
     /// When the render began, which is the shell's own clock: the job takes a
     /// reading rather than reading one, because it also compiles for the
     /// browser where there is no `Instant`.
@@ -82,7 +80,7 @@ impl State {
         if self.still.is_some() {
             return;
         }
-        let Some((_, settings)) = self.resolve_still_request() else {
+        let Some(settings) = self.resolve_still_request() else {
             return;
         };
         self.gui.open_still_modal(
@@ -101,89 +99,50 @@ impl State {
     /// again for the render rather than carried over from the opening: what
     /// runs is what the node says at the moment Render is pressed, which is the
     /// rule the browser host states for the same reason.
-    fn resolve_still_request(
-        &mut self,
-    ) -> Option<(Option<Box<solarxy_graph::Engine>>, RenderSettings)> {
+    fn resolve_still_request(&mut self) -> Option<RenderSettings> {
         use crate::gui::ToastSeverity;
-        // Which root renders: the open engine as before, or a document
-        // synthesized from the open model, so the desktop renders the file
-        // it is displaying the way the terminal already does. One synthesis
-        // in the product (`solarxy_graph::model_document`, shared with the
-        // headless command); the throwaway engine lives only as long as
-        // this start and never becomes `State::engine`, so the two-roots
-        // invariant stands unamended.
-        let synthesized: Option<Box<solarxy_graph::Engine>> = if self.engine.is_some() {
-            None
-        } else {
-            let Some(path) = self.scene.as_ref().map(|s| s.model_path.clone()) else {
-                self.gui.set_toast(
-                    "Open a scene or a model to render a still",
-                    ToastSeverity::Warning,
-                );
-                return None;
-            };
-            match engine_for_model(&path) {
-                Ok((engine, warnings)) => {
-                    // The terminal's channel and one toast: a missing
-                    // optional companion should not be only in the log.
-                    for w in &warnings {
-                        tracing::warn!("{w}");
-                    }
-                    if let Some(first) = warnings.first() {
-                        self.gui.set_toast(first, ToastSeverity::Warning);
-                    }
-                    Some(engine)
-                }
-                Err(message) => {
-                    self.gui.set_toast(&message, ToastSeverity::Error);
-                    return None;
-                }
-            }
+        // One root renders. A model file is already the document it
+        // synthesizes into by the time it is on screen, so the still no longer
+        // rebuilds one at the moment Render is pressed and the picture is of
+        // exactly what the viewport is showing.
+        let Some(engine) = self.engine.as_deref() else {
+            self.gui.set_toast(
+                "Open a scene or a model to render a still",
+                ToastSeverity::Warning,
+            );
+            return None;
         };
 
-        // The health gate reads the session engine's cook. The synthesized
-        // document was just cooked to quiescence, and a failure there has
-        // already returned with its own message.
-        if synthesized.is_none() {
-            let engine = self.engine.as_ref()?;
-            if !self.cook_health.is_healthy() {
-                let failing = self.cook_health.failing();
-                let message = failing.iter().next().map_or_else(
-                    || "Cannot render: a cook failed".to_owned(),
-                    |(id, reason)| {
-                        let name = find_node_name(engine, *id);
-                        let more = failing.len() - 1;
-                        if more == 0 {
-                            format!("Cannot render: {name} failed to cook: {reason}")
-                        } else {
-                            format!(
-                                "Cannot render: {name} failed to cook: {reason} (and {more} more)"
-                            )
-                        }
-                    },
-                );
-                self.gui.set_toast(&message, ToastSeverity::Error);
-                return None;
-            }
+        if !self.cook_health.is_healthy() {
+            let failing = self.cook_health.failing();
+            let message = failing.iter().next().map_or_else(
+                || "Cannot render: a cook failed".to_owned(),
+                |(id, reason)| {
+                    let name = find_node_name(engine, *id);
+                    let more = failing.len() - 1;
+                    if more == 0 {
+                        format!("Cannot render: {name} failed to cook: {reason}")
+                    } else {
+                        format!("Cannot render: {name} failed to cook: {reason} (and {more} more)")
+                    }
+                },
+            );
+            self.gui.set_toast(&message, ToastSeverity::Error);
+            return None;
         }
-        let engine: &solarxy_graph::Engine = match synthesized.as_deref() {
-            Some(e) => e,
-            None => self.engine.as_deref()?,
-        };
 
-        let settings = match resolve_still_settings(engine) {
+        match resolve_still_settings(engine) {
             Ok((settings, note)) => {
                 if let Some(note) = note {
                     self.gui.set_toast(&note, ToastSeverity::Info);
                 }
-                settings
+                Some(settings)
             }
             Err(message) => {
                 self.gui.set_toast(&message, ToastSeverity::Error);
-                return None;
+                None
             }
-        };
-        Some((synthesized, settings))
+        }
     }
 
     /// Start the still render the dialog is showing.
@@ -197,7 +156,7 @@ impl State {
         if self.still.is_some() {
             return;
         }
-        let Some((synthesized, settings)) = self.resolve_still_request() else {
+        let Some(settings) = self.resolve_still_request() else {
             return;
         };
 
@@ -273,24 +232,8 @@ impl State {
             RenderEngine::PathTraced => StillEngine::PathTraced,
             RenderEngine::Raster => StillEngine::Raster,
         };
-        // A synthesized document's geometry enters the session's scene
-        // objects for the raster job's draw list, and leaves again when the
-        // job ends. Applied directly to the backend rather than through the
-        // pending-delta queue: the scene objects ignore the environment op
-        // by design, so the session's lighting and background stay whatever
-        // the viewer set, where the queue's drain would hand the synthesized
-        // document's environment to the shell. A model session's scene
-        // objects are empty (opening a model closed any scene), so the
-        // teardown clears them wholesale. The traced job needs no ingest: it
-        // snapshots the engine below, into its own scene.
-        let synthesized_scene = match synthesized.as_deref() {
-            Some(model_engine) if engine_kind == StillEngine::Raster => {
-                let delta = model_engine.scene_snapshot();
-                self.raster.apply(&self.device, &self.queue, &delta);
-                true
-            }
-            _ => false,
-        };
+        // The raster job needs no ingest of its own: the session's scene
+        // objects already hold the open document, because there is only one.
         if engine_kind == StillEngine::PathTraced {
             if self.tracer.is_none() {
                 self.tracer = Some(PathBackend::new(&self.device, &self.queue));
@@ -303,12 +246,8 @@ impl State {
             // delta feed goes to the raster backend alone, so a tracer
             // kept from a previous still has seen nothing since. Cheap,
             // because unchanged geometry stays a hierarchy-cache hit.
-            let delta = match synthesized.as_deref() {
-                Some(e) => e.scene_snapshot(),
-                None => match self.engine.as_deref() {
-                    Some(e) => e.scene_snapshot(),
-                    None => return,
-                },
+            let Some(delta) = self.engine.as_deref().map(Engine::scene_snapshot) else {
+                return;
             };
             if let Some(t) = self.tracer.as_mut() {
                 t.apply_snapshot(&self.device, &self.queue, &delta);
@@ -383,7 +322,6 @@ impl State {
             engine: engine_kind,
             image,
             float,
-            synthesized_scene,
             started: std::time::Instant::now(),
         });
     }
@@ -478,9 +416,7 @@ impl State {
                     "A tile readback failed; the render is incomplete",
                     crate::gui::ToastSeverity::Error,
                 );
-                if self.still.take().is_some_and(|s| s.synthesized_scene) {
-                    self.clear_scene_objects();
-                }
+                self.still.take();
                 return;
             }
         }
@@ -503,9 +439,6 @@ impl State {
         let Some(done) = self.still.take() else {
             return;
         };
-        if done.synthesized_scene {
-            self.clear_scene_objects();
-        }
         // The final elapsed, set here rather than left at whatever the last
         // pump reported: the reading a person keeps looking at after a render
         // ends should be how long it actually took.
@@ -526,10 +459,7 @@ impl State {
     /// Drop the running job. Dropping frees everything the job owns; the
     /// next ordinary frame resizes the targets back to the panes.
     pub(super) fn cancel_still_render(&mut self) {
-        if let Some(cancelled) = self.still.take() {
-            if cancelled.synthesized_scene {
-                self.clear_scene_objects();
-            }
+        if self.still.take().is_some() {
             self.gui.mark_still_cancelled();
             self.gui
                 .set_toast("Render cancelled", crate::gui::ToastSeverity::Info);

@@ -21,11 +21,9 @@ use crate::state::view_state::{BoundsMode, ViewLayout};
 use crate::gui::MOD;
 use crate::gui::dock::SolarxyTab;
 use crate::gui::intent::{
-    CaptureIntent, EditIntent, FileIntent, HelpIntent, Intent, Intents, LayoutIntent, PanelIntent,
-    ReviewIntent,
+    CaptureIntent, EditIntent, FileIntent, HelpIntent, Intent, Intents, LayoutIntent, ReviewIntent,
 };
 use crate::gui::intent::{DisplayChange, PaneChange, PostChange};
-use crate::gui::panels::outliner::OutlinerAction;
 use crate::gui::settings::PanelSettings;
 use crate::gui::theme::Theme;
 
@@ -502,16 +500,6 @@ fn draw_view_menu(ui: &mut egui::Ui, settings: PanelSettings<'_>, intents: &mut 
                 intents.pane(active, PaneChange::LineWeight(v));
             }
         });
-
-        ui.separator();
-        if ui
-            .button("Show All Meshes")
-            .on_hover_text("Make every mesh visible (Alt+H)")
-            .clicked()
-        {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::ShowAll));
-            ui.close();
-        }
     });
 }
 

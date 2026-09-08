@@ -217,7 +217,6 @@ impl SolarxyApp {
                 },
             },
             Some(cam_data) => PaneContent::Scene {
-                extra: None,
                 selected: self.selected_object,
                 cam_data,
                 // A capture is one pane on its own, so it owns the shadow map

@@ -267,14 +267,6 @@ pub enum PaneContent<'a> {
     /// and which object the host considers selected. Those two are what this
     /// arm carries.
     Scene {
-        /// An object drawn first, from a scene the backend does not own. The
-        /// desktop shell's file-loaded model; `None` on a host that has no
-        /// such thing.
-        ///
-        /// Drawn first because order is load-bearing: overdraw counts
-        /// fragments in submission order, and the depth-equal overlays resolve
-        /// against whatever landed first.
-        extra: Option<DrawObject<'a>>,
         /// The host's selected object, flagged in the list so the main pass
         /// tints it and the outline stages find a silhouette. A selection that
         /// resolves to nothing drawable flags nothing, which is what stops the
@@ -293,11 +285,10 @@ pub enum PaneContent<'a> {
 
 /// Where a UV pane's geometry comes from.
 ///
-/// Two arms rather than one object, because the two hosts answer differently
-/// and only one of them can hand over an object directly: the desktop's comes
-/// from its file-loaded model and the web's preview from a scene of its own,
-/// both outside the backend, while the web's fallback is an object the backend
-/// itself owns and therefore cannot be borrowed out and passed back in.
+/// Two arms rather than one object, because a host may hold a scene of its own
+/// that the backend cannot see: the browser's node preview is one, and it can
+/// hand the object over directly. What the backend owns it cannot borrow out
+/// and take back in, so that case names an id instead.
 pub enum UvSource<'a> {
     /// An object the host resolved from a scene the backend does not own.
     External(DrawObject<'a>),

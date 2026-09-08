@@ -58,18 +58,9 @@ impl State {
         }
         match code {
             KeyCode::KeyH => {
-                if self.input.modifiers.shift_key() {
-                    self.hide_hovered_mesh();
-                } else if self.input.modifiers.alt_key() {
-                    self.show_all_meshes();
-                } else {
-                    let bounds = self.scene_bounds();
-                    self.release_look_through_for_gesture();
-                    self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
-                }
-            }
-            KeyCode::Slash => {
-                self.isolate_hovered_mesh();
+                let bounds = self.scene_bounds();
+                self.release_look_through_for_gesture();
+                self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
             }
             KeyCode::KeyT => {
                 if self.input.modifiers.shift_key() {
@@ -492,10 +483,15 @@ impl State {
     }
 
     fn cycle_bounds_mode(&mut self) {
+        // Per-mesh bounds are only a distinct picture when there is more than
+        // one mesh to tell apart, so the mode is skipped over otherwise.
         let is_multi = self
-            .scene
-            .as_ref()
-            .is_some_and(|s| s.model.meshes.len() > 1);
+            .raster
+            .scene()
+            .iter()
+            .map(|(_, o)| o.model.meshes.len())
+            .sum::<usize>()
+            > 1;
         let pds = &mut self.view.pane_settings[self.view.active_pane];
         pds.bounds_mode = match pds.bounds_mode {
             BoundsMode::Off => BoundsMode::WholeModel,

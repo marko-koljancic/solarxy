@@ -31,7 +31,6 @@ use solarxy_core::validation::{
 use solarxy_core::view_config::{
     DisplaySettings, PaneDisplaySettings, PaneEngine, PaneLook, ViewLayout,
 };
-use solarxy_core::geometry::compute_bounds;
 use solarxy_core::AABB;
 use solarxy_graph::assets::AssetTable;
 use solarxy_graph::cook::{ImportOptions, JobId, JobRequest, JobResult, ParsedModel};
@@ -56,8 +55,7 @@ use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
 use solarxy_renderer::pathtrace::denoise::DenoiseSettings;
 use solarxy_renderer::capture::CaptureTarget;
 use solarxy_renderer::frame::{Renderer, RendererInit};
-use solarxy_renderer::geometry::build_normals_geometry;
-use solarxy_renderer::model::{GizmoVertex, NormalsGeometry};
+use solarxy_renderer::model::GizmoVertex;
 use solarxy_renderer::input::PointerButton;
 use solarxy_renderer::light::LightsUniform;
 use solarxy_renderer::panes::{self, PaneRect};

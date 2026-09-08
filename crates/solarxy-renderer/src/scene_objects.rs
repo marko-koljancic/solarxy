@@ -239,6 +239,28 @@ pub struct SceneObjects {
     texture_cache: resources::TextureCache,
 }
 
+impl SceneObject {
+    /// The cooked geometry this object was last built from.
+    ///
+    /// Exposed because the per-mesh visualization overlays need what the GPU
+    /// meshes do not carry: per-vertex normals, and the untransformed
+    /// positions to bake them against. `CookedGeometry` is GPU-free and lives
+    /// in the core crate, which is what lets the shared host build that
+    /// aggregate without reaching for the engine.
+    #[must_use]
+    pub fn geometry(&self) -> &CookedGeometry {
+        &self.geometry
+    }
+
+    /// This object's cooked-mesh index to GPU-mesh index remap. Empty meshes
+    /// are skipped when the GPU meshes are built, so anything walking the two
+    /// in step has to read this rather than assume they are parallel.
+    #[must_use]
+    pub fn raw_to_gpu(&self) -> &[Option<usize>] {
+        &self.raw_to_gpu
+    }
+}
+
 impl SceneObjects {
     #[must_use]
     pub fn new() -> Self {

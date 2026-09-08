@@ -1,15 +1,12 @@
-//! The Outliner panel — a docked tab listing the loaded model's **Meshes**
-//! and **Materials**. Each row has a visibility checkbox; clicking a row
-//! name frames the active camera on it. Mesh rows also carry a right-click
-//! context menu (Frame / Hide / Isolate / Show All).
+//! The Outliner panel, a docked tab listing the open document's objects,
+//! each expanding to its own meshes and materials. An object row carries a
+//! visibility checkbox; clicking a row name frames the active camera on it.
 //!
-//! Lights / cameras are intentionally absent — the glTF loader parses
-//! neither, and the three scene lights are a synthetic camera-relative
-//! rig, not scene data (deferred to a later release).
+//! Lights and cameras are intentionally absent here: they are nodes, and the
+//! Node Tree is where a document's nodes are listed.
 //!
-//! The panel is read-only over `&Model`; mutations are raised as
-//! [`OutlinerAction`]s onto the intent queue, drained by `state/intents.rs`
-//! after the egui pass.
+//! The panel is read-only; mutations are raised as [`OutlinerAction`]s onto
+//! the intent queue, drained by `state/intents.rs` after the egui pass.
 
 use solarxy_core::scene::SceneObjectId;
 use solarxy_renderer::model::Model;
@@ -19,27 +16,13 @@ use crate::gui::intent::{Intents, PanelIntent};
 
 /// One Outliner interaction, raised during an egui pass.
 ///
-/// The mutating variants address the **file-loaded model**, whose meshes
-/// the app owns outright. A scene's geometry belongs to the engine and is
-/// re-emitted on every cook, so the only visibility a scene object can
-/// offer durably is object-level, and it travels as a parameter change
-/// rather than as one of these. See `ToggleObject` below.
+/// **Visibility is object-level and nothing finer.** A document's geometry
+/// belongs to the engine and is re-emitted on every cook, so the only
+/// visibility that survives a user's next edit is a `visible` parameter on
+/// the owning node. The shell offered per-mesh and per-material hiding until
+/// 0.10.0, when the second root that owned those meshes went away.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum OutlinerAction {
-    /// Frame the active camera on a mesh's bounds.
-    FrameMesh(usize),
-    /// Toggle a single mesh's visibility.
-    ToggleMesh(usize),
-    /// Hide a single mesh (context menu).
-    HideMesh(usize),
-    /// Hide every mesh except this one (context menu).
-    IsolateMesh(usize),
-    /// Make every mesh visible (context menu).
-    ShowAll,
-    /// Toggle visibility of every mesh using a material.
-    ToggleMaterial(usize),
-    /// Frame the active camera on the union of a material's meshes.
-    FrameMaterial(usize),
     /// Frame the active camera on one scene object's bounds.
     FrameObject(SceneObjectId),
     /// Frame the active camera on one mesh inside a scene object.
@@ -54,16 +37,11 @@ pub(crate) enum OutlinerAction {
 }
 
 /// What the Outliner draws.
-///
-/// The two roots are mutually exclusive, so this is which one is open
-/// rather than a pair.
 #[derive(Clone, Copy)]
 pub(crate) enum OutlinerSource<'a> {
     /// Nothing is open.
     Empty,
-    /// A single model file: meshes and materials, fully mutable.
-    Model(&'a Model),
-    /// A cooked scene: objects, each expanding to its own meshes and
+    /// The open document's objects, each expanding to its own meshes and
     /// materials. `names` is parallel to the objects' iteration order.
     Scene {
         objects: &'a SceneObjects,
@@ -85,7 +63,6 @@ pub(in crate::gui) fn draw_outliner_content(
                 ui.label(egui::RichText::new("Nothing open").weak());
             });
         }
-        OutlinerSource::Model(model) => draw_model_outliner(ui, model, intents),
         OutlinerSource::Scene { objects, names } => {
             draw_scene_outliner(ui, objects, names, intents);
         }
@@ -261,52 +238,6 @@ fn draw_scene_material_row(ui: &mut egui::Ui, idx: usize, name: &str, model: &Mo
         ui.label(egui::RichText::new(format!("({mesh_count})")).weak());
     });
 }
-
-fn draw_model_outliner(ui: &mut egui::Ui, model: &Model, intents: &mut Intents) {
-    // Bulk-visibility action. "Show All" previously lived only in a
-    // right-click menu and was undiscoverable — a persistent button is
-    // the obvious recovery path after hiding meshes.
-    let any_hidden = model.meshes.iter().any(|m| !m.visible);
-    ui.add_space(2.0);
-    ui.horizontal(|ui| {
-        if ui
-            .add_enabled(any_hidden, egui::Button::new("Show All Meshes").small())
-            .on_hover_text("Make every mesh visible (Alt+H)")
-            .clicked()
-        {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::ShowAll));
-        }
-    });
-    ui.separator();
-
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.add_space(2.0);
-
-        if !model.meshes.is_empty() {
-            egui::CollapsingHeader::new(format!("Meshes ({})", model.meshes.len()))
-                .default_open(true)
-                .show(ui, |ui| {
-                    for (i, mesh) in model.meshes.iter().enumerate() {
-                        draw_mesh_row(ui, i, mesh, model, intents);
-                    }
-                });
-            ui.separator();
-        }
-
-        if !model.materials.is_empty() {
-            egui::CollapsingHeader::new(format!("Materials ({})", model.materials.len()))
-                .default_open(true)
-                .show(ui, |ui| {
-                    for (m, material) in model.materials.iter().enumerate() {
-                        draw_material_row(ui, m, &material.name, model, intents);
-                    }
-                });
-        }
-
-        ui.add_space(8.0);
-    });
-}
-
 /// Display name for a mesh — falls back to `Mesh N` for unnamed meshes
 /// (common in OBJ files without `o`/`g` groups).
 fn mesh_display_name(mesh: &solarxy_renderer::model::Mesh, idx: usize) -> String {
@@ -315,100 +246,4 @@ fn mesh_display_name(mesh: &solarxy_renderer::model::Mesh, idx: usize) -> String
     } else {
         mesh.name.clone()
     }
-}
-
-fn draw_mesh_row(
-    ui: &mut egui::Ui,
-    idx: usize,
-    mesh: &solarxy_renderer::model::Mesh,
-    model: &Model,
-    intents: &mut Intents,
-) {
-    let row = ui.horizontal(|ui| {
-        let mut visible = mesh.visible;
-        if ui
-            .checkbox(&mut visible, "")
-            .on_hover_text("Toggle mesh visibility")
-            .changed()
-        {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleMesh(idx)));
-        }
-
-        let name = mesh_display_name(mesh, idx);
-        if ui
-            .selectable_label(false, name)
-            .on_hover_text("Click to frame \u{2014} right-click for actions")
-            .clicked()
-        {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::FrameMesh(idx)));
-        }
-
-        if let Some(material) = model.materials.get(mesh.material)
-            && !material.name.trim().is_empty()
-        {
-            ui.label(egui::RichText::new(&material.name).weak());
-        }
-    });
-
-    // Context menu on the whole row, not just the name label — the RC2
-    // build attached it to the label only, so a right-click anywhere
-    // else on the row did nothing.
-    row.response.context_menu(|ui| {
-        if ui.button("Frame").clicked() {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::FrameMesh(idx)));
-            ui.close();
-        }
-        if ui.button("Hide").clicked() {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::HideMesh(idx)));
-            ui.close();
-        }
-        if ui.button("Isolate").clicked() {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::IsolateMesh(idx)));
-            ui.close();
-        }
-        if ui.button("Show All").clicked() {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::ShowAll));
-            ui.close();
-        }
-    });
-}
-
-fn draw_material_row(
-    ui: &mut egui::Ui,
-    idx: usize,
-    name: &str,
-    model: &Model,
-    intents: &mut Intents,
-) {
-    let mesh_count = model.meshes.iter().filter(|m| m.material == idx).count();
-    let all_visible = model
-        .meshes
-        .iter()
-        .filter(|m| m.material == idx)
-        .all(|m| m.visible);
-
-    ui.horizontal(|ui| {
-        let mut visible = all_visible;
-        if ui
-            .checkbox(&mut visible, "")
-            .on_hover_text("Toggle visibility of every mesh using this material")
-            .changed()
-        {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleMaterial(idx)));
-        }
-
-        let label = if name.trim().is_empty() {
-            format!("Material {idx}")
-        } else {
-            name.to_string()
-        };
-        let resp = ui
-            .selectable_label(false, label)
-            .on_hover_text("Click to frame this material's meshes");
-        if resp.clicked() {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::FrameMaterial(idx)));
-        }
-
-        ui.label(egui::RichText::new(format!("({mesh_count})")).weak());
-    });
 }

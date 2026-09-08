@@ -397,15 +397,19 @@ impl State {
     /// Toggle review mode (`Shift+R` or the Review menu) — flips the bit,
     /// opens the panel on entry, and emits the matching toast.
     ///
-    /// Refused, with the reason, when no model file is open: the desktop's
-    /// review anchors against the file-loaded model, so with a scene or
-    /// nothing open the mode would report itself active and then discard
-    /// every click in silence. Turning an already-active mode off is always
+    /// **Refused outright for this release.** Review anchors against a
+    /// file-loaded model's meshes, and the second root that held one went away
+    /// with the one-document-root change; repointing it at the engine's own
+    /// review store is its own piece of work. Arming a mode that would report
+    /// itself active and then discard every click in silence is the one thing
+    /// worse than not offering it. Turning an already-active mode off stays
     /// allowed, so a stale bit can never wedge the shell.
     pub(super) fn toggle_review_mode(&mut self) {
-        if self.scene.is_none() && !self.review.active {
-            self.gui
-                .set_toast("Review needs an open model file", ToastSeverity::Warning);
+        if !self.review.active {
+            self.gui.set_toast(
+                "Review is unavailable until it reads the document's own annotations",
+                ToastSeverity::Warning,
+            );
             return;
         }
         let now_active = self.review.toggle_active();

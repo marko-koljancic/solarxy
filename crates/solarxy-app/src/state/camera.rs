@@ -67,13 +67,7 @@ impl State {
     /// lives on (Properties → Validation row click) and enable that
     /// pane's per-face validation overlay so the defect is visible.
     pub(super) fn fly_to_validation_issue(&mut self, idx: usize) {
-        let aabb = match &self.scene {
-            Some(scene) => scene.validation.issues.get(idx).and_then(|issue| {
-                resolve_issue_aabb(&issue.scope, &scene.model, &scene.validation_raw_to_gpu)
-            }),
-            None => self.scene_issue_aabb(idx),
-        };
-        let Some(aabb) = aabb else {
+        let Some(aabb) = self.scene_issue_aabb(idx) else {
             return;
         };
         self.view.pane_settings[self.view.active_pane].show_validation = true;
@@ -122,10 +116,10 @@ impl State {
             return;
         };
         let [x, y, z] = ann.anchor.world_pos_fallback;
-        let half = self
-            .scene
-            .as_ref()
-            .map_or(1.0, |s| (s.model.bounds.diagonal() * 0.12).max(0.05));
+        // A fraction of the scene rather than a fixed size, so the marker
+        // lands at the same apparent zoom whatever scale the document is
+        // authored at.
+        let half = (self.scene_bounds().diagonal() * 0.12).max(0.05);
         let center = cgmath::Point3::new(x, y, z);
         let offset = cgmath::Vector3::new(half, half, half);
         self.frame_active_pane(solarxy_core::AABB {

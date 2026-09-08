@@ -17,7 +17,6 @@ use crate::console::ConsoleState;
 use crate::state::hdri_info::HdriInfo;
 
 use super::chrome::divider::DividerInfo;
-use super::panels::material_inspector::MaterialInspectorState;
 use super::panels::node_tree::{NodeTreeSource, NodeTreeState};
 use super::panels::outliner::OutlinerSource;
 use super::chrome::overlays::HudInfo;
@@ -59,10 +58,6 @@ pub(crate) struct PanelSources<'a> {
     pub settings: PanelSettings<'a>,
     pub hud: &'a HudInfo,
     pub validation: ValidationView<'a>,
-    /// The file-loaded model, when one is open. Separate from `outliner`
-    /// because the Material Inspector and the review overlay are file-model
-    /// surfaces and stay that way.
-    pub model: Option<&'a solarxy_renderer::model::Model>,
     pub outliner: OutlinerSource<'a>,
     /// The open document, when the Node Tree tab is mounted. The state layer
     /// passes `Empty` for a closed tab so the fold is skipped.
@@ -86,7 +81,6 @@ pub(super) struct OpenFile<'a> {
 pub(crate) struct PanelState<'a> {
     pub console: &'a mut ConsoleState,
     pub node_tree: &'a mut NodeTreeState,
-    pub material_inspector: &'a mut MaterialInspectorState,
 }
 
 /// What a capture frame asks the interface to do differently.

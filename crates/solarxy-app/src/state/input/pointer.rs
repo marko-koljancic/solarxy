@@ -1,12 +1,19 @@
-//! Pointer handling: what a click, a drag and a wheel mean, and the three-step
-//! ladder a click in review mode walks before it lands.
+//! Pointer handling: what a click, a drag and a wheel mean.
+//!
+//! A click in review mode used to walk a three-step ladder before it landed.
+//! Review anchors against a file-loaded model's meshes and cannot arm while
+//! there is no such root, so the ladder came out with it; what the repointed
+//! review picks against is the engine's anchor model, not this one.
 
 use winit::event::MouseButton;
 
 use solarxy_renderer::camera_state::CameraState;
-use crate::gui::{ToastSeverity, ViewportContextMenu};
+use crate::gui::ViewportContextMenu;
 use solarxy_renderer::input::PointerButton;
 use solarxy_core::preferences::PaneMode;
+
+use cgmath::{SquareMatrix, Transform};
+use solarxy_core::scene::SceneObjectId;
 
 use crate::state::State;
 
@@ -20,11 +27,21 @@ fn to_pointer_button(button: MouseButton) -> PointerButton {
 }
 
 impl State {
-    /// Model index of the frontmost **visible** mesh under the cursor, via
-    /// a CPU raycast through the active 3D pane's content rect. `None` if
-    /// the cursor is not over a `Scene3D` pane or hits no visible mesh.
-    pub(in crate::state) fn hovered_mesh(&self) -> Option<usize> {
-        let scene = self.scene.as_ref()?;
+    /// The frontmost **visible** scene object under the cursor, via a CPU
+    /// raycast through the active 3D pane's content rect. `None` if the cursor
+    /// is not over a `Scene3D` pane or hits nothing.
+    ///
+    /// Objects rather than meshes, because an object is what a document can
+    /// durably say something about: its visibility is a parameter on the node
+    /// that owns it, where a cooked mesh is an artefact of the cook and is
+    /// re-derived on the next one.
+    ///
+    /// The ray is transformed into each object's own space rather than the
+    /// geometry into the world, which is the same trick the hierarchy
+    /// traversal uses and costs nothing per triangle. The direction is
+    /// deliberately **not** renormalized, so the hit distances stay comparable
+    /// across objects at different scales.
+    pub(in crate::state) fn hovered_object(&self) -> Option<SceneObjectId> {
         let panes = self.compute_panes();
         let cursor = self.input.cursor_pos;
         let pane_idx = crate::state::hit_test_pane(&panes, cursor);
@@ -40,37 +57,57 @@ impl State {
             camera.build_view_projection_matrix(),
         );
 
-        // Raycast only visible meshes — a hidden mesh you cannot see must
-        // not steal the pick from the geometry behind it.
-        let mut model_index: Vec<usize> = Vec::new();
-        let mut views: Vec<crate::state::raycast::MeshView<'_>> = Vec::new();
-        for (i, mesh) in scene.model.meshes.iter().enumerate() {
-            if !mesh.visible {
+        let mut best: Option<(f32, SceneObjectId)> = None;
+        for (id, object) in self.raster.scene().iter() {
+            // A hidden object you cannot see must not steal the pick from the
+            // geometry behind it.
+            if !object.visible {
                 continue;
             }
-            if let (Some(cpu), Some(bounds)) = (
-                scene.model.cpu_meshes.get(i),
-                scene.model.mesh_bounds.get(i),
-            ) {
-                model_index.push(i);
-                views.push(crate::state::raycast::MeshView {
-                    positions: &cpu.positions,
-                    indices: &cpu.indices,
-                    bounds: *bounds,
-                });
+            let Some(inverse) = object.transform.invert() else {
+                continue;
+            };
+            let local = crate::state::raycast::Ray {
+                origin: inverse.transform_point(ray.origin),
+                direction: inverse.transform_vector(ray.direction),
+            };
+
+            let mut views: Vec<crate::state::raycast::MeshView<'_>> = Vec::new();
+            for (i, mesh) in object.model.meshes.iter().enumerate() {
+                if !mesh.visible {
+                    continue;
+                }
+                if let (Some(cpu), Some(bounds)) = (
+                    object.model.cpu_meshes.get(i),
+                    object.model.mesh_bounds.get(i),
+                ) {
+                    views.push(crate::state::raycast::MeshView {
+                        positions: &cpu.positions,
+                        indices: &cpu.indices,
+                        bounds: *bounds,
+                    });
+                }
+            }
+            if let Some(hit) = crate::state::raycast::raycast_meshes(&local, &views)
+                && best.is_none_or(|(t, _)| hit.distance < t)
+            {
+                best = Some((hit.distance, *id));
             }
         }
-        crate::state::raycast::raycast_meshes(&ray, &views)
-            .map(|hit| model_index[hit.mesh_index as usize])
+        best.map(|(_, id)| id)
     }
 
-    /// Open the viewport right-click context menu when the cursor is over
-    /// a mesh; right-clicking empty space clears any open menu.
+    /// Open the viewport right-click context menu when the cursor is over an
+    /// object; right-clicking empty space clears any open menu.
     pub fn open_viewport_context_menu(&mut self) {
-        self.viewport_context_menu = self.hovered_mesh().map(|mesh_index| {
+        let hit = self
+            .hovered_object()
+            .and_then(|id| self.raster.scene().get(id).map(|o| (id, o.visible)));
+        self.viewport_context_menu = hit.map(|(object, visible)| {
             let ppp = self.window.scale_factor() as f32;
             ViewportContextMenu {
-                mesh_index,
+                object,
+                visible,
                 screen_pos: egui::pos2(
                     self.input.cursor_pos.0 / ppp,
                     self.input.cursor_pos.1 / ppp,
@@ -81,14 +118,6 @@ impl State {
     }
 
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
-        if pressed
-            && matches!(button, MouseButton::Left)
-            && self.review.active
-            && self.try_review_pick()
-        {
-            return;
-        }
-
         let ap = self.view.active_pane;
         if self.view.pane_settings[ap].pane_mode == PaneMode::UvMap {
             match button {
@@ -116,134 +145,6 @@ impl State {
             }
             self.for_each_target_cam(|cam| cam.handle_mouse_button(mapped, pressed));
         }
-    }
-
-    /// Resolve a review-mode click. Returns `true` if the click was
-    /// consumed (the caller should not pass it down to camera handling).
-    ///
-    /// Routing order:
-    /// 1. **Re-anchor pending** — raycast geometry and route the hit
-    ///    through `ReviewState::complete_reanchor`. Always consumes the
-    ///    click; never falls through to the other paths.
-    /// 2. **Marker hit-test** — project visible markers to screen space
-    ///    and check distance to the cursor. Within ~20 px ⇒ select that
-    ///    annotation (cyan ring + panel scroll). Consumes the click.
-    /// 3. **New annotation** — raycast geometry and open a fresh
-    ///    `EditDraft` popup at the cursor; or toast "Click on the model
-    ///    surface" on a miss. Consumes the click either way.
-    fn try_review_pick(&mut self) -> bool {
-        if self.review.editing.is_some() {
-            return true;
-        }
-        let Some(scene) = self.scene.as_ref() else {
-            return false;
-        };
-
-        let panes = self.compute_panes();
-        let cursor = self.input.cursor_pos;
-        let pane_idx = crate::state::hit_test_pane(&panes, cursor);
-        let pane = &panes[pane_idx];
-
-        if self.view.pane_settings[pane_idx].pane_mode != PaneMode::Scene3D {
-            return false;
-        }
-
-        let Some(camera) = self.view.cameras[pane_idx].as_ref().map(|c| c.camera) else {
-            return false;
-        };
-
-        let view_proj = camera.build_view_projection_matrix();
-        let local = (cursor.0 - pane.x, cursor.1 - pane.y);
-
-        if let Some(target_id) = self.review.reanchor_target.clone() {
-            let ray = crate::state::raycast::screen_to_world_ray(
-                local,
-                (pane.width, pane.height),
-                view_proj,
-            );
-            let model = &scene.model;
-            let views: Vec<crate::state::raycast::MeshView<'_>> = model
-                .cpu_meshes
-                .iter()
-                .zip(model.mesh_bounds.iter())
-                .map(|(m, b)| crate::state::raycast::MeshView {
-                    positions: &m.positions,
-                    indices: &m.indices,
-                    bounds: *b,
-                })
-                .collect();
-            let preview = self.review.find(&target_id).map_or_else(
-                || "annotation".to_string(),
-                |a| crate::state::review::short_text_preview(&a.text),
-            );
-            match crate::state::raycast::raycast_meshes(&ray, &views) {
-                Some(hit) => {
-                    if self.review.complete_reanchor(&hit) {
-                        self.gui.set_toast(
-                            &format!("Re-anchored \u{201C}{preview}\u{201D}"),
-                            ToastSeverity::Success,
-                        );
-                    }
-                }
-                None => {
-                    self.gui.set_toast(
-                        "No surface under cursor \u{2014} try again",
-                        ToastSeverity::Info,
-                    );
-                }
-            }
-            return true;
-        }
-
-        if let Some(id) =
-            self.review
-                .marker_at_screen_pos(local, (pane.width, pane.height), view_proj, 20.0)
-        {
-            self.review.selected = Some(id);
-            self.review.scroll_to_selected = true;
-            return true;
-        }
-
-        // The click missed every marker — it lands on geometry or empty
-        // space. Either way, collapse any open card (B4): selection is
-        // cleared before the new-annotation draft (if any) opens.
-        self.review.selected = None;
-
-        let ray =
-            crate::state::raycast::screen_to_world_ray(local, (pane.width, pane.height), view_proj);
-
-        let model = &scene.model;
-        let views: Vec<crate::state::raycast::MeshView<'_>> = model
-            .cpu_meshes
-            .iter()
-            .zip(model.mesh_bounds.iter())
-            .map(|(m, b)| crate::state::raycast::MeshView {
-                positions: &m.positions,
-                indices: &m.indices,
-                bounds: *b,
-            })
-            .collect();
-
-        match crate::state::raycast::raycast_meshes(&ray, &views) {
-            Some(hit) => {
-                let anchor = solarxy_core::review::AnchorPosition {
-                    mesh_index: hit.mesh_index,
-                    face_index: hit.face_index,
-                    barycentric: hit.barycentric,
-                    world_pos_fallback: [hit.world_pos.x, hit.world_pos.y, hit.world_pos.z],
-                };
-                let seq = self.review.alloc_draft_seq();
-                self.review.editing =
-                    Some(crate::state::review::EditDraft::new_at(seq, anchor, cursor));
-            }
-            None => {
-                self.gui.set_toast(
-                    "Click on the model surface to annotate",
-                    ToastSeverity::Info,
-                );
-            }
-        }
-        true
     }
 
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {

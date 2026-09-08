@@ -652,7 +652,6 @@ fn probe_frame(h: &mut Host, backend: &mut PathBackend, width: u32, height: u32)
             outline: false,
             window: None,
             content: PaneContent::Scene {
-                extra: None,
                 selected: None,
                 cam_data,
                 shadow: false,

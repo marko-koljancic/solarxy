@@ -56,34 +56,7 @@ impl State {
         self.poll_overlap_stats();
         self.poll_pending_capture();
 
-        // Drain queued scene deltas into the multi-object scene before any
-        // pane encodes (the engine's per-frame commit point, next milestone).
-        if !self.pending_scene_deltas.is_empty() {
-            for delta in std::mem::take(&mut self.pending_scene_deltas) {
-                self.raster.apply(&self.device, &self.queue, &delta);
-                // The backend collects upload failures rather than logging
-                // them: it has no logging facility and this shell is the layer
-                // that knows where a message belongs.
-                //
-                // A toast rather than only a console line, because a mesh the
-                // device cannot hold is refused through here and the user
-                // would otherwise see a model simply fail to appear. The
-                // toast carries its own `tracing` event, so nothing is logged
-                // twice.
-                for e in self.raster.take_errors() {
-                    self.gui.set_toast(
-                        &format!("Scene delta apply failed: {e}"),
-                        crate::gui::ToastSeverity::Error,
-                    );
-                }
-                self.apply_scene_environment(&delta);
-            }
-            // The panels read summed counters and one merged validation
-            // report. Both are derived from what just landed, so they are
-            // rebuilt here rather than per frame: a delta is the only thing
-            // that can change either.
-            self.refresh_engine_scene_info();
-        }
+        self.apply_pending_scene_deltas();
 
         // A running still renders instead of the panes: the job and the
         // viewport would otherwise fight over the shared render targets
@@ -217,21 +190,16 @@ impl State {
                 .is_some_and(|id| self.raster.scene().draw_object(id).is_some());
 
         // Everything below borrows fields other than `raster`, so the backend
-        // can be driven mutably: the file-loaded model and the UV source both
-        // come from this shell's own state, and the backend assembles the rest
-        // of the draw list from the scene it owns.
+        // can be driven mutably: the backend assembles the draw list from the
+        // scene it owns.
         let content = match cam_data {
             None => PaneContent::Empty,
             Some(_) if is_uv_map => PaneContent::Uv {
-                source: self.scene.as_ref().map_or(UvSource::None, |s| {
-                    UvSource::External(s.draw_object(&self.env.instance_buffer))
-                }),
+                source: UvSource::Scene {
+                    preferred: self.selected_object,
+                },
             },
             Some(cam_data) => PaneContent::Scene {
-                extra: self
-                    .scene
-                    .as_ref()
-                    .map(|s| s.draw_object(&self.env.instance_buffer)),
                 selected: self.selected_object,
                 cam_data,
                 shadow: i == 0 || !self.view.display.lights_locked,
@@ -297,7 +265,44 @@ impl State {
         );
     }
 
-    /// Whether this frame has scene content: a file-loaded model, or at least
+    /// Drain queued scene deltas into the multi-object scene.
+    ///
+    /// Called at the top of a frame, before any pane encodes, which is the
+    /// engine's per-frame commit point. Also called at adoption, so a document
+    /// that arrived already cooked has its bounds known before the panes are
+    /// framed rather than one frame later.
+    pub(super) fn apply_pending_scene_deltas(&mut self) {
+        if self.pending_scene_deltas.is_empty() {
+            return;
+        }
+        for delta in std::mem::take(&mut self.pending_scene_deltas) {
+            self.raster.apply(&self.device, &self.queue, &delta);
+            // The backend collects upload failures rather than logging them:
+            // it has no logging facility and this shell is the layer that
+            // knows where a message belongs.
+            //
+            // A toast rather than only a console line, because a mesh the
+            // device cannot hold is refused through here and the user would
+            // otherwise see a model simply fail to appear. The toast carries
+            // its own `tracing` event, so nothing is logged twice.
+            for e in self.raster.take_errors() {
+                self.gui.set_toast(
+                    &format!("Scene delta apply failed: {e}"),
+                    crate::gui::ToastSeverity::Error,
+                );
+            }
+            self.apply_scene_environment(&delta);
+        }
+        // The panels read summed counters and one merged validation report.
+        // Both are derived from what just landed, so they are rebuilt here
+        // rather than per frame: a delta is the only thing that can change
+        // either. The same is true of the per-mesh overlay buffers, which are
+        // baked geometry rather than a pass over the live scene.
+        self.refresh_engine_scene_info();
+        self.viz_dirty = true;
+    }
+
+    /// Whether this frame has scene content: at least
     /// one visible object in the multi-object scene.
     ///
     /// The composite pass folds in the bloom and ambient-occlusion textures
@@ -306,7 +311,7 @@ impl State {
     /// background, the grid and the floor, and blooming that would put a glow
     /// on a bare viewport nobody asked for.
     fn scene_present(&self) -> bool {
-        self.scene.is_some() || self.raster.scene().draw_objects().next().is_some()
+        self.raster.scene().draw_objects().next().is_some()
     }
 
     /// Recompute the camera-relative light rig for a non-primary pane
@@ -439,31 +444,23 @@ impl State {
             } else {
                 None
             },
-            has_uvs: self.scene.as_ref().is_some_and(|s| s.model.has_uvs),
+            has_uvs: self.raster.scene().iter().any(|(_, o)| o.model.has_uvs),
             overdraw_active: active_inspection == InspectionMode::Overdraw
                 && active_pane_mode == PaneMode::Scene3D,
         };
-        // Whichever root is open supplies the panels. The two are mutually
-        // exclusive, so this is a choice rather than a merge; a file model
-        // wins the tie only because it cannot occur.
-        let validation = match (&self.scene, &self.engine_scene) {
-            (Some(scene), _) => crate::gui::ValidationView {
-                report: Some(&scene.validation),
-                owners: &[],
-            },
-            (None, Some(info)) => crate::gui::ValidationView {
+        let validation = match &self.engine_scene {
+            Some(info) => crate::gui::ValidationView {
                 report: Some(&info.validation.report),
                 owners: &info.validation.labels,
             },
-            (None, None) => crate::gui::ValidationView::default(),
+            None => crate::gui::ValidationView::default(),
         };
-        let outliner_source = match (&self.scene, &self.engine_scene) {
-            (Some(scene), _) => crate::gui::OutlinerSource::Model(&scene.model),
-            (None, Some(info)) => crate::gui::OutlinerSource::Scene {
+        let outliner_source = match &self.engine_scene {
+            Some(info) => crate::gui::OutlinerSource::Scene {
                 objects: self.raster.scene(),
                 names: &info.object_names,
             },
-            (None, None) => crate::gui::OutlinerSource::Empty,
+            None => crate::gui::OutlinerSource::Empty,
         };
         // Folded fresh each frame rather than cached on a delta, because
         // selection is part of what the tree draws and selection changes
@@ -475,16 +472,10 @@ impl State {
                 doc: engine.document(),
                 registry: engine.registry(),
             },
-            // A model file is open, or nothing is. The panel distinguishes
-            // the two: "no graph" and "nothing open" are different facts,
-            // and a panel that conflates them reads as broken while the
-            // viewport is plainly full of geometry.
-            None if self.scene.is_some() => crate::gui::NodeTreeSource::ModelFile,
             None => crate::gui::NodeTreeSource::Empty,
         };
 
         let recent_files = self.preferences.history.recent_files.clone();
-        let model = self.scene.as_ref().map(|s| &s.model);
         // `PaneToolbarData` is passed by value — `render_ui` consumes it,
         // releasing its `&mut self.view.pane_settings` borrow before
         // `apply_to_state` re-borrows the same field below.
@@ -551,7 +542,6 @@ impl State {
                 settings,
                 hud: &hud,
                 validation,
-                model,
                 outliner: outliner_source,
                 node_tree: node_tree_source,
                 recent_files: &recent_files,

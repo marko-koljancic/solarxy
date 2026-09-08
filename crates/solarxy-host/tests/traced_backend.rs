@@ -73,7 +73,6 @@ fn frame(h: &mut Harness, backend: &mut dyn RenderBackend, look: CompositeLook) 
             outline: false,
             window: None,
             content: PaneContent::Scene {
-                extra: None,
                 selected: None,
                 cam_data,
                 shadow: false,

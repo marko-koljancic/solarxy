@@ -132,6 +132,20 @@ fn main() -> anyhow::Result<ExitCode> {
     }
 }
 
+/// The arguments the view mode hands the GUI binary.
+///
+/// A free function so the contract between the two binaries can be asserted
+/// without launching a window. It is the whole of what the terminal says about
+/// what to open, and it does not change with what the shell does internally
+/// with the file: a model became a one-node document in 0.10.0 and this stayed
+/// exactly as it was, which is the point.
+fn gui_args(model_path: Option<&str>) -> Vec<String> {
+    match model_path {
+        Some(m) => vec!["--model".to_owned(), m.to_owned()],
+        None => Vec::new(),
+    }
+}
+
 fn exec_gui(model_path: Option<&str>) -> ExitCode {
     let gui_bin_name = if cfg!(target_os = "windows") {
         "solarxy.exe"
@@ -149,9 +163,7 @@ fn exec_gui(model_path: Option<&str>) -> ExitCode {
         None => std::process::Command::new("solarxy"),
     };
 
-    if let Some(m) = model_path {
-        cmd.arg("--model").arg(m);
-    }
+    cmd.args(gui_args(model_path));
 
     match cmd.status() {
         Ok(status) => status
@@ -738,4 +750,28 @@ fn run_render(_args: &solarxy_cli::parser::RenderArgs, _theme: Option<&str>) -> 
          'render' feature"
     );
     ExitCode::from(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gui_args;
+
+    /// The view mode spawns the GUI as a subprocess, so what it passes is a
+    /// contract between two binaries rather than an internal call. The shell's
+    /// answer to a model file changed completely in 0.10.0 and the invocation
+    /// did not, which is only true while this stays as it is.
+    #[test]
+    fn the_view_mode_passes_a_model_through_unchanged() {
+        assert_eq!(
+            gui_args(Some("/models/dragon.obj")),
+            vec!["--model".to_owned(), "/models/dragon.obj".to_owned()],
+        );
+    }
+
+    /// No model is not an error and not an empty argument: the GUI opens with
+    /// nothing loaded, as it does when launched on its own.
+    #[test]
+    fn the_view_mode_with_no_model_passes_nothing() {
+        assert!(gui_args(None).is_empty());
+    }
 }

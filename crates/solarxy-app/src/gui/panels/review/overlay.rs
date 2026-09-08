@@ -16,7 +16,6 @@ use std::borrow::Cow;
 
 use cgmath::{Matrix4, Vector4};
 use solarxy_core::review::ReviewAnnotation;
-use solarxy_renderer::model::Model;
 
 use crate::gui::panels::review::visuals::{category_color, category_label, category_letter};
 use crate::gui::theme::Theme;
@@ -65,18 +64,12 @@ pub(crate) fn draw_review_overlay(
     review: &mut ReviewState,
     suppress: bool,
     theme: Theme,
-    model: Option<&Model>,
     force_expand_all: bool,
 ) {
     if suppress {
         return;
     }
-    // No model ⇒ no markers, ever (the model was closed but annotations
-    // may not be cleared yet on the frame the close lands).
-    if model.is_none()
-        || panes.is_empty()
-        || review.annotations.iter().all(|a| a.reply_to.is_some())
-    {
+    if panes.is_empty() || review.annotations.iter().all(|a| a.reply_to.is_some()) {
         review.hovered = None;
         return;
     }
@@ -111,11 +104,12 @@ pub(crate) fn draw_review_overlay(
             let has_replies = review.reply_count(&ann.id) > 0;
             let card_height = card_height_for(&body_galley, has_replies);
             let card_rect = compute_card_rect(pos, pane.egui_rect, card_height);
-            let mesh_hidden = model.is_some_and(|m| {
-                m.meshes
-                    .get(ann.anchor.mesh_index as usize)
-                    .is_some_and(|mesh| !mesh.visible)
-            });
+            // Dimming a marker whose mesh is hidden needs a mesh-level
+            // visibility flag the shell no longer owns; visibility is a
+            // parameter on a node now, and the anchor addresses a mesh index
+            // into a model that is re-derived on every cook. This comes back
+            // with the review repointing.
+            let mesh_hidden = false;
             visible.push(VisiblePin {
                 ann,
                 pos,

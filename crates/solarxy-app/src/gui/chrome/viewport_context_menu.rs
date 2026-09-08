@@ -1,21 +1,29 @@
 //! Right-click context menu inside the 3D viewport.
 //!
-//! The viewport's 3D content is a non-interactive egui area (so winit
-//! pointer events reach the camera). A right-click is therefore caught in
-//! `app.rs`, raycast in `State`, and — if it landed on a mesh — recorded
-//! as a [`ViewportContextMenu`]. This module paints that menu as a
-//! free-floating `egui::Area` and reports the chosen action back as an
-//! [`OutlinerAction`] (reused — the actions are identical to the
-//! Outliner's).
+//! The viewport's 3D content is a non-interactive egui area, so winit pointer
+//! events reach the camera. A right-click is therefore caught in `app.rs`,
+//! raycast in `State`, and, if it landed on an object, recorded as a
+//! [`ViewportContextMenu`]. This module paints that menu as a free-floating
+//! `egui::Area` and reports the chosen action back as an [`OutlinerAction`],
+//! reused because the actions are identical to the Outliner's.
+//!
+//! Frame and one Hide-or-Show toggle, which is what the browser's own
+//! viewport menu offers. Hiding is a `visible` parameter change on the
+//! object's node, so it survives the next cook.
+
+use solarxy_core::scene::SceneObjectId;
 
 use crate::gui::panels::outliner::OutlinerAction;
 
-/// A pending viewport context menu — set by `State` on a right-click that
-/// hit a mesh, cleared once the menu is dismissed.
+/// A pending viewport context menu, set by `State` on a right-click that hit
+/// an object and cleared once the menu is dismissed.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ViewportContextMenu {
-    /// Model mesh index the right-click landed on.
-    pub mesh_index: usize,
+    /// The scene object the right-click landed on.
+    pub object: SceneObjectId,
+    /// Whether that object is currently visible, which is what decides
+    /// between the Hide and the Show wording.
+    pub visible: bool,
     /// Egui-logical position to anchor the menu at (the cursor).
     pub screen_pos: egui::Pos2,
     /// Skips the dismiss check on the first frame so the opening
@@ -40,7 +48,8 @@ pub(in crate::gui) fn draw_viewport_context_menu(
 ) -> ContextMenuOutcome {
     let mut action = None;
     let mut close = false;
-    let mesh = menu.mesh_index;
+    let object = menu.object;
+    let hide_label = if menu.visible { "Hide" } else { "Show" };
 
     let area = egui::Area::new(egui::Id::new("solarxy_viewport_context_menu"))
         .order(egui::Order::Foreground)
@@ -51,20 +60,11 @@ pub(in crate::gui) fn draw_viewport_context_menu(
                 ui.set_min_width(150.0);
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                     if ui.button("Frame").clicked() {
-                        action = Some(OutlinerAction::FrameMesh(mesh));
+                        action = Some(OutlinerAction::FrameObject(object));
                         close = true;
                     }
-                    if ui.button("Hide").clicked() {
-                        action = Some(OutlinerAction::HideMesh(mesh));
-                        close = true;
-                    }
-                    if ui.button("Hide Others").clicked() {
-                        action = Some(OutlinerAction::IsolateMesh(mesh));
-                        close = true;
-                    }
-                    ui.separator();
-                    if ui.button("Show All").clicked() {
-                        action = Some(OutlinerAction::ShowAll);
+                    if ui.button(hide_label).clicked() {
+                        action = Some(OutlinerAction::ToggleObject(object));
                         close = true;
                     }
                 });

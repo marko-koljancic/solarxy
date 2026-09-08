@@ -165,6 +165,7 @@ pub mod passes;
 pub mod raster;
 pub mod still;
 pub mod view;
+pub mod visualization;
 
 pub use cameras::{depth_bounds, ensure_pane_cameras};
 pub use compare::{ImageDifference, compare_rgba8};

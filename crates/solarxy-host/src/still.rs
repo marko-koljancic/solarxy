@@ -1242,7 +1242,6 @@ impl StillRenderJob {
                     full: [self.spec.width, self.spec.height],
                 }),
                 content: PaneContent::Scene {
-                    extra: None,
                     selected: None,
                     cam_data,
                     shadow: true,

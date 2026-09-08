@@ -1,24 +1,32 @@
-//! Central application state — [`State`] (the GUI's root struct), plus
-//! `Pane`, `PendingLoad`, `InputState`, and per-pane geometry helpers.
+//! Central application state: [`State`], the GUI's root struct, plus `Pane`,
+//! `PendingOpen`, `InputState`, and the per-pane geometry helpers.
 //!
 //! Submodules:
-//! - `init.rs` — startup wiring (surface, device, queue, renderer).
-//! - `update.rs` — per-frame updates; owns the IBL chokepoint
-//!   `rebuild_light_bind_group` called on HDRI load, `IblMode` toggle, and
+//! - `init.rs`, startup wiring (surface, device, queue, renderer).
+//! - `update.rs`, per-frame updates; owns the IBL chokepoint
+//!   `rebuild_light_bind_group`, called on HDRI load, `IblMode` toggle, and
 //!   background change.
-//! - `render.rs` — `State::render`, per-pane orchestration.
-//! - `panes.rs` — split-viewport layout math.
-//! - `overlap.rs` — UV-overlap GPU readback polling.
-//! - `capture.rs` — screenshot capture.
-//! - `raycast` — CPU picking (Möller-Trumbore + AABB early-reject), now
-//!   `solarxy_core::raycast` (moved so web picking can run in Rust);
-//!   re-exported here so call sites keep their paths.
-//! - `review.rs` — `ReviewState`: in-memory mirror of one review-file
-//!   plus transient UI state (draft, selection, panel visibility).
-//! - `input/` — keyboard/mouse, dialogs, menu actions.
-//! - `intents.rs`: the drain, one ordered application of everything an
+//! - `render.rs`, `State::render`, the scene-delta drain, and the per-pane
+//!   orchestration.
+//! - `intents.rs`, the drain: one ordered application of everything an
 //!   interface pass raised.
-//! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
+//! - `open.rs`, how a file becomes the open document. The only place `engine`
+//!   is assigned.
+//! - `camera.rs`, where the pane cameras point. `visibility.rs`, what is
+//!   shown and hidden. `persist.rs`, preference write-back and the flushes on
+//!   the way out.
+//! - `panes.rs`, split-viewport layout math. `overlap.rs`, the UV-overlap
+//!   readback poll. `capture.rs`, the shell's half of a screenshot.
+//! - `still/`, the tiled still render job. `review/`, the annotation state,
+//!   the anchoring, and the sidecar. `input/`, keyboard, pointer, and the
+//!   native pickers.
+//! - `engine_scene.rs`, what the inspection panels read about the open
+//!   document. `cook_health.rs`, which nodes are failing. `hdri_info.rs`,
+//!   what Properties says about the loaded HDRI.
+//! - `view_state.rs`, `ViewState` (re-exports the `view_config` types).
+//! - `raycast`, CPU picking (Moller-Trumbore plus an AABB early reject), now
+//!   `solarxy_core::raycast` so web picking can run in Rust; re-exported here
+//!   so call sites keep their paths.
 
 mod camera;
 mod capture;
@@ -30,6 +38,7 @@ pub(crate) mod hdri_info;
 mod init;
 mod input;
 mod intents;
+mod open;
 mod overlap;
 mod panes;
 mod persist;
@@ -45,16 +54,13 @@ pub(super) use view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, Vi
 
 pub(super) use solarxy_renderer::composite::CompositeLook;
 pub(super) use solarxy_renderer::frame::Renderer;
-pub(super) use solarxy_renderer::scene::{
-    BackgroundModeExt, LoadedModel, ModelScene, create_light_bind_group,
-};
+pub(super) use solarxy_renderer::scene::BackgroundModeExt;
 
 pub(super) use crate::gui::{EguiRenderer, ToastSeverity, ViewportContextMenu};
 pub(super) use solarxy_core::preferences::{
-    self, IblMode, InspectionMode, MaterialOverride, PaneMode, Preferences, UvMapBackground,
-    ViewMode,
+    self, IblMode, MaterialOverride, PaneMode, Preferences, UvMapBackground, ViewMode,
 };
-pub(super) use solarxy_renderer::ibl::{BrdfLut, IblState};
+pub(super) use solarxy_renderer::ibl::IblState;
 
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
@@ -64,10 +70,18 @@ use winit::{keyboard::ModifiersState, window::Window};
 // so both shells share the layout math; re-exported to keep call sites.
 pub(super) use solarxy_renderer::panes::{PaneRect as Pane, compute_target_dimensions, hit_test_pane};
 
-pub(super) struct PendingLoad {
-    pub(super) receiver: mpsc::Receiver<anyhow::Result<LoadedModel>>,
+/// A model file being built into a document on a worker thread.
+///
+/// The whole expensive half is on the far side of the channel: natively an
+/// import parses inside the cook rather than in a job, so cooking a
+/// synthesized document to quiescence blocks for the entire parse. `cancel`
+/// reaches that cook, so a second open, or a quit, stops the first between
+/// nodes rather than waiting it out.
+pub(super) struct PendingOpen {
+    pub(super) receiver: mpsc::Receiver<Result<open::OpenedModel, String>>,
     pub(super) filename: String,
     pub(super) path: String,
+    pub(super) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// In-flight async HDRI load. The source path is retained so the
@@ -114,14 +128,13 @@ pub struct State {
     pub(super) is_surface_configured: bool,
     pub(super) renderer: Renderer,
     pub(super) gui: EguiRenderer,
-    pub(super) scene: Option<ModelScene>,
-    /// The node engine, when a scene file is open.
+    /// The open document, whatever file it came from.
     ///
-    /// A file model and an engine scene are mutually exclusive: opening
-    /// either closes the other, so `scene` and this are never both `Some`.
-    /// They could coexist, since the draw list already chains both sources
-    /// and framing already unions them, but one root at a time is what keeps
-    /// Close unambiguous and the inspection panels presenting one tree.
+    /// **There is one root.** A scene file already is a document and a model
+    /// file becomes one, so nothing downstream branches on which was opened.
+    /// The shell held a second root until 0.10.0, a directly loaded model with
+    /// its own GPU buffers, and half the product was reachable at a time
+    /// because the two carried different capabilities.
     pub(super) engine: Option<Box<solarxy_graph::Engine>>,
     /// What the inspection panels read about the open scene: its file
     /// identity, per-object names, summed geometry counters, and every
@@ -185,6 +198,10 @@ pub struct State {
     pub(super) env: solarxy_renderer::environment::SceneEnvironment,
     /// The bounds `env` was last built around (grid, floor and shadow fit).
     pub(super) env_bounds: solarxy_core::AABB,
+    /// Whether the per-mesh overlay buffers in `env.vis` describe the scene as
+    /// it now stands. Set by anything that changes what is drawn; consumed by
+    /// the rebuild, which only runs when a pane actually shows an overlay.
+    pub(super) viz_dirty: bool,
     pub(super) pending_scene_deltas: Vec<solarxy_core::scene::SceneDelta>,
     /// Makes `SceneOp::SetEnvironment` idempotent. The engine re-emits the
     /// whole environment on every rebuild, and installing one convolves an
@@ -199,8 +216,17 @@ pub struct State {
     pub(super) view: ViewState,
     pub(super) input: InputState,
     pub(super) review: review::ReviewState,
-    pub(super) last_project_config_toast: Option<std::path::PathBuf>,
-    pub(super) pending_load: Option<PendingLoad>,
+    pub(super) pending_open: Option<PendingOpen>,
+    /// Panes waiting to be framed on the document once it has cooked far
+    /// enough to have bounds.
+    ///
+    /// A model file arrives already cooked, so its panes are framed at
+    /// adoption. A scene file cooks over the frame loop, so at the moment it
+    /// opens there is nothing to frame on and the panes would seed on the
+    /// placeholder box and stay there, because the seeding is idempotent and
+    /// nothing re-frames afterwards. A pane the file's own saved view supplied
+    /// a camera for is never marked: an authored camera outranks framing.
+    pub(super) pending_frame: [bool; 4],
     pub(super) pending_hdri: Option<PendingHdri>,
     pub(super) pending_capture: Option<PendingCapture>,
     /// Pending viewport right-click context menu — `Some` while the menu

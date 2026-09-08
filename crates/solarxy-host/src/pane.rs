@@ -439,14 +439,13 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>, scene: &SceneObjects) -> Encod
     let (is_uv_map, present) = match (&*content, camera.as_deref_mut()) {
         (
             PaneContent::Scene {
-                extra,
                 selected,
                 cam_data,
                 shadow,
             },
             Some(camera),
         ) => {
-            let objects = &build_draw_list(scene, *extra, *selected);
+            let objects = &build_draw_list(scene, *selected);
             // A tile of a larger image gets an asymmetric frustum cut from that
             // image's, and the image's aspect rather than its own: the two
             // differ for every tile that is not the same shape as the picture,
@@ -549,14 +548,15 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>, scene: &SceneObjects) -> Encod
     }
 }
 
-/// Assemble the raster draw list: the host's extra object first, then every
-/// visible object the backend owns, with the selection flagged.
+/// Assemble the raster draw list: every visible object the backend owns, with
+/// the selection flagged.
 ///
 /// Order is load-bearing, not incidental. Overdraw counts fragments in
 /// submission order, and the depth-equal overlays (edge wireframe, validation
-/// lines) resolve against whatever landed first, so the host's own object
-/// stays ahead of the delta-fed ones exactly as it did when it was the only
-/// entry that could come first.
+/// lines) resolve against whatever landed first, so the scene's own iteration
+/// order is what decides. A host object used to be drawn ahead of these; it
+/// was the desktop's file-loaded model, and there is no second root to draw
+/// since 0.10.0.
 ///
 /// An empty list is a legitimate frame: the background, grid, floor and axes
 /// come from the environment, not from this list.
@@ -564,15 +564,11 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>, scene: &SceneObjects) -> Encod
 /// This was written twice, once per shell, with the selection loop duplicated
 /// character for character. It belongs to whichever component owns the scene,
 /// and that is now the backend.
-fn build_draw_list<'a>(
-    scene: &'a SceneObjects,
-    extra: Option<DrawObject<'a>>,
+fn build_draw_list(
+    scene: &SceneObjects,
     selected: Option<solarxy_core::scene::SceneObjectId>,
-) -> Vec<DrawObject<'a>> {
-    let mut objects = Vec::with_capacity(usize::from(extra.is_some()) + scene.len());
-    if let Some(extra) = extra {
-        objects.push(extra);
-    }
+) -> Vec<DrawObject<'_>> {
+    let mut objects = Vec::with_capacity(scene.len());
     objects.extend(scene.draw_objects());
     // `SceneObjects` hands out its draw objects unselected, so the flag is set
     // here by matching on model identity, which is also why the lookup filters

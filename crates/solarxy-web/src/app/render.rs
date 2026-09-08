@@ -470,18 +470,13 @@ impl SolarxyApp {
         pds.background_mode.resolve(&[])
     }
 
-    /// Rebuilds the bounds-derived environment (grid/floor scale, shadow
-    /// frustum, light-rig fit) when the scene bounds move materially.
     /// Whether any active-layout 3D pane wants the per-mesh visualization
-    /// overlays (normal arrows, per-mesh bounds boxes).
+    /// overlays: the normal arrows and the per-mesh bounds boxes.
     pub(super) fn viz_overlays_wanted(&self) -> bool {
-        use solarxy_core::preferences::{NormalsMode, PaneMode};
-        use solarxy_core::view_config::BoundsMode;
-        let count = self.view.display.layout.pane_count();
-        self.view.pane_settings[..count].iter().any(|pds| {
-            pds.pane_mode != PaneMode::UvMap
-                && (pds.normals_mode != NormalsMode::Off || pds.bounds_mode == BoundsMode::PerMesh)
-        })
+        solarxy_host::visualization::overlays_wanted(
+            &self.view.pane_settings,
+            self.view.display.layout.pane_count(),
+        )
     }
 
     /// Rebuilds `env.vis` from every displayed geometry when the aggregate
@@ -498,7 +493,8 @@ impl SolarxyApp {
             return;
         };
         self.viz_dirty = false;
-        let (mesh_bounds, normals) = self.build_viz_aggregate();
+        let (mesh_bounds, normals) =
+            solarxy_host::visualization::build_aggregate(self.raster.scene());
         let grid_color = self
             .resolve_background(&self.view.pane_settings[0])
             .grid_color();
@@ -714,74 +710,6 @@ impl SolarxyApp {
                 ]
             })
             .collect()
-    }
-
-    /// The world-space visualization aggregate over
-    /// `Engine::display_geometries` (ascending geo id = the renderer's
-    /// draw order).
-    pub(super) fn build_viz_aggregate(&self) -> (Vec<AABB>, NormalsGeometry) {
-        use cgmath::{Matrix3, Matrix4, SquareMatrix, Transform};
-        let mut mesh_bounds: Vec<AABB> = Vec::new();
-        let mut agg = NormalsGeometry {
-            vertex_lines: Vec::new(),
-            face_lines: Vec::new(),
-            vertex_segments: Vec::new(),
-            face_segments: Vec::new(),
-        };
-        for (_node, set, m) in self.engine.display_geometries() {
-            let matrix = Matrix4::from(m);
-            // Normal matrix: inverse-transpose of the upper 3x3 (the geo
-            // transform allows nonuniform scale).
-            let normal_matrix = Matrix3::from_cols(
-                matrix.x.truncate(),
-                matrix.y.truncate(),
-                matrix.z.truncate(),
-            )
-            .invert()
-            .map(|inv| cgmath::Matrix::transpose(&inv));
-            for mesh in &set.meshes {
-                let world: Vec<[f32; 3]> = mesh
-                    .positions
-                    .iter()
-                    .map(|p| {
-                        let tp = matrix.transform_point(Point3::from(*p));
-                        [tp.x, tp.y, tp.z]
-                    })
-                    .collect();
-                let bounds = compute_bounds(&world);
-                let world_normals: Vec<[f32; 3]> = match (&mesh.normals, normal_matrix) {
-                    (Some(ns), Some(nm)) => ns
-                        .iter()
-                        .map(|n| {
-                            let v = nm * Vector3::from(*n);
-                            let v = if v.magnitude2() > 1e-12 {
-                                v.normalize()
-                            } else {
-                                v
-                            };
-                            [v.x, v.y, v.z]
-                        })
-                        .collect(),
-                    // A singular matrix (zero scale) has no usable normal
-                    // transform; fall back to object-space directions.
-                    (Some(ns), None) => ns.to_vec(),
-                    // No stored normals: vertex arrows are empty, face
-                    // arrows still derive from the world positions.
-                    (None, _) => Vec::new(),
-                };
-                let (v_lines, f_lines) =
-                    build_normals_geometry(&world, &world_normals, &mesh.indices, &bounds);
-                let v_start = agg.vertex_lines.len() as u32;
-                agg.vertex_lines.extend(v_lines);
-                agg.vertex_segments
-                    .push(v_start..agg.vertex_lines.len() as u32);
-                let f_start = agg.face_lines.len() as u32;
-                agg.face_lines.extend(f_lines);
-                agg.face_segments.push(f_start..agg.face_lines.len() as u32);
-                mesh_bounds.push(bounds);
-            }
-        }
-        (mesh_bounds, agg)
     }
 
     pub(super) fn sync_env_bounds(&mut self) {
@@ -1233,9 +1161,6 @@ impl SolarxyApp {
                 },
             },
             Some(cam_data) => PaneContent::Scene {
-                // This host draws nothing that did not come down the delta
-                // stream, so there is no extra object.
-                extra: None,
                 selected: self.selected_object,
                 cam_data,
                 shadow: i == 0 || !self.view.display.lights_locked,
