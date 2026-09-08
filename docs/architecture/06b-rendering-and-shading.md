@@ -53,7 +53,7 @@ The composite is deliberately not in that function. It is a second free function
 `composite_and_submit` at `crates/solarxy-host/src/pane.rs:345`, invoked by the caller after
 `RenderBackend::encode` has returned. So one pane's full order lives in two functions with a
 trait call between them, and each shell writes that stitching itself:
-`crates/solarxy-app/src/state/render.rs:258`, `crates/solarxy-web/src/app.rs:5536`, and
+`crates/solarxy-app/src/state/render.rs:258`, `crates/solarxy-web/src/app/render.rs:1275`, and
 `crates/solarxy-host/src/still.rs:1210`.
 
 One naming trap worth stating plainly. `crates/solarxy-host/src/passes.rs` contains no render
@@ -649,7 +649,7 @@ independently from each shell.
 first sRGB surface format and declares a linear view format
 (`crates/solarxy-app/src/state/init.rs:70-83`) which nothing ever instantiates, since its
 surface views use the default descriptor. The browser configures a non-sRGB surface and renders
-through an sRGB view (`crates/solarxy-web/src/app.rs:968-996`). The headless render command
+through an sRGB view (`crates/solarxy-web/src/app/lifecycle.rs:68-96`). The headless render command
 uses `Bgra8UnormSrgb` (`crates/solarxy-render/src/lib.rs:503`). Two shells, mirror-image
 routes, no shared helper and no test pinning them together.
 
@@ -989,9 +989,9 @@ predicate is true for the default limits, and the negative cases use downlevel d
 hand-built structures no shell ever requests.
 
 It has exactly one caller, a capability object serialized to the browser at
-`crates/solarxy-web/src/app.rs:3207`, which is presentational. The four sites that actually
-construct a path-tracing backend do not call it: `crates/solarxy-web/src/app.rs:3139`,
-`crates/solarxy-web/src/app.rs:1977`, `crates/solarxy-app/src/state/still.rs:287` and
+`crates/solarxy-web/src/app/view_state.rs:206`, which is presentational. The four sites that actually
+construct a path-tracing backend do not call it: `crates/solarxy-web/src/app/render.rs:141`,
+`crates/solarxy-web/src/app/still.rs:36`, `crates/solarxy-app/src/state/still.rs:287` and
 `crates/solarxy-render/src/lib.rs:1222`.
 
 So on a device that genuinely cannot host the tracer, the guard reports capable and
@@ -1031,9 +1031,9 @@ The divergences that exist are these:
 |---|---|---|---|
 | Backend mask | primary backends | browser WebGPU | in code |
 | Surface usage | render attachment plus copy source, for screenshots | render attachment only | in code |
-| sRGB plumbing | sRGB surface format with a declared linear view nothing instantiates, `state/init.rs:70-83` | base format with a declared sRGB view used for every surface view, `crates/solarxy-web/src/app.rs:968-996` | not recorded; mirror-image routes, no shared helper, no test |
-| Multisample count | user preference of 1, 2 or 4 | pinned at 4, `crates/solarxy-web/src/app.rs:75` | **not recorded anywhere** |
-| Traced viewport panes | none; the desktop calls the raster backend unconditionally at `crates/solarxy-app/src/state/render.rs:258` and hardcodes the raster occlusion capability at `:308` | per-pane, `crates/solarxy-web/src/app.rs:5536-5541` | not recorded as a decision |
+| sRGB plumbing | sRGB surface format with a declared linear view nothing instantiates, `state/init.rs:70-83` | base format with a declared sRGB view used for every surface view, `crates/solarxy-web/src/app/lifecycle.rs:68-96` | not recorded; mirror-image routes, no shared helper, no test |
+| Multisample count | user preference of 1, 2 or 4 | pinned at 4, `crates/solarxy-web/src/app/mod.rs:74` | **not recorded anywhere** |
+| Traced viewport panes | none; the desktop calls the raster backend unconditionally at `crates/solarxy-app/src/state/render.rs:258` and hardcodes the raster occlusion capability at `:308` | per-pane, `crates/solarxy-web/src/app/render.rs:1275-1280` | not recorded as a decision |
 | Float still ceiling | none | 16 megapixels, because WebAssembly is a 32-bit address space | in code, with the reason for keeping it out of the shared crate |
 | Screenshot budget | none | 4 megapixels with a downscale, to avoid losing the device | in code, though the constant is declared twice in two functions |
 
@@ -1264,6 +1264,6 @@ Recorded here rather than answered, because the code does not settle them.
 - The desktop still render lights a traced scene with the resolved gradient sky when a document
   has no environment image (`crates/solarxy-app/src/state/still.rs:611-635`), while the browser
   still and the headless command both install black deliberately and by name
-  (`crates/solarxy-web/src/app.rs:4488-4489`, `crates/solarxy-render/src/lib.rs:1258`). Two
+  (`crates/solarxy-web/src/app/render.rs:243-244`, `crates/solarxy-render/src/lib.rs:1258`). Two
   surfaces agree and one does not. Which is the intended answer for what "no environment image"
   means?

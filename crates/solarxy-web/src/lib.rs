@@ -24,7 +24,12 @@
     clippy::module_name_repetitions,
     clippy::must_use_candidate,
     clippy::needless_pass_by_value,
-    clippy::unused_self
+    clippy::unused_self,
+    // The host's modules are slices of one impl block over one struct, and each
+    // reaches the parent's vocabulary through `use super::*`. The desktop shell
+    // allows this for the same reason and for the same shape of code: its own
+    // state is split the same way.
+    clippy::wildcard_imports
 )]
 
 #[cfg(target_arch = "wasm32")]

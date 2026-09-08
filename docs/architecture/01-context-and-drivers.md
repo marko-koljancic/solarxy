@@ -125,7 +125,7 @@ flowchart TB
 
 What to notice. The `.slxy` archive is the one artefact all three primary shells read, which
 makes it the load-bearing contract of the system rather than a convenience format, and only
-the browser shell writes one: `save_slxy` exists at `crates/solarxy-web/src/app.rs:3861` and
+the browser shell writes one: `save_slxy` exists at `crates/solarxy-web/src/app/scenefile.rs:79` and
 has no counterpart in `solarxy-app`, so the desktop opens scenes it cannot save. The terminal
 shell is the only one that produces a machine-readable validation report,
 so a pipeline engineer never touches a window. The watch window hangs off the terminal shell
@@ -198,8 +198,9 @@ instead captures the same two models twice on the same runner, once at the pull 
 commit and once at the head, because that removes the maintenance of a baseline tree. The
 fan-out verifier exists because one person cannot watch six channels. The frontend is a
 display mirror rather than an independent application because a second document model would be
-a second thing to keep correct. It also explains the gaps: `crates/solarxy-web/src/app.rs` is
-6,489 lines with zero tests, and the whole crate has eleven, in two small helper modules.
+a second thing to keep correct. It also explains the gaps: the browser host was one
+6,489-line file with zero tests, against eleven in the whole crate. It is now eleven modules
+under `crates/solarxy-web/src/app/`, which addresses the size and not yet the tests.
 
 **Browser and desktop from one core.** This is the force with the largest structural
 footprint. The engine and the renderer never depend on each other, so both compile into a
@@ -218,7 +219,7 @@ obligation on documentation: this set exists because a contributor could not pre
 the architecture anywhere, and `README.md` now points at it.
 
 **The WebAssembly 32-bit address space.** It is a hard ceiling on allocation, and the code
-argues with it explicitly rather than hoping. `crates/solarxy-web/src/app.rs:679` caps a
+argues with it explicitly rather than hoping. `crates/solarxy-web/src/app/mod.rs:690` caps a
 floating-point still at 16 million pixels, and its doc comment does the arithmetic: roughly
 forty bytes a pixel at peak, near 290 megabytes, inside an address space also holding the
 document, the tracer's buffers and the page. The comment states the reason a stated limit

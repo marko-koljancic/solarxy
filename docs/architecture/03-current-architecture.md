@@ -359,7 +359,7 @@ is edits, not correctness.
 `crates/solarxy-app/src/state/render.rs:2` states that the module "assembles each pane's
 parameters and hands them to `solarxy_host::render_pane`". No such symbol exists. A workspace
 search finds `render_pane` at `crates/solarxy-app/src/state/render.rs:165` and
-`crates/solarxy-web/src/app.rs:5458`, plus comment references in the renderer and the host.
+`crates/solarxy-web/src/app/render.rs:1197`, plus comment references in the renderer and the host.
 The two shells each build the full nineteen-field `FrameCtx` literal themselves and share only
 the composite tail, `solarxy_host::composite_and_submit`. They have already diverged: the
 desktop passes no grid plane and writes no manipulator or light markers per pane; the web does
@@ -375,7 +375,7 @@ added to the settings halts compilation in all three shells and forces the autho
 of that guarantee itself. The guard is one function above it, not in it.
 
 **The still-render pump loop is written three times.**
-`crates/solarxy-app/src/state/still.rs:385`, `crates/solarxy-web/src/app.rs:2409` and
+`crates/solarxy-app/src/state/still.rs:385`, `crates/solarxy-web/src/app/still.rs:501` and
 `crates/solarxy-render/src/lib.rs:1087` each read the job's current tile, resize the shared
 targets to it, build the twelve-field context, dispatch through the backend trait, match five
 ways on the resulting step, drain tiles and previews, and compute progress. The desktop
@@ -488,7 +488,7 @@ drain this pass, and calls `cook_until` once per context. The inner one is `cook
 
 The budget unit is not defined by the engine at all. `Engine::cook` takes an opaque
 `&mut dyn FnMut() -> bool`. Both shells independently chose wall-clock, at different values and
-with no shared constant: `COOK_BUDGET_MS: f64 = 6.0` at `crates/solarxy-web/src/app.rs:74`, and
+with no shared constant: `COOK_BUDGET_MS: f64 = 6.0` at `crates/solarxy-web/src/app/mod.rs:73`, and
 `COOK_BUDGET: Duration = from_millis(8)` at `crates/solarxy-app/src/state/update.rs:21`. Those
 are the only two callers of `Engine::cook` in the workspace.
 
@@ -1156,8 +1156,8 @@ batch applier returns early on an empty batch, so that batch's revision is never
 the revision is merged with a maximum, so a batch below the mirror's revision applies its events
 anyway.
 
-The boundary itself is 97 exported methods on `SolarxyApp` across five implementation blocks in
-`crates/solarxy-web/src/app.rs`, plus four free worker exports and a start function. Outbound
+The boundary itself is 97 exported methods on `SolarxyApp` across the implementation blocks in
+`crates/solarxy-web/src/app/`, plus four free worker exports and a start function. Outbound
 serialization goes through one helper using a JSON-compatible serializer, so every return builds
 a full plain JavaScript object graph rather than a shared-memory view. Raw bytes use typed
 arrays and copy. Per animation frame the session makes eight or nine crossings, of which seven
@@ -1565,7 +1565,7 @@ production TypeScript or TSX files reach 250 lines and 8 reach 500.
 
 | File | LOC | Distinct responsibilities tangled inside it |
 |---|---|---|
-| `crates/solarxy-web/src/app.rs` | 6,489 | The wgpu instance, adapter, device and surface boot; 96 exported methods across five implementation blocks; around twenty hand-written boundary transfer types; a ten-variant host-event queue; the per-frame loop with cook budget, delta ingest and per-pane render; per-pane camera lifecycle, look-through and camera locking; the gizmo drag address and write-back; the still-render pump, tile and preview queues, EXR and PNG encoding, pass plane extraction; screenshot and turntable capture; the UV pane's separate one-object preview scene; the traced-preview accumulator bookkeeping; a second asset-preview surface with its own render state; four worker job pumps and eight submit and error arms; the environment installation tracker; the scene-file view sidecar, the only writer of it; player mode and display defaults. **Zero tests in the file. The whole crate has 11, in two other modules.** |
+| `crates/solarxy-web/src/app/` | 6,509 across 12 modules | The wgpu instance, adapter, device and surface boot; 97 exported methods; around twenty hand-written boundary transfer types; a host-event queue; the per-frame loop with cook budget, delta ingest and per-pane render; per-pane camera lifecycle, look-through and camera locking; the gizmo drag address and write-back; the still-render pump, tile and preview queues, EXR and PNG encoding, pass plane extraction; screenshot and turntable capture; the UV pane's separate one-object preview scene; the traced-preview accumulator bookkeeping; a second asset-preview surface with its own render state; four worker job pumps and their submit and error arms; the environment installation tracker; the scene-file view sidecar, the only writer of it; player mode and display defaults. Split out of one file in 0.10.0; see `08-engineering-standards.md` section 3.4. **Still zero tests. The whole crate has 11, in two other modules.** |
 | `crates/solarxy-graph/src/engine/mod.rs` | 4,201 | The 35-variant command vocabulary and its 260-line dispatch; the 21-variant event vocabulary; the `Engine` god object with 19 fields and 55 public methods in this file alone; undo and redo transaction driving and inverse application; review annotation CRUD, anchor hashing and staleness refresh; gizmo and transform policy including matrix algebra; export action execution, which encodes OBJ, MTL, ZIP and PNG bytes inline; content-addressed asset staging; the playback clock and its retime dirty set; the expression index lifecycle; cross-context reference cycle refusal and context ordering; cook scheduling across contexts; the asynchronous job pump; scene-delta lifecycle and object-presence diffing; picking; document save and load; node lookup helpers that linearly scan every subflow. |
 | `crates/solarxy-renderer/src/frame.rs` | 2,549 | The `Renderer` struct owning every shared render target, all 48 pipelines, both UV cameras, the outline ping-pong, the overdraw counter and the label atlas; ten pass-encoding methods; sixteen private per-draw helpers; the UV-overlap readback state machine; the colour-grading table installation chokepoint; five host-fed vertex-buffer channels with their own upload methods; and a clearing call that exists as a cross-cutting workaround for those channels being modelled at the wrong scope. |
 | `crates/solarxy-renderer/src/pathtrace/scene.rs` | 2,218 | Traced-scene ingestion of the same delta stream the raster path consumes; a per-mesh hierarchy cache keyed on buffer addresses and holding strong clones to keep them valid; the inline-versus-deferred build policy and its job handout and submission; repack decisions. Deliberately contains no wgpu, because the expensive half has to move into the GPU-free worker. |

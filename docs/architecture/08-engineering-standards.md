@@ -131,7 +131,7 @@ this repository, all verified.
 
 There is no `solarxy_host::render_pane`. A workspace-wide search for `fn render_pane` returns
 exactly two definitions, `crates/solarxy-app/src/state/render.rs:165` and
-`crates/solarxy-web/src/app.rs:5458`, which is to say the function the comment claims is shared
+`crates/solarxy-web/src/app/render.rs:1197`, which is to say the function the comment claims is shared
 is implemented separately in each shell. The shared function that does exist is
 `solarxy_host::pane::encode_pane_passes` at `crates/solarxy-host/src/pane.rs:410`, and it is a
 narrower thing: it encodes the pass chain, not the pane. The paragraph beginning "The pane body
@@ -286,7 +286,7 @@ two-arm match with no wildcard, so adding a third variant halts compilation ever
 
 **Hierarchy and BVH.** The frontend calls `buildHierarchyInWorker` at
 `web/src/engine/session.ts:192`; the export it calls is `build_bvh_job` at
-`crates/solarxy-web/src/app.rs:6282`. One operation, two words, one on each side of the wasm
+`crates/solarxy-web/src/app/mod.rs:1117`. One operation, two words, one on each side of the wasm
 boundary. "Hierarchy" is the better word for prose and "BVH" is the crate name; pick one for
 identifiers.
 
@@ -381,37 +381,56 @@ These are the current worst offenders, opened and read. Each proposal names modu
 what moves. None of them is scheduled here; sequencing is
 [09-evolution-and-roadmap.md](09-evolution-and-roadmap.md)'s job.
 
-#### `crates/solarxy-web/src/app.rs`, 6,489 lines, 169 methods on one type, zero tests
+#### `crates/solarxy-web/src/app/`, split in 0.10.0 from one 6,489-line file
 
-The worst hotspot in the workspace, and the problem is not length. It is that at least twelve
-responsibilities share one `&mut self` that owns a WebGPU device, so nothing in the file can be
-constructed without one, which is exactly why the file has no tests and the whole crate has
-eleven (in `camera_commit.rs` and `trace_settings.rs`, which were extracted and acquired tests
-immediately). The methods are already spread across five `impl SolarxyApp` blocks at lines 913,
-3940, 4208, 5882 and 5978, which is a decomposition the author started and stopped.
+**This proposal was carried out.** What follows records what shipped, because a decomposition
+proposal that outlives its own execution is worse than none: the next reader would plan a split
+that already happened.
 
-Proposed split, using the boundaries the file already has:
+The file was the worst hotspot in the workspace, and the problem was never length. It was that
+at least twelve responsibilities shared one `&mut self` owning a WebGPU device, so nothing in the
+file could be constructed without one, which is exactly why it had no tests while the crate around
+it had eleven, in the two modules that had been extracted and acquired tests immediately.
 
-| New module | What moves | Lines today |
+| Module | What it holds | Lines |
 |---|---|---|
-| `dto.rs` | The ~25 hand-written boundary structs and their `From` impls, currently in two separate runs | :288-410 and :6311-6490 |
-| `still.rs` | The still-render job driver: `start_still_render`, `pump_still_render`, `take_still_tile`, `take_still_preview`, the pass and file accessors, EXR and PNG encoding | :1932-2409 |
-| `capture.rs` | Screenshot and turntable: `request_screenshot`, `request_turntable_frame`, `poll_screenshot`, `render_screenshot`, `finish_capture`, `render_turntable_frame` | :2524-2900 |
-| `jobs.rs` | The four worker pumps and their eight paired submit and error arms: import, validate, image, HDRI | :3357-3789 |
-| `gizmo_drag.rs` | The whole drag lifecycle already isolated in its own impl block: `pane_ray`, `manipulator_at`, `update_gizmo_hover`, `begin_gizmo_drag`, `take_gizmo_drag`, `drag_state`, `update_gizmo_drag`, `commit_gizmo_drag`, `rollback_gizmo_drag` | :3940-4205 |
-| `environment.rs` | Environment and IBL install: `sync_traced_environment`, `install_still_environment`, `install_traced_environment`, `apply_scene_environment`, `environment_json` | :4445-4612 |
-| `attr_viz.rs` | Attribute visualisation: channel sync, label atlas rebuild, vector-line geometry, the aggregate builder | :4711-5020 |
-| `player.rs` | The embedded asset-preview sub-app, already its own `impl` block plus a `PreviewState` struct: `preview_open`, `preview_orbit`, `preview_zoom`, `preview_resize`, `preview_close`, `preview_render_set`, `render_preview` | :5869-6106 |
-| `workers.rs` | The four GPU-free worker exports, which are a second headless wasm instance's entire public API and have no business sharing a file with the GPU host | :6195-6300 |
-| `scenefile.rs` | `.slxy` save and load plus the camera and view JSON marshalling | :3861-3942, :5759-5868 |
+| `mod.rs` | The `SolarxyApp` struct, the boundary transfer types, the shared constants and free helpers, and the four GPU-free worker exports | 1,324 |
+| `render.rs` | The per-pane orchestration, the environment and traced-preview installation, and the attribute-visualisation channels | 1,497 |
+| `still.rs` | The still job: start, pump, tile and preview drains, pass accessors, EXR and PNG encoding | 612 |
+| `lifecycle.rs` | Device and surface boot, dispatch, the frame pump, resize | 442 |
+| `assets.rs` | Asset staging and the four worker pumps with their submit and error arms | 439 |
+| `pointer.rs` | Pointer routing and picking | 407 |
+| `capture.rs` | Screenshot and turntable capture | 389 |
+| `view_state.rs` | The host-owned view state the frontend mirrors, and the mirror surfaces | 383 |
+| `gizmo_drag.rs` | The drag lifecycle, already its own implementation block | 280 |
+| `scenefile.rs` | Scene save and load, and the view sidecar | 253 |
+| `queries.rs` | Read-only document queries, selection and label state | 249 |
+| `preview.rs` | The asset-preview sub-application and its own render state | 234 |
 
-What is left in `app.rs` after that is the wasm-bindgen class, device and surface setup, the
-frame pump, pointer routing, per-pane camera lifecycle and the pane render path: still large,
-but one responsibility, the host.
+**Three deviations from the proposal above, each with a reason.**
 
-The tractable wins are `player.rs`, `workers.rs`, `dto.rs` and `gizmo_drag.rs`, because each is
-already a contiguous region behind a clean seam. `gizmo_drag.rs` is the one with the largest
-test payoff: the drag solver it calls already has 801 lines of tests in
+The boundary transfer types **stayed in the parent** rather than becoming `dto.rs`. Moving them
+meant widening roughly 120 struct *fields* to `pub(super)`, since a sibling module cannot read a
+private field. The resulting cut is data in the parent and behaviour in the children, which is why
+`mod.rs` is the second-largest module rather than a thin shell.
+
+The proposed `environment.rs` and `attr_viz.rs` are **inside `render.rs`**. Both are steps of the
+per-pane render path rather than independent concerns, and separating them would have split a
+sequence that reads in order.
+
+The proposed `workers.rs` **stayed in the parent**. The four exports are free functions rather than
+methods, so they cost the parent little, and they read next to the transfer types they build.
+
+**The split was a pure move and was verified as one.** Every line of the original is present in
+some module; the only additions are eleven `use super::*` lines, eleven module declarations, the
+implementation-block wrappers, the module documentation, and 65 `fn` declarations that gained
+`pub(super)` so a sibling can call them, each with an identifiable twin. No body was edited.
+`clippy::wildcard_imports` was added to the crate's allow list, matching `solarxy-app`, which
+allows it for the same pattern.
+
+**The tests are still missing and that is deliberate.** A move that also added assertions would no
+longer be provable as a move. The seams are what make them affordable next, and the drag lifecycle
+remains the largest payoff: the solver it calls already has 801 lines of tests in
 `crates/solarxy-host/src/gizmo.rs`, and the lifecycle wrapping it has none.
 
 #### `crates/solarxy-graph/src/engine/mod.rs`, 4,201 lines
@@ -550,7 +569,7 @@ which means every serde enum crossing the boundary carries both `rename_all = "c
 `rename_all_fields = "camelCase"`.
 
 **Why, and this is a real bug that shipped.** `#[serde(rename_all = "camelCase")]` on an enum
-renames the variants and nothing else. `HostEvent` in `crates/solarxy-web/src/app.rs:212` had
+renames the variants and nothing else. `HostEvent` in `crates/solarxy-web/src/app/mod.rs:223` had
 only the first attribute. Every field in that enum was one word, so nothing was wrong, until
 `renderProgress` gained `elapsed_ms` and `remaining_ms`. Those crossed in snake case while
 `web/src/engine/types.ts` declared them camel, and the still dialog's elapsed and remaining
@@ -912,7 +931,7 @@ never renders one never pays.
 
 **Rule.** Optional GPU features are not required. Every device request in the workspace passes
 `wgpu::Features::empty()`, verified at `crates/solarxy-app/src/state/init.rs:46`,
-`crates/solarxy-render/src/lib.rs:1043`, `crates/solarxy-web/src/app.rs:949` and three sites in
+`crates/solarxy-render/src/lib.rs:1043`, `crates/solarxy-web/src/app/lifecycle.rs:49` and three sites in
 `crates/solarxy-web/src/pathtrace_probe.rs`. That is the posture, and it is what makes one
 renderer run on a browser and on a desktop adapter without a capability matrix.
 
@@ -1210,8 +1229,10 @@ rather than an aspiration.
 
 **Gaps, named.**
 
-- **`crates/solarxy-web/src/app.rs` has zero tests**, and the crate around it has eleven, all in
-  `camera_commit.rs` and `trace_settings.rs`. Untested by consequence: the still-render pump and
+- **`crates/solarxy-web/src/app/` has zero tests**, and the crate around it has eleven, all in
+  `camera_commit.rs` and `trace_settings.rs`. The 0.10.0 split addressed the file's size and
+  deliberately did not add tests, because a pure move that also added assertions would no longer
+  be provable as a pure move. The seams it created are what makes them affordable next. Untested by consequence: the still-render pump and
   its image encoding, the gizmo drag lifecycle including rollback, all four worker pumps and
   their eight submit and error arms, the `.slxy` save and load path, the view-state round trip,
   and screenshot capture. The cause is structural, and section 3.4's split is the fix: the two
@@ -1278,9 +1299,9 @@ the three checks into that job costs one step, since the bundle is already built
 
 | Budget | Value | Where |
 |---|---|---|
-| Cook budget, browser | 6 ms | `crates/solarxy-web/src/app.rs:74` |
+| Cook budget, browser | 6 ms | `crates/solarxy-web/src/app/mod.rs:73` |
 | Cook budget, desktop | 8 ms | `crates/solarxy-app/src/state/update.rs:21` |
-| Screenshot and capture | 4.0 megapixels | `crates/solarxy-web/src/app.rs` |
+| Screenshot and capture | 4.0 megapixels | `crates/solarxy-web/src/app/capture.rs` |
 | Still tile | 4,194,304 pixels | `crates/solarxy-host/src/still.rs` |
 | Reference chain depth | 32 | `crates/solarxy-graph/src/refs.rs:31` |
 

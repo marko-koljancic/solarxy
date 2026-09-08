@@ -77,8 +77,8 @@ and would do this with no `unsafe` at all.
 ### What happens to an error crossing into TypeScript
 
 Every fallible WebAssembly export returns `Result<JsValue, JsError>`. There are 164 `JsError`
-occurrences in `crates/solarxy-web/src/app.rs` alone. The construction is uniformly
-`JsError::new(&format!("{e}"))`, for example at `crates/solarxy-web/src/app.rs:1158-1162`,
+occurrences in `crates/solarxy-web/src/app/` alone. The construction is uniformly
+`JsError::new(&format!("{e}"))`, for example at `crates/solarxy-web/src/app/lifecycle.rs:248-252`,
 where `dispatch` flattens a typed `EngineError` into a string on both the deserialization arm
 and the engine arm.
 
@@ -154,7 +154,7 @@ case. It is a *second instantiation of the same `solarxy_web.wasm`*
 is paid once, but the instance is separate: its own linear memory, its own heap, its own panic
 hook, and no wgpu device is ever created in it. Four exports are reachable there and are
 compiled to be GPU-free: `parse_model_job`, `validate_geometry_job`, `prepare_hdri_job` and
-`build_bvh_job`, at `crates/solarxy-web/src/app.rs:6196`, `:6240`, `:6260` and `:6281`.
+`build_bvh_job`, at `crates/solarxy-web/src/app/mod.rs:1031`, `:1076`, `:1096` and `:1117`.
 
 That shape is what the engine-renderer separation buys. Because `solarxy-graph`,
 `solarxy-kernel` and `solarxy-bvh` compile with no wgpu dependency, a model parse, a validation
@@ -186,7 +186,7 @@ in the browser is postMessage between instances and nothing else. The address sp
 which matters in section 4.
 
 The engine knows about this asymmetry through one flag. `Engine::set_async_jobs` is called with
-`true` in exactly one place, `crates/solarxy-web/src/app.rs:1068`; it defaults to false
+`true` in exactly one place, `crates/solarxy-web/src/app/lifecycle.rs:161`; it defaults to false
 (`crates/solarxy-graph/src/cook/driver.rs:131`, documented as "native cooks parse imports
 inline"). The desktop drains jobs synchronously in the frame loop
 (`crates/solarxy-app/src/state/update.rs:290-293`: take, resolve, submit, in one pass), so the
@@ -197,7 +197,7 @@ entire pending-and-generation machinery is exercised only in the browser and in 
 `Engine::cook` takes an opaque `&mut dyn FnMut() -> bool`. The engine has no notion of a budget
 unit; the shells supply the meaning, and they chose different numbers with no shared constant:
 
-- `COOK_BUDGET_MS: f64 = 6.0` at `crates/solarxy-web/src/app.rs:74`, documented as about half a
+- `COOK_BUDGET_MS: f64 = 6.0` at `crates/solarxy-web/src/app/mod.rs:73`, documented as about half a
   60 Hz frame.
 - `COOK_BUDGET: Duration = from_millis(8)` at `crates/solarxy-app/src/state/update.rs:21`, with
   the same justification written differently.
@@ -312,7 +312,7 @@ deleted container's entire child network, and `UndoOp::RestoreReview` (`undo.rs:
 whole review store for every annotation edit.
 
 The codebase does bound memory where it has been bitten: `MAX_FLOAT_STILL_PIXELS = 16_000_000`
-at `crates/solarxy-web/src/app.rs:679` and `MAX_CAPTURE_PIXELS = 4_000_000` at `:2533` both
+at `crates/solarxy-web/src/app/mod.rs:690` and `MAX_CAPTURE_PIXELS = 4_000_000` at `app/capture.rs:20` both
 exist precisely because a 32-bit allocation failure is fatal. The graph's own residency has not
 had the same treatment.
 

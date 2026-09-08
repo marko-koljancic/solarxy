@@ -1070,7 +1070,7 @@ fn the_planning_code_matcher_fires_on_real_examples() {
 #[test]
 fn the_wasm_boundary_enums_rename_their_fields_too() {
     let cases = [
-        ("crates/solarxy-web/src/app.rs", "enum HostEvent {"),
+        ("crates/solarxy-web/src/app/mod.rs", "enum HostEvent {"),
         (
             "crates/solarxy-graph/src/engine/mod.rs",
             "pub enum Command {",

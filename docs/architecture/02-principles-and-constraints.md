@@ -149,7 +149,7 @@ one wrapper at `crates/solarxy-app/src/state/update.rs:24`, which calls the shar
 
 **Where it does not.** The browser shell never calls that function. It assembles its own
 lights uniform, writes its own buffer and picks its own shadow caster at
-`crates/solarxy-web/src/app.rs:5247-5275`, and installs its own bind group at
+`crates/solarxy-web/src/app/render.rs:969-997`, and installs its own bind group at
 `app.rs:1053` and `app.rs:5075`. So the chokepoint is a chokepoint on one shell and a copy on
 the other, which is the precise shape the rule was written to forbid.
 
@@ -269,7 +269,7 @@ directory holds one file today.
 ### Capture and still budgets
 
 - **Screenshot and capture: 4.0 megapixels.** `MAX_CAPTURE_PIXELS = 4_000_000`, declared twice
-  in `crates/solarxy-web/src/app.rs`, at `:2533` and `:2567`, once for screenshots and once
+  in `crates/solarxy-web/src/app/capture.rs`, at `:20` and `:54`, once for screenshots and once
   for turntable frames. Larger captures can lose the WebGPU device, and there is no device-loss
   recovery on the web.
 - **Still render tile: 4,194,304 pixels**, `TILE_BUDGET_PIXELS` at
@@ -277,7 +277,7 @@ directory holds one file today.
   passes and an 8,192-pixel maximum edge at `:83`. The preview tile budget is 256 by 256, at
   `:72`.
 - **Floating-point still in the browser: 16,000,000 pixels**,
-  `crates/solarxy-web/src/app.rs:679`. This one is a WebAssembly constraint rather than a GPU
+  `crates/solarxy-web/src/app/mod.rs:690`. This one is a WebAssembly constraint rather than a GPU
   one and the comment does the arithmetic: roughly forty bytes a pixel at peak, near 290
   megabytes, inside a 32-bit address space that also holds the document, the tracer's buffers
   and the page. It deliberately does not live in `solarxy-host` beside the other still
@@ -289,7 +289,7 @@ directory holds one file today.
 ### Cook budgets
 
 The resumable cook is given 6 milliseconds per frame in the browser, `COOK_BUDGET_MS` at
-`crates/solarxy-web/src/app.rs:74`, and 8 milliseconds on the desktop, `COOK_BUDGET` at
+`crates/solarxy-web/src/app/mod.rs:73`, and 8 milliseconds on the desktop, `COOK_BUDGET` at
 `crates/solarxy-app/src/state/update.rs:21`. Two numbers for one concept, in two shells, with
 nothing reconciling them and no record of why they differ.
 
