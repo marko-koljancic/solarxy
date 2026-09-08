@@ -40,6 +40,7 @@ mod node_tree;
 mod outliner;
 mod overlays;
 mod pane_toolbar;
+mod pass;
 mod preferences_modal;
 mod properties;
 mod renderer;
@@ -66,6 +67,7 @@ pub use renderer::EguiRenderer;
 
 pub(crate) use divider::DividerInfo;
 pub(crate) use dock::SolarxyTab;
+pub(crate) use pass::{CaptureFrame, FramePaint, PanelSources, ViewportChrome};
 pub(crate) use settings::PanelSettings;
 pub(crate) use intent::{
     CaptureIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,

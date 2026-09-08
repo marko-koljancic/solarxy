@@ -27,13 +27,8 @@
 
 use egui_dock::{DockState, NodeIndex, TabViewer};
 
-use crate::console::ConsoleState;
-use crate::state::hdri_info::HdriInfo;
-
 use super::intent::Intents;
-use super::material_inspector::MaterialInspectorState;
-use super::properties::ModelInfo;
-use super::settings::PanelSettings;
+use super::pass::{OpenFile, PanelSources, PanelState};
 use super::theme::Theme;
 
 /// The eight tab variants in the Solarxy dock. The `Viewport` variant is
@@ -106,25 +101,21 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     state
 }
 
-/// Per-frame `TabViewer` carrying mutable borrows into every tab's state.
-/// Constructed fresh inside `render_ui`'s egui closure each frame.
+/// Per-frame `TabViewer`, constructed fresh inside the interface pass.
+///
+/// **Eight fields where there were seventeen**, and the difference is grouping
+/// rather than removal: a panel that needs a new source adds a field to
+/// [`PanelSources`], and one that needs its own interface state adds a field to
+/// [`PanelState`]. Neither this struct nor the entry point's signature moves.
 pub(super) struct SolarxyTabViewer<'a> {
-    pub settings: PanelSettings<'a>,
+    pub sources: PanelSources<'a>,
+    pub open_file: OpenFile<'a>,
+    pub panels: PanelState<'a>,
     pub review: &'a mut crate::state::review::ReviewState,
-    pub console: &'a mut ConsoleState,
-    pub model: Option<&'a solarxy_renderer::model::Model>,
-    pub outliner_source: super::outliner::OutlinerSource<'a>,
-    pub model_info: Option<&'a ModelInfo>,
-    pub hdri_info: Option<&'a HdriInfo>,
-    pub validation: super::properties::ValidationView<'a>,
-    pub node_tree_source: super::node_tree::NodeTreeSource<'a>,
-    pub node_tree_state: &'a mut super::node_tree::NodeTreeState,
-    /// Everything the panels ask for this pass, drained once it is over.
     pub intents: &'a mut Intents,
-    pub material_inspector: &'a mut MaterialInspectorState,
+    pub toolbars: &'a super::pane_toolbar::PaneToolbarData<'a>,
     pub viewport_rect_out: &'a mut Option<egui::Rect>,
     pub theme: Theme,
-    pub pane_toolbar: super::pane_toolbar::PaneToolbarData<'a>,
 }
 
 impl TabViewer for SolarxyTabViewer<'_> {
@@ -138,7 +129,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Console => "Console".into(),
             SolarxyTab::MaterialInspector => format!(
                 "Material Inspector ({})",
-                self.model.map_or(0, |m| m.materials.len())
+                self.sources.model.map_or(0, |m| m.materials.len())
             )
             .into(),
             SolarxyTab::Properties => "Properties".into(),
@@ -153,15 +144,15 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 *self.viewport_rect_out = Some(ui.max_rect());
                 super::pane_toolbar::draw_pane_toolbars(
                     ui,
-                    &self.pane_toolbar,
-                    self.settings,
+                    self.toolbars,
+                    self.sources.settings,
                     self.intents,
                     self.theme,
                 );
                 ui.allocate_space(ui.available_size());
             }
             SolarxyTab::Sidebar => {
-                super::sidebar::draw_sidebar_content(ui, self.settings, self.intents);
+                super::sidebar::draw_sidebar_content(ui, self.sources.settings, self.intents);
             }
             SolarxyTab::ReviewPanel => {
                 super::review_panel::draw_review_panel_content(
@@ -172,14 +163,14 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 );
             }
             SolarxyTab::Console => {
-                super::console_view::draw_console_content(ui, self.console, &self.theme);
+                super::console_view::draw_console_content(ui, self.panels.console, &self.theme);
             }
             SolarxyTab::MaterialInspector => {
-                if let Some(model) = self.model {
+                if let Some(model) = self.sources.model {
                     super::material_inspector::draw_material_inspector_content(
                         ui,
                         model,
-                        self.material_inspector,
+                        self.panels.material_inspector,
                         &self.theme,
                     );
                 } else {
@@ -191,7 +182,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     draw_material_inspector_placeholder(
                         ui,
                         matches!(
-                            self.outliner_source,
+                            self.sources.outliner,
                             super::outliner::OutlinerSource::Scene { .. }
                         ),
                     );
@@ -200,21 +191,21 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Properties => {
                 super::properties::draw_properties_content(
                     ui,
-                    self.model_info,
-                    self.hdri_info,
-                    self.validation,
-                    self.settings,
+                    self.open_file.model_info,
+                    self.open_file.hdri_info,
+                    self.sources.validation,
+                    self.sources.settings,
                     self.intents,
                 );
             }
             SolarxyTab::Outliner => {
-                super::outliner::draw_outliner_content(ui, self.outliner_source, self.intents);
+                super::outliner::draw_outliner_content(ui, self.sources.outliner, self.intents);
             }
             SolarxyTab::NodeTree => {
                 super::node_tree::draw_node_tree_content(
                     ui,
-                    self.node_tree_source,
-                    self.node_tree_state,
+                    self.sources.node_tree,
+                    self.panels.node_tree,
                     self.intents,
                     self.theme,
                 );

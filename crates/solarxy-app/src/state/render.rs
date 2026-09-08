@@ -530,36 +530,39 @@ impl State {
             cameras: &scene_cameras,
             look_through: look_through_mirror,
         };
-        // The screenshot modal is suppressed on any capture frame so it
-        // cannot land in the shot; a re-capture additionally forces every
-        // review card open for that frame.
-        let suppress_screenshot_modal = self.capture_requested;
-        let force_expand_review = self.capture_requested && self.screenshot_expand_review;
         self.gui.render_ui(
-            settings,
-            &hud,
-            validation,
-            &self.device,
-            &self.queue,
-            &mut encoder,
-            &self.window,
-            &output.texture,
-            screen,
-            frame_ms,
-            divider,
-            &pane_gaps,
-            active_pane_rect,
-            &review_panes,
-            &recent_files,
+            crate::gui::FramePaint {
+                device: &self.device,
+                queue: &self.queue,
+                encoder: &mut encoder,
+                window: &self.window,
+                surface_texture: &output.texture,
+                screen,
+                frame_ms,
+            },
+            crate::gui::ViewportChrome {
+                divider,
+                pane_gaps: &pane_gaps,
+                active_pane_rect,
+                review_panes: &review_panes,
+                toolbars: pane_toolbar,
+            },
+            crate::gui::PanelSources {
+                settings,
+                hud: &hud,
+                validation,
+                model,
+                outliner: outliner_source,
+                node_tree: node_tree_source,
+                recent_files: &recent_files,
+            },
             &mut self.review,
-            model,
-            outliner_source,
-            node_tree_source,
-            pane_toolbar,
             &mut intents,
             &mut self.viewport_context_menu,
-            force_expand_review,
-            suppress_screenshot_modal,
+            crate::gui::CaptureFrame {
+                capturing: self.capture_requested,
+                expand_review: self.capture_requested && self.screenshot_expand_review,
+            },
         );
 
         // Everything the pass raised, in one ordered pass: the settings the
