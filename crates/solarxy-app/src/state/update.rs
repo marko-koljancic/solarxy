@@ -79,7 +79,7 @@ impl State {
             .display
             .lights_locked
             .then_some(self.env.lights_uniform);
-        self.env = build_bounds_env(
+        self.env = solarxy_host::build_bounds_env(
             &self.device,
             &self.queue,
             &self.renderer,
@@ -705,59 +705,6 @@ impl State {
         );
         true
     }
-}
-
-/// Build a scene environment around `bounds` with no model-derived
-/// visualization contents, and point its light bind group at the IBL the
-/// current mode shades with.
-///
-/// Cheap enough for the frame loop, unlike the environment a model load
-/// produces: with no normals geometry the visualization half allocates only
-/// the grid, floor, axes and bounds line buffers, every one of them sized by
-/// `bounds` rather than by a triangle count.
-///
-/// Free rather than a method because startup builds one before there is a
-/// `State` to call a method on, and the two must not drift apart.
-pub(super) fn build_bounds_env(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    renderer: &Renderer,
-    bounds: &solarxy_core::AABB,
-    grid_color: [f32; 3],
-    shadow_map_size: u32,
-) -> solarxy_renderer::environment::SceneEnvironment {
-    let vis = solarxy_renderer::visualization::VisualizationState::new_from_parts(
-        device,
-        &renderer.layouts,
-        bounds,
-        &[],
-        None,
-        grid_color,
-    );
-    let aspect = renderer.target_width.max(1) as f32 / renderer.target_height.max(1) as f32;
-    let mut env = solarxy_renderer::environment::SceneEnvironment::new(
-        device,
-        queue,
-        &renderer.layouts,
-        bounds,
-        aspect,
-        &renderer.ibl_res.brdf_lut,
-        &renderer.ibl_res.ltc,
-        shadow_map_size,
-        vis,
-    );
-    // `SceneEnvironment::new` seeds the bind group against a throwaway
-    // fallback IBL; rebind it to the live one, exactly as the model-load
-    // path does with the worker-built environment.
-    env.light_bind_group = create_light_bind_group(
-        device,
-        &renderer.layouts,
-        &env.light_buffer,
-        solarxy_host::active_ibl(renderer),
-        &renderer.ibl_res.brdf_lut,
-        &renderer.ibl_res.ltc,
-    );
-    env
 }
 
 /// A node's display name looked up across every context, root first,

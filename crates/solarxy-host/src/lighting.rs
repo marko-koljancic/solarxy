@@ -194,3 +194,74 @@ pub fn apply_scene_environment(
 
     result
 }
+
+/// Build a scene environment around `bounds` with no model-derived
+/// visualization contents, and point its light bind group at the IBL the
+/// current mode shades with.
+///
+/// Cheap enough for the frame loop, unlike the environment a model load
+/// produces: with no normals geometry the visualization half allocates only
+/// the grid, floor, axes and bounds line buffers, every one of them sized by
+/// `bounds` rather than by a triangle count.
+///
+/// This was written twice. The desktop had already factored it out of its own
+/// bounds refit; the browser inlined the identical construction inside its
+/// refit, which is why a name-matching duplication census recorded the two
+/// refits as one 75-line duplicate and missed that the shared half was the
+/// build rather than the refit. **What is shared is the build. The refit's
+/// guards are not**: a loaded model pins the desktop's environment to itself,
+/// and a live preview or a running scene clock suppresses the browser's, and
+/// neither shell wants the other's answer. Those stay at the call sites.
+///
+/// Free rather than a method for the reason the shape rule gives, and because
+/// the desktop's startup builds one before there is any host to hang a method
+/// on, so the startup path and the refit path cannot drift.
+///
+/// `shadow_map_size` is a parameter rather than a constant because the desktop
+/// takes it from a user preference and the browser from a fixed value; the two
+/// want the same arithmetic and their own numbers.
+#[must_use]
+pub fn build_bounds_env(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    renderer: &Renderer,
+    bounds: &solarxy_core::AABB,
+    grid_color: [f32; 3],
+    shadow_map_size: u32,
+) -> SceneEnvironment {
+    let vis = solarxy_renderer::visualization::VisualizationState::new_from_parts(
+        device,
+        &renderer.layouts,
+        bounds,
+        &[],
+        None,
+        grid_color,
+    );
+    // Both dimensions are clamped. The browser's own dimension guard already
+    // refuses a zero width, so the clamp is unreachable there and changes
+    // nothing; on the desktop it has always been here.
+    let aspect = renderer.target_width.max(1) as f32 / renderer.target_height.max(1) as f32;
+    let mut env = SceneEnvironment::new(
+        device,
+        queue,
+        &renderer.layouts,
+        bounds,
+        aspect,
+        &renderer.ibl_res.brdf_lut,
+        &renderer.ibl_res.ltc,
+        shadow_map_size,
+        vis,
+    );
+    // `SceneEnvironment::new` seeds the bind group against a throwaway
+    // fallback IBL; rebind it to the live one, exactly as the model-load
+    // path does with the worker-built environment.
+    env.light_bind_group = create_light_bind_group(
+        device,
+        &renderer.layouts,
+        &env.light_buffer,
+        active_ibl(renderer),
+        &renderer.ibl_res.brdf_lut,
+        &renderer.ibl_res.ltc,
+    );
+    env
+}

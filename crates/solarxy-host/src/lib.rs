@@ -168,7 +168,10 @@ pub mod view;
 
 pub use cameras::{depth_bounds, ensure_pane_cameras};
 pub use compare::{ImageDifference, compare_rgba8};
-pub use lighting::{EnvironmentApplied, active_ibl, apply_scene_environment, rebuild_light_bind_group};
+pub use lighting::{
+    EnvironmentApplied, active_ibl, apply_scene_environment, build_bounds_env,
+    rebuild_light_bind_group,
+};
 pub use pane::{
     EncodedPane, PaneComposite, PaneScene, PaneUniforms, apply_viewer_rig, composite_and_submit,
     encode_pane_passes, render_3d_passes, render_overdraw_pane, setup_pane_lighting,

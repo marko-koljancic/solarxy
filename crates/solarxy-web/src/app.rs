@@ -5020,35 +5020,14 @@ impl SolarxyApp {
         let grid_color = self
             .resolve_background(&self.view.pane_settings[0])
             .grid_color();
-        let vis = VisualizationState::new_from_parts(
-            &self.device,
-            &self.renderer.layouts,
-            &bounds,
-            &[],
-            None,
-            grid_color,
-        );
-        let aspect = self.renderer.target_width as f32 / self.renderer.target_height.max(1) as f32;
-        let mut env = SceneEnvironment::new(
+        self.env = solarxy_host::build_bounds_env(
             &self.device,
             &self.queue,
-            &self.renderer.layouts,
+            &self.renderer,
             &bounds,
-            aspect,
-            &self.renderer.ibl_res.brdf_lut,
-            &self.renderer.ibl_res.ltc,
+            grid_color,
             SHADOW_MAP_SIZE,
-            vis,
         );
-        env.light_bind_group = create_light_bind_group(
-            &self.device,
-            &self.renderer.layouts,
-            &env.light_buffer,
-            solarxy_host::active_ibl(&self.renderer),
-            &self.renderer.ibl_res.brdf_lut,
-            &self.renderer.ibl_res.ltc,
-        );
-        self.env = env;
         self.env_bounds = bounds;
         // The rebuilt environment starts with empty per-mesh viz data; the
         // aggregate refills it when a pane wants overlays (and the attr
