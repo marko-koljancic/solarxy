@@ -44,7 +44,7 @@ documents so a single edit is no longer one transaction.
 
 ## Decision
 
-Every graph carries a `ContextKind`, one of `Obj`, `Geo`, `Mat` or `Tex`
+Every graph carries a `ContextKind`, one of `Obj`, `Sop`, `Mat` or `Cop`
 (`crates/solarxy-graph/src/document/mod.rs:69`). The kind lives on the graph, not in its
 address: the address is separately `Root` or `Subflow(node)`
 (`crates/solarxy-graph/src/document/mod.rs:101`), so a subflow is any child network regardless

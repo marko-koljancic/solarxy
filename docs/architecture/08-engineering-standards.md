@@ -243,7 +243,7 @@ otherwise is a wish list.
 | **parameter** | A named authored value on a node. May be a literal or an expression. | `crates/solarxy-graph/src/params.rs` |
 | **cook** | Evaluating a node to produce its outputs. Budgeted and resumable. Never "evaluate", "compute" or "execute" for this. | `crates/solarxy-graph/src/cook/` |
 | **registry** | The catalogue of node types, and the snapshot of it the frontend interprets. | `crates/solarxy-graph/src/registry/` |
-| **context** | One graph canvas, of kind Obj, Geo, Mat or Tex. The root canvas is a context. | `crates/solarxy-graph/src/document/mod.rs` |
+| **context** | One graph canvas, of kind Obj, Sop, Mat or Cop. The root canvas is a context. | `crates/solarxy-graph/src/document/mod.rs` |
 | **subflow** | A child context owned by a container node. | `GraphContext::Subflow`, same file |
 | **delta** | The engine-to-renderer scene contract. The only thing that crosses between them. | `crates/solarxy-core/src/scene.rs` |
 | **attribute** | Named per-element data on geometry, in a lane of f32, vec2, vec3 or vec4. | `crates/solarxy-kernel/src/set.rs` |

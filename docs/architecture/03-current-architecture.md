@@ -592,21 +592,28 @@ line 203 against the descriptor vector's own length. The file additionally asser
 per-category counts as a hardcoded table, so moving one node between categories fails the build
 by design.
 
-The registry's extensibility contract is real for plain geometry operators and not real beyond
-them. `crates/solarxy-graph/src/nodes/mod.rs` claims adding a node is two touch points. It is
-not, for anything that is a light, a camera, an environment, a container or a manipulable
-object: `crates/solarxy-graph/src/engine/scene.rs:92` dispatches scene lowering on the string
-literals `"geo"`, `"camera"` and `"environment"` and then a six-arm string match for lights;
-`crates/solarxy-graph/src/engine/mod.rs:776` declares transform roles from a hardcoded type-id
-table; and `invoke_action` matches type-id and key string pairs. Counting the non-test engine
-code, more than a dozen sites hardcode a type id. The narrower claim in the registry itself,
-that a container's child network is created from its declared `opens` field with no type-id
-test, does hold.
+The registry's extensibility contract is real for containers and for plain geometry operators,
+and not real beyond them. `crates/solarxy-graph/src/nodes/mod.rs` claims adding a node is two
+touch points. It is not, for anything that is a light, a camera, an environment or a
+manipulable object: `crates/solarxy-graph/src/engine/scene.rs` dispatches scene lowering on the
+string literals `"camera"` and `"environment"` and then a six-arm string match for lights, and
+`invoke_action` matches type-id and key string pairs. Counting the non-test engine code, roughly
+a dozen sites still hardcode a type id.
+
+**Containers left that set in v0.10.0.** Ten sites decided that a node opened a geometry network
+by comparing its type id to a literal, and each now asks `Registry::opens`
+(`crates/solarxy-graph/src/registry/mod.rs`): scene lowering, both pick loops, the transform
+role table, the display-geometry filter, the world-matrix guard, the two flag and transform
+resolvers, the subflow gizmo frame, and the document synthesised around an imported model. Two
+of the ten were not comparisons but latent defects, fetching the container's descriptor by name
+while already holding the node whose descriptor they wanted. `a_second_container_opening_the_same_kind_behaves_as_the_first`
+in `crates/solarxy-graph/src/engine/tests.rs` is what holds it, by driving a fabricated second
+container through every one of them.
 
 ### Typed contexts
 
-`ContextKind` is a four-variant enum, `Obj`, `Geo`, `Mat`, `Tex`, at
-`crates/solarxy-graph/src/document/mod.rs:69`, stored as a field on `Graph` at line 199 rather
+`ContextKind` is a four-variant enum, `Obj`, `Sop`, `Mat`, `Cop`, at
+`crates/solarxy-graph/src/document/mod.rs`, stored as a field on `Graph` rather
 than encoded in the address. The address is a separate two-variant `GraphContext` at line 101:
 `Root` or `Subflow(NodeId)`. The root graph is always `Obj`; a child network's kind is whatever
 its owning container declares that it opens.
@@ -772,6 +779,10 @@ maps. There is no cache key type, no input digest, and no per-port state. Notice
 node instance carries a `type_version` independent of its descriptor's `version`, which is the
 whole of the per-node migration mechanism, and that a graph carries a `ContextKind` while a
 graph's address is a separate two-variant concept.
+
+The kind names are the field's rather than this project's, since v0.10.0: a geometry network is
+a SOP network and an image network is a COP network, and the containers that open them are
+`sopnet` and `copnet` beside the `matnet` that did not move.
 
 ```mermaid
 sequenceDiagram
@@ -982,10 +993,12 @@ silently and fails later at cook time.
 
 ### Versioning
 
-Three constants, all currently 1, at `crates/solarxy-scenefile/src/lib.rs:41`, `:45` and `:53`:
+Three constants, all currently 2, in `crates/solarxy-scenefile/src/lib.rs`:
 `SCHEMA_VERSION_CURRENT` (what this build stamps), `MIN_READER_CURRENT` (the minimum reader it
 stamps), and `READER_VERSION` (what this build implements). The scene JSON carries
-`schema_version` and `min_reader` as required fields.
+`schema_version` and `min_reader` as required fields. The last two are held in step by a `const`
+assertion, added in v0.10.0; the prose beside them had claimed the lockstep for two releases and
+nothing enforced it.
 
 The read gate runs in this order. A `min_reader` above `READER_VERSION` fails the load. An
 absent or non-integer `schema_version` fails the load, a deliberate tightening recorded in the
@@ -1002,14 +1015,25 @@ produced the first rule applies equally to the second and was not applied to it.
 
 There are two mechanisms at two granularities, and only one of them carries weight.
 
-**Container level** is `migrate_scene` at `crates/solarxy-scenefile/src/lib.rs:286`: a single
-match with one real arm that restamps version zero to one and rewrites no fields, an identity
-arm, and an error arm. Its documentation says it steps a raw value up one version at a time.
-The caller at line 201 calls it once, not in a loop. Today that is invisible because there is
-exactly one step and it is a no-op. The day the current schema version becomes 2, a version-zero
-file will run the zero arm, be restamped to 1, and be deserialized as if it were version 1; the
-1-to-2 step will never execute. The only test of the mechanism asserts that a version-zero file
-lands at 1, which is precisely the invariant that will keep passing after the bug becomes real.
+**Container level** is `migrate_scene` in `crates/solarxy-scenefile/src/lib.rs`: a loop over
+successive steps, with the driver stamping each version rather than the steps doing it. There
+are two steps. Zero to one restamps and rewrites no fields, because the only shape change at the
+public-beta freeze was a serde-defaulted field. One to two rewrites the context vocabulary on
+the raw document: the sub-graph kinds `geo` and `tex` become `sop` and `cop`, the container type
+ids `geo` and `texnet` become `sopnet` and `copnet`, and any container carrying no name is given
+the display name it used to answer to, because expressions address nodes by name and a changed
+display name would otherwise redirect a path silently.
+
+This was a single match applied once until v0.10.0, while its own documentation, this document
+and [ADR 0006](adr/0006-slxy-scene-file-format.md) all described stepwise behaviour, and the
+release that added a second step is the one that would have broken. It is now held by a test
+that walks every version behind the current one and asserts each reaches it, so the test grows a
+case per format version rather than needing one written.
+
+The rewrite runs on raw JSON before typing, and that ordering is load-bearing rather than
+stylistic: an unmigrated container matches no registered descriptor, and the recovery path for
+an unknown type keeps a node's id and position while discarding every parameter, so a container
+would lose its transform, its flags and its name, and orphan its whole network.
 `SceneFileError::UnsupportedVersion` is currently unreachable for the same reason.
 
 **Node level** is `crates/solarxy-graph/src/migration.rs`, and this one is a genuine ordered

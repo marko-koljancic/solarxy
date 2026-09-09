@@ -53,7 +53,7 @@ export interface Stat {
 export const STATS: Stat[] = [
   { n: String(NODE_TYPE_COUNT), l: "Node types, test-enforced" },
   { n: String(CRATE_COUNT), l: "Workspace crates" },
-  { n: String(CONTEXT_COUNT), l: "Typed contexts: Obj, Geo, Mat, Tex" },
+  { n: String(CONTEXT_COUNT), l: "Typed contexts: Obj, Sop, Mat, Cop" },
   { n: String(SHELL_COUNT), l: "Shells: desktop, CLI, web" },
   { n: String(VALIDATION_KIND_COUNT), l: "Validation kinds" },
   { n: String(CARD_COUNT), l: "Roadmap cards, all dispositioned" },
@@ -172,9 +172,9 @@ export const ARCH_LAYERS: ArchLayer[] = [
 ];
 
 export const CONTRACTS: Stat[] = [
-  { n: "4", l: "typed contexts, Obj / Geo / Mat / Tex, with cross-context path references" },
+  { n: "4", l: "typed contexts, Obj / Sop / Mat / Cop, with cross-context path references" },
   { n: "13", l: "wire DataTypes and a snapshot-tested 13x13 coercion matrix; no Any / Object" },
-  { n: "1", l: "frozen schema_version; every node change rides a type_version bump + migration" },
+  { n: "2", l: "scene schema_version, migrated forward one step at a time; every node change rides a type_version bump + migration" },
   { n: "0", l: "frontend changes to add a Rust node; the registry snapshot drives the UI" },
 ];
 

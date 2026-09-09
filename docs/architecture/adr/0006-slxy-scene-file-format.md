@@ -4,7 +4,8 @@
 - **Date**: 2026-09-07
 - **Embodied in**: 0.7.0, the release at which the schema version was frozen at 1 and the
   compatibility promise below begins. The container predates it; version 0 was the pre-beta
-  format and carried no guarantees.
+  format and carried no guarantees. Version 2 arrived at 0.10.0 with the context vocabulary,
+  and is the first bump the promise actually had to carry.
 
 ## Context
 
@@ -81,13 +82,23 @@ asymmetrically: an absent `schema_version` is fatal, with a comment explaining t
 it made a corrupt file indistinguishable from an old one, while an absent `min_reader` silently
 reads as 0 and passes the gate. The stricter gate is the one that can be omitted.
 
-The container migration is a placeholder called once rather than in a loop. There is one real
-step, from 0 to 1, which only restamps the version, and the function's own documentation says
-it steps a value up one version at a time, which the caller does not do. The day the schema
-version becomes 2, a version-0 file will run the 0 step, be restamped to 1, and be read as a
-version-1 file with no warning. The node-level machinery, which runs a per-type hook once per
-version step over raw JSON before typing, is where the real migration weight sits, and it is a
-genuine loop.
+The container migration was a placeholder called once rather than in a loop, with one real step
+from 0 to 1 that only restamped the version, while the function's own documentation said it
+stepped a value up one version at a time. This paragraph named the failure precisely: the day
+the schema version became 2, a version-0 file would run the 0 step, be restamped to 1, and be
+read at the newer shape with no warning. That day was 0.10.0, and the loop landed first, ahead
+of the step that would have exposed it. The driver stamps each version rather than the steps
+doing it, so a step that forgets cannot leave a document that migrates again on every open.
+
+The node-level machinery, which runs a per-type hook once per version step over raw JSON before
+typing, was already a genuine loop and is unchanged.
+
+The 1-to-2 step is also the first one that rewrites fields, and it establishes two rules the
+next one should follow. It runs on raw JSON before typing, because an unmigrated node matches no
+descriptor and the recovery path for an unknown type discards every parameter. And it writes an
+explicit name onto any container that had none, because a node with no name answers to its
+type's display name and expressions address nodes by name, so a display-name change silently
+redirects a path. Neither rule is obvious from the outside and both are cheap to omit.
 
 Parameters are not self-describing: a parameter's JSON is a bare number or a bare string, and
 reading it back requires the registry's declared type to tell an integer from a float from an

@@ -205,14 +205,10 @@ was, it should say so at the call sites; if it was not, this is a straightforwar
 
 ### B7. Step the scene migration in a loop
 
-**What.** The schema migration entry point is called once, while its own documentation
-describes stepping one version at a time. Correct today with one step defined; wrong on the day
-a second is added, and wrong silently.
-
-**Size.** Small.
-
-**If skipped.** The second schema version ships a migration that is never reached from the
-first, and the failure appears as a malformed document rather than as a version error.
+**Done in 0.10.0**, ahead of the release that added the second schema version, so the failure
+this item described never occurred. The entry point walks the chain and a test asserts that
+every version behind the current one reaches it, generating its cases from the version constant
+so it grows with the format rather than needing a case written per bump.
 
 ### B8. Preserve parameters on an unknown node type
 
@@ -228,14 +224,15 @@ documentation says it does not.
 
 ### B9. Commit a real old scene file as a migration fixture
 
-**What.** Every migration test constructs its input with the current writer. That proves the
-migration is self-consistent, not that it reads a file an earlier release actually wrote.
+**Done in 0.10.0.** Two shipped sample scenes were copied into
+`crates/solarxy-graph/tests/fixtures/scenes/` before the context vocabulary moved, so they are
+genuinely files an earlier release wrote rather than ones the current writer produced. They open,
+migrate and cook clean, and each is asserted equal to the document its regenerated twin
+describes, which is the strong form of the claim. A second test pins their stamp, because a
+regeneration alongside the samples would empty the coverage without failing anything.
 
-**Size.** Small, and it is work only a person can do: produce a file with a real old build and
-commit it.
-
-**If skipped.** The compatibility promise in [ADR 0006](adr/0006-slxy-scene-file-format.md) is
-tested against itself.
+It turned out not to need a real old build after all: the samples are committed artefacts, so a
+copy taken before the change is exactly the artefact this item asked for.
 
 ## Group C: make the material model one model
 

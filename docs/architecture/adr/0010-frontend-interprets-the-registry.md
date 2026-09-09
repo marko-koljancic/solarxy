@@ -74,7 +74,8 @@ The corpus found six more branches on a node type identifier, and they belong he
 in a footnote. Auto-layout excludes notes (`web/src/flow/layout.ts:46`). The pane toolbar's
 look-through picker filters root nodes for `"camera"`
 (`web/src/components/PaneToolbar.tsx:280`). Double-click-to-enter-a-container is gated on
-`"geo"` (`web/src/components/Viewport.tsx:235`). The text pane collects nodes of type `"text"`
+the SOP container's type id (`web/src/components/Viewport.tsx`), where the engine now asks its
+descriptor instead. The text pane collects nodes of type `"text"`
 (`web/src/components/TextPane.tsx:65`). And the parameter panel's generic action button is
 diverted for `"render"` into the still-render dialog rather than invoking the engine action
 (`web/src/components/ParameterPanel.tsx:410`), which is the most consequential of them because

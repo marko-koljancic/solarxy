@@ -278,16 +278,26 @@ Partial, and unevenly.
 names the command that regenerates it. That is a real contract check on the registry snapshot
 the frontend consumes, and it works.
 
-The migration side is weaker in two specific ways, both recorded in
-[03](03-current-architecture.md) with their evidence. The schema migration entry point is
-called once rather than in a loop, so it steps one version even though its own documentation
-describes stepwise behaviour, which is correct today with one step defined and wrong on the
-day a second is added. And no fixture at an old version is committed: every migration test
-constructs its input with the current writer, so the tests prove the migration is
-self-consistent rather than that it reads a file some earlier release actually wrote.
+The migration side was weaker in two specific ways, and v0.10.0 closed both because that
+release is the one that added a second schema version.
 
-The fix for the second is cheap and is the kind of thing only a person can do: commit a real
-file, produced by a real old build, and read it in a test.
+The schema migration entry point was called once rather than in a loop, so it stepped one
+version even though its own documentation described stepwise behaviour. It walks the chain now,
+and a test asserts that every version behind the current one reaches it, deriving its cases from
+the version constant rather than listing them.
+
+And no fixture at an old version was committed: every migration test constructed its input with
+the current writer, so the tests proved the migration self-consistent rather than able to read a
+file some earlier release wrote. Two real files now sit in
+`crates/solarxy-graph/tests/fixtures/scenes/`, byte copies of shipped sample scenes taken before
+the vocabulary moved. A second test pins their stamp, because they are only worth anything while
+they stay older than the build reading them, and regenerating them alongside the samples would
+empty the coverage without failing anything.
+
+The distinction that makes those fixtures necessary is worth stating, because the milestone that
+produced them had it backwards. The bundled sample scenes are rebuilt from scratch by their
+generator and written straight at the current version, so they never pass through a migration:
+that gate covers a rename. Only a committed old file covers the migration.
 
 ## Crossing 4: the worker boundaries
 

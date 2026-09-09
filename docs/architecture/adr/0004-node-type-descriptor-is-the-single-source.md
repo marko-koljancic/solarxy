@@ -81,15 +81,21 @@ against the live registry as text, so a descriptor change that is not regenerate
 build. The generated node reference under `schemas/` is guarded the same way.
 
 The honest limit: the engine still special-cases specific type identifiers in several places,
-so the descriptor is the single source for geometry operators and not yet for everything.
-Scene lowering dispatches on the string literals `"geo"`, `"camera"` and `"environment"` and
-then on a six-arm `is_light` match (`crates/solarxy-graph/src/engine/scene.rs:92` and `:132`).
-`transform_params_for` (`crates/solarxy-graph/src/engine/mod.rs:776`) is a hardcoded table
-saying which transform roles a type has, even though `solarxy_core::gizmo::TransformParams`
-exists so a node can declare them. `invoke_action` matches on type-identifier and key pairs.
-Several more sites hardcode `"geo"`, `"transform"`, `"render"` and `"environment"`. So adding a
-light, a camera or a manipulable node touches files outside `nodes/`, and the claim that
-adding a node is two touch points holds for a plain geometry operator only.
+so the descriptor is the single source for containers and geometry operators and not yet for
+everything. Scene lowering dispatches on the string literals `"camera"` and `"environment"` and
+then on a six-arm `is_light` match (`crates/solarxy-graph/src/engine/scene.rs`).
+`invoke_action` matches on type-identifier and key pairs. Several more sites hardcode
+`"transform"`, `"render"` and `"environment"`. So adding a light, a camera or a manipulable node
+touches files outside `nodes/`, and the claim that adding a node is two touch points holds for a
+container or a plain geometry operator.
+
+**Containers came off that list in v0.10.0.** Ten sites decided a node opened a geometry network
+by comparing its type id to a literal, including `transform_params_for`, which was a hardcoded
+table that named the container directly. They ask `Registry::opens` now, and a test drives a
+fabricated second container opening the same kind through every one of them. That was the
+prerequisite for the contexts the platform ladder adds: each would otherwise have been another
+sweep of the same sites. The remaining hardcoded identifiers are lights, cameras, the
+environment and the render node, and the fix for those is still the one described below.
 
 That is a defect against this decision rather than a qualification of it, and the obvious fix
 is not the obvious one: `NodeRole::Light` cannot simply replace `is_light`, because the
