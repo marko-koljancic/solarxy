@@ -1033,37 +1033,32 @@ way. `GraphContext` is `"root" | { subflow: NodeId }`, matching the Rust enum's 
 
 ### 6.3 Keeping boundary types in sync with Rust
 
-**Today.** `web/src/engine/types.ts` is 931 lines and hand-authored. Its own header says so:
+**Rule.** The mirror is hand-authored and mechanically checked. Rust owns the schema; when the
+two disagree the mirror is normally the side that moves.
 
-```ts
-// Hand-authored TypeScript mirror of the frozen Rust serde boundary shapes
-// (solarxy-graph). These are the wasm boundary contract; they are pinned on
-// the Rust side by `command_boundary_json_shape_is_camelcase` and exercised
-// live. A generated .d.ts via tsify is a documented follow-up; until then
-// keep this file in lockstep with the Rust `Command`/`EngineEvent`/snapshot
-// definitions (all camelCase).
-```
+**Today, held.** `web/src/engine/types.ts` is 931 lines and hand-authored, and since 0.10.0
+`crates/solarxy-core/tests/boundary_mirror.rs` compares it against the Rust definitions type by
+type, variant by variant and field by field, naming whatever is missing or stale on either
+side. Generation was the alternative and was ruled against in
+[adr/0015](adr/0015-the-boundary-mirror-is-checked-not-generated.md): it removes the error class
+rather than reporting it, but it adds a build step and a generated file to review where a test
+adds neither, and it replaces types a reader can annotate with output.
 
-**What that pin actually covers.** Three tests serialise a boundary shape and assert on it:
+**Two guards, two failures, and neither subsumes the other.** The check compares two
+*declarations*. The three camelCase tests,
 `command_boundary_json_shape_is_camelcase` (`crates/solarxy-graph/src/engine/tests.rs:383`),
 `review_command_boundary_shape_is_camelcase` (`:1897`) and
-`gizmo_command_boundary_json_shape_is_camelcase` (`:4210`). Between them they exercise **six**
-`Command` variants of 35: `AddNode`, `ResetParams`, `AddAnnotation`, `ReanchorAnnotation`,
-`CancelTransaction`, `EnsureTransformTarget`. Plus one event shape, `nodeAdded`, of 21.
+`gizmo_command_boundary_json_shape_is_camelcase` (`:4212`), serialize a real value and prove the
+*serde attributes* are right, which comparing declarations cannot see. Deleting either reopens a
+failure that has already shipped.
 
-**Rule, stated plainly.** Hand-authoring should not continue at this coverage. Six of 35 pinned
-means a variant added on either side and forgotten on the other is caught by nothing until a
-user hits it, which is exactly what happened with the still dialog's readouts. Two acceptable
-resolutions, and the choice is a real decision:
-
-- **Generate.** `tsify` produces the `.d.ts` from the Rust types, and the hand-written file
-  becomes a thin re-export of the generated one plus any frontend-only types. This is what the
-  header already names as the follow-up. It costs a build-order dependency the web build
-  already has, since `web/src/wasm/pkg/` must exist before `tsc` runs.
-- **Pin exhaustively.** Keep hand-authoring but assert every variant, by driving the pin from a
-  list the compiler forces to be complete rather than from hand-written cases.
-
-Doing neither is the current state and is the position this rule exists to close.
+**Membership is derived, which is the part worth protecting.** The check seeds from two module
+paths and reaches everything else by following the type names its fields mention, so a type
+added to the boundary is checked with no other edit. Only the exceptions are written down, and a
+reachable type matching none of them fails rather than being skipped. A guard that knows what to
+look at from a hand-kept list has the failure mode of the thing it guards, one level up: the
+older `tokens_drift.rs` scan names two enums beside it, and `IssueScope` was not one of them,
+which is why its wrong casing survived until the exhaustive check arrived.
 
 ### 6.4 Component boundaries and composition
 

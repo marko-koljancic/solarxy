@@ -175,19 +175,40 @@ Hand-mirroring is a legitimate choice. It avoids a code generator in the build, 
 TypeScript express things the Rust shape does not, and it keeps the frontend readable. What it
 does not do is stay correct by itself.
 
-### What actually pins the two sides today
+### What pins the two sides
 
-Three tests and one source grep, and between them they cover a small fraction of the surface.
+One exhaustiveness check, three serialization tests and one source grep. They are not
+redundant with each other, and the first was added in 0.10.0.
 
-- `crates/solarxy-graph/src/engine/tests.rs:383`, `:1897` and `:4210` each serialize a handful
+- `crates/solarxy-core/tests/boundary_mirror.rs` compares every type that crosses, variant by
+  variant and field by field, and names whatever is missing or stale on either side. It reads
+  source on both sides, which is forced rather than chosen: the host event enum lives behind
+  `cfg(target_arch = "wasm32")`, so no native test can construct one, and the TypeScript is not
+  Rust at all.
+- `crates/solarxy-graph/src/engine/tests.rs:383`, `:1897` and `:4212` each serialize a handful
   of command variants and assert the JSON shape is camelCase. Six variants across the three.
-- `crates/solarxy-core/tests/tokens_drift.rs:1088` is a source-level scan asserting that two
+- `crates/solarxy-core/tests/tokens_drift.rs:1071` is a source-level scan asserting that two
   named enums carry `rename_all_fields = "camelCase"`.
 
-Nothing asserts variant exhaustiveness. The Rust `Command` enum has 35 variants and
-`EngineEvent` has 21; nothing checks that the TypeScript union has 35 and 21 members, that the
-names match, or that each variant's fields match. A variant added in Rust and forgotten in
-TypeScript compiles on both sides and fails at runtime as an unhandled case.
+**The check and the serialization tests catch different failures, and neither subsumes the
+other.** The check compares two *declarations* and proves they agree. The tests serialize a real
+value and prove the *serde attributes* are right, which a comparison of declarations cannot see.
+`IssueScope` was the worked example: a declaration that looked correct on both sides and
+serialized in the wrong case.
+
+**Membership is derived rather than listed.** The check seeds from two module paths,
+`crates/solarxy-web/src/app/` and `crates/solarxy-graph/src/engine/`, and reaches everything
+else by following the type names its fields mention. A type added to either module, or pointed
+at by a new field, is checked with no other edit. What stays written down is only the
+exceptions, and a reachable type matching none of them fails rather than being skipped. A
+check that knew what to look at from a hand-kept list would fail in exactly the way it exists
+to prevent, one level up.
+
+Three live defects were standing when it landed, all of which it now catches:
+`ViewStateDto::pane_camera_locked` mirrored as `paneCameraLock`, so the pane camera-lock toggle
+read `undefined` and could only ever be set; `DisplaySettings::point_size` reaching the wire
+with no declaration to read it; and `IssueScope` renaming its variants without renaming its
+fields.
 
 ### The trap this boundary has already sprung
 
@@ -217,7 +238,8 @@ State it as three rules.
    the frontend can discriminate. A panic in wasm poisons the instance, so any path where the
    engine can refuse must refuse in the return type.
 
-Rule 2 is the one with teeth and it is not written yet.
+Rule 2 is the one with teeth. It was written in 0.10.0 as
+`crates/solarxy-core/tests/boundary_mirror.rs`; rule 3 is still a target.
 
 ## Crossing 2: the engine to the renderer
 
@@ -349,11 +371,11 @@ and is worth doing at the same time, since the allow-list is already written.
 
 ## What this document owes
 
-Two things are stated here as target and are not true yet. The `solarxy-studio` rows in the
-allow-matrix describe a crate that does not exist. The boundary exhaustiveness test for the
-TypeScript mirror does not exist. Both are steps in
-[09-evolution-and-roadmap.md](09-evolution-and-roadmap.md), and until they land, this document
-is a specification rather than a description.
+One thing is stated here as target and is not true yet: the `solarxy-studio` rows in the
+allow-matrix describe a crate that does not exist. It is a step in
+[09-evolution-and-roadmap.md](09-evolution-and-roadmap.md), and until it lands, that part of
+this document is a specification rather than a description. The boundary exhaustiveness test
+for the TypeScript mirror was the other, and it landed in 0.10.0.
 
 ## Open questions
 

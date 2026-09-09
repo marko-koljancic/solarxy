@@ -111,8 +111,14 @@ sides and fails at runtime.
 **Settled 2026-09-07.** This item is now the decision rather than one of two options.
 [adr/0015](adr/0015-the-boundary-mirror-is-checked-not-generated.md) rules that the mirror stays
 hand-written and is checked, closing the open question [05](05-boundaries-and-contracts.md) left
-standing. The 0.10.0 milestone had specified generation and was reversed to match, so this item
-is scheduled in that release rather than unscheduled.
+standing. The 0.10.0 milestone had specified generation and was reversed to match.
+
+**Delivered in 0.10.0** as `crates/solarxy-core/tests/boundary_mirror.rs`, which reads both
+sides as source and compares every type that crosses. It found three live defects standing at
+the time it landed, one of them the field-naming trap this item cites: `IssueScope` renamed its
+variants without renaming its fields, and the older guard could not have seen it because that
+guard names the two enums it checks in a list beside itself. Membership in the new check is
+derived from two module paths instead.
 
 ## Group B: close the silent correctness defects
 

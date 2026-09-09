@@ -7,7 +7,7 @@
 
 `web/src/engine/types.ts` is 931 hand-written lines mirroring roughly eighty Rust types that
 cross the WebAssembly boundary: `Command`, `EngineEvent`, `HostEvent`, the registry snapshot,
-and the boundary record types in `crates/solarxy-web/src/app.rs`. Rust owns the schema; the
+and the boundary record types in `crates/solarxy-web/src/app/`. Rust owns the schema; the
 TypeScript is a copy of it maintained by hand.
 
 Three Rust tests pin a sample of variants, and one source-level scan pins the serde attributes.
@@ -15,7 +15,7 @@ Nothing asserts that the two sides carry the same set of variants and fields. A 
 variant added in Rust and forgotten in TypeScript compiles, links, ships, and fails only at
 runtime.
 
-That is not hypothetical. `crates/solarxy-web/src/app.rs:198-205` records the failure it already
+That is not hypothetical. `crates/solarxy-web/src/app/mod.rs` records the failure it already
 caused: `HostEvent` carried `rename_all` without `rename_all_fields`, so a multi-word field
 crossed the boundary in snake case while the TypeScript declared it camel, and the still-render
 dialog's elapsed and remaining readouts were blank for a whole release. Neither side was wrong
@@ -33,8 +33,8 @@ the parameter panel reads, so the mirror moves under more pressure than it has e
 ### Option A: generate the TypeScript from the Rust definitions
 
 A build step emits the mirror, and the generated file is committed with a drift gate asserting
-it matches what the generator produces. This is what `web/src/engine/types.ts:4-5` already names
-as the intended follow-up.
+it matches what the generator produces. This is what the mirror's own header named as the
+intended follow-up until this decision replaced it.
 
 It removes the class of error entirely rather than reporting it: a missing variant cannot exist,
 because nobody writes the file.
@@ -91,3 +91,17 @@ now reads checked, and the board epic for the work is rescoped from a generator 
 
 If the boundary later grows past what a source scan can read reliably, generation is still
 available and this ADR is superseded rather than edited.
+
+## Delivered
+
+0.10.0, as `crates/solarxy-core/tests/boundary_mirror.rs`. Three live defects were standing when
+it landed and it catches all three: a mirrored field name that differed by one letter and left a
+toggle permanently off, a field reaching the wire with no declaration to read it, and
+`IssueScope` renaming its variants without renaming its fields.
+
+The consequence this ADR worried about is the one that had to be designed around. Membership is
+seeded from two module paths and closed transitively over the type names fields mention, so no
+list says what to check; only the exceptions are written down, and a reachable type matching
+none of them fails rather than being skipped. An unmodelled serde rule panics rather than
+passing a name through unchanged, since a silently unchecked type is this failure one level up.
+
