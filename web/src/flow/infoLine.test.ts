@@ -39,7 +39,7 @@ function desc(
     displayName: "T",
     category,
     categoryLabel: category[0].toUpperCase() + category.slice(1),
-    contexts: ["obj", "geo"],
+    contexts: ["obj", "sop"],
     opens: null,
     inputs: [],
     outputs: [],

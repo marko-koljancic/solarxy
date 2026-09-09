@@ -233,7 +233,7 @@ function PaneColorPicker({
 function autoPaneColor(id: string, kind: ReturnType<typeof contextKind>): string | undefined {
   if (id === "texture") return "#f2c9d6";
   if (id !== "nodes") return undefined;
-  if (kind === "tex") return "#f2c9d6";
+  if (kind === "cop") return "#f2c9d6";
   if (kind === "mat") return "#c9c2f0";
   return undefined;
 }

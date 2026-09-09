@@ -22,8 +22,8 @@ import { allBranchKeys, buildSceneTree, searchTree, type TreeRow } from "./treeM
 /** The container-context tints, the exact tokens the canvas tints
  * container tiles with, so the tree's color language matches the graph. */
 const CONTAINER_TINT: Record<string, string> = {
-  geo: "var(--node-cat-container-geo)",
-  tex: "var(--node-cat-container-tex)",
+  sop: "var(--node-cat-container-sop)",
+  cop: "var(--node-cat-container-cop)",
   mat: "var(--node-cat-container-mat)",
 };
 

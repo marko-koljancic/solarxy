@@ -52,7 +52,7 @@ export function descriptorFor(
 }
 
 /** The network kind of a canvas: the root is "obj"; a child canvas is
- * whatever its owning container's descriptor `opens` ("geo" when the
+ * whatever its owning container's descriptor `opens` ("sop" when the
  * owner or its descriptor is unknown, the only pre-context child kind).
  * `ownerNodes` is the graph holding the owning container (the root graph
  * while containers are root-only; the N-level breadcrumb generalizes the
@@ -64,8 +64,8 @@ export function contextKind(
 ): ContextKind {
   if (current === "root") return "obj";
   const owner = ownerNodes.find((n) => n.id === current.subflow);
-  if (!owner) return "geo";
-  return descriptorFor(reg, owner.typeId)?.opens ?? "geo";
+  if (!owner) return "sop";
+  return descriptorFor(reg, owner.typeId)?.opens ?? "sop";
 }
 
 /** A port's DataType, resolved from the descriptor (null if unknown). */
@@ -101,9 +101,9 @@ export const CATEGORY_ORDER: readonly string[] = [
   // the root graph and both shape what the render sees.
   "cameras",
   "utility",
-  "tex_generate",
-  "tex_adjust",
-  "tex_composite",
+  "cop_generate",
+  "cop_adjust",
+  "cop_composite",
 ];
 
 /** Comparator over category ids in [`CATEGORY_ORDER`]. */

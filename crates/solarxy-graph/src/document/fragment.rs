@@ -42,7 +42,7 @@ impl SubflowFragment {
 
     /// Rebuilds a live `Graph` (topology re-derived from the edges).
     fn to_graph(&self) -> Graph {
-        let mut graph = Graph::new(self.kind.unwrap_or(ContextKind::Geo));
+        let mut graph = Graph::new(self.kind.unwrap_or(ContextKind::Sop));
         for node in &self.nodes {
             graph.add_node(node.clone());
         }

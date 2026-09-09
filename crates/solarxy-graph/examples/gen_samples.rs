@@ -270,7 +270,7 @@ fn modeling_basics() -> Builder {
          container to step inside and see the graph that builds the model. \
          Every sample opens read-to-edit; nothing here is baked.",
     );
-    let geo = b.add(ROOT, "geo", [120.0, 0.0]);
+    let geo = b.add(ROOT, "sopnet", [120.0, 0.0]);
     b.rename(ROOT, geo, "basics");
     let g = sub(geo);
 
@@ -329,7 +329,7 @@ fn copy_and_scatter() -> Builder {
         "Instancing: scatter points over a surface, then copy a template \
          onto every point. Step into scatterfield for the graph.",
     );
-    let geo = b.add(ROOT, "geo", [120.0, 0.0]);
+    let geo = b.add(ROOT, "sopnet", [120.0, 0.0]);
     b.rename(ROOT, geo, "scatterfield");
     let g = sub(geo);
 
@@ -386,7 +386,7 @@ fn attributes_and_displace() -> Builder {
          terrain samples it into point lanes, and a displace node reads \
          one lane as height. Step into maps first, then terrain.",
     );
-    let tex = b.add(ROOT, "texnet", [120.0, 0.0]);
+    let tex = b.add(ROOT, "copnet", [120.0, 0.0]);
     b.rename(ROOT, tex, "maps");
     let t = sub(tex);
     let noise = b.add(t, "noise", [0.0, -100.0]);
@@ -405,7 +405,7 @@ fn attributes_and_displace() -> Builder {
          node here reshapes the terrain live.",
     );
 
-    let geo = b.add(ROOT, "geo", [320.0, 0.0]);
+    let geo = b.add(ROOT, "sopnet", [320.0, 0.0]);
     b.rename(ROOT, geo, "terrain");
     let g = sub(geo);
     let plane = b.add(g, "plane", [0.0, -220.0]);
@@ -468,7 +468,7 @@ fn texture_to_material() -> Builder {
          in a principled surface, and the geometry binds that material by \
          path. Each container is its own small network.",
     );
-    let tex = b.add(ROOT, "texnet", [120.0, 0.0]);
+    let tex = b.add(ROOT, "copnet", [120.0, 0.0]);
     b.rename(ROOT, tex, "maps");
     let t = sub(tex);
     let noise = b.add(t, "noise", [0.0, -100.0]);
@@ -511,7 +511,7 @@ fn texture_to_material() -> Builder {
          metallic-roughness, occlusion, emissive) work the same way.",
     );
 
-    let geo = b.add(ROOT, "geo", [520.0, 0.0]);
+    let geo = b.add(ROOT, "sopnet", [520.0, 0.0]);
     b.rename(ROOT, geo, "shaded");
     let g = sub(geo);
     let sphere = b.add(g, "sphere", [0.0, -120.0]);
@@ -547,7 +547,7 @@ fn lights_camera_review() -> Builder {
          and toggle Review Mode (Shift+R) to read the pinned note on the \
          knot.",
     );
-    let geo = b.add(ROOT, "geo", [120.0, 0.0]);
+    let geo = b.add(ROOT, "sopnet", [120.0, 0.0]);
     b.rename(ROOT, geo, "hero");
     let g = sub(geo);
     let knot = b.add(g, "torus_knot", [0.0, -100.0]);
@@ -629,7 +629,7 @@ fn animated_field() -> Builder {
          to step through it by hand.",
     );
 
-    let geo = b.add(ROOT, "geo", [120.0, 0.0]);
+    let geo = b.add(ROOT, "sopnet", [120.0, 0.0]);
     b.rename(ROOT, geo, "field");
     let g = sub(geo);
 
@@ -752,7 +752,7 @@ fn procedural_lookdev() -> Builder {
     );
 
     // --- maps -------------------------------------------------------
-    let tex = b.add(ROOT, "texnet", [120.0, 0.0]);
+    let tex = b.add(ROOT, "copnet", [120.0, 0.0]);
     b.rename(ROOT, tex, "maps");
     let t = sub(tex);
     let cells = b.add(t, "voronoi", [0.0, -160.0]);
@@ -812,7 +812,7 @@ fn procedural_lookdev() -> Builder {
     b.display(m, surface);
 
     // --- geometry ---------------------------------------------------
-    let geo = b.add(ROOT, "geo", [520.0, 0.0]);
+    let geo = b.add(ROOT, "sopnet", [520.0, 0.0]);
     b.rename(ROOT, geo, "subject");
     let g = sub(geo);
     let knot = b.add(g, "torus_knot", [0.0, -220.0]);
@@ -919,7 +919,7 @@ fn orrery() -> Builder {
     );
 
     // --- bands: the gas giant's colour map ---------------------------
-    let bands_net = b.add(ROOT, "texnet", [120.0, 0.0]);
+    let bands_net = b.add(ROOT, "copnet", [120.0, 0.0]);
     b.rename(ROOT, bands_net, "bands");
     let t = sub(bands_net);
     let ramp = b.add(t, "ramp", [0.0, -160.0]);
@@ -956,7 +956,7 @@ fn orrery() -> Builder {
     );
 
     // --- relief: the same idea cooking a normal map ------------------
-    let relief_net = b.add(ROOT, "texnet", [320.0, 0.0]);
+    let relief_net = b.add(ROOT, "copnet", [320.0, 0.0]);
     b.rename(ROOT, relief_net, "relief");
     let r = sub(relief_net);
     let bump = b.add(r, "noise", [0.0, -100.0]);
@@ -1029,7 +1029,7 @@ fn orrery() -> Builder {
     );
 
     // --- the orrery itself -------------------------------------------
-    let geo = b.add(ROOT, "geo", [720.0, 0.0]);
+    let geo = b.add(ROOT, "sopnet", [720.0, 0.0]);
     b.rename(ROOT, geo, "orrery");
     let g = sub(geo);
 
@@ -1391,7 +1391,7 @@ fn cornell_box() -> Builder {
          computes and the rasterized pane approximates or omits.",
     );
 
-    let geo = b.add(ROOT, "geo", [120.0, 0.0]);
+    let geo = b.add(ROOT, "sopnet", [120.0, 0.0]);
     b.rename(ROOT, geo, "box");
     let g = sub(geo);
 

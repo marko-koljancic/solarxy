@@ -26,7 +26,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Copy to Points",
         category: Category::Copy,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::single("template", "Template", DataType::Geometry, true).doc(

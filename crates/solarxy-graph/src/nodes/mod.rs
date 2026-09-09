@@ -59,19 +59,19 @@ pub(crate) mod environment_node;
 mod export_nodes;
 
 // Texture context: the container plus the image ops.
+mod copnet_node;
 mod image_adjust;
 mod image_generate;
 mod image_ops;
 pub(crate) mod image_support;
-mod texnet_node;
 
 // Container + utility + lights (root) and imports (subflow).
 mod camera_node;
-mod geo_node;
 mod import_image;
 mod imports;
 mod lights;
 mod note_node;
+mod sopnet_node;
 mod text_node;
 
 pub use export_nodes::{
@@ -92,9 +92,9 @@ use crate::registry::{NodeTypeDescriptor, Registry};
 pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
     vec![
         // Containers.
-        geo_node::descriptor(),
+        sopnet_node::descriptor(),
         mat_nodes::matnet_descriptor(),
-        texnet_node::descriptor(),
+        copnet_node::descriptor(),
         // Generators (Geo).
         box_node::descriptor(),
         sphere_node::descriptor(),
@@ -244,9 +244,9 @@ mod tests {
                 .count()
         };
         assert!(in_context(ContextKind::Obj) > 0, "the Obj context is empty");
-        assert!(in_context(ContextKind::Geo) > 0, "the Geo context is empty");
+        assert!(in_context(ContextKind::Sop) > 0, "the Geo context is empty");
         assert!(in_context(ContextKind::Mat) > 0, "the Mat context is empty");
-        assert!(in_context(ContextKind::Tex) > 0, "the Tex context is empty");
+        assert!(in_context(ContextKind::Cop) > 0, "the Tex context is empty");
     }
 
     /// The taxonomy is presentation: pinning the per-category counts makes
@@ -279,9 +279,9 @@ mod tests {
             (Category::Cameras, 1),
             // +1: the `text` datablock joined in round 2.
             (Category::Utility, 6),
-            (Category::TexGenerate, 7),
-            (Category::TexAdjust, 5),
-            (Category::TexComposite, 5),
+            (Category::CopGenerate, 7),
+            (Category::CopAdjust, 5),
+            (Category::CopComposite, 5),
         ];
         for (cat, n) in expected {
             assert_eq!(count(cat), n, "{}", cat.display_name());

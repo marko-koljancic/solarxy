@@ -17,7 +17,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Edges to Geo",
         category: Category::Topology,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)

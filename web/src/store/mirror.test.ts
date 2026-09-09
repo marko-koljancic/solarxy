@@ -20,7 +20,7 @@ describe("mirror store", () => {
     const batch: EventBatch = {
       revision: 1,
       events: [
-        { type: "nodeAdded", ctx: "root", node: node(1, "geo") },
+        { type: "nodeAdded", ctx: "root", node: node(1, "sopnet") },
         { type: "nodeAdded", ctx: "root", node: node(2, "point_light") },
         {
           type: "edgeAdded",
@@ -84,14 +84,14 @@ describe("mirror store", () => {
 
   it("rebuilds the whole mirror from a snapshot, including subflows", () => {
     const snap: DocumentSnapshot = {
-      root: { nodes: [node(1, "geo")], edges: [], activeOutput: null, selection: [] },
+      root: { nodes: [node(1, "sopnet")], edges: [], activeOutput: null, selection: [] },
       subflows: { "1": { nodes: [node(2, "box")], edges: [], activeOutput: 2, selection: [] } },
       annotations: [],
     };
     useMirror.getState().replaceFromSnapshot(snap, 7);
     const st = useMirror.getState();
     expect(st.revision).toBe(7);
-    expect(selectGraph(st, "root").nodes[0].typeId).toBe("geo");
+    expect(selectGraph(st, "root").nodes[0].typeId).toBe("sopnet");
     expect(selectGraph(st, { subflow: 1 }).activeOutput).toBe(2);
   });
 });

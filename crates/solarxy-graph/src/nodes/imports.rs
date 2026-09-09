@@ -156,7 +156,7 @@ fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
         version: f.version,
         display_name: f.display_name,
         category: Category::Import,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![],
         outputs: vec![geometry_output()],

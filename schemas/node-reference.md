@@ -25,7 +25,7 @@ Every node also carries a `name` and a `description` parameter. They are common 
 [Blur](#blur) · [Height to Normal](#height_to_normal) · [Mix](#mix) · [Pack ORM](#pack_orm) · [Sharpen](#sharpen)
 
 **Container**  
-[Geo](#geo) · [Mat](#matnet) · [Tex](#texnet)
+[Cop](#copnet) · [Mat](#matnet) · [Sop](#sopnet)
 
 **Copy & Instance**  
 [Array](#array) · [Copy to Points](#copy_to_points) · [Mirror](#mirror) · [Scatter](#scatter)
@@ -61,7 +61,7 @@ Every node also carries a `name` and a `description` parameter. They are common 
 
 ### Brightness / Contrast <a id="brightness_contrast"></a>
 
-`brightness_contrast` · v1 · Adjust · placed inside a texture network
+`brightness_contrast` · v1 · Adjust · placed inside a COP network
 
 Palette search also matches: brightness, contrast, exposure.
 
@@ -85,7 +85,7 @@ The pivot is fixed at 0.5, so contrast leaves mid-gray exactly where it is and m
 
 ### Gamma <a id="gamma"></a>
 
-`gamma` · v1 · Adjust · placed inside a texture network
+`gamma` · v1 · Adjust · placed inside a COP network
 
 Palette search also matches: gamma, curve.
 
@@ -108,7 +108,7 @@ The ends are pinned: 0 stays 0 and 1 stays 1 whatever the value, so this only re
 
 ### Hue / Saturation <a id="hue_saturation"></a>
 
-`hue_saturation` · v1 · Adjust · placed inside a texture network
+`hue_saturation` · v1 · Adjust · placed inside a COP network
 
 Palette search also matches: hue, saturation, hsl, color.
 
@@ -133,7 +133,7 @@ Saturation and Lightness are multipliers, not offsets, and that bites in two pla
 
 ### Invert <a id="invert"></a>
 
-`invert` · v1 · Adjust · placed inside a texture network
+`invert` · v1 · Adjust · placed inside a COP network
 
 Palette search also matches: invert, negative.
 
@@ -152,7 +152,7 @@ It inverts the stored sRGB-encoded bytes rather than linear light, so this is th
 
 ### Levels <a id="levels"></a>
 
-`levels` · v1 · Adjust · placed inside a texture network
+`levels` · v1 · Adjust · placed inside a COP network
 
 Palette search also matches: levels, tone, remap, histogram.
 
@@ -181,7 +181,7 @@ It works on the stored sRGB-encoded bytes, the convention of 2D image editors, n
 
 ### Attribute Copy <a id="attribute_copy"></a>
 
-`attribute_copy` · v1 · Attribute · placed inside a geo
+`attribute_copy` · v1 · Attribute · placed inside a SOP network
 
 Palette search also matches: copy, rename, attribute, convert, cast, color.
 
@@ -206,7 +206,7 @@ The headline use is feeding the reserved lanes: copy any vec3 into `color` and t
 
 ### Attribute Create <a id="attribute_create"></a>
 
-`attribute_create` · v1 · Attribute · placed inside a geo
+`attribute_create` · v1 · Attribute · placed inside a SOP network
 
 Palette search also matches: attribute, lane, constant, color, tag.
 
@@ -234,7 +234,7 @@ Writing a reserved name with the wrong type is legal but inert, and the node war
 
 ### Attribute Promote <a id="attribute_promote"></a>
 
-`attribute_promote` · v1 · Attribute · placed inside a geo
+`attribute_promote` · v1 · Attribute · placed inside a SOP network
 
 Palette search also matches: promote, domain, primitive, point, demote.
 
@@ -258,7 +258,7 @@ By default the lane MOVES to the destination domain; Keep Original leaves the so
 
 ### Attribute Randomize <a id="attribute_randomize"></a>
 
-`attribute_randomize` · v1 · Attribute · placed inside a geo
+`attribute_randomize` · v1 · Attribute · placed inside a SOP network
 
 Palette search also matches: random, variation, jitter, noise, color, attribute.
 
@@ -289,7 +289,7 @@ Writing a reserved name with the wrong type is legal but inert (the node warns):
 
 ### Attribute Wrangle <a id="attribute_wrangle"></a>
 
-`attribute_wrangle` · v1 · Attribute · placed inside a geo
+`attribute_wrangle` · v1 · Attribute · placed inside a SOP network
 
 Palette search also matches: wrangle, attribute, vex, expression, snippet, code, script.
 
@@ -317,7 +317,7 @@ There is no `if` and no `for`; use the `? :` conditional for a branching value. 
 
 ### Attribute from Image <a id="attribute_from_image"></a>
 
-`attribute_from_image` · v1 · Attribute · placed inside a geo
+`attribute_from_image` · v1 · Attribute · placed inside a SOP network
 
 Palette search also matches: sample, map, texture, image, bake, vertex color.
 
@@ -346,7 +346,7 @@ Meshes without the UV lane, or an unwired image, pass through with a warning.
 
 ### Compute Normals <a id="compute_normals"></a>
 
-`compute_normals` · v2 · Attribute · placed inside a geo
+`compute_normals` · v2 · Attribute · placed inside a SOP network
 
 Palette search also matches: normals, recompute, smooth.
 
@@ -369,7 +369,7 @@ It can only smooth where points are actually shared. Primitives split their corn
 
 ### UV Project <a id="uv_project"></a>
 
-`uv_project` · v1 · Attribute · placed inside a geo
+`uv_project` · v1 · Attribute · placed inside a SOP network
 
 Palette search also matches: uv, unwrap, project, texture, mapping.
 
@@ -452,7 +452,7 @@ It does nothing while F-Stop is 0: a pinhole has no opening to shape. |
 
 ### Blur <a id="blur"></a>
 
-`blur` · v1 · Composite · placed inside a texture network
+`blur` · v1 · Composite · placed inside a COP network
 
 Palette search also matches: blur, gaussian, soften.
 
@@ -475,7 +475,7 @@ Alone among the image nodes it filters alpha as well as RGB, so blurring a partl
 
 ### Height to Normal <a id="height_to_normal"></a>
 
-`height_to_normal` · v1 · Composite · placed inside a texture network
+`height_to_normal` · v1 · Composite · placed inside a COP network
 
 Palette search also matches: normal, height, bump, sobel.
 
@@ -498,7 +498,7 @@ The output is a normal map, not a color: do not run the adjust nodes on it after
 
 ### Mix <a id="mix"></a>
 
-`mix` · v1 · Composite · placed inside a texture network · gather silhouette
+`mix` · v1 · Composite · placed inside a COP network · gather silhouette
 
 Palette search also matches: mix, blend, composite, over, multiply, screen.
 
@@ -523,7 +523,7 @@ The two inputs are not interchangeable. The output always takes the base's size,
 
 ### Pack ORM <a id="pack_orm"></a>
 
-`pack_orm` · v1 · Composite · placed inside a texture network · gather silhouette
+`pack_orm` · v1 · Composite · placed inside a COP network · gather silhouette
 
 Palette search also matches: orm, pack, occlusion, roughness, metallic, gltf.
 
@@ -550,7 +550,7 @@ Only the red channel of each input is read, so a color image silently contribute
 
 ### Sharpen <a id="sharpen"></a>
 
-`sharpen` · v1 · Composite · placed inside a texture network
+`sharpen` · v1 · Composite · placed inside a COP network
 
 Palette search also matches: sharpen, unsharp, detail.
 
@@ -573,19 +573,51 @@ The blur radius is not exposed: 1.5 px is baked in, so this sharpens fine detail
 
 ## Container
 
-### Geo <a id="geo"></a>
+### Cop <a id="copnet"></a>
 
-`geo` · v3 · Container · placed scene
+`copnet` · v1 · Container · placed scene
 
-*A container: diving in opens its geo network.*
+*A container: diving in opens its COP network.*
+
+Palette search also matches: texture, image network.
+
+A container you dive into to build an image procedurally: `constant`, `ramp`, `noise` and `import_image` as sources, then the adjust, filter and composite nodes. Whichever node inside carries the display flag publishes the network's image.
+
+Drop one at the root next to your `sopnet` and `matnet` nodes, build the image inside, then consume it from a material network with a `tex_ref`, whose Texture Network param points at this container. The texture viewer pane previews the published image live while you work, and editing anything inside recooks every referrer.
+
+The reference is a path, not a wire. This node has no ports at all, so nothing connects to it on the canvas, and it is not a scene object either -- no transform, nothing lowered into the scene delta. A COP network nothing refers to still cooks and still shows nothing.
+
+*Bypassed: cannot be bypassed.*
+
+### Mat <a id="matnet"></a>
+
+`matnet` · v1 · Container · placed scene
+
+*A container: diving in opens its material network.*
+
+Palette search also matches: matnet, material, shop, shader network.
+
+A container for a material network. Surface nodes cook inside it, and whichever node you designate as the display node publishes its material as the network's one result.
+
+Add one per material you want to reuse. Dive in, build a surface with `principled`, `matcap`, `toon` or `unlit`, and combine surfaces with `mix_material`. Nothing leaves on a wire: materials cross contexts by path only, so a SOP-side `material` node in Reference mode is what pulls the result out, and any number of them can point at the same network.
+
+It cooks nothing itself and cannot be bypassed. A network with no display node designated publishes nothing at all, and every `material` node referring to it fails its cook rather than falling back to a default surface.
+
+*Bypassed: cannot be bypassed.*
+
+### Sop <a id="sopnet"></a>
+
+`sopnet` · v3 · Container · placed scene
+
+*A container: diving in opens its SOP network.*
 
 Palette search also matches: object, container, group, subflow.
 
 A container: one object in the scene, holding a whole geometry network inside it. It has no ports and produces no wire value. What it renders is whichever node inside carries the display flag, placed in the world by this node's transform.
 
-Containers are how a scene stays a scene instead of one enormous graph. The object level holds geos, cameras, and lights -- the things a scene is made of -- and each geo's network holds the modelling that builds that one object. Double-click a geo to dive into its network; the breadcrumb walks you back out. Bypassing a geo takes its entire subflow out of the scene in one click.
+Containers are how a scene stays a scene instead of one enormous graph. The object level holds these, cameras, and lights -- the things a scene is made of -- and each one's SOP network holds the modelling that builds that one object. Double-click it to dive into its network; the breadcrumb walks you back out. Bypassing it takes its entire subflow out of the scene in one click.
 
-The rendering flags live here and only here. Visible and Cast Shadow are per-object properties, so they belong to the object, not to the box or the merge inside it -- which is why a plain geometry node has no such params, and why hunting for a Visible checkbox on your `box` will not find one. The transform is the same story: it is applied to the object at draw time rather than baked into the points, so dragging a geo around never recooks the network inside it, however heavy that network is.
+The rendering flags live here and only here. Visible and Cast Shadow are per-object properties, so they belong to the object, not to the box or the merge inside it -- which is why a plain geometry node has no such params, and why hunting for a Visible checkbox on your `box` will not find one. The transform is the same story: it is applied to the object at draw time rather than baked into the points, so dragging one around never recooks the network inside it, however heavy that network is.
 
 | Parameter | Type | Default | Range | Notes |
 |---|---|---|---|---|
@@ -599,43 +631,11 @@ The rendering flags live here and only here. Visible and Cast Shadow are per-obj
 
 *Bypassed: emits nothing.*
 
-### Mat <a id="matnet"></a>
-
-`matnet` · v1 · Container · placed scene
-
-*A container: diving in opens its material network.*
-
-Palette search also matches: matnet, material, shop, shader network.
-
-A container for a material network. Surface nodes cook inside it, and whichever node you designate as the display node publishes its material as the network's one result.
-
-Add one per material you want to reuse. Dive in, build a surface with `principled`, `matcap`, `toon` or `unlit`, and combine surfaces with `mix_material`. Nothing leaves on a wire: materials cross contexts by path only, so a geo-side `material` node in Reference mode is what pulls the result out, and any number of them can point at the same network.
-
-It cooks nothing itself and cannot be bypassed. A network with no display node designated publishes nothing at all, and every `material` node referring to it fails its cook rather than falling back to a default surface.
-
-*Bypassed: cannot be bypassed.*
-
-### Tex <a id="texnet"></a>
-
-`texnet` · v1 · Container · placed scene
-
-*A container: diving in opens its texture network.*
-
-Palette search also matches: texnet, texture, cop, image network.
-
-A container you dive into to build an image procedurally: `constant`, `ramp`, `noise` and `import_image` as sources, then the adjust, filter and composite nodes. Whichever node inside carries the display flag publishes the network's image.
-
-Drop one at the root next to your `geo` and `matnet` nodes, build the image inside, then consume it from a material network with a `tex_ref`, whose Texture Network param points at this container. The texture viewer pane previews the published image live while you work, and editing anything inside recooks every referrer.
-
-The reference is a path, not a wire. This node has no ports at all, so nothing connects to it on the canvas, and it is not a scene object either -- no transform, nothing lowered into the scene delta. A texnet nothing refers to still cooks and still shows nothing.
-
-*Bypassed: cannot be bypassed.*
-
 ## Copy & Instance
 
 ### Array <a id="array"></a>
 
-`array` · v2 · Copy & Instance · placed inside a geo
+`array` · v2 · Copy & Instance · placed inside a SOP network
 
 Palette search also matches: duplicate, repeat, clone, radial, grid, instance.
 
@@ -672,7 +672,7 @@ Bake makes every copy real, which is what you choose when the copies have to be 
 
 ### Copy to Points <a id="copy_to_points"></a>
 
-`copy_to_points` · v2 · Copy & Instance · placed inside a geo
+`copy_to_points` · v2 · Copy & Instance · placed inside a SOP network
 
 Palette search also matches: instance, stamp, duplicate, clone, template, forest.
 
@@ -708,7 +708,7 @@ Bake makes every copy real, which is what you choose when the copies have to be 
 
 ### Mirror <a id="mirror"></a>
 
-`mirror` · v1 · Copy & Instance · placed inside a geo
+`mirror` · v1 · Copy & Instance · placed inside a SOP network
 
 Palette search also matches: reflect, symmetry, flip.
 
@@ -733,7 +733,7 @@ Offset is where the mirror is, not where the copy lands: a box spanning -0.5 to 
 
 ### Scatter <a id="scatter"></a>
 
-`scatter` · v2 · Copy & Instance · placed inside a geo
+`scatter` · v2 · Copy & Instance · placed inside a SOP network
 
 Palette search also matches: points, distribute, sprinkle, sample, random, spray.
 
@@ -762,7 +762,7 @@ Author it with `attribute_wrangle`: `@density = fit(@P.y, 0, 1, 0, 1);` gathers 
 
 ### Export Geometry <a id="geo_export"></a>
 
-`geo_export` · v2 · Export · placed inside a geo · terminal silhouette
+`geo_export` · v2 · Export · placed inside a SOP network · terminal silhouette
 
 Palette search also matches: export, save, file, obj, stl, ply, gltf, glb, rop.
 
@@ -788,7 +788,7 @@ Materials and vertex colors travel with the geometry: GLB embeds the full materi
 
 ### Export Image <a id="image_export"></a>
 
-`image_export` · v1 · Export · placed inside a texture network · terminal silhouette
+`image_export` · v1 · Export · placed inside a COP network · terminal silhouette
 
 Palette search also matches: export, save, file, png, jpeg, image.
 
@@ -929,7 +929,7 @@ Path traced only. |
 
 ### Brick <a id="brick"></a>
 
-`brick` · v1 · Generate · placed inside a texture network · image source silhouette
+`brick` · v1 · Generate · placed inside a COP network · image source silhouette
 
 Palette search also matches: brick, wall, masonry, bond.
 
@@ -958,7 +958,7 @@ Colors are written without conversion, alpha included. The layout is in normaliz
 
 ### Checker <a id="checker"></a>
 
-`checker` · v1 · Generate · placed inside a texture network · image source silhouette
+`checker` · v1 · Generate · placed inside a COP network · image source silhouette
 
 Palette search also matches: checker, checkerboard, grid, uv.
 
@@ -985,7 +985,7 @@ Colors are written without conversion, alpha included, so what the picker shows 
 
 ### Constant <a id="constant"></a>
 
-`constant` · v1 · Generate · placed inside a texture network · image source silhouette
+`constant` · v1 · Generate · placed inside a COP network · image source silhouette
 
 Palette search also matches: constant, solid, fill, color.
 
@@ -1009,7 +1009,7 @@ The color is not converted on the way in, so what the picker shows is what the t
 
 ### Gradient <a id="gradient"></a>
 
-`gradient` · v1 · Generate · placed inside a texture network · image source silhouette
+`gradient` · v1 · Generate · placed inside a COP network · image source silhouette
 
 Palette search also matches: gradient, conic, radial, linear.
 
@@ -1036,7 +1036,7 @@ All four channels interpolate, alpha included. Distances are measured in normali
 
 ### Noise <a id="noise"></a>
 
-`noise` · v1 · Generate · placed inside a texture network · image source silhouette
+`noise` · v1 · Generate · placed inside a COP network · image source silhouette
 
 Palette search also matches: noise, random, value noise.
 
@@ -1061,7 +1061,7 @@ The output is opaque gray: R, G and B carry the same value and alpha is always 1
 
 ### Ramp <a id="ramp"></a>
 
-`ramp` · v1 · Generate · placed inside a texture network · image source silhouette
+`ramp` · v1 · Generate · placed inside a COP network · image source silhouette
 
 Palette search also matches: ramp, gradient.
 
@@ -1087,7 +1087,7 @@ All four channels interpolate, alpha included. Radial measures distance from the
 
 ### Voronoi <a id="voronoi"></a>
 
-`voronoi` · v1 · Generate · placed inside a texture network · image source silhouette
+`voronoi` · v1 · Generate · placed inside a COP network · image source silhouette
 
 Palette search also matches: voronoi, worley, cellular, cells.
 
@@ -1117,7 +1117,7 @@ The output is opaque grey: R, G and B carry the same value and alpha is 1, so th
 
 ### Box <a id="box"></a>
 
-`box` · v2 · Generators · placed inside a geo
+`box` · v2 · Generators · placed inside a SOP network
 
 Palette search also matches: cube, rectangle, cuboid.
 
@@ -1144,7 +1144,7 @@ The segment counts only matter to something downstream that needs the extra poin
 
 ### Circle <a id="circle"></a>
 
-`circle` · v1 · Generators · placed inside a geo
+`circle` · v1 · Generators · placed inside a SOP network
 
 Palette search also matches: ring, loop, profile, disc, curve.
 
@@ -1168,7 +1168,7 @@ The default Y axis lays the loop flat in the ground plane, winding counter-clock
 
 ### Cone <a id="cone"></a>
 
-`cone` · v2 · Generators · placed inside a geo
+`cone` · v2 · Generators · placed inside a SOP network
 
 Palette search also matches: pyramid, spike.
 
@@ -1193,7 +1193,7 @@ This is `cylinder` with the top radius pinned to 0, sharing one generator so the
 
 ### Cylinder <a id="cylinder"></a>
 
-`cylinder` · v2 · Generators · placed inside a geo
+`cylinder` · v2 · Generators · placed inside a SOP network
 
 Palette search also matches: tube, pipe.
 
@@ -1219,7 +1219,7 @@ Either radius may be 0, which collapses that ring to a point and omits its cap. 
 
 ### Line <a id="line"></a>
 
-`line` · v1 · Generators · placed inside a geo
+`line` · v1 · Generators · placed inside a SOP network
 
 Palette search also matches: curve, segment, polyline, wire, path.
 
@@ -1247,7 +1247,7 @@ The two optional inputs anchor the ends to existing geometry: a connected input 
 
 ### Plane <a id="plane"></a>
 
-`plane` · v2 · Generators · placed inside a geo
+`plane` · v2 · Generators · placed inside a SOP network
 
 Palette search also matches: quad, grid, ground.
 
@@ -1272,7 +1272,7 @@ It stands upright, it does not lie flat. The XY/+Z orientation is the spec the o
 
 ### Sphere <a id="sphere"></a>
 
-`sphere` · v2 · Generators · placed inside a geo
+`sphere` · v2 · Generators · placed inside a SOP network
 
 Palette search also matches: ball, globe.
 
@@ -1296,7 +1296,7 @@ Point count is (width + 1) x (height + 1), which at the default 32 x 16 is 561 p
 
 ### Torus <a id="torus"></a>
 
-`torus` · v2 · Generators · placed inside a geo
+`torus` · v2 · Generators · placed inside a SOP network
 
 Palette search also matches: donut, ring.
 
@@ -1321,7 +1321,7 @@ The two segment counts are named the opposite way round from most people's first
 
 ### Torus Knot <a id="torus_knot"></a>
 
-`torus_knot` · v2 · Generators · placed inside a geo
+`torus_knot` · v2 · Generators · placed inside a SOP network
 
 Palette search also matches: knot, pretzel.
 
@@ -1350,7 +1350,7 @@ It is far and away the heaviest primitive here. The defaults, 128 tubular by 32 
 
 ### Import Image <a id="import_image"></a>
 
-`import_image` · v1 · Import · placed inside a geo or inside a texture network · image source silhouette
+`import_image` · v1 · Import · placed inside a SOP network or inside a COP network · image source silhouette
 
 Palette search also matches: image, texture, png, jpeg, webp, import.
 
@@ -1372,7 +1372,7 @@ With no file staged the node emits no value at all, not a placeholder pixel: a m
 
 ### Import OBJ <a id="import_obj"></a>
 
-`import_obj` · v4 · Import · placed inside a geo
+`import_obj` · v4 · Import · placed inside a SOP network
 
 Palette search also matches: obj, wavefront, import, colors.
 
@@ -1400,7 +1400,7 @@ Per-vertex colours ride the unofficial extended-position form (`v x y z r g b`),
 
 ### Import PLY <a id="import_ply"></a>
 
-`import_ply` · v3 · Import · placed inside a geo
+`import_ply` · v3 · Import · placed inside a SOP network
 
 Palette search also matches: ply, import, scan, points, cloud.
 
@@ -1425,7 +1425,7 @@ A file with no face element loads as a true point cloud and draws as camera-faci
 
 ### Import STL <a id="import_stl"></a>
 
-`import_stl` · v2 · Import · placed inside a geo
+`import_stl` · v2 · Import · placed inside a SOP network
 
 Palette search also matches: stl, import, print.
 
@@ -1450,7 +1450,7 @@ STL stores a normal per facet rather than per vertex, and the loader keeps none 
 
 ### Import glTF <a id="import_gltf"></a>
 
-`import_gltf` · v2 · Import · placed inside a geo
+`import_gltf` · v2 · Import · placed inside a SOP network
 
 Palette search also matches: gltf, glb, import.
 
@@ -1475,15 +1475,15 @@ Draco-compressed glTF is rejected outright, with a message asking you to re-expo
 
 ### Texture Reference <a id="tex_ref"></a>
 
-`tex_ref` · v1 · Import · placed inside a geo or inside a material network · image source silhouette
+`tex_ref` · v1 · Import · placed inside a SOP network or inside a material network · image source silhouette
 
 Palette search also matches: tex_ref, fetch, object merge, texture, reference.
 
 Pulls the image a texture network publishes into this network as an Image wire. It reads across contexts by path, so no wire ever crosses a network boundary.
 
-Point it at a `texnet` and feed the result into a map port on `principled`, or into the geo-side `material` node -- it is placeable in both Mat and Geo networks for exactly that reason. One texture network can back any number of these, which is how a texture gets authored once and used everywhere; editing the network recooks every referrer.
+Point it at a `copnet` and feed the result into a map port on `principled`, or into the SOP-side `material` node -- it is placeable in both Mat and SOP networks for exactly that reason. One texture network can back any number of these, which is how a texture gets authored once and used everywhere; editing the network recooks every referrer.
 
-This is the fetch pattern rather than a wire, so the dependency is invisible on the canvas: nothing draws a line from the `texnet` to here, and the only record of the link is this node's Texture Network param. An unset path is harmless (no output, read downstream as no map), but a path pointing at a network with no display node is a cook error.
+This is the fetch pattern rather than a wire, so the dependency is invisible on the canvas: nothing draws a line from the `copnet` to here, and the only record of the link is this node's Texture Network param. An unset path is harmless (no output, read downstream as no map), but a path pointing at a network with no display node is a cook error.
 
 | Port | Direction | Type | Notes |
 |---|---|---|---|
@@ -1491,7 +1491,7 @@ This is the fetch pattern rather than a wire, so the dependency is invisible on 
 
 | Parameter | Type | Default | Range | Notes |
 |---|---|---|---|---|
-| `texture_path` | nodePath | `null` |  | The `texnet` to fetch from; only containers that open a texture context can be picked. What arrives is that network's display node output, so re-designating the display node inside it changes every referrer at once. Left unset this node simply emits nothing, but a path aimed at a deleted node or at a network that publishes nothing fails the cook rather than yielding a blank image. |
+| `texture_path` | nodePath | `null` |  | The `copnet` to fetch from; only containers that open a texture context can be picked. What arrives is that network's display node output, so re-designating the display node inside it changes every referrer at once. Left unset this node simply emits nothing, but a path aimed at a deleted node or at a network that publishes nothing fails the cook rather than yielding a blank image. |
 
 *Bypassed: emits nothing.*
 
@@ -1710,7 +1710,7 @@ The matcap image IS the base-color texture role; no separate matcap slot exists 
 
 ### Material <a id="material"></a>
 
-`material` · v3 · Shaders · placed inside a geo
+`material` · v3 · Shaders · placed inside a SOP network
 
 Palette search also matches: material, pbr, texture, shader, color.
 
@@ -1798,7 +1798,7 @@ The physically-based metallic-roughness surface: base colour, metallic, roughnes
 
 This is the surface to reach for first inside a `matnet`, and the one the renderer's Cook-Torrance path with image-based lighting exists for. Feed its map ports from `tex_ref` or an `import_image`, then either designate it the network's display node or run it into `mix_material` first.
 
-The factor-and-map pairing is a hand-off, not a blend: connecting a map sets its factor to the multiplicative identity (white, or 1.0) so the map alone drives the channel, and the parameter panel dims the factor to say so. Metallic Roughness is one port for two channels and neutralizes both at once. It is the same surface builder the geo-side `material` node uses inline; the difference is only that this one outputs a Material wire instead of assigning to geometry.
+The factor-and-map pairing is a hand-off, not a blend: connecting a map sets its factor to the multiplicative identity (white, or 1.0) so the map alone drives the channel, and the parameter panel dims the factor to say so. Metallic Roughness is one port for two channels and neutralizes both at once. It is the same surface builder the SOP-side `material` node uses inline; the difference is only that this one outputs a Material wire instead of assigning to geometry.
 
 | Port | Direction | Type | Notes |
 |---|---|---|---|
@@ -1892,7 +1892,7 @@ Its semantics come from glTF's `KHR_materials_unlit`. Nothing else in the shadin
 
 ### Delete <a id="delete"></a>
 
-`delete` · v1 · Topology · placed inside a geo
+`delete` · v1 · Topology · placed inside a SOP network
 
 Palette search also matches: remove, cull, erase, filter.
 
@@ -1920,7 +1920,7 @@ Those two predicates are the whole selection model. There are no groups, no prim
 
 ### Edges to Geo <a id="edges_to_geo"></a>
 
-`edges_to_geo` · v1 · Topology · placed inside a geo
+`edges_to_geo` · v1 · Topology · placed inside a SOP network
 
 Palette search also matches: wireframe, wire, outline, skeleton, convert.
 
@@ -1939,7 +1939,7 @@ A typical inspection chain pairs it with `points_from_geo`: edges show the conne
 
 ### Merge <a id="merge"></a>
 
-`merge` · v2 · Topology · placed inside a geo · gather silhouette
+`merge` · v2 · Topology · placed inside a SOP network · gather silhouette
 
 Palette search also matches: combine, join, union, append.
 
@@ -1958,7 +1958,7 @@ Nothing is welded, intersected, or fused geometrically. Two meshes that overlap 
 
 ### Points from Geo <a id="points_from_geo"></a>
 
-`points_from_geo` · v1 · Topology · placed inside a geo
+`points_from_geo` · v1 · Topology · placed inside a SOP network
 
 Palette search also matches: vertices, cloud, convert, centers, centroid.
 
@@ -1981,7 +1981,7 @@ Points draw unlit at a uniform screen-space size, colored by their `color` attri
 
 ### Subdivide <a id="subdivide"></a>
 
-`subdivide` · v2 · Topology · placed inside a geo
+`subdivide` · v2 · Topology · placed inside a SOP network
 
 Palette search also matches: subdivide, smooth, tessellate, refine.
 
@@ -2006,7 +2006,7 @@ The subdivision is linear: it adds points onto the existing surface without movi
 
 ### Displace <a id="displace"></a>
 
-`displace` · v1 · Transform · placed inside a geo
+`displace` · v1 · Transform · placed inside a SOP network
 
 Palette search also matches: displacement, deform, push, noise, height, relief.
 
@@ -2034,7 +2034,7 @@ Normals are left as they were (deliberately, so chained displaces compound predi
 
 ### Transform <a id="transform"></a>
 
-`transform` · v2 · Transform · placed inside a geo
+`transform` · v2 · Transform · placed inside a SOP network
 
 Palette search also matches: move, rotate, scale, xform.
 
@@ -2064,7 +2064,7 @@ Rotate Order and Pivot are the two that catch people out. The angles compose in 
 
 ### Bounds <a id="bounds"></a>
 
-`bounds` · v2 · Utility · placed inside a geo
+`bounds` · v2 · Utility · placed inside a SOP network
 
 Palette search also matches: bbox, aabb, extents, measure, center.
 
@@ -2087,7 +2087,7 @@ The box is axis-aligned in object space, so a diagonally oriented model gets a b
 
 ### Note <a id="note"></a>
 
-`note` · v2 · Utility · placed scene or inside a geo or inside a material network or inside a texture network · note silhouette
+`note` · v2 · Utility · placed scene or inside a SOP network or inside a material network or inside a COP network · note silhouette
 
 Palette search also matches: comment, annotation, sticky, label.
 
@@ -2109,7 +2109,7 @@ It cannot be bypassed, since there is nothing to switch off, and it is the singl
 
 ### Null <a id="null"></a>
 
-`null` · v1 · Utility · placed inside a geo · terminal silhouette
+`null` · v1 · Utility · placed inside a SOP network · terminal silhouette
 
 Palette search also matches: out, output, anchor, passthrough.
 
@@ -2128,7 +2128,7 @@ Nothing about it is inert to the graph, only to the geometry. It is a real node 
 
 ### Switch <a id="switch"></a>
 
-`switch` · v1 · Utility · placed inside a geo · branch silhouette
+`switch` · v1 · Utility · placed inside a SOP network · branch silhouette
 
 Palette search also matches: select, choose, multiplex, if.
 
@@ -2151,7 +2151,7 @@ Selection is positional, and this is the part that surprises people. The index a
 
 ### Text <a id="text"></a>
 
-`text` · v1 · Utility · placed scene or inside a geo or inside a material network or inside a texture network · text silhouette
+`text` · v1 · Utility · placed scene or inside a SOP network or inside a material network or inside a COP network · text silhouette
 
 Palette search also matches: text, script, snippet, code, notepad, scratch, datablock.
 
@@ -2172,7 +2172,7 @@ Presentation only. Solarxy does not run a snippet from here: a wrangle snippet i
 
 ### Validate <a id="validate"></a>
 
-`validate` · v2 · Utility · placed inside a geo · analyzer silhouette
+`validate` · v2 · Utility · placed inside a SOP network · analyzer silhouette
 
 Palette search also matches: validate, check, lint, inspect.
 

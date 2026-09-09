@@ -31,7 +31,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         category: Category::Import,
         // Placeable in geometry networks (material map wiring) AND in
         // texture networks (the image-op source).
-        contexts: ContextSet::GEO.or(ContextSet::TEX),
+        contexts: ContextSet::SOP.or(ContextSet::COP),
         opens: None,
         inputs: vec![],
         outputs: vec![

@@ -29,7 +29,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Subdivide",
         category: Category::Topology,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)

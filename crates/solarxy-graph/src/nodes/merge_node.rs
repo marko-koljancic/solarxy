@@ -18,7 +18,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Merge",
         category: Category::Topology,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::variadic("inputs", "Inputs", DataType::Geometry, 0)

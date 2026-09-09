@@ -148,7 +148,7 @@ fn measure(target_nodes: usize) -> Result<Row, Box<dyn std::error::Error>> {
     // real document looks like.
     let mut transforms: Vec<(GraphContext, NodeId, String)> = Vec::new();
     for _ in 0..geo_count {
-        let geo = add_node(&mut engine, GraphContext::Root, "geo")?;
+        let geo = add_node(&mut engine, GraphContext::Root, "sopnet")?;
         let ctx = GraphContext::Subflow(geo);
         for ni in 0..per_geo {
             if ni % 4 == 0 {
@@ -302,7 +302,7 @@ fn measure_fanout(target_nodes: usize) -> Result<Fanout, Box<dyn std::error::Err
     let mut transforms: Vec<(GraphContext, NodeId)> = Vec::new();
     let mut id_to_name: HashMap<NodeId, String> = HashMap::new();
     for _ in 0..geo_count {
-        let geo = add_node(&mut engine, GraphContext::Root, "geo")?;
+        let geo = add_node(&mut engine, GraphContext::Root, "sopnet")?;
         let ctx = GraphContext::Subflow(geo);
         for ni in 0..per_geo {
             if ni % 4 == 0 {

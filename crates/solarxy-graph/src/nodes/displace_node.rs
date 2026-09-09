@@ -21,7 +21,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Displace",
         category: Category::Transform,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)

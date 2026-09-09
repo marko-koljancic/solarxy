@@ -32,17 +32,25 @@ pub use scene::{
 
 use thiserror::Error;
 
-/// The schema version this build writes. **Frozen at 1 for the public beta**
-/// (v0.7.0): from here on, a change to the on-disk shape needs a version bump
-/// and a migration step in `migrate_scene`, not a silent edit.
+/// The schema version this build writes. A change to the on-disk shape needs
+/// a version bump and a step in `migrate_scene`, never a silent edit.
 ///
 /// Version 0 was the pre-beta format and carried no compatibility guarantees.
-/// It is still readable: the `0 -> 1` migration steps it up on load.
-pub const SCHEMA_VERSION_CURRENT: u32 = 1;
+/// Version 1 was the public-beta freeze (v0.7.0). Version 2 renamed the
+/// context vocabulary: a geometry network is a SOP network and an image
+/// network is a COP network, so the sub-graph kinds and the two container
+/// type ids changed spelling. Both older versions still open; the chain in
+/// `migrate_scene` steps them up on load.
+pub const SCHEMA_VERSION_CURRENT: u32 = 2;
 
 /// The `min_reader` floor this build writes: the lowest reader version able
 /// to open files it produces.
-pub const MIN_READER_CURRENT: u32 = 1;
+///
+/// It moved to 2 with the vocabulary. A version-1 reader handed a version-2
+/// file would not fail: it would find container type ids it has never heard
+/// of, load each as a parameterless placeholder, and destroy the document on
+/// the next save. Refusing with an upgrade message is what this field is for.
+pub const MIN_READER_CURRENT: u32 = 2;
 
 /// The reader version this build implements. A file whose `min_reader`
 /// exceeds this is refused with an upgrade message.
@@ -50,7 +58,7 @@ pub const MIN_READER_CURRENT: u32 = 1;
 /// Moves in lockstep with [`MIN_READER_CURRENT`]. If it did not, this build
 /// would write files whose `min_reader` its own reader then rejected as
 /// "too new".
-pub const READER_VERSION: u32 = 1;
+pub const READER_VERSION: u32 = 2;
 
 /// The lockstep above, enforced rather than only described.
 ///
@@ -324,6 +332,7 @@ fn migrate_scene(value: &mut serde_json::Value, from: u32) -> Result<(), SceneFi
         match version {
             // No field rewrites needed (see the doc comment above).
             0 => {}
+            1 => rename_context_vocabulary(value),
             other => return Err(SceneFileError::UnsupportedVersion(other)),
         }
         version += 1;
@@ -332,6 +341,105 @@ fn migrate_scene(value: &mut serde_json::Value, from: u32) -> Result<(), SceneFi
         }
     }
     Ok(())
+}
+
+/// The 1 -> 2 step: the context vocabulary takes the field's names.
+///
+/// Sub-graph kinds `geo` and `tex` become `sop` and `cop`, and the two
+/// container type ids `geo` and `texnet` become `sopnet` and `copnet`. The
+/// third container, `matnet`, does not move.
+///
+/// **Why this runs on raw JSON rather than after typing.** An unmigrated
+/// container resolves to no registered descriptor, and the recovery path for
+/// an unknown type keeps the node's id and position while discarding every
+/// parameter, its port order and its timestamps. A container would therefore
+/// lose its transform, its render flags and its name, and its whole network
+/// would be orphaned, with nothing but a warning to say so.
+///
+/// **The walk is fixed at two levels**, because a sub-graph carries no
+/// sub-graphs of its own. Container types are declared root-only, so only the
+/// root can hold one today; the inner level is rewritten anyway, because a
+/// walk that is correct only while a placement rule holds is a trap for
+/// whoever relaxes it.
+///
+/// **The name back-fill is the part with teeth.** A node with no explicit
+/// name answers to its type's display name, and expressions address nodes by
+/// name, so changing a display name silently changes what `ch("/Geo/...")`
+/// refers to. Writing the name the container resolved to *before* the rename
+/// turns a silent failure into no failure at all.
+///
+/// Two details of that back-fill are deliberate. It writes the **top-level**
+/// `name` field rather than a `name` parameter, because that is where the
+/// writer puts it: a literal-text `name` param is lifted out of the params
+/// map on write and re-injected on read, so a back-fill into the params map
+/// would produce a file shaped unlike anything this project emits. And it
+/// skips any node that already carries a `name` parameter, which can only be
+/// an expression-valued one from a hand-edited file: such a name also
+/// resolves to the display name, but writing a literal over it would destroy
+/// the expression, and a migration that loses data to prevent a rename is a
+/// bad trade.
+fn rename_context_vocabulary(value: &mut serde_json::Value) {
+    /// Container type ids, with the display name each resolved to before the
+    /// rename. `matnet` is absent because it does not move.
+    const CONTAINERS: &[(&str, &str, &str)] =
+        &[("geo", "sopnet", "Geo"), ("texnet", "copnet", "Tex")];
+    const KINDS: &[(&str, &str)] = &[("geo", "sop"), ("tex", "cop")];
+
+    fn rewrite_nodes(nodes: &mut serde_json::Value) {
+        let Some(nodes) = nodes.as_array_mut() else {
+            return;
+        };
+        for node in nodes {
+            let Some(node) = node.as_object_mut() else {
+                continue;
+            };
+            let Some(old_type) = node.get("type").and_then(|t| t.as_str()).map(str::to_owned)
+            else {
+                continue;
+            };
+            let Some(&(_, new_type, display)) =
+                CONTAINERS.iter().find(|(from, _, _)| *from == old_type)
+            else {
+                continue;
+            };
+            node.insert("type".to_string(), serde_json::json!(new_type));
+
+            let unnamed = node
+                .get("name")
+                .and_then(|n| n.as_str())
+                .is_none_or(str::is_empty);
+            let has_name_param = node
+                .get("params")
+                .and_then(|p| p.as_object())
+                .is_some_and(|p| p.contains_key("name"));
+            if unnamed && !has_name_param {
+                node.insert("name".to_string(), serde_json::json!(display));
+            }
+        }
+    }
+
+    let Some(graph) = value.get_mut("graph").and_then(|g| g.as_object_mut()) else {
+        return;
+    };
+    if let Some(nodes) = graph.get_mut("nodes") {
+        rewrite_nodes(nodes);
+    }
+    let Some(subflows) = graph.get_mut("subflows").and_then(|s| s.as_object_mut()) else {
+        return;
+    };
+    for sub in subflows.values_mut() {
+        let Some(sub) = sub.as_object_mut() else {
+            continue;
+        };
+        if let Some(kind) = sub.get("kind").and_then(|k| k.as_str())
+            && let Some(&(_, new_kind)) = KINDS.iter().find(|(from, _)| *from == kind)
+        {
+            sub.insert("kind".to_string(), serde_json::json!(new_kind));
+        }
+        if let Some(nodes) = sub.get_mut("nodes") {
+            rewrite_nodes(nodes);
+        }
+    }
 }
 
 /// Generates the [`SceneJson`] JSON Schema as a pretty string, stripping the
@@ -481,14 +589,130 @@ mod tests {
         );
     }
 
-    /// The freeze's load-bearing test. A pre-beta v0 scene must still open, and
-    /// come back stamped as v1.
-    ///
-    /// The existing tests all build `SCHEMA_VERSION_CURRENT`, so they would pass
-    /// vacuously no matter what the migration did (or did not do). This one
-    /// writes an actual v0 file and reads it back.
+    /// A version-1 document, as the release before the rename wrote one.
+    fn v1_document() -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": 1,
+            "min_reader": 1,
+            "graph": {
+                "nodes": [
+                    { "id": "1", "type": "geo", "name": "terrain" },
+                    { "id": "2", "type": "texnet" },
+                    { "id": "3", "type": "matnet", "name": "shaders" },
+                    { "id": "4", "type": "camera", "name": "hero" },
+                    { "id": "5", "type": "geo",
+                      "params": { "name": { "$expr": "chs(\"/other/label\")" } } },
+                ],
+                "subflows": {
+                    "1": { "kind": "geo", "nodes": [ { "id": "10", "type": "box" } ] },
+                    "2": { "kind": "tex", "nodes": [] },
+                    "3": { "kind": "mat", "nodes": [] },
+                    "9": { "nodes": [] },
+                },
+            },
+        })
+    }
+
+    fn node<'a>(v: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
+        v["graph"]["nodes"]
+            .as_array()
+            .expect("nodes")
+            .iter()
+            .find(|n| n["id"] == id)
+            .unwrap_or_else(|| panic!("no node {id}"))
+    }
+
+    /// The container type ids and the sub-graph kinds take the new spellings,
+    /// and the container that does not move keeps its own.
     #[test]
-    fn a_v0_scene_migrates_to_v1_on_read() {
+    fn the_vocabulary_step_rewrites_types_and_kinds() {
+        let mut v = v1_document();
+        migrate_scene(&mut v, 1).expect("the vocabulary step");
+
+        assert_eq!(node(&v, "1")["type"], "sopnet");
+        assert_eq!(node(&v, "2")["type"], "copnet");
+        assert_eq!(node(&v, "3")["type"], "matnet", "the third container stays");
+        assert_eq!(
+            node(&v, "4")["type"],
+            "camera",
+            "a non-container is untouched"
+        );
+
+        let subs = &v["graph"]["subflows"];
+        assert_eq!(subs["1"]["kind"], "sop");
+        assert_eq!(subs["2"]["kind"], "cop");
+        assert_eq!(subs["3"]["kind"], "mat");
+        assert!(
+            subs["9"].get("kind").is_none(),
+            "a pre-context sub-graph carries no kind and must not be given one; \
+             the engine resolves it from the owning container"
+        );
+        assert_eq!(
+            subs["1"]["nodes"][0]["type"], "box",
+            "an ordinary node inside a container is untouched"
+        );
+        assert_eq!(read_u32(&v, "schema_version"), 2);
+    }
+
+    /// The regression case for the naming ruling.
+    ///
+    /// A container with no name answered to its type's display name, and
+    /// expressions address nodes by name, so changing the display name would
+    /// silently change what `ch("/Geo/...")` refers to. The step writes the
+    /// name the container resolved to before the rename, which turns a silent
+    /// failure into no failure. A container that already has a name keeps it.
+    #[test]
+    fn an_unnamed_container_is_given_the_name_it_used_to_answer_to() {
+        let mut v = v1_document();
+        migrate_scene(&mut v, 1).expect("the vocabulary step");
+
+        assert_eq!(
+            node(&v, "2")["name"],
+            "Tex",
+            "the unnamed image container lost the name it resolved to"
+        );
+        assert_eq!(node(&v, "1")["name"], "terrain", "an explicit name is kept");
+        assert_eq!(node(&v, "3")["name"], "shaders");
+        assert!(
+            node(&v, "4").get("name").is_some(),
+            "a non-container keeps whatever it had"
+        );
+    }
+
+    /// A name that is an expression is left exactly as it is.
+    ///
+    /// It also resolves to the display name and so breaks the same way, but a
+    /// literal written over it would destroy the expression, and a migration
+    /// that loses authored data to prevent a rename is a bad trade. One can
+    /// only exist in a hand-edited file: the parameter setter refuses an
+    /// expression on a text parameter.
+    #[test]
+    fn an_expression_valued_name_is_not_overwritten() {
+        let mut v = v1_document();
+        migrate_scene(&mut v, 1).expect("the vocabulary step");
+
+        let n = node(&v, "5");
+        assert_eq!(n["type"], "sopnet", "it is still renamed");
+        assert!(
+            n.get("name").is_none(),
+            "a top-level name was written over an expression-valued one"
+        );
+        assert!(
+            n["params"]["name"]["$expr"].is_string(),
+            "the expression survived"
+        );
+    }
+
+    /// A pre-beta v0 scene must still open, and come back stamped at whatever
+    /// this build writes, having passed through every step in between.
+    ///
+    /// The other tests all build `SCHEMA_VERSION_CURRENT`, so they would pass
+    /// vacuously no matter what the migration did or did not do. This one
+    /// writes an actual v0 file and reads it back. It was asserting `1` until
+    /// the vocabulary step landed, which is the moment "one step" and "the
+    /// chain" stopped meaning the same thing.
+    #[test]
+    fn a_v0_scene_migrates_all_the_way_forward_on_read() {
         let cube = blob("cube.obj", b"v 0 0 0\n");
         let mut scene = minimal_scene();
         // A genuine pre-beta file: v0 stamps, and no `alias_names` concept.
@@ -511,8 +735,8 @@ mod tests {
         let result = read(&bytes).expect("a v0 scene must still open after the freeze");
 
         assert_eq!(
-            result.file.scene.schema_version, 1,
-            "the 0 -> 1 migration restamped it"
+            result.file.scene.schema_version, SCHEMA_VERSION_CURRENT,
+            "a v0 file must traverse every step, not just the first"
         );
         assert_eq!(
             result.file.scene.graph.nodes.len(),

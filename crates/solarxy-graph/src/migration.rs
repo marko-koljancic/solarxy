@@ -216,7 +216,7 @@ mod tests {
             version: 2,
             display_name: "Widget",
             category: Category::Generators,
-            contexts: ContextSet::GEO,
+            contexts: ContextSet::SOP,
             opens: None,
             inputs: vec![],
             outputs: vec![
@@ -338,7 +338,7 @@ mod tests {
         let loaded = load_node(
             &reg,
             NodeId(2),
-            "geo",
+            "sopnet",
             1,
             raw(&[
                 ("visible", serde_json::json!(false)),

@@ -147,7 +147,7 @@ fn scene(path: &Path, environment: bool, hdri_sky: bool) {
 
     // Geometry lives in a geo container: the root context takes lights,
     // cameras, the environment and the render node, and nothing that cooks.
-    let geo = b.add(ROOT, "geo");
+    let geo = b.add(ROOT, "sopnet");
     let g = GraphContext::Subflow(geo);
     let sphere = b.add(g, "sphere");
     b.set(g, sphere, "radius", V::Float(1.0));

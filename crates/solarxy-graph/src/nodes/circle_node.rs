@@ -18,7 +18,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Circle",
         category: Category::Generators,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![],
         outputs: vec![geometry_output()],

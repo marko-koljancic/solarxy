@@ -99,7 +99,7 @@ export const MODELING_TOUR: TourDef = {
       id: "canvas",
       target: ".node-canvas-host",
       title: "Model with nodes",
-      body: "Press Tab, add a Geo container, and double-click it to step inside: the graph in there IS the model. Generators make geometry, modifiers reshape it, and the display flag picks what renders.",
+      body: "Press Tab, add a Sop container, and double-click it to step inside: the graph in there IS the model. Generators make geometry, modifiers reshape it, and the display flag picks what renders.",
       side: "left",
     },
     {

@@ -114,7 +114,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 3,
         display_name: "Material",
         category: Category::Shaders,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs,
         outputs: vec![geometry_output()],

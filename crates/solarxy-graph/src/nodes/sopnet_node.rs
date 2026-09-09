@@ -1,10 +1,10 @@
-//! The `geo` container: the subflow
+//! The `sopnet` container: the subflow
 //! host. No ports, no wire output. The renderer resolves its display object
 //! from the subflow's active display node and applies this node's transform
 //! as the `SceneObject` transform (not baked into vertices, so transform
 //! edits never recook the subflow).
 
-use super::common::{migrate_geo, params_with, passive_cook, rendering_params, rotate_order_param};
+use super::common::{migrate_sopnet, params_with, passive_cook, rendering_params, rotate_order_param};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
 use crate::document::ContextKind;
@@ -14,25 +14,25 @@ use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDe
 pub fn descriptor() -> NodeTypeDescriptor {
     // v2: `receive_shadow` dropped from the rendering group (never wired).
     // v3: `rotate_order` added, and the world matrix moved onto the kernel's
-    // `compose_trs`. Before this, `geo` hardcoded ZYX while `transform`
+    // `compose_trs`. Before this, the container hardcoded ZYX while `transform`
     // defaulted to XYZ, so identical angles meant different orientations; the
     // rotate gizmo, which must decompose back into the target's order, is what
-    // forced the two to agree. See `migrate_geo` for how old files keep their
+    // forced the two to agree. See `migrate_sopnet` for how old files keep their
     // exact appearance.
     NodeTypeDescriptor {
-        type_id: "geo",
+        type_id: "sopnet",
         version: 3,
-        display_name: "Geo",
+        display_name: "Sop",
         category: Category::Container,
         contexts: ContextSet::OBJ,
-        // The geo container opens a geometry network; the engine creates
+        // The SOP container opens a geometry network; the engine creates
         // and kinds the child canvas from this, never from the type id.
-        opens: Some(ContextKind::Geo),
+        opens: Some(ContextKind::Sop),
         inputs: vec![],
         outputs: vec![],
         params: {
             let mut params = params_with(
-                "Geo",
+                "Sop",
                 vec![
                     ParamSpec::new(
                         "translate",
@@ -107,18 +107,18 @@ pub fn descriptor() -> NodeTypeDescriptor {
             params.extend(rendering_params());
             params
         },
-        // Bypassing a geo excludes its whole subflow from the scene.
+        // Bypassing a SOP container excludes its whole subflow from the scene.
         bypass: BypassBehavior::Mute,
         doc: "A container: one object in the scene, holding a whole geometry \
               network inside it. It has no ports and produces no wire value. \
               What it renders is whichever node inside carries the display \
               flag, placed in the world by this node's transform.\n\n\
               Containers are how a scene stays a scene instead of one \
-              enormous graph. The object level holds geos, cameras, and \
-              lights -- the things a scene is made of -- and each geo's \
+              enormous graph. The object level holds these, cameras, and \
+              lights -- the things a scene is made of -- and each one's SOP \
               network holds the modelling that builds that one object. \
-              Double-click a geo to dive into its network; the breadcrumb \
-              walks you back out. Bypassing a geo takes its entire subflow \
+              Double-click it to dive into its network; the breadcrumb \
+              walks you back out. Bypassing it takes its entire subflow \
               out of the scene in one click.\n\n\
               The rendering flags live here and only here. Visible and Cast \
               Shadow are per-object properties, so they belong to the object, \
@@ -126,13 +126,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
               geometry node has no such params, and why hunting for a Visible \
               checkbox on your `box` will not find one. The transform is the \
               same story: it is applied to the object at draw time rather \
-              than baked into the points, so dragging a geo around never \
+              than baked into the points, so dragging one around never \
               recooks the network inside it, however heavy that network is.",
         search_aliases: &["object", "container", "group", "subflow"],
-        glyph: "geo",
+        glyph: "sopnet",
         role: NodeRole::Container,
         cook: passive_cook,
-        migrate: Some(migrate_geo),
+        migrate: Some(migrate_sopnet),
     }
 }
 
@@ -156,24 +156,24 @@ mod tests {
         Some(map.get("rotate_order")?.as_str()?.to_string())
     }
 
-    /// The whole point of the v3 migration: a geo whose rotation ACTUALLY
+    /// The whole point of the v3 migration: a container whose rotation ACTUALLY
     /// depended on the old ZYX order keeps it explicitly, so the document
     /// renders exactly as it did before the unification.
     #[test]
-    fn a_multi_axis_rotated_geo_keeps_its_old_order() {
+    fn a_multi_axis_rotated_container_keeps_its_old_order() {
         let mut params = params_with_rotate([30.0, 40.0, 0.0]);
-        migrate_geo(2, &mut params).unwrap();
+        migrate_sopnet(2, &mut params).unwrap();
         assert_eq!(stamped_order(&params).as_deref(), Some("zyx"));
     }
 
-    /// ...and a geo where the order was never observable is left alone, so it
+    /// ...and a container where the order was never observable is left alone, so it
     /// picks up the new XYZ default and the document stays free of noise. One
     /// nonzero lane rotates identically under all six orders.
     #[test]
-    fn a_single_axis_rotated_geo_is_left_at_the_new_default() {
+    fn a_single_axis_rotated_container_is_left_at_the_new_default() {
         for rotate in [[0.0, 0.0, 0.0], [0.0, 45.0, 0.0], [90.0, 0.0, 0.0]] {
             let mut params = params_with_rotate(rotate);
-            migrate_geo(2, &mut params).unwrap();
+            migrate_sopnet(2, &mut params).unwrap();
             assert!(
                 !params.contains_key("rotate_order"),
                 "{rotate:?} should not have been stamped"
@@ -186,7 +186,7 @@ mod tests {
     fn an_existing_rotate_order_survives_the_migration() {
         let mut params = params_with_rotate([30.0, 40.0, 50.0]);
         params.insert("rotate_order".to_string(), serde_json::json!("yxz"));
-        migrate_geo(2, &mut params).unwrap();
+        migrate_sopnet(2, &mut params).unwrap();
         assert_eq!(stamped_order(&params).as_deref(), Some("yxz"));
     }
 
@@ -196,11 +196,11 @@ mod tests {
     fn the_v1_step_still_strips_receive_shadow() {
         let mut params = params_with_rotate([30.0, 40.0, 0.0]);
         params.insert("receive_shadow".to_string(), serde_json::json!(true));
-        migrate_geo(1, &mut params).unwrap();
+        migrate_sopnet(1, &mut params).unwrap();
         assert!(!params.contains_key("receive_shadow"));
         // v1 -> v2 must not stamp; that is the v2 -> v3 step's job.
         assert!(!params.contains_key("rotate_order"));
-        migrate_geo(2, &mut params).unwrap();
+        migrate_sopnet(2, &mut params).unwrap();
         assert_eq!(stamped_order(&params).as_deref(), Some("zyx"));
     }
 }

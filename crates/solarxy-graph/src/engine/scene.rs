@@ -92,7 +92,7 @@ pub fn build_scene_delta(
         // A container that opens a geometry network lowers to a scene object,
         // whichever container that is. The arms below still name their types,
         // because a camera is a camera and no descriptor field says so yet.
-        if registry.opens_kind(&node.type_id, ContextKind::Geo) {
+        if registry.opens_kind(&node.type_id, ContextKind::Sop) {
             if emit_geo(doc, registry, cook, previews, node.id, &mut delta) {
                 present.insert(SceneObjectId(node.id.0));
             }
@@ -317,7 +317,7 @@ fn effective_validation(
 /// with a zero pivot (a geo's pivot is its origin). It used to hand-roll
 /// `T * Rz * Ry * Rx * S`, which is ZYX, while `transform` defaulted to XYZ:
 /// identical angles on the two nodes meant different orientations. Old
-/// documents keep their appearance because `migrate_geo` stamps `zyx` on any
+/// documents keep their appearance because `migrate_sopnet` stamps `zyx` on any
 /// geo where the order was actually observable.
 pub(crate) fn geo_world_matrix(
     doc: &Document,
@@ -406,7 +406,7 @@ pub fn pick_node(
     let root = doc.graph(GraphContext::Root).ok()?;
     let mut best: Option<(f32, NodeId)> = None;
     for node in root.nodes() {
-        if !registry.opens_kind(&node.type_id, ContextKind::Geo) {
+        if !registry.opens_kind(&node.type_id, ContextKind::Sop) {
             continue;
         }
         let geo = node.id;
@@ -549,7 +549,7 @@ pub(crate) fn pick_node_detailed(
     let root = doc.graph(GraphContext::Root).ok()?;
     let mut best: Option<super::PickDetail> = None;
     for node in root.nodes() {
-        if !registry.opens_kind(&node.type_id, ContextKind::Geo) {
+        if !registry.opens_kind(&node.type_id, ContextKind::Sop) {
             continue;
         }
         let geo = node.id;

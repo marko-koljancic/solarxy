@@ -1135,7 +1135,7 @@ export async function importDroppedFiles(files: File[]): Promise<void> {
 
 /** The import-node creation tail of [`importDroppedFiles`], also run by the
  * missing-sidecars dialog on completion: creates the matching import node
- * (inside a fresh Geo container when at root) and points its `file` param
+ * (inside a fresh SOP container when at root) and points its `file` param
  * at the staged primary. */
 export function completeModelImport(primaryHash: string, primaryName: string): void {
   const nodeType = IMPORT_NODE[extOf(primaryName)];
@@ -1143,10 +1143,15 @@ export function completeModelImport(primaryHash: string, primaryName: string): v
 
   let ctx = useMirror.getState().current;
   if (ctx === "root") {
-    const geoBatch = dispatch({ type: "addNode", ctx: "root", nodeType: "geo", position: [40, 40] });
-    const geoEv = geoBatch.events.find((e) => e.type === "nodeAdded");
-    if (!geoEv || geoEv.type !== "nodeAdded") return;
-    ctx = { subflow: geoEv.node.id };
+    const sopBatch = dispatch({
+      type: "addNode",
+      ctx: "root",
+      nodeType: "sopnet",
+      position: [40, 40],
+    });
+    const sopEv = sopBatch.events.find((e) => e.type === "nodeAdded");
+    if (!sopEv || sopEv.type !== "nodeAdded") return;
+    ctx = { subflow: sopEv.node.id };
     useMirror.getState().setCurrent(ctx);
   }
 

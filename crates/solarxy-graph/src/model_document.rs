@@ -90,7 +90,7 @@ pub fn synthesize_model_document(
     // registry answers with a descriptor and not a predicate.
     let container = engine
         .registry()
-        .container_for(ContextKind::Geo)
+        .container_for(ContextKind::Sop)
         .ok_or_else(|| {
             ModelDocumentError::Engine("no registered type opens a geometry network".into())
         })?
@@ -270,7 +270,7 @@ mod tests {
 
         let mut descriptors = crate::nodes::builtin_descriptors();
         for d in &mut descriptors {
-            if d.opens == Some(ContextKind::Geo) {
+            if d.opens == Some(ContextKind::Sop) {
                 d.type_id = "renamed_container";
             }
         }

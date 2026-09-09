@@ -72,7 +72,7 @@ export const GLYPH_PATHS: Record<string, string> = {
   import_ply: "M4 2.5h5l3 3v8h-8z m5 0v3h3m-4 1.5v4m-1.7-1.7l1.7 1.7 1.7-1.7",
   import_image:
     "M3 4h10v8h-10z m2.5 4.3a1.1 1.1 0 1 0 0-2.2m-2 5.4l3-3 2.3 2.3 2.2-2.3 2 2",
-  geo: "M4.5 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z m1 5.5h5",
+  sopnet: "M4.5 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z m1 5.5h5",
   note: "M3 3h10v6.5l-3.5 3.5h-6.5z m6.5 10v-3.5h3.5",
   // Text: a full page with lines of writing on it. Deliberately close to
   // the note glyph, because both hold prose; the folded corner is what
@@ -118,8 +118,8 @@ export const GLYPH_PATHS: Record<string, string> = {
   height_to_normal:
     "M2.5 12.5c2-5 3.8-5 5.5-2s3.8 3 5.5-2 M11.5 8V3.5 m-1.7 1.7l1.7-1.7 1.7 1.7",
 
-  // Containers: the geo body with a context motif inside.
-  texnet:
+  // Containers: the SOP body with a context motif inside.
+  copnet:
     "M4.5 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M5 10.5l2.2-2.7 1.6 1.8 1.4-1.6 1.8 2.5",
   matnet:
     "M4.5 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M8 4.8c1.5 1.9 2.4 3 2.4 4.2a2.4 2.4 0 1 1-4.8 0c0-1.2 0.9-2.3 2.4-4.2z",
@@ -146,7 +146,7 @@ export const GLYPH_PATHS: Record<string, string> = {
 /** Category -> the glyph shown when a node's declared key has no art (a
  * future Rust node with a novel glyph key degrades to its family icon). */
 const CATEGORY_GLYPH: Record<NodeTypeSnapshot["category"], string> = {
-  container: "geo",
+  container: "sopnet",
   generators: "box",
   attribute: "attribute_create",
   transform: "transform",
@@ -158,9 +158,9 @@ const CATEGORY_GLYPH: Record<NodeTypeSnapshot["category"], string> = {
   lights: "point",
   cameras: "camera",
   utility: "null",
-  tex_generate: "checker",
-  tex_adjust: "levels",
-  tex_composite: "mix",
+  cop_generate: "checker",
+  cop_adjust: "levels",
+  cop_composite: "mix",
 };
 
 /** Category -> the silhouette used when a node declares no role (older
@@ -178,9 +178,9 @@ const CATEGORY_ROLE: Record<NodeTypeSnapshot["category"], NodeRole> = {
   lights: "light",
   cameras: "camera",
   utility: "standard",
-  tex_generate: "imageSource",
-  tex_adjust: "standard",
-  tex_composite: "standard",
+  cop_generate: "imageSource",
+  cop_adjust: "standard",
+  cop_composite: "standard",
 };
 
 /** The 16x16 glyph path for a node type: declared key first, category art

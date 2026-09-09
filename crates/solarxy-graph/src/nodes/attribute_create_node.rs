@@ -24,7 +24,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Attribute Create",
         category: Category::Attribute,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)

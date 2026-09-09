@@ -402,7 +402,7 @@ mod tests {
     /// portless root node, and return the engine holding it.
     fn scene() -> (Engine, NodeId, NodeId) {
         let mut engine = Engine::new().expect("registry builds");
-        let geo = added(&mut engine, GraphContext::Root, "geo");
+        let geo = added(&mut engine, GraphContext::Root, "sopnet");
         let _light = added(&mut engine, GraphContext::Root, "point_light");
         let leaf = added(&mut engine, GraphContext::Subflow(geo), "box");
         (engine, geo, leaf)

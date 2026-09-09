@@ -177,7 +177,7 @@ pub fn rotate_order_from_key(key: &str) -> RotateOrder {
 /// rotates identically under either order, so it keeps the new default and the
 /// document stays clean.
 #[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
-pub fn migrate_geo(
+pub fn migrate_sopnet(
     from: u32,
     params: &mut serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), MigrateError> {
@@ -457,7 +457,7 @@ pub fn geometry_output() -> PortSpec {
 
 /// Assembles a node's full param list: `general`, then the node-specific
 /// groups. (The `rendering` group is geo-container-only;
-/// `geo_node` appends it explicitly.)
+/// `sopnet_node` appends it explicitly.)
 #[must_use]
 pub fn params_with(display_name: &str, specific: Vec<ParamSpec>) -> Vec<ParamSpec> {
     let mut params = general_params(display_name);

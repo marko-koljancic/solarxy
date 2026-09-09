@@ -16,7 +16,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Cone",
         category: Category::Generators,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![],
         outputs: vec![geometry_output()],

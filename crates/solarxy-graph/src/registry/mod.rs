@@ -158,9 +158,9 @@ pub enum Category {
     /// and stereo cameras are all plausible neighbours).
     Cameras,
     Utility,
-    TexGenerate,
-    TexAdjust,
-    TexComposite,
+    CopGenerate,
+    CopAdjust,
+    CopComposite,
 }
 
 impl Category {
@@ -182,9 +182,9 @@ impl Category {
             Self::Lights => "Lights",
             Self::Cameras => "Cameras",
             Self::Utility => "Utility",
-            Self::TexGenerate => "Generate",
-            Self::TexAdjust => "Adjust",
-            Self::TexComposite => "Composite",
+            Self::CopGenerate => "Generate",
+            Self::CopAdjust => "Adjust",
+            Self::CopComposite => "Composite",
         }
     }
 }
@@ -229,11 +229,11 @@ pub struct ContextSet(u16);
 
 impl ContextSet {
     pub const OBJ: Self = Self::of(ContextKind::Obj);
-    pub const GEO: Self = Self::of(ContextKind::Geo);
+    pub const SOP: Self = Self::of(ContextKind::Sop);
     pub const MAT: Self = Self::of(ContextKind::Mat);
-    pub const TEX: Self = Self::of(ContextKind::Tex);
+    pub const COP: Self = Self::of(ContextKind::Cop);
     /// Every kind (the note node's placement).
-    pub const ALL: Self = Self::OBJ.or(Self::GEO).or(Self::MAT).or(Self::TEX);
+    pub const ALL: Self = Self::OBJ.or(Self::SOP).or(Self::MAT).or(Self::COP);
 
     #[must_use]
     pub const fn of(kind: ContextKind) -> Self {
@@ -252,7 +252,7 @@ impl ContextSet {
     }
 
     /// Set union, `const` so descriptor literals can compose
-    /// (`ContextSet::GEO.or(ContextSet::TEX)`).
+    /// (`ContextSet::SOP.or(ContextSet::COP)`).
     #[must_use]
     pub const fn or(self, other: Self) -> Self {
         Self(self.0 | other.0)
@@ -656,9 +656,9 @@ mod tests {
     fn every_named_constant_holds_exactly_its_own_kind() {
         for (set, kind) in [
             (ContextSet::OBJ, ContextKind::Obj),
-            (ContextSet::GEO, ContextKind::Geo),
+            (ContextSet::SOP, ContextKind::Sop),
             (ContextSet::MAT, ContextKind::Mat),
-            (ContextSet::TEX, ContextKind::Tex),
+            (ContextSet::COP, ContextKind::Cop),
         ] {
             assert_eq!(
                 set.kinds(),

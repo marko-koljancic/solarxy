@@ -115,7 +115,7 @@ fn scene_with(a: Authored) -> Vec<u8> {
             .expect("connect");
     };
 
-    let geo = add(&mut engine, root, "geo", [0.0, 0.0]);
+    let geo = add(&mut engine, root, "sopnet", [0.0, 0.0]);
     let g = GraphContext::Subflow(geo);
     let ball = add(&mut engine, g, "sphere", [0.0, 0.0]);
     let ball_x = add(&mut engine, g, "transform", [160.0, 0.0]);

@@ -25,7 +25,7 @@ const PROBE: NodeTypeSnapshot = {
   displayName: "Probe",
   category: "generators",
   categoryLabel: "Generators",
-  contexts: ["geo"],
+  contexts: ["sop"],
   opens: null,
   inputs: [
     { key: "geometry", label: "Geometry", dataType: "geometry", variadic: false, required: false, min: 0, isDefault: true, doc: "" },
@@ -72,7 +72,7 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     // (obj) palette does not. The kinds come from the typed-context
     // vocabulary; a node declaring a NEW kind is still just a
     // filter match away.
-    expect(SNAP.nodes.filter((n) => n.contexts.includes("geo")).map((n) => n.typeId)).toContain(
+    expect(SNAP.nodes.filter((n) => n.contexts.includes("sop")).map((n) => n.typeId)).toContain(
       "probe",
     );
     expect(SNAP.nodes.filter((n) => n.contexts.includes("obj"))).toHaveLength(0);
@@ -85,19 +85,19 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     // whatever the descriptor opens.
     const container: NodeTypeSnapshot = {
       ...PROBE,
-      typeId: "texnet_probe",
+      typeId: "copnet_probe",
       contexts: ["obj"],
-      opens: "tex",
+      opens: "cop",
       inputs: [],
       outputs: [],
     };
     const snap: RegistrySnapshot = { nodes: [PROBE, container], coercions: SNAP.coercions };
     const ownerNodes = [
-      { id: 7, typeId: "texnet_probe", typeVersion: 1, params: {}, position: [0, 0] as [number, number], bypassed: false, portOrder: {} },
+      { id: 7, typeId: "copnet_probe", typeVersion: 1, params: {}, position: [0, 0] as [number, number], bypassed: false, portOrder: {} },
     ];
-    expect(contextKind(snap, { subflow: 7 }, ownerNodes)).toBe("tex");
+    expect(contextKind(snap, { subflow: 7 }, ownerNodes)).toBe("cop");
     // An unknown owner falls back to geo (the only pre-context child kind).
-    expect(contextKind(snap, { subflow: 99 }, ownerNodes)).toBe("geo");
+    expect(contextKind(snap, { subflow: 99 }, ownerNodes)).toBe("sop");
   });
 
   it("has typed handles the frontend can color + validate", () => {

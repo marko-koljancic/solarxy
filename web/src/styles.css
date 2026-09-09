@@ -2915,14 +2915,14 @@ body.reduce-motion .cook-arc {
 /* Root containers color-code by context: the fill token per
  * opened network kind, with a border accent derived from the fill so the
  * tint carries in both themes. The glyph follows --cat-fill on its own
- * (the ink is a fill/ink color-mix). Geo keeps the neutral tile. */
-.flow-node.cat-container.nt-geo {
-  --cat-fill: var(--node-cat-container-geo);
+ * (the ink is a fill/ink color-mix). Sop keeps the neutral tile. */
+.flow-node.cat-container.nt-sopnet {
+  --cat-fill: var(--node-cat-container-sop);
 }
-.flow-node.cat-container.nt-texnet {
-  --cat-fill: var(--node-cat-container-tex);
-  --cat-accent: color-mix(in srgb, var(--node-cat-container-tex) 60%, rgba(0, 0, 0, 0.45));
-  --cat-accent-hover: color-mix(in srgb, var(--node-cat-container-tex) 45%, rgba(0, 0, 0, 0.6));
+.flow-node.cat-container.nt-copnet {
+  --cat-fill: var(--node-cat-container-cop);
+  --cat-accent: color-mix(in srgb, var(--node-cat-container-cop) 60%, rgba(0, 0, 0, 0.45));
+  --cat-accent-hover: color-mix(in srgb, var(--node-cat-container-cop) 45%, rgba(0, 0, 0, 0.6));
 }
 .flow-node.cat-container.nt-matnet {
   --cat-fill: var(--node-cat-container-mat);
@@ -2932,9 +2932,9 @@ body.reduce-motion .cook-arc {
 /* The context tint now rides the SVG stroke rather than a CSS border, since
  * the container body became a folder silhouette. */
 
-.flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }
-.flow-node.cat-tex_adjust { --cat-fill: var(--node-cat-tex_adjust); }
-.flow-node.cat-tex_composite { --cat-fill: var(--node-cat-tex_composite); }
+.flow-node.cat-cop_generate { --cat-fill: var(--node-cat-cop_generate); }
+.flow-node.cat-cop_adjust { --cat-fill: var(--node-cat-cop_adjust); }
+.flow-node.cat-cop_composite { --cat-fill: var(--node-cat-cop_composite); }
 
 /* ---- Typed wires (source data-type colors, matching the
  * handle palette in registry/datatypes.ts) ---- */

@@ -71,9 +71,9 @@ describe("category fallback totality (the 15-category taxonomy)", () => {
     "lights",
     "cameras",
     "utility",
-    "tex_generate",
-    "tex_adjust",
-    "tex_composite",
+    "cop_generate",
+    "cop_adjust",
+    "cop_composite",
   ];
 
   const probe = (category: NodeTypeSnapshot["category"]): NodeTypeSnapshot =>

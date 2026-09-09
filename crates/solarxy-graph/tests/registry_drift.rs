@@ -318,7 +318,7 @@ fn node_name_matches_the_frontend_label() {
 
     // The Rust half, against the shared rule's three branches.
     let named = |name: Option<&str>| {
-        let mut g = Graph::new(ContextKind::Geo);
+        let mut g = Graph::new(ContextKind::Sop);
         let mut node = NodeData::new(NodeId(1), "box", 1);
         if let Some(n) = name {
             node.params.insert(

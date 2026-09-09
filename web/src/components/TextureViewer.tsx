@@ -22,14 +22,14 @@ export function TextureViewer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dims, setDims] = useState<[number, number] | null>(null);
 
-  // The network to preview: the open canvas when it IS a texture network,
-  // else the first texnet-like container at root.
+  // The network to preview: the open canvas when it IS an image network,
+  // else the first COP container at root.
   const owner = useMemo(() => {
-    if (current !== "root" && contextKind(registry, current, rootNodes) === "tex") {
+    if (current !== "root" && contextKind(registry, current, rootNodes) === "cop") {
       return current.subflow;
     }
     return (
-      rootNodes.find((n) => descriptorFor(registry, n.typeId)?.opens === "tex")?.id ?? null
+      rootNodes.find((n) => descriptorFor(registry, n.typeId)?.opens === "cop")?.id ?? null
     );
   }, [current, registry, rootNodes]);
 

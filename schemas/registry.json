@@ -152,7 +152,7 @@
       "category": "copy",
       "categoryLabel": "Copy & Instance",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -425,7 +425,7 @@
       "category": "attribute",
       "categoryLabel": "Attribute",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -612,7 +612,7 @@
       "category": "attribute",
       "categoryLabel": "Attribute",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -848,7 +848,7 @@
       "category": "attribute",
       "categoryLabel": "Attribute",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -1077,7 +1077,7 @@
       "category": "attribute",
       "categoryLabel": "Attribute",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -1244,7 +1244,7 @@
       "category": "attribute",
       "categoryLabel": "Attribute",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -1552,7 +1552,7 @@
       "category": "attribute",
       "categoryLabel": "Attribute",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -1671,10 +1671,10 @@
       "typeId": "blur",
       "version": 1,
       "displayName": "Blur",
-      "category": "tex_composite",
+      "category": "cop_composite",
       "categoryLabel": "Composite",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -1774,7 +1774,7 @@
       "category": "utility",
       "categoryLabel": "Utility",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -1879,7 +1879,7 @@
       "category": "generators",
       "categoryLabel": "Generators",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -2060,10 +2060,10 @@
       "typeId": "brick",
       "version": 1,
       "displayName": "Brick",
-      "category": "tex_generate",
+      "category": "cop_generate",
       "categoryLabel": "Generate",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [],
@@ -2288,10 +2288,10 @@
       "typeId": "brightness_contrast",
       "version": 1,
       "displayName": "Brightness / Contrast",
-      "category": "tex_adjust",
+      "category": "cop_adjust",
       "categoryLabel": "Adjust",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -3043,10 +3043,10 @@
       "typeId": "checker",
       "version": 1,
       "displayName": "Checker",
-      "category": "tex_generate",
+      "category": "cop_generate",
       "categoryLabel": "Generate",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [],
@@ -3238,7 +3238,7 @@
       "category": "generators",
       "categoryLabel": "Generators",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -3377,7 +3377,7 @@
       "category": "attribute",
       "categoryLabel": "Attribute",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -3471,7 +3471,7 @@
       "category": "generators",
       "categoryLabel": "Generators",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -3612,10 +3612,10 @@
       "typeId": "constant",
       "version": 1,
       "displayName": "Constant",
-      "category": "tex_generate",
+      "category": "cop_generate",
       "categoryLabel": "Generate",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [],
@@ -3739,13 +3739,68 @@
       "role": "imageSource"
     },
     {
+      "typeId": "copnet",
+      "version": 1,
+      "displayName": "Cop",
+      "category": "container",
+      "categoryLabel": "Container",
+      "contexts": [
+        "obj"
+      ],
+      "opens": "cop",
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Cop",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "multilineText",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        }
+      ],
+      "bypass": {
+        "mode": "notBypassable"
+      },
+      "doc": "A container you dive into to build an image procedurally: `constant`, `ramp`, `noise` and `import_image` as sources, then the adjust, filter and composite nodes. Whichever node inside carries the display flag publishes the network's image.\n\nDrop one at the root next to your `sopnet` and `matnet` nodes, build the image inside, then consume it from a material network with a `tex_ref`, whose Texture Network param points at this container. The texture viewer pane previews the published image live while you work, and editing anything inside recooks every referrer.\n\nThe reference is a path, not a wire. This node has no ports at all, so nothing connects to it on the canvas, and it is not a scene object either -- no transform, nothing lowered into the scene delta. A COP network nothing refers to still cooks and still shows nothing.",
+      "searchAliases": [
+        "texture",
+        "image network"
+      ],
+      "glyph": "copnet",
+      "role": "container"
+    },
+    {
       "typeId": "copy_to_points",
       "version": 2,
       "displayName": "Copy to Points",
       "category": "copy",
       "categoryLabel": "Copy & Instance",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -3948,7 +4003,7 @@
       "category": "generators",
       "categoryLabel": "Generators",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -4113,7 +4168,7 @@
       "category": "topology",
       "categoryLabel": "Topology",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -4603,7 +4658,7 @@
       "category": "transform",
       "categoryLabel": "Transform",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -4816,7 +4871,7 @@
       "category": "topology",
       "categoryLabel": "Topology",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -5024,10 +5079,10 @@
       "typeId": "gamma",
       "version": 1,
       "displayName": "Gamma",
-      "category": "tex_adjust",
+      "category": "cop_adjust",
       "categoryLabel": "Adjust",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -5120,224 +5175,13 @@
       "role": "standard"
     },
     {
-      "typeId": "geo",
-      "version": 3,
-      "displayName": "Geo",
-      "category": "container",
-      "categoryLabel": "Container",
-      "contexts": [
-        "obj"
-      ],
-      "opens": "geo",
-      "inputs": [],
-      "outputs": [],
-      "params": [
-        {
-          "key": "name",
-          "label": "Name",
-          "group": "general",
-          "paramType": "text",
-          "enumVariants": [],
-          "accept": [],
-          "default": "Geo",
-          "hard": null,
-          "soft": null,
-          "step": null,
-          "unit": "none",
-          "drivenByPort": null,
-          "doc": "The node's title on the canvas."
-        },
-        {
-          "key": "description",
-          "label": "Description",
-          "group": "general",
-          "paramType": "multilineText",
-          "enumVariants": [],
-          "accept": [],
-          "default": "",
-          "hard": null,
-          "soft": null,
-          "step": null,
-          "unit": "none",
-          "drivenByPort": null,
-          "doc": "Free-text notes shown as the node subtitle."
-        },
-        {
-          "key": "translate",
-          "label": "Translate",
-          "group": "transform",
-          "paramType": "vec3",
-          "enumVariants": [],
-          "accept": [],
-          "default": [
-            0.0,
-            0.0,
-            0.0
-          ],
-          "hard": null,
-          "soft": null,
-          "step": null,
-          "unit": "meters",
-          "drivenByPort": null,
-          "doc": "Where the object sits in the world, in metres from the origin. Applied after rotation and scale, so it moves the object as a finished whole. The move gizmo writes here."
-        },
-        {
-          "key": "rotate",
-          "label": "Rotate",
-          "group": "transform",
-          "paramType": "vec3",
-          "enumVariants": [],
-          "accept": [],
-          "default": [
-            0.0,
-            0.0,
-            0.0
-          ],
-          "hard": null,
-          "soft": null,
-          "step": null,
-          "unit": "degrees",
-          "drivenByPort": null,
-          "doc": "Euler angles in degrees, one per axis, applied in Rotate Order. With two or more axes nonzero the order changes the result, so the two params are read together."
-        },
-        {
-          "key": "rotate_order",
-          "label": "Rotate Order",
-          "group": "transform",
-          "paramType": "enum",
-          "enumVariants": [
-            [
-              "xyz",
-              "XYZ"
-            ],
-            [
-              "xzy",
-              "XZY"
-            ],
-            [
-              "yxz",
-              "YXZ"
-            ],
-            [
-              "yzx",
-              "YZX"
-            ],
-            [
-              "zxy",
-              "ZXY"
-            ],
-            [
-              "zyx",
-              "ZYX"
-            ]
-          ],
-          "accept": [],
-          "default": "xyz",
-          "hard": null,
-          "soft": null,
-          "step": null,
-          "unit": "none",
-          "drivenByPort": null,
-          "doc": "The order the three Euler angles compose in. It only matters once two or more axes are nonzero -- a single-axis rotation is identical under all six orders. Match the order your DCC used if you are transcribing angles from one, or the object arrives pointing somewhere else."
-        },
-        {
-          "key": "scale",
-          "label": "Scale",
-          "group": "transform",
-          "paramType": "vec3",
-          "enumVariants": [],
-          "accept": [],
-          "default": [
-            1.0,
-            1.0,
-            1.0
-          ],
-          "hard": [
-            0.001,
-            10000.0
-          ],
-          "soft": [
-            0.01,
-            100.0
-          ],
-          "step": null,
-          "unit": "none",
-          "drivenByPort": null,
-          "doc": "Per-axis scale multipliers. 1 on every axis leaves the object alone; unequal values stretch it. Multiplied by Uniform Scale, so the effective scale on each axis is this times that."
-        },
-        {
-          "key": "uniform_scale",
-          "label": "Uniform Scale",
-          "group": "transform",
-          "paramType": "float",
-          "enumVariants": [],
-          "accept": [],
-          "default": 1.0,
-          "hard": [
-            0.001,
-            10000.0
-          ],
-          "soft": [
-            0.01,
-            100.0
-          ],
-          "step": null,
-          "unit": "none",
-          "drivenByPort": null,
-          "doc": "One multiplier over all three axes, on top of Scale. Reach for it to resize the whole object without disturbing a per-axis ratio you have already dialled in."
-        },
-        {
-          "key": "visible",
-          "label": "Visible",
-          "group": "rendering",
-          "paramType": "bool",
-          "enumVariants": [],
-          "accept": [],
-          "default": true,
-          "hard": null,
-          "soft": null,
-          "step": null,
-          "unit": "none",
-          "drivenByPort": null,
-          "doc": "Whether this object is displayed. Hidden objects stay cooked, so re-show is instant."
-        },
-        {
-          "key": "cast_shadow",
-          "label": "Cast Shadow",
-          "group": "rendering",
-          "paramType": "bool",
-          "enumVariants": [],
-          "accept": [],
-          "default": true,
-          "hard": null,
-          "soft": null,
-          "step": null,
-          "unit": "none",
-          "drivenByPort": null,
-          "doc": "Whether this object is drawn into the shadow map."
-        }
-      ],
-      "bypass": {
-        "mode": "mute"
-      },
-      "doc": "A container: one object in the scene, holding a whole geometry network inside it. It has no ports and produces no wire value. What it renders is whichever node inside carries the display flag, placed in the world by this node's transform.\n\nContainers are how a scene stays a scene instead of one enormous graph. The object level holds geos, cameras, and lights -- the things a scene is made of -- and each geo's network holds the modelling that builds that one object. Double-click a geo to dive into its network; the breadcrumb walks you back out. Bypassing a geo takes its entire subflow out of the scene in one click.\n\nThe rendering flags live here and only here. Visible and Cast Shadow are per-object properties, so they belong to the object, not to the box or the merge inside it -- which is why a plain geometry node has no such params, and why hunting for a Visible checkbox on your `box` will not find one. The transform is the same story: it is applied to the object at draw time rather than baked into the points, so dragging a geo around never recooks the network inside it, however heavy that network is.",
-      "searchAliases": [
-        "object",
-        "container",
-        "group",
-        "subflow"
-      ],
-      "glyph": "geo",
-      "role": "container"
-    },
-    {
       "typeId": "geo_export",
       "version": 2,
       "displayName": "Export Geometry",
       "category": "export",
       "categoryLabel": "Export",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -5496,10 +5340,10 @@
       "typeId": "gradient",
       "version": 1,
       "displayName": "Gradient",
-      "category": "tex_generate",
+      "category": "cop_generate",
       "categoryLabel": "Generate",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [],
@@ -5699,10 +5543,10 @@
       "typeId": "height_to_normal",
       "version": 1,
       "displayName": "Height to Normal",
-      "category": "tex_composite",
+      "category": "cop_composite",
       "categoryLabel": "Composite",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -5962,10 +5806,10 @@
       "typeId": "hue_saturation",
       "version": 1,
       "displayName": "Hue / Saturation",
-      "category": "tex_adjust",
+      "category": "cop_adjust",
       "categoryLabel": "Adjust",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -6099,7 +5943,7 @@
       "category": "export",
       "categoryLabel": "Export",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -6262,7 +6106,7 @@
       "category": "import",
       "categoryLabel": "Import",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -6398,8 +6242,8 @@
       "category": "import",
       "categoryLabel": "Import",
       "contexts": [
-        "geo",
-        "tex"
+        "sop",
+        "cop"
       ],
       "opens": null,
       "inputs": [],
@@ -6489,7 +6333,7 @@
       "category": "import",
       "categoryLabel": "Import",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -6640,7 +6484,7 @@
       "category": "import",
       "categoryLabel": "Import",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -6777,7 +6621,7 @@
       "category": "import",
       "categoryLabel": "Import",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -6909,10 +6753,10 @@
       "typeId": "invert",
       "version": 1,
       "displayName": "Invert",
-      "category": "tex_adjust",
+      "category": "cop_adjust",
       "categoryLabel": "Adjust",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -6987,10 +6831,10 @@
       "typeId": "levels",
       "version": 1,
       "displayName": "Levels",
-      "category": "tex_adjust",
+      "category": "cop_adjust",
       "categoryLabel": "Adjust",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -7163,7 +7007,7 @@
       "category": "generators",
       "categoryLabel": "Generators",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -7426,7 +7270,7 @@
       "category": "shaders",
       "categoryLabel": "Shaders",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -8399,7 +8243,7 @@
       "bypass": {
         "mode": "notBypassable"
       },
-      "doc": "A container for a material network. Surface nodes cook inside it, and whichever node you designate as the display node publishes its material as the network's one result.\n\nAdd one per material you want to reuse. Dive in, build a surface with `principled`, `matcap`, `toon` or `unlit`, and combine surfaces with `mix_material`. Nothing leaves on a wire: materials cross contexts by path only, so a geo-side `material` node in Reference mode is what pulls the result out, and any number of them can point at the same network.\n\nIt cooks nothing itself and cannot be bypassed. A network with no display node designated publishes nothing at all, and every `material` node referring to it fails its cook rather than falling back to a default surface.",
+      "doc": "A container for a material network. Surface nodes cook inside it, and whichever node you designate as the display node publishes its material as the network's one result.\n\nAdd one per material you want to reuse. Dive in, build a surface with `principled`, `matcap`, `toon` or `unlit`, and combine surfaces with `mix_material`. Nothing leaves on a wire: materials cross contexts by path only, so a SOP-side `material` node in Reference mode is what pulls the result out, and any number of them can point at the same network.\n\nIt cooks nothing itself and cannot be bypassed. A network with no display node designated publishes nothing at all, and every `material` node referring to it fails its cook rather than falling back to a default surface.",
       "searchAliases": [
         "matnet",
         "material",
@@ -8416,7 +8260,7 @@
       "category": "topology",
       "categoryLabel": "Topology",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -8496,7 +8340,7 @@
       "category": "copy",
       "categoryLabel": "Copy & Instance",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -8636,10 +8480,10 @@
       "typeId": "mix",
       "version": 1,
       "displayName": "Mix",
-      "category": "tex_composite",
+      "category": "cop_composite",
       "categoryLabel": "Composite",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -8909,10 +8753,10 @@
       "typeId": "noise",
       "version": 1,
       "displayName": "Noise",
-      "category": "tex_generate",
+      "category": "cop_generate",
       "categoryLabel": "Generate",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [],
@@ -9058,9 +8902,9 @@
       "categoryLabel": "Utility",
       "contexts": [
         "obj",
-        "geo",
+        "sop",
         "mat",
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [],
@@ -9216,7 +9060,7 @@
       "category": "utility",
       "categoryLabel": "Utility",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -9293,10 +9137,10 @@
       "typeId": "pack_orm",
       "version": 1,
       "displayName": "Pack ORM",
-      "category": "tex_composite",
+      "category": "cop_composite",
       "categoryLabel": "Composite",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -9451,7 +9295,7 @@
       "category": "generators",
       "categoryLabel": "Generators",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -9897,7 +9741,7 @@
       "category": "topology",
       "categoryLabel": "Topology",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -10654,7 +10498,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "The physically-based metallic-roughness surface: base colour, metallic, roughness and emissive as factors, each with an optional texture map port that takes its channel over.\n\nThis is the surface to reach for first inside a `matnet`, and the one the renderer's Cook-Torrance path with image-based lighting exists for. Feed its map ports from `tex_ref` or an `import_image`, then either designate it the network's display node or run it into `mix_material` first.\n\nThe factor-and-map pairing is a hand-off, not a blend: connecting a map sets its factor to the multiplicative identity (white, or 1.0) so the map alone drives the channel, and the parameter panel dims the factor to say so. Metallic Roughness is one port for two channels and neutralizes both at once. It is the same surface builder the geo-side `material` node uses inline; the difference is only that this one outputs a Material wire instead of assigning to geometry.",
+      "doc": "The physically-based metallic-roughness surface: base colour, metallic, roughness and emissive as factors, each with an optional texture map port that takes its channel over.\n\nThis is the surface to reach for first inside a `matnet`, and the one the renderer's Cook-Torrance path with image-based lighting exists for. Feed its map ports from `tex_ref` or an `import_image`, then either designate it the network's display node or run it into `mix_material` first.\n\nThe factor-and-map pairing is a hand-off, not a blend: connecting a map sets its factor to the multiplicative identity (white, or 1.0) so the map alone drives the channel, and the parameter panel dims the factor to say so. Metallic Roughness is one port for two channels and neutralizes both at once. It is the same surface builder the SOP-side `material` node uses inline; the difference is only that this one outputs a Material wire instead of assigning to geometry.",
       "searchAliases": [
         "principled",
         "pbr",
@@ -10668,10 +10512,10 @@
       "typeId": "ramp",
       "version": 1,
       "displayName": "Ramp",
-      "category": "tex_generate",
+      "category": "cop_generate",
       "categoryLabel": "Generate",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [],
@@ -11736,7 +11580,7 @@
       "category": "copy",
       "categoryLabel": "Copy & Instance",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -11872,10 +11716,10 @@
       "typeId": "sharpen",
       "version": 1,
       "displayName": "Sharpen",
-      "category": "tex_composite",
+      "category": "cop_composite",
       "categoryLabel": "Composite",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [
@@ -11966,13 +11810,224 @@
       "role": "standard"
     },
     {
+      "typeId": "sopnet",
+      "version": 3,
+      "displayName": "Sop",
+      "category": "container",
+      "categoryLabel": "Container",
+      "contexts": [
+        "obj"
+      ],
+      "opens": "sop",
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Sop",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "multilineText",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "translate",
+          "label": "Translate",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "Where the object sits in the world, in metres from the origin. Applied after rotation and scale, so it moves the object as a finished whole. The move gizmo writes here."
+        },
+        {
+          "key": "rotate",
+          "label": "Rotate",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "doc": "Euler angles in degrees, one per axis, applied in Rotate Order. With two or more axes nonzero the order changes the result, so the two params are read together."
+        },
+        {
+          "key": "rotate_order",
+          "label": "Rotate Order",
+          "group": "transform",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "xyz",
+              "XYZ"
+            ],
+            [
+              "xzy",
+              "XZY"
+            ],
+            [
+              "yxz",
+              "YXZ"
+            ],
+            [
+              "yzx",
+              "YZX"
+            ],
+            [
+              "zxy",
+              "ZXY"
+            ],
+            [
+              "zyx",
+              "ZYX"
+            ]
+          ],
+          "accept": [],
+          "default": "xyz",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The order the three Euler angles compose in. It only matters once two or more axes are nonzero -- a single-axis rotation is identical under all six orders. Match the order your DCC used if you are transcribing angles from one, or the object arrives pointing somewhere else."
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Per-axis scale multipliers. 1 on every axis leaves the object alone; unequal values stretch it. Multiplied by Uniform Scale, so the effective scale on each axis is this times that."
+        },
+        {
+          "key": "uniform_scale",
+          "label": "Uniform Scale",
+          "group": "transform",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "One multiplier over all three axes, on top of Scale. Reach for it to resize the whole object without disturbing a per-axis ratio you have already dialled in."
+        },
+        {
+          "key": "visible",
+          "label": "Visible",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether this object is displayed. Hidden objects stay cooked, so re-show is instant."
+        },
+        {
+          "key": "cast_shadow",
+          "label": "Cast Shadow",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether this object is drawn into the shadow map."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A container: one object in the scene, holding a whole geometry network inside it. It has no ports and produces no wire value. What it renders is whichever node inside carries the display flag, placed in the world by this node's transform.\n\nContainers are how a scene stays a scene instead of one enormous graph. The object level holds these, cameras, and lights -- the things a scene is made of -- and each one's SOP network holds the modelling that builds that one object. Double-click it to dive into its network; the breadcrumb walks you back out. Bypassing it takes its entire subflow out of the scene in one click.\n\nThe rendering flags live here and only here. Visible and Cast Shadow are per-object properties, so they belong to the object, not to the box or the merge inside it -- which is why a plain geometry node has no such params, and why hunting for a Visible checkbox on your `box` will not find one. The transform is the same story: it is applied to the object at draw time rather than baked into the points, so dragging one around never recooks the network inside it, however heavy that network is.",
+      "searchAliases": [
+        "object",
+        "container",
+        "group",
+        "subflow"
+      ],
+      "glyph": "sopnet",
+      "role": "container"
+    },
+    {
       "typeId": "sphere",
       "version": 2,
       "displayName": "Sphere",
       "category": "generators",
       "categoryLabel": "Generators",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -12451,7 +12506,7 @@
       "category": "topology",
       "categoryLabel": "Topology",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -12552,7 +12607,7 @@
       "category": "utility",
       "categoryLabel": "Utility",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -12653,7 +12708,7 @@
       "category": "import",
       "categoryLabel": "Import",
       "contexts": [
-        "geo",
+        "sop",
         "mat"
       ],
       "opens": null,
@@ -12710,7 +12765,7 @@
           "accept": [],
           "nodePath": {
             "kind": "opens",
-            "opens": "tex"
+            "opens": "cop"
           },
           "default": null,
           "hard": null,
@@ -12718,13 +12773,13 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "The `texnet` to fetch from; only containers that open a texture context can be picked. What arrives is that network's display node output, so re-designating the display node inside it changes every referrer at once. Left unset this node simply emits nothing, but a path aimed at a deleted node or at a network that publishes nothing fails the cook rather than yielding a blank image."
+          "doc": "The `copnet` to fetch from; only containers that open a texture context can be picked. What arrives is that network's display node output, so re-designating the display node inside it changes every referrer at once. Left unset this node simply emits nothing, but a path aimed at a deleted node or at a network that publishes nothing fails the cook rather than yielding a blank image."
         }
       ],
       "bypass": {
         "mode": "mute"
       },
-      "doc": "Pulls the image a texture network publishes into this network as an Image wire. It reads across contexts by path, so no wire ever crosses a network boundary.\n\nPoint it at a `texnet` and feed the result into a map port on `principled`, or into the geo-side `material` node -- it is placeable in both Mat and Geo networks for exactly that reason. One texture network can back any number of these, which is how a texture gets authored once and used everywhere; editing the network recooks every referrer.\n\nThis is the fetch pattern rather than a wire, so the dependency is invisible on the canvas: nothing draws a line from the `texnet` to here, and the only record of the link is this node's Texture Network param. An unset path is harmless (no output, read downstream as no map), but a path pointing at a network with no display node is a cook error.",
+      "doc": "Pulls the image a texture network publishes into this network as an Image wire. It reads across contexts by path, so no wire ever crosses a network boundary.\n\nPoint it at a `copnet` and feed the result into a map port on `principled`, or into the SOP-side `material` node -- it is placeable in both Mat and SOP networks for exactly that reason. One texture network can back any number of these, which is how a texture gets authored once and used everywhere; editing the network recooks every referrer.\n\nThis is the fetch pattern rather than a wire, so the dependency is invisible on the canvas: nothing draws a line from the `copnet` to here, and the only record of the link is this node's Texture Network param. An unset path is harmless (no output, read downstream as no map), but a path pointing at a network with no display node is a cook error.",
       "searchAliases": [
         "tex_ref",
         "fetch",
@@ -12736,63 +12791,6 @@
       "role": "imageSource"
     },
     {
-      "typeId": "texnet",
-      "version": 1,
-      "displayName": "Tex",
-      "category": "container",
-      "categoryLabel": "Container",
-      "contexts": [
-        "obj"
-      ],
-      "opens": "tex",
-      "inputs": [],
-      "outputs": [],
-      "params": [
-        {
-          "key": "name",
-          "label": "Name",
-          "group": "general",
-          "paramType": "text",
-          "enumVariants": [],
-          "accept": [],
-          "default": "Tex",
-          "hard": null,
-          "soft": null,
-          "step": null,
-          "unit": "none",
-          "drivenByPort": null,
-          "doc": "The node's title on the canvas."
-        },
-        {
-          "key": "description",
-          "label": "Description",
-          "group": "general",
-          "paramType": "multilineText",
-          "enumVariants": [],
-          "accept": [],
-          "default": "",
-          "hard": null,
-          "soft": null,
-          "step": null,
-          "unit": "none",
-          "drivenByPort": null,
-          "doc": "Free-text notes shown as the node subtitle."
-        }
-      ],
-      "bypass": {
-        "mode": "notBypassable"
-      },
-      "doc": "A container you dive into to build an image procedurally: `constant`, `ramp`, `noise` and `import_image` as sources, then the adjust, filter and composite nodes. Whichever node inside carries the display flag publishes the network's image.\n\nDrop one at the root next to your `geo` and `matnet` nodes, build the image inside, then consume it from a material network with a `tex_ref`, whose Texture Network param points at this container. The texture viewer pane previews the published image live while you work, and editing anything inside recooks every referrer.\n\nThe reference is a path, not a wire. This node has no ports at all, so nothing connects to it on the canvas, and it is not a scene object either -- no transform, nothing lowered into the scene delta. A texnet nothing refers to still cooks and still shows nothing.",
-      "searchAliases": [
-        "texnet",
-        "texture",
-        "cop",
-        "image network"
-      ],
-      "glyph": "texnet",
-      "role": "container"
-    },
-    {
       "typeId": "text",
       "version": 1,
       "displayName": "Text",
@@ -12800,9 +12798,9 @@
       "categoryLabel": "Utility",
       "contexts": [
         "obj",
-        "geo",
+        "sop",
         "mat",
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [],
@@ -13033,7 +13031,7 @@
       "category": "generators",
       "categoryLabel": "Generators",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -13177,7 +13175,7 @@
       "category": "generators",
       "categoryLabel": "Generators",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [],
@@ -13357,7 +13355,7 @@
       "category": "transform",
       "categoryLabel": "Transform",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -13694,7 +13692,7 @@
       "category": "attribute",
       "categoryLabel": "Attribute",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -13871,7 +13869,7 @@
       "category": "utility",
       "categoryLabel": "Utility",
       "contexts": [
-        "geo"
+        "sop"
       ],
       "opens": null,
       "inputs": [
@@ -14082,10 +14080,10 @@
       "typeId": "voronoi",
       "version": 1,
       "displayName": "Voronoi",
-      "category": "tex_generate",
+      "category": "cop_generate",
       "categoryLabel": "Generate",
       "contexts": [
-        "tex"
+        "cop"
       ],
       "opens": null,
       "inputs": [],

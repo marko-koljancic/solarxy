@@ -137,7 +137,7 @@ mod tests {
     use crate::document::{ContextKind, Graph, NodeData, NodeId};
 
     fn graph_with(names: &[(&str, Option<&str>)]) -> Graph {
-        let mut g = Graph::new(ContextKind::Geo);
+        let mut g = Graph::new(ContextKind::Sop);
         for (i, (type_id, name)) in names.iter().enumerate() {
             let mut node = NodeData::new(NodeId(i as u64 + 1), *type_id, 1);
             if let Some(n) = name {

@@ -46,12 +46,17 @@ pub struct EdgeId(pub u64);
 
 /// The network kind a graph is: the vocabulary of typed contexts. The
 /// root graph is always [`ContextKind::Obj`]; a child network's kind is
-/// whatever its owning container's descriptor `opens` (`geo` opens `Geo`,
-/// `matnet` opens `Mat`, `texnet` opens `Tex`). Node placement legality is
-/// judged against this kind via the descriptor's `ContextSet`, and adding
-/// a kind here plus a container descriptor is the whole cost of a new
-/// context. This generalizes the older root/subflow pair, which could only
-/// ever describe two kinds.
+/// whatever its owning container's descriptor `opens` (`sopnet` opens
+/// `Sop`, `matnet` opens `Mat`, `copnet` opens `Cop`). Node placement
+/// legality is judged against this kind via the descriptor's `ContextSet`,
+/// and adding a kind here plus a container descriptor is the whole cost of
+/// a new context. This generalizes the older root/subflow pair, which could
+/// only ever describe two kinds.
+///
+/// The names are the field's rather than this project's: a geometry network
+/// is a SOP network and an image network is a COP network wherever else a
+/// person has met one, so the vocabulary is a cost every user would
+/// otherwise pay twice, once learning it and once converting.
 #[derive(
     Debug,
     Default,
@@ -72,21 +77,21 @@ pub enum ContextKind {
     /// (the generalized MVP invariant).
     #[default]
     Obj,
-    /// A geometry network (a `geo` container's canvas).
-    Geo,
+    /// A geometry network (a `sopnet` container's canvas).
+    Sop,
     /// A material network (a `matnet` container's canvas).
     Mat,
-    /// A texture/image network (a `texnet` container's canvas).
-    Tex,
+    /// An image network (a `copnet` container's canvas).
+    Cop,
 }
 
 impl ContextKind {
     /// Every kind, in declaration order (snapshot and UI vocabularies).
     pub const ALL: [ContextKind; 4] = [
         ContextKind::Obj,
-        ContextKind::Geo,
+        ContextKind::Sop,
         ContextKind::Mat,
-        ContextKind::Tex,
+        ContextKind::Cop,
     ];
 }
 
@@ -583,7 +588,7 @@ mod tests {
 
     #[test]
     fn single_arity_occupancy_is_enforced() {
-        let mut g = Graph::new(ContextKind::Geo);
+        let mut g = Graph::new(ContextKind::Sop);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let c = node(&mut g, 3);
@@ -597,7 +602,7 @@ mod tests {
 
     #[test]
     fn variadic_connect_appends_port_order() {
-        let mut g = Graph::new(ContextKind::Geo);
+        let mut g = Graph::new(ContextKind::Sop);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let m = node(&mut g, 3);
@@ -613,7 +618,7 @@ mod tests {
 
     #[test]
     fn cycle_refused_and_graph_intact() {
-        let mut g = Graph::new(ContextKind::Geo);
+        let mut g = Graph::new(ContextKind::Sop);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         g.connect(edge(10, a, b, "geometry"), false).unwrap();
@@ -628,7 +633,7 @@ mod tests {
 
     #[test]
     fn disconnect_cleans_port_order() {
-        let mut g = Graph::new(ContextKind::Geo);
+        let mut g = Graph::new(ContextKind::Sop);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let m = node(&mut g, 3);
@@ -644,7 +649,7 @@ mod tests {
 
     #[test]
     fn reorder_requires_a_permutation_and_returns_previous() {
-        let mut g = Graph::new(ContextKind::Geo);
+        let mut g = Graph::new(ContextKind::Sop);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let m = node(&mut g, 3);
@@ -674,7 +679,7 @@ mod tests {
 
     #[test]
     fn remove_node_returns_state_and_cleans_neighbors() {
-        let mut g = Graph::new(ContextKind::Geo);
+        let mut g = Graph::new(ContextKind::Sop);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let m = node(&mut g, 3);
@@ -715,7 +720,7 @@ mod tests {
             doc.graph(GraphContext::Subflow(geo)),
             Err(GraphError::UnknownContext)
         ));
-        doc.create_subflow(geo, ContextKind::Geo);
+        doc.create_subflow(geo, ContextKind::Sop);
         assert!(doc.graph(GraphContext::Subflow(geo)).is_ok());
 
         let sub = doc.remove_subflow(geo).unwrap();

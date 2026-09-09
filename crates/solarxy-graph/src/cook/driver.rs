@@ -1104,7 +1104,7 @@ mod tests {
             version: 1,
             display_name: "Gen",
             category: Category::Generators,
-            contexts: ContextSet::GEO,
+            contexts: ContextSet::SOP,
             opens: None,
             inputs: vec![],
             outputs: vec![
@@ -1140,7 +1140,7 @@ mod tests {
             version: 1,
             display_name: "Pass",
             category: Category::Topology,
-            contexts: ContextSet::GEO,
+            contexts: ContextSet::SOP,
             opens: None,
             inputs: vec![
                 PortSpec::single("geometry", "Geometry", DataType::Geometry, true).default_port(),
@@ -1164,7 +1164,7 @@ mod tests {
             version: 1,
             display_name: "Img Async",
             category: Category::Import,
-            contexts: ContextSet::GEO,
+            contexts: ContextSet::SOP,
             opens: None,
             inputs: vec![],
             outputs: vec![
@@ -1184,7 +1184,7 @@ mod tests {
             version: 1,
             display_name: "Pts",
             category: Category::Generators,
-            contexts: ContextSet::GEO,
+            contexts: ContextSet::SOP,
             opens: None,
             inputs: vec![],
             outputs: vec![
@@ -1229,7 +1229,7 @@ mod tests {
         fn new() -> Self {
             let mut doc = Document::new();
             let geo = doc.mint_node_id();
-            doc.create_subflow(geo, ContextKind::Geo);
+            doc.create_subflow(geo, ContextKind::Sop);
             Self {
                 doc,
                 engine: CookEngine::new(),

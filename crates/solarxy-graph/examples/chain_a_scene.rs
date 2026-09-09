@@ -98,7 +98,7 @@ fn main() {
     let mut e = Engine::new().expect("the builtin registry is valid");
 
     // A geo container, and the geometry chain inside its subflow.
-    let geo = add(&mut e, GraphContext::Root, "geo", [0.0, 0.0]);
+    let geo = add(&mut e, GraphContext::Root, "sopnet", [0.0, 0.0]);
     let ctx = GraphContext::Subflow(geo);
 
     // The control: a box nobody displays, whose width is the single number

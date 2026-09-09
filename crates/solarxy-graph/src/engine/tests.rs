@@ -26,7 +26,7 @@ fn subflow_engine() -> (Engine, GraphContext) {
     // A geo node exists only after N2; for 3b tests we drive a subflow
     // directly by minting one through the document.
     let geo = e.doc.mint_node_id();
-    e.doc.create_subflow(geo, ContextKind::Geo);
+    e.doc.create_subflow(geo, ContextKind::Sop);
     (e, GraphContext::Subflow(geo))
 }
 
@@ -442,7 +442,7 @@ fn command_boundary_json_shape_is_camelcase() {
 
     // The event mirror is camelCase too (typeId, not type_id).
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let batch = serde_json::to_value(
         e.apply(Command::AddNode {
             ctx: GraphContext::Subflow(geo),
@@ -1486,7 +1486,7 @@ fn annotation_crud_and_undo() {
 /// box id).
 fn displayed_box() -> (Engine, NodeId, GraphContext, NodeId) {
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let box_id = add(&mut e, sub, "box");
     e.cook(&mut || true);
@@ -1808,7 +1808,7 @@ fn pick_detailed_reports_the_mesh_within_a_merged_set() {
     // Subflow: box0 at origin, box1 pushed +3x through a transform, both
     // merged (mesh order = connection order); geo translated +5x.
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let box0 = add(&mut e, sub, "box");
     let box1 = add(&mut e, sub, "box");
@@ -2457,10 +2457,10 @@ fn physical_camera_derives_fov_from_focal_and_sensor() {
 /// it. A rebuilt delta only ever says what exists, so before removals were
 /// emitted the renderer kept the GPU object resident and drew it forever.
 #[test]
-fn deleting_a_geo_node_emits_a_scene_remove() {
+fn deleting_a_sopnet_node_emits_a_scene_remove() {
     use solarxy_core::scene::{SceneObjectId, SceneOp};
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let _box_id = add(&mut e, sub, "box");
     e.cook(&mut || true);
@@ -2520,7 +2520,7 @@ fn deleting_a_geo_node_emits_a_scene_remove() {
 fn clearing_the_display_flag_emits_a_scene_remove() {
     use solarxy_core::scene::{SceneObjectId, SceneOp};
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let box_id = add(&mut e, sub, "box");
     e.cook(&mut || true);
@@ -2551,7 +2551,7 @@ fn scene_delta_maps_a_geo_container_and_lights() {
     let mut e = engine();
 
     // A geo container at root, with a box in its subflow.
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let box_id = add(&mut e, sub, "box");
     // The subflow's first node claimed display automatically.
@@ -2868,7 +2868,7 @@ fn async_import_fixture() -> (Engine, GraphContext, NodeId, JobId, crate::cook::
     let asset = e.stage_asset("tri.stl", "model/stl", TRI_STL.as_bytes().to_vec());
 
     let geo = e.doc.mint_node_id();
-    e.doc.create_subflow(geo, ContextKind::Geo);
+    e.doc.create_subflow(geo, ContextKind::Sop);
     let ctx = GraphContext::Subflow(geo);
     let node = add(&mut e, ctx, "import_stl");
     e.apply(Command::SetParam {
@@ -2942,7 +2942,7 @@ fn stale_job_result_is_dropped_by_the_generation_guard() {
 #[test]
 fn pick_returns_the_geo_container_under_the_ray() {
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     add(&mut e, sub, "box"); // origin-centered, claims display
     e.cook(&mut || true);
@@ -2961,7 +2961,7 @@ fn pick_returns_the_geo_container_under_the_ray() {
 fn save_and_load_document_round_trips_and_emits_replaced() {
     // Build a root geo with a box in its subflow, plus a param edit.
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let box_id = add(&mut e, sub, "box");
     e.apply(Command::SetParam {
@@ -3294,7 +3294,7 @@ const DIRTY_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 1 1\nf 1 2 3\n";
 /// OBJ (display auto-claimed by the import). Not yet cooked.
 fn dirty_import_fixture() -> (Engine, GraphContext, NodeId, NodeId) {
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let import = add(&mut e, sub, "import_obj");
     let asset = e.stage_asset("dirty.obj", "model/obj", DIRTY_OBJ.as_bytes().to_vec());
@@ -3428,7 +3428,7 @@ fn nearest_validate_node_wins_and_bypass_falls_back_to_the_import() {
 fn heavy_validate_routes_through_the_job_protocol() {
     let mut e = engine();
     e.set_async_jobs(true);
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let sphere = add(&mut e, sub, "sphere");
     // 512x512 segments is ~522k triangles, over the 250k inline threshold.
@@ -3684,7 +3684,7 @@ fn every_transform_param_is_declared_by_its_descriptor() {
 
     let registry = crate::registry::Registry::with_descriptors(crate::nodes::builtin_descriptors())
         .expect("the builtin registry is valid");
-    for type_id in ["geo", "transform"]
+    for type_id in ["sopnet", "transform"]
         .into_iter()
         .chain(LIGHT_TYPE_IDS.iter().copied())
     {
@@ -4099,7 +4099,7 @@ fn ensure_transform_target_treats_a_bypassed_tail_as_absent() {
 #[test]
 fn ensure_transform_target_errors_without_a_display_node() {
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     // An empty subflow displays nothing, so there is nothing to transform.
     assert!(e.gizmo_target(GraphContext::Subflow(geo)).is_none());
     assert!(matches!(
@@ -4265,7 +4265,7 @@ fn geo_and_transform_compose_rotation_identically() {
 
     for (key, order) in orders {
         let mut e = engine();
-        let geo = add(&mut e, GraphContext::Root, "geo");
+        let geo = add(&mut e, GraphContext::Root, "sopnet");
         for (k, v) in [
             ("translate", ParamValue::Vec3(translate)),
             ("rotate", ParamValue::Vec3(degrees)),
@@ -4315,7 +4315,7 @@ fn a_fresh_geo_rotates_xyz_like_a_transform_node() {
     use solarxy_kernel::transform::{RotateOrder, rotation_matrix};
 
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     e.apply(Command::SetParam {
         ctx: GraphContext::Root,
         node: geo,
@@ -5077,7 +5077,7 @@ fn a_geo_saved_before_the_rotate_order_split_opens_facing_the_same_way() {
     /// has been aged to `version`, with `rotate_order` stripped.
     fn reopened_at(version: u32, rotate: [f64; 3]) -> [[f32; 4]; 4] {
         let mut e = engine();
-        let geo = add(&mut e, GraphContext::Root, "geo");
+        let geo = add(&mut e, GraphContext::Root, "sopnet");
         e.apply(Command::SetParam {
             ctx: GraphContext::Root,
             node: geo,
@@ -5095,7 +5095,7 @@ fn a_geo_saved_before_the_rotate_order_split_opens_facing_the_same_way() {
         );
         let mut aged = 0;
         for node in &mut scene.graph.nodes {
-            if node.type_id == "geo" {
+            if node.type_id == "sopnet" {
                 node.type_version = version;
                 node.params.remove("rotate_order");
                 aged += 1;
@@ -5138,7 +5138,7 @@ fn a_geo_saved_before_the_rotate_order_split_opens_facing_the_same_way() {
     // What the aged document must produce: the ZYX composition it was
     // authored against, which is what an explicit stamp gives.
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     for (key, value) in [
         ("rotate", ParamValue::Vec3(observable)),
         ("rotate_order", ParamValue::Enum("zyx".into())),
@@ -5505,7 +5505,7 @@ fn carry_unaware_probe() -> crate::registry::NodeTypeDescriptor {
         version: 1,
         display_name: "Carry Unaware Probe",
         category: crate::registry::Category::Utility,
-        contexts: crate::registry::ContextSet::GEO,
+        contexts: crate::registry::ContextSet::SOP,
         opens: None,
         inputs: vec![
             crate::registry::PortSpec::single(
@@ -5547,7 +5547,7 @@ fn a_node_with_no_instancing_awareness_cooks_correctly_on_instanced_input() {
 
     let mut e = Engine::with_registry(registry);
     let geo = e.doc.mint_node_id();
-    e.doc.create_subflow(geo, ContextKind::Geo);
+    e.doc.create_subflow(geo, ContextKind::Sop);
     let ctx = GraphContext::Subflow(geo);
 
     let prim = add(&mut e, ctx, "box");
@@ -5731,9 +5731,9 @@ fn typed_contexts_generalize_beyond_geo() {
     };
     let registry = Registry::with_descriptors(vec![
         mk("matnet", ContextSet::OBJ, Some(ContextKind::Mat)),
-        mk("subtex", ContextSet::MAT, Some(ContextKind::Tex)),
+        mk("subtex", ContextSet::MAT, Some(ContextKind::Cop)),
         mk("mat_only", ContextSet::MAT, None),
-        mk("geo_only", ContextSet::GEO, None),
+        mk("geo_only", ContextSet::SOP, None),
     ])
     .expect("test registry satisfies the invariants");
     let mut e = Engine::with_registry(registry);
@@ -5768,7 +5768,7 @@ fn typed_contexts_generalize_beyond_geo() {
     // Level 2 -> 3: containers nest; the grandchild kind follows `opens`.
     let subtex = add(&mut e, mat_ctx, "subtex");
     let tex_ctx = GraphContext::Subflow(subtex);
-    assert_eq!(e.doc.graph(tex_ctx).unwrap().kind, ContextKind::Tex);
+    assert_eq!(e.doc.graph(tex_ctx).unwrap().kind, ContextKind::Cop);
 
     // Remove the top container: the WHOLE tree goes (no orphaned
     // grandchild network), and undo restores every level with its kind.
@@ -5782,7 +5782,7 @@ fn typed_contexts_generalize_beyond_geo() {
 
     e.apply(Command::Undo).unwrap();
     assert_eq!(e.doc.graph(mat_ctx).unwrap().kind, ContextKind::Mat);
-    assert_eq!(e.doc.graph(tex_ctx).unwrap().kind, ContextKind::Tex);
+    assert_eq!(e.doc.graph(tex_ctx).unwrap().kind, ContextKind::Cop);
     assert!(
         e.doc.graph(mat_ctx).unwrap().node(subtex).is_some(),
         "the nested container node itself came back"
@@ -5907,7 +5907,7 @@ fn cross_context_references_propagate_and_refuse_cycles() {
         version: 1,
         display_name: "Ref Consumer",
         category: Category::Utility,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![],
         outputs: float_out(),
@@ -5928,7 +5928,7 @@ fn cross_context_references_propagate_and_refuse_cycles() {
     // would cook it before the material network and read a stale value;
     // only the reference-ordered walk makes the same-pass assertion hold.
     let geo = e.doc.mint_node_id();
-    e.doc.create_subflow(geo, ContextKind::Geo);
+    e.doc.create_subflow(geo, ContextKind::Sop);
     let geo_ctx = GraphContext::Subflow(geo);
 
     let matnet1 = add(&mut e, GraphContext::Root, "matnet");
@@ -6039,10 +6039,10 @@ fn context_kinds_and_node_refs_survive_a_slxy_round_trip() {
 
     let mut e = engine();
     // A real geo container through the command path (kind from `opens`).
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let _box_node = add(&mut e, sub, "box");
-    assert_eq!(e.doc.graph(sub).unwrap().kind, ContextKind::Geo);
+    assert_eq!(e.doc.graph(sub).unwrap().kind, ContextKind::Sop);
 
     let bytes = e.save_slxy(&SceneSidecar::default()).expect("save");
     // The stored form carries the kind string.
@@ -6050,7 +6050,7 @@ fn context_kinds_and_node_refs_survive_a_slxy_round_trip() {
     e2.load_slxy(&bytes).expect("load");
     assert_eq!(
         e2.doc.graph(GraphContext::Subflow(geo)).unwrap().kind,
-        ContextKind::Geo,
+        ContextKind::Sop,
         "the subflow kind survives the archive"
     );
 
@@ -6078,9 +6078,9 @@ fn context_kinds_and_node_refs_survive_a_slxy_round_trip() {
 #[test]
 fn texture_network_cooks_and_publishes_its_display_image() {
     let mut e = engine();
-    let texnet = add(&mut e, GraphContext::Root, "texnet");
+    let texnet = add(&mut e, GraphContext::Root, "copnet");
     let tex_ctx = GraphContext::Subflow(texnet);
-    assert_eq!(e.doc.graph(tex_ctx).unwrap().kind, ContextKind::Tex);
+    assert_eq!(e.doc.graph(tex_ctx).unwrap().kind, ContextKind::Cop);
 
     // noise -> blur, display on blur (first node auto-claims, so move it).
     let noise = add(&mut e, tex_ctx, "noise");
@@ -6131,7 +6131,7 @@ fn texture_network_cooks_and_publishes_its_display_image() {
     );
 
     // A geo network does not publish an image.
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let _box_node = add(&mut e, sub, "box");
     e.cook(&mut || true);
@@ -6235,7 +6235,7 @@ fn material_network_references_flow_across_three_contexts() {
     let mut e = engine();
 
     // /tex: a texnet publishing a constant image.
-    let texnet = add(&mut e, GraphContext::Root, "texnet");
+    let texnet = add(&mut e, GraphContext::Root, "copnet");
     let tex_ctx = GraphContext::Subflow(texnet);
     let constant = add(&mut e, tex_ctx, "constant");
 
@@ -6270,7 +6270,7 @@ fn material_network_references_flow_across_three_contexts() {
     .unwrap();
 
     // /geo: a box whose material node references the matnet.
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let box_node = add(&mut e, sub, "box");
     let material = add(&mut e, sub, "material");
@@ -6366,7 +6366,7 @@ fn material_network_references_flow_across_three_contexts() {
 #[test]
 fn geo_export_action_round_trips_through_the_loaders() {
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let box_node = add(&mut e, sub, "box");
     let export = add(&mut e, sub, "geo_export");
@@ -6436,7 +6436,7 @@ fn geo_export_action_round_trips_through_the_loaders() {
 #[test]
 fn geo_export_obj_with_materials_delivers_a_zip() {
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let sub = GraphContext::Subflow(geo);
     let box_node = add(&mut e, sub, "box");
     let material = add(&mut e, sub, "material");
@@ -6771,9 +6771,9 @@ fn undoing_a_rename_restores_the_previous_name() {
 fn two_graphs_may_each_hold_the_same_name() {
     let mut e = engine();
     let geo_a = e.doc.mint_node_id();
-    e.doc.create_subflow(geo_a, ContextKind::Geo);
+    e.doc.create_subflow(geo_a, ContextKind::Sop);
     let geo_b = e.doc.mint_node_id();
-    e.doc.create_subflow(geo_b, ContextKind::Geo);
+    e.doc.create_subflow(geo_b, ContextKind::Sop);
     let a = add(&mut e, GraphContext::Subflow(geo_a), "box");
     let b = add(&mut e, GraphContext::Subflow(geo_b), "box");
     // Uniqueness is per network, exactly as two directories may each hold
@@ -7026,7 +7026,7 @@ fn an_expression_driven_transform_keeps_its_gizmo() {
     // it now resolves like any other value.
     let mut e = engine();
     let ctx = GraphContext::Root;
-    let geo = add(&mut e, ctx, "geo");
+    let geo = add(&mut e, ctx, "sopnet");
     e.apply(Command::SetParam {
         ctx,
         node: geo,
@@ -7058,7 +7058,7 @@ fn an_expression_drives_the_geo_container_world_matrix() {
     // object would render at the origin while the node badged elsewhere.
     let mut e = engine();
     let ctx = GraphContext::Root;
-    let geo = add(&mut e, ctx, "geo");
+    let geo = add(&mut e, ctx, "sopnet");
     e.apply(Command::SetParam {
         ctx,
         node: geo,
@@ -7153,7 +7153,7 @@ fn ch_reads_a_param_on_its_own_node_with_a_single_segment() {
 #[test]
 fn ch_climbs_to_the_container_and_to_its_siblings() {
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let ctx = GraphContext::Subflow(geo);
     e.apply(Command::SetParam {
         ctx: GraphContext::Root,
@@ -7172,7 +7172,7 @@ fn ch_climbs_to_the_container_and_to_its_siblings() {
 #[test]
 fn ch_resolves_an_absolute_path_from_anywhere() {
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let name = name_of(&e, GraphContext::Root, geo);
     let ctx = GraphContext::Subflow(geo);
     let b = add(&mut e, ctx, "box");
@@ -7204,8 +7204,8 @@ fn a_reference_reads_the_authoring_space_not_radians() {
     // another rotation round-trips instead of converting twice.
     let mut e = engine();
     let ctx = GraphContext::Root;
-    let a = add(&mut e, ctx, "geo");
-    let b = add(&mut e, ctx, "geo");
+    let a = add(&mut e, ctx, "sopnet");
+    let b = add(&mut e, ctx, "sopnet");
     let a_name = rename(&mut e, ctx, a, "source");
     e.apply(Command::SetParam {
         ctx,
@@ -7415,12 +7415,12 @@ fn a_rename_preserves_the_rest_of_the_expression_byte_for_byte() {
 fn a_rename_rewrites_across_contexts() {
     // An absolute path from inside one network naming a node in another.
     let mut e = engine();
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let geo_name = rename(&mut e, GraphContext::Root, geo, "obj");
     let ctx = GraphContext::Subflow(geo);
     let inner = add(&mut e, ctx, "box");
     let inner_name = name_of(&e, ctx, inner);
-    let other = add(&mut e, GraphContext::Root, "geo");
+    let other = add(&mut e, GraphContext::Root, "sopnet");
     set_expr(
         &mut e,
         GraphContext::Root,
@@ -7743,7 +7743,7 @@ fn undo_restores_the_dependency_graph_not_just_the_text() {
 fn climbing_above_the_root_is_refused_by_name() {
     let mut e = engine();
     let ctx = GraphContext::Root;
-    let geo = add(&mut e, ctx, "geo");
+    let geo = add(&mut e, ctx, "sopnet");
     set_expr(&mut e, ctx, geo, "uniform_scale", "ch(\"../nope\")");
     // Root has no parent; the geo world matrix falls back rather than
     // resolving, and the message is what the cook badge would carry.
@@ -7777,7 +7777,7 @@ fn expressions_are_accepted_on_every_numeric_param_type() {
         .unwrap_or_else(|err| panic!("`{key}` should accept an expression: {err}"));
     }
     // Vec3 and Bool, on a geo container.
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     for (key, expr) in [("translate", "set(1, 2, 3)"), ("visible", "1 > 0")] {
         e.apply(Command::SetParam {
             ctx: GraphContext::Root,
@@ -8606,7 +8606,7 @@ fn only_the_first_environment_node_wins() {
 fn budgeted_cook_defers_cross_network_references() {
     let mut e = engine();
 
-    let tex = add(&mut e, GraphContext::Root, "texnet");
+    let tex = add(&mut e, GraphContext::Root, "copnet");
     let t = GraphContext::Subflow(tex);
     let noise = add(&mut e, t, "noise");
     e.apply(Command::SetActiveOutput {
@@ -8615,7 +8615,7 @@ fn budgeted_cook_defers_cross_network_references() {
     })
     .expect("display");
 
-    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
     let g = GraphContext::Subflow(geo);
     let plane = add(&mut e, g, "plane");
     let tex_ref = add(&mut e, g, "tex_ref");
@@ -9314,7 +9314,7 @@ fn a_second_container_opening_the_same_kind_behaves_as_the_first() {
     let mut descriptors = crate::nodes::builtin_descriptors();
     let first = descriptors
         .iter()
-        .find(|d| d.opens == Some(ContextKind::Geo))
+        .find(|d| d.opens == Some(ContextKind::Sop))
         .expect("some registered type opens a geometry network")
         .type_id;
     // Built a second time rather than cloned: a descriptor carries function
@@ -9322,7 +9322,7 @@ fn a_second_container_opening_the_same_kind_behaves_as_the_first() {
     // worse trade than calling the builder twice.
     let mut twin = crate::nodes::builtin_descriptors()
         .into_iter()
-        .find(|d| d.opens == Some(ContextKind::Geo))
+        .find(|d| d.opens == Some(ContextKind::Sop))
         .expect("some registered type opens a geometry network");
     twin.type_id = "container_twin";
     twin.display_name = "Container Twin";

@@ -1,0 +1,561 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AssetRecordJson": {
+      "description": "One semantic asset record in `scene.json`. `id` and `sha256` are the same content hash today; `role` distinguishes imports from future environment/texture assets.",
+      "properties": {
+        "alias_names": {
+          "description": "Additional names the same bytes were staged under. Content-addressing collapses byte-identical companions into one entry, so without these a reload would forget every name but the first and report the others as missing companions.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "import_settings": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "original_name": {
+          "type": "string"
+        },
+        "role": {
+          "default": "import",
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "original_name",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "CameraJson": {
+      "description": "The orbit camera state (aspect is viewport-derived and not persisted).",
+      "properties": {
+        "distance": {
+          "type": "number"
+        },
+        "fov_y": {
+          "type": "number"
+        },
+        "ortho_scale": {
+          "default": 0.0,
+          "description": "Half-height of the orthographic view volume; unused in perspective.",
+          "type": "number"
+        },
+        "pitch": {
+          "type": "number"
+        },
+        "projection": {
+          "default": "perspective",
+          "description": "`\"perspective\"` (default) or `\"orthographic\"`, per pane. Serde-default, so a file written before per-pane projection existed loads unchanged.",
+          "type": "string"
+        },
+        "target": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "yaw": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "distance",
+        "fov_y",
+        "pitch",
+        "target",
+        "yaw"
+      ],
+      "type": "object"
+    },
+    "CanvasViewportJson": {
+      "description": "One context's canvas pan/zoom.",
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "zoom": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "zoom"
+      ],
+      "type": "object"
+    },
+    "EdgeJson": {
+      "description": "One edge. `from`/`to` are `[node_id, port_key]` pairs.",
+      "properties": {
+        "from": {
+          "items": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "to": {
+          "items": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "from",
+        "id",
+        "to"
+      ],
+      "type": "object"
+    },
+    "EditorJson": {
+      "description": "Editor-only state: the cook mode and per-context canvas viewports.",
+      "properties": {
+        "canvas_viewports": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CanvasViewportJson"
+          },
+          "description": "Canvas pan/zoom per context, keyed by `\"root\"` or a container node id.",
+          "type": "object"
+        },
+        "cook_mode": {
+          "default": "auto",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "EnvironmentJson": {
+      "description": "The lighting environment. Reserved for the HDRI/IBL flow; defaults are inert.",
+      "properties": {
+        "background": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "hdri_asset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ibl_mode": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "GraphJson": {
+      "description": "The node graph: the root canvas plus one entry per subflow, keyed by the owning container's node id.",
+      "properties": {
+        "edges": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/EdgeJson"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/NodeJson"
+          },
+          "type": "array"
+        },
+        "subflows": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubGraphJson"
+          },
+          "default": {},
+          "description": "Subflows keyed by the owning container's node id (string).",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "MetaJson": {
+      "description": "Document metadata. Timestamps are ISO-8601 strings supplied by the host (the format layer never reads a clock).",
+      "properties": {
+        "created": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "modified": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "NodeJson": {
+      "description": "One node instance. Params are plain JSON literals keyed by param id (the shape since schema 1; the `{\"$expr\": \"...\"}` object form is reserved for the future expression variant). The display name is surfaced top-level for readability; the mapping layer keeps it authoritative there.",
+      "properties": {
+        "bypass": {
+          "description": "Present (and true) only when the node is bypassed.",
+          "type": "boolean"
+        },
+        "created_ms": {
+          "description": "Unix milliseconds when the node was created and when its behaviour last changed.\n\nAdditive and optional, so they needed no version bump: a document written before 0.8.1 simply has neither, and a reader that predates them ignores both. Absent (rather than zero) when the writing host had no wall clock, so a reader can say \"unknown\" instead of displaying a fabricated 1970.\n\nCanvas position deliberately does not count as a modification; see `NodeData` in `solarxy-graph`.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "modified_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "port_order": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Explicit edge order per variadic input port (edge id strings); omitted for nodes with no variadic ports.",
+          "type": "object"
+        },
+        "position": {
+          "description": "Canvas position `[x, y]`.",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        },
+        "type_version": {
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "position",
+        "type",
+        "type_version"
+      ],
+      "type": "object"
+    },
+    "PaneJson": {
+      "description": "One viewport pane: its camera, display flags, inspection mode, and background. `display` and `background` are opaque JSON: the reader round-trips them without interpreting their contents.",
+      "properties": {
+        "background": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "camera": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CameraJson"
+            }
+          ],
+          "default": {
+            "distance": 0.0,
+            "fov_y": 0.0,
+            "ortho_scale": 0.0,
+            "pitch": 0.0,
+            "projection": "perspective",
+            "target": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "yaw": 0.0
+          }
+        },
+        "camera_locked": {
+          "description": "Whether the look-through pane is locked (reframes the camera).",
+          "type": "boolean"
+        },
+        "display": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "inspection": {
+          "default": "shaded",
+          "type": "string"
+        },
+        "look_through": {
+          "description": "The `camera` node this pane looks through (its id), or `None` for a free view. Serde-default so older scenes load unchanged.",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ReviewJson": {
+      "description": "Review annotations. The annotation shape is owned by `solarxy_core::review` (which has its own schema); the format carries each annotation opaquely, so it survives a save/load round trip without the format layer needing to understand it.",
+      "properties": {
+        "annotations": {
+          "items": true,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeJson": {
+      "description": "The scene clock, as saved.\n\nDeliberately only the persisted half: `playing` and the current frame are session state. A format that could round-trip \"I was playing when I hit save\" would make a scene's meaning depend on the author's transport, and would break the reproducibility every golden capture and CLI cook relies on.",
+      "properties": {
+        "autoplay": {
+          "default": false,
+          "description": "Whether a published player starts playing on load. The editor saves it and never acts on it.",
+          "type": "boolean"
+        },
+        "fps": {
+          "default": 24.0,
+          "type": "number"
+        },
+        "frameEnd": {
+          "default": 240,
+          "type": "integer"
+        },
+        "frameStart": {
+          "default": 1,
+          "type": "integer"
+        },
+        "loopMode": {
+          "default": "loop",
+          "description": "`once`, `loop` or `pingPong`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SubGraphJson": {
+      "description": "One subflow's contents plus its display node.",
+      "properties": {
+        "active_output": {
+          "description": "The node id whose output this subflow displays, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "edges": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/EdgeJson"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "description": "The network kind (`\"sop\"`, `\"mat\"`, `\"cop\"` since schema 2; `\"geo\"`, `\"mat\"`, `\"tex\"` before it, which the migration rewrites); absent in pre-context files, whose subflows were all geometry networks. The engine resolves an absent kind from the owning node's registry descriptor on load, so this field is advisory redundancy that keeps the file self-describing.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/NodeJson"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ViewJson": {
+      "description": "The viewport layout and per-pane state: one entry per pane, each with its own camera and display settings.",
+      "properties": {
+        "active_pane": {
+          "default": 0,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "layout": {
+          "default": "single",
+          "type": "string"
+        },
+        "panes": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PaneJson"
+          },
+          "type": "array"
+        },
+        "split_ratio": {
+          "default": 0.5,
+          "description": "Divider position for the two-pane layouts; 0.5 when unset.",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "description": "The whole `scene.json`.",
+  "properties": {
+    "assets": {
+      "default": [],
+      "description": "Semantic asset records (role + settings); the byte-level records live in `manifest.json`, keyed by the same content hash.",
+      "items": {
+        "$ref": "#/definitions/AssetRecordJson"
+      },
+      "type": "array"
+    },
+    "editor": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/EditorJson"
+        }
+      ],
+      "default": {
+        "cook_mode": "auto"
+      }
+    },
+    "environment": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/EnvironmentJson"
+        }
+      ],
+      "default": {}
+    },
+    "generator": {
+      "description": "The tool + version that wrote the file (diagnostic only).",
+      "type": "string"
+    },
+    "graph": {
+      "$ref": "#/definitions/GraphJson"
+    },
+    "meta": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/MetaJson"
+        }
+      ],
+      "default": {}
+    },
+    "min_reader": {
+      "description": "The lowest reader version able to open this file; a reader below it hard-rejects with an upgrade message.",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "review": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ReviewJson"
+        }
+      ],
+      "default": {}
+    },
+    "runtime": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/RuntimeJson"
+        }
+      ],
+      "default": {
+        "autoplay": false,
+        "fps": 24.0,
+        "frameEnd": 240,
+        "frameStart": 1,
+        "loopMode": "loop"
+      },
+      "description": "The scene clock's persisted half. Defaulted like every other optional section, so a pre-0.8.1 file loads with a stopped default clock and `schema_version` stays 1."
+    },
+    "schema_version": {
+      "description": "The document schema version (0 pre-beta, no guarantees; 1 at public beta; 2 since the context vocabulary took the field's names).",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "units": {
+      "default": "meters",
+      "type": "string"
+    },
+    "view": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ViewJson"
+        }
+      ],
+      "default": {
+        "active_pane": 0,
+        "layout": "single",
+        "panes": [
+          {
+            "camera": {
+              "distance": 0.0,
+              "fov_y": 0.0,
+              "ortho_scale": 0.0,
+              "pitch": 0.0,
+              "projection": "perspective",
+              "target": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "yaw": 0.0
+            },
+            "inspection": "shaded"
+          }
+        ],
+        "split_ratio": 0.5
+      }
+    }
+  },
+  "required": [
+    "generator",
+    "graph",
+    "min_reader",
+    "schema_version"
+  ],
+  "title": "SceneJson",
+  "type": "object"
+}

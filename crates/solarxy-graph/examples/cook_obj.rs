@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // One subflow to work in (owned by a synthetic geo container id).
     let geo = doc.mint_node_id();
-    doc.create_subflow(geo, ContextKind::Geo);
+    doc.create_subflow(geo, ContextKind::Sop);
     let ctx = GraphContext::Subflow(geo);
 
     // Helpers over the direct API.

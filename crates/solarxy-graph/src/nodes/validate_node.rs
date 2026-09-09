@@ -24,7 +24,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Validate",
         category: Category::Utility,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)

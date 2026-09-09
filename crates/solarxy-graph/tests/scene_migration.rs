@@ -93,6 +93,54 @@ fn a_scene_from_an_earlier_release_opens_migrates_and_cooks_clean() {
     }
 }
 
+/// A migrated version-1 file IS its regenerated version-2 twin.
+///
+/// The weaker claim, that the old file opens and cooks without complaint, is
+/// the test above and it would pass a migration that quietly dropped a
+/// parameter. This one pins the strong claim the milestone actually makes:
+/// each fixture was produced by the sample generator, the same generator now
+/// emits the version-2 sample beside it, so migrating the old bytes must
+/// arrive at exactly the document the new bytes describe. Anything the
+/// migration forgot to carry, rename or back-fill shows up here as a
+/// difference rather than as a scene that merely loads.
+///
+/// Compared through the document's own serialisation rather than the archive
+/// bytes, because the archive also carries a generator string and an asset
+/// table that have nothing to do with the migration.
+#[test]
+fn a_migrated_fixture_matches_its_regenerated_twin() {
+    for (name, _) in FIXTURES {
+        let current = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../web/public/samples")
+            .join(name.trim_start_matches("v1-"));
+        if !current.is_file() {
+            eprintln!(
+                "skipping {name}: no current sample at {}",
+                current.display()
+            );
+            continue;
+        }
+
+        let mut old_engine = Engine::new().expect("builtin registry");
+        old_engine
+            .load_slxy(&fixture(name))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+
+        let mut new_engine = Engine::new().expect("builtin registry");
+        let bytes = std::fs::read(&current).expect("current sample readable");
+        new_engine
+            .load_slxy(&bytes)
+            .unwrap_or_else(|e| panic!("{}: {e}", current.display()));
+
+        let migrated = serde_json::to_value(old_engine.save_document()).expect("serialize");
+        let regenerated = serde_json::to_value(new_engine.save_document()).expect("serialize");
+        assert_eq!(
+            migrated, regenerated,
+            "{name} did not migrate to the document its regenerated twin describes"
+        );
+    }
+}
+
 /// The fixtures must stay stamped at the version they were captured at.
 ///
 /// A well-meaning regeneration would rewrite them to whatever this build

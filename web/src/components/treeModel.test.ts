@@ -22,16 +22,16 @@ function graph(nodes: NodeMirror[], activeOutput: number | null = null): GraphMi
 /** A minimal registry: only the fields the tree consumes (opens, names). */
 const REGISTRY = {
   nodes: [
-    { typeId: "geo", displayName: "Geo", opens: "geo" },
-    { typeId: "texnet", displayName: "Texture Network", opens: "tex" },
+    { typeId: "sopnet", displayName: "Sop", opens: "sop" },
+    { typeId: "copnet", displayName: "Cop", opens: "cop" },
     { typeId: "box", displayName: "Box", opens: null },
     { typeId: "note", displayName: "Note", opens: null },
   ],
 } as unknown as RegistrySnapshot;
 
 const CONTEXTS: Record<string, GraphMirror> = {
-  root: graph([node(1, "geo", "terrain"), node(2, "texnet", "maps"), node(3, "note")]),
-  "sub:1": graph([node(4, "box"), node(5, "texnet", "inner")], 4),
+  root: graph([node(1, "sopnet", "terrain"), node(2, "copnet", "maps"), node(3, "note")]),
+  "sub:1": graph([node(4, "box"), node(5, "copnet", "inner")], 4),
   "sub:5": graph([node(6, "box", "deep")]),
   // An orphaned context (its owner was deleted): never reachable root-down.
   "sub:99": graph([node(7, "box")]),
@@ -41,7 +41,7 @@ describe("buildSceneTree", () => {
   it("builds root-down, preserving mirror order, with nested containers", () => {
     const rows = buildSceneTree(REGISTRY, CONTEXTS);
     expect(rows.map((r) => r.label)).toEqual(["terrain", "maps", "Note"]);
-    expect(rows[0].children.map((r) => r.typeId)).toEqual(["box", "texnet"]);
+    expect(rows[0].children.map((r) => r.typeId)).toEqual(["box", "copnet"]);
     expect(rows[0].children[1].children.map((r) => r.label)).toEqual(["deep"]);
     expect(rows[0].depth).toBe(0);
     expect(rows[0].children[0].depth).toBe(1);
@@ -58,7 +58,7 @@ describe("buildSceneTree", () => {
 
   it("marks containers, leaves, and the display flag", () => {
     const rows = buildSceneTree(REGISTRY, CONTEXTS);
-    expect(rows[0].opens).toBe("geo");
+    expect(rows[0].opens).toBe("sop");
     expect(rows[2].opens).toBeNull();
     const sub = rows[0].children;
     expect(sub[0].isDisplay).toBe(true);
@@ -69,17 +69,17 @@ describe("buildSceneTree", () => {
 
   it("tolerates a container whose sub-context is not mirrored", () => {
     const rows = buildSceneTree(REGISTRY, {
-      root: graph([node(1, "geo", "hollow")]),
+      root: graph([node(1, "sopnet", "hollow")]),
     });
-    expect(rows[0].opens).toBe("geo");
+    expect(rows[0].opens).toBe("sop");
     expect(rows[0].children).toEqual([]);
   });
 
   it("terminates on a cyclic contexts map", () => {
     // Malformed: the container's subtree contains a node with its own id.
     const rows = buildSceneTree(REGISTRY, {
-      root: graph([node(1, "geo")]),
-      "sub:1": graph([node(1, "geo")]),
+      root: graph([node(1, "sopnet")]),
+      "sub:1": graph([node(1, "sopnet")]),
     });
     expect(rows.length).toBe(1);
     // The guard cuts the recursion rather than hanging; depth is capped.
@@ -104,7 +104,7 @@ describe("searchTree", () => {
   it("matches case-insensitively over label and type id", () => {
     const { matches } = searchTree(rows, "DEEP");
     expect([...matches]).toEqual(["sub:5:6"]);
-    const byType = searchTree(rows, "texnet");
+    const byType = searchTree(rows, "copnet");
     expect(byType.matches.size).toBe(2);
   });
 
@@ -124,7 +124,7 @@ describe("allBranchKeys", () => {
   it("collects only rows with children, at every depth", () => {
     const rows = buildSceneTree(REGISTRY, CONTEXTS);
     const keys = allBranchKeys(rows);
-    // terrain (root container) and the nested inner texnet are branches;
+    // terrain (root container) and the nested inner container are branches;
     // maps has no mirrored sub-context, so it is a leaf, as are box/note.
     expect(keys).toEqual(new Set(["root:1", "sub:1:5"]));
   });

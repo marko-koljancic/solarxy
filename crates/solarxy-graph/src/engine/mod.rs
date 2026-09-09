@@ -791,7 +791,7 @@ fn transform_params_for(registry: &Registry, type_id: &str) -> Option<TransformP
     // whichever container that is. Its transform reaches the renderer as the
     // scene object's own rather than baked into vertices, which is what makes
     // the handles write these keys and not the child network's.
-    if registry.opens_kind(type_id, ContextKind::Geo) {
+    if registry.opens_kind(type_id, ContextKind::Sop) {
         return Some(TRS);
     }
     let params = match type_id {
@@ -2299,7 +2299,7 @@ impl Engine {
         };
         let mut out: Vec<_> = root
             .nodes()
-            .filter(|n| self.registry.opens_kind(&n.type_id, ContextKind::Geo))
+            .filter(|n| self.registry.opens_kind(&n.type_id, ContextKind::Sop))
             .filter(|n| scene::geo_visible(&self.doc, &self.registry, &self.previews, n.id))
             .filter_map(|n| {
                 let set = scene::display_output(&self.doc, &self.cook, n.id)?;
@@ -3055,7 +3055,7 @@ impl Engine {
     pub fn geo_world_matrix(&self, geo: NodeId) -> Option<[[f32; 4]; 4]> {
         let root = self.doc.graph(GraphContext::Root).ok()?;
         let node = root.node(geo)?;
-        if !self.registry.opens_kind(&node.type_id, ContextKind::Geo) {
+        if !self.registry.opens_kind(&node.type_id, ContextKind::Sop) {
             return None;
         }
         Some(scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, geo).into())
@@ -3140,8 +3140,9 @@ impl Engine {
                 let display = sub.active_output?;
                 let tail = sub.node(display)?;
 
-                let geo_node = self.doc.graph(GraphContext::Root).ok()?.node(geo)?;
-                let (geo_xf, _) = self.node_transform(geo, &geo_node.params, &geo_node.type_id)?;
+                let sopnet_node = self.doc.graph(GraphContext::Root).ok()?.node(geo)?;
+                let (geo_xf, _) =
+                    self.node_transform(geo, &sopnet_node.params, &sopnet_node.type_id)?;
                 let geo_matrix =
                     scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, geo);
 

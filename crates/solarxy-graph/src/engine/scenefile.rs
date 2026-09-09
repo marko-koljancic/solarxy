@@ -104,21 +104,28 @@ fn edge_to_json(e: &Edge) -> sf::EdgeJson {
 
 /// The `.slxy` string form of a network kind (the file speaks strings so
 /// the scenefile crate never depends on the engine's enums).
+///
+/// These are the **schema-2** spellings. A file written at schema 1 says
+/// `geo` and `tex`; it never reaches here, because the format's migration
+/// rewrites the raw document before it is typed. Teaching the reader below
+/// to accept both spellings instead would look kinder and would be worse: a
+/// file would then load without being migrated, keep its old stamp, and go
+/// on carrying container type ids nothing understands.
 fn context_kind_to_str(kind: crate::document::ContextKind) -> String {
     match kind {
         crate::document::ContextKind::Obj => "obj".to_string(),
-        crate::document::ContextKind::Geo => "geo".to_string(),
+        crate::document::ContextKind::Sop => "sop".to_string(),
         crate::document::ContextKind::Mat => "mat".to_string(),
-        crate::document::ContextKind::Tex => "tex".to_string(),
+        crate::document::ContextKind::Cop => "cop".to_string(),
     }
 }
 
 fn context_kind_from_str(s: &str) -> Option<crate::document::ContextKind> {
     match s {
         "obj" => Some(crate::document::ContextKind::Obj),
-        "geo" => Some(crate::document::ContextKind::Geo),
+        "sop" => Some(crate::document::ContextKind::Sop),
         "mat" => Some(crate::document::ContextKind::Mat),
-        "tex" => Some(crate::document::ContextKind::Tex),
+        "cop" => Some(crate::document::ContextKind::Cop),
         _ => None,
     }
 }

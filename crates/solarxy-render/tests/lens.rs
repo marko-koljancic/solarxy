@@ -59,7 +59,7 @@ fn scene_at(f_stop: f64) -> Vec<u8> {
             .unwrap_or_else(|| panic!("add {ty}: no NodeAdded"))
     };
 
-    let geo = add(&mut engine, root, "geo", [0.0, 0.0]);
+    let geo = add(&mut engine, root, "sopnet", [0.0, 0.0]);
     let g = GraphContext::Subflow(geo);
     let near = add(&mut engine, g, "sphere", [0.0, 0.0]);
     let near_x = add(&mut engine, g, "transform", [160.0, 0.0]);

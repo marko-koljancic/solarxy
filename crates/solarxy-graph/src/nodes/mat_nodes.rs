@@ -2,18 +2,18 @@
 //! container plus the mat-network node set. Inside a material network,
 //! `DataType::Material` wires nodes together and the display node
 //! publishes the network's material; across contexts materials travel by
-//! path reference only, consumed by the geo-side
+//! path reference only, consumed by the SOP-side
 //! `material` node's Reference mode.
 //!
 //! Surface nodes: `principled` (the full metallic-roughness surface,
-//! sharing the inline hybrid builder with the geo-side `material` node),
+//! sharing the inline hybrid builder with the SOP-side `material` node),
 //! `matcap` (its image IS the base-color texture, sampled by view normal
 //! in the shader), `toon` (banded diffuse), and `unlit` (flat color, glTF
 //! `KHR_materials_unlit`). `mix_material` lerps the FACTOR channels and
 //! takes textures and the shading model from the dominant side (a
 //! documented v1 simplification: true map blending needs shader work).
 //! `tex_ref` turns a texture-network path into an Image wire (the
-//! Object-Merge pattern), placeable in Mat and Geo networks.
+//! Object-Merge pattern), placeable in Mat and SOP networks.
 
 use std::sync::Arc;
 
@@ -88,7 +88,7 @@ pub fn matnet_descriptor() -> NodeTypeDescriptor {
               Add one per material you want to reuse. Dive in, build a \
               surface with `principled`, `matcap`, `toon` or `unlit`, and \
               combine surfaces with `mix_material`. Nothing leaves on a \
-              wire: materials cross contexts by path only, so a geo-side \
+              wire: materials cross contexts by path only, so a SOP-side \
               `material` node in Reference mode is what pulls the result \
               out, and any number of them can point at the same network.\n\n\
               It cooks nothing itself and cannot be bypassed. A network \
@@ -107,7 +107,7 @@ pub fn matnet_descriptor() -> NodeTypeDescriptor {
 
 #[must_use]
 pub fn principled_descriptor() -> NodeTypeDescriptor {
-    // The same map ports and factor params as the geo-side material node's
+    // The same map ports and factor params as the SOP-side material node's
     // inline half; only the output differs (a Material wire, not an
     // assignment).
     let mut inputs = Vec::new();
@@ -118,7 +118,7 @@ pub fn principled_descriptor() -> NodeTypeDescriptor {
         type_id: "principled",
         // v2: the principled surface properties, which arrive here because
         // this node shares `factor_params` and `MAP_PORTS` with the
-        // geo-side `material` node. Sharing them is the point: the two
+        // SOP-side `material` node. Sharing them is the point: the two
         // cannot describe the same surface differently. Pure additions
         // filling from registry defaults, so no migration hook.
         version: 2,
@@ -143,7 +143,7 @@ pub fn principled_descriptor() -> NodeTypeDescriptor {
               identity (white, or 1.0) so the map alone drives the channel, \
               and the parameter panel dims the factor to say so. Metallic \
               Roughness is one port for two channels and neutralizes both \
-              at once. It is the same surface builder the geo-side \
+              at once. It is the same surface builder the SOP-side \
               `material` node uses inline; the difference is only that this \
               one outputs a Material wire instead of assigning to geometry.",
         search_aliases: &["principled", "pbr", "surface", "standard"],
@@ -627,7 +627,7 @@ pub fn tex_ref_descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Texture Reference",
         category: Category::Import,
-        contexts: ContextSet::MAT.or(ContextSet::GEO),
+        contexts: ContextSet::MAT.or(ContextSet::SOP),
         opens: None,
         inputs: vec![],
         outputs: vec![
@@ -647,12 +647,12 @@ pub fn tex_ref_descriptor() -> NodeTypeDescriptor {
                     "Texture Network",
                     "object",
                     ParamType::NodePath {
-                        accept: NodePathAccept::Opens(ContextKind::Tex),
+                        accept: NodePathAccept::Opens(ContextKind::Cop),
                     },
                     ParamValue::NodeRef(None),
                 )
                 .doc(
-                    "The `texnet` to fetch from; only containers that open a \
+                    "The `copnet` to fetch from; only containers that open a \
                      texture context can be picked. What arrives is that \
                      network's display node output, so re-designating the \
                      display node inside it changes every referrer at once. \
@@ -667,15 +667,15 @@ pub fn tex_ref_descriptor() -> NodeTypeDescriptor {
         doc: "Pulls the image a texture network publishes into this network \
               as an Image wire. It reads across contexts by path, so no wire \
               ever crosses a network boundary.\n\n\
-              Point it at a `texnet` and feed the result into a map port on \
-              `principled`, or into the geo-side `material` node -- it is \
-              placeable in both Mat and Geo networks for exactly that \
+              Point it at a `copnet` and feed the result into a map port on \
+              `principled`, or into the SOP-side `material` node -- it is \
+              placeable in both Mat and SOP networks for exactly that \
               reason. One texture network can back any number of these, \
               which is how a texture gets authored once and used \
               everywhere; editing the network recooks every referrer.\n\n\
               This is the fetch pattern rather than a wire, so the \
               dependency is invisible on the canvas: nothing draws a line \
-              from the `texnet` to here, and the only record of the link is \
+              from the `copnet` to here, and the only record of the link is \
               this node's Texture Network param. An unset path is harmless \
               (no output, read downstream as no map), but a path pointing \
               at a network with no display node is a cook error.",

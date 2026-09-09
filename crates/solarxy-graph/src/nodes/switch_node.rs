@@ -27,7 +27,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Switch",
         category: Category::Utility,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::variadic("inputs", "Inputs", DataType::Geometry, 0)

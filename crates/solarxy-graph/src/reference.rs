@@ -98,9 +98,9 @@ fn render_node(out: &mut String, node: &NodeTypeSnapshot) {
         .iter()
         .map(|k| match k {
             ContextKind::Obj => "scene",
-            ContextKind::Geo => "inside a geo",
+            ContextKind::Sop => "inside a SOP network",
             ContextKind::Mat => "inside a material network",
-            ContextKind::Tex => "inside a texture network",
+            ContextKind::Cop => "inside a COP network",
         })
         .collect();
     // A container's silhouette phrase would restate the sentence below it.
@@ -120,9 +120,9 @@ fn render_node(out: &mut String, node: &NodeTypeSnapshot) {
     if let Some(kind) = node.opens {
         let network = match kind {
             ContextKind::Obj => "scene",
-            ContextKind::Geo => "geo",
+            ContextKind::Sop => "SOP",
             ContextKind::Mat => "material",
-            ContextKind::Tex => "texture",
+            ContextKind::Cop => "COP",
         };
         let _ = writeln!(
             out,

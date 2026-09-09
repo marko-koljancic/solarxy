@@ -84,7 +84,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Line",
         category: Category::Generators,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             point_input("start_point", "Start Point", "starting"),

@@ -19,7 +19,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Compute Normals",
         category: Category::Attribute,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)

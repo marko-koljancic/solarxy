@@ -107,7 +107,7 @@ impl Document {
         let subflows: BTreeMap<NodeId, Graph> = data
             .subflows
             .iter()
-            .map(|(owner, gd)| (*owner, graph_from_data(gd, ContextKind::Geo)))
+            .map(|(owner, gd)| (*owner, graph_from_data(gd, ContextKind::Sop)))
             .collect();
         Self {
             root: graph_from_data(&data.root, ContextKind::Obj),
@@ -130,10 +130,10 @@ mod tests {
         // flag, params, and a variadic edge order.
         let mut doc = Document::new();
         let geo = doc.mint_node_id();
-        doc.create_subflow(geo, ContextKind::Geo);
+        doc.create_subflow(geo, ContextKind::Sop);
         doc.graph_mut(GraphContext::Root)
             .unwrap()
-            .add_node(NodeData::new(geo, "geo", 1));
+            .add_node(NodeData::new(geo, "sopnet", 1));
 
         let sub = GraphContext::Subflow(geo);
         let a = doc.mint_node_id();

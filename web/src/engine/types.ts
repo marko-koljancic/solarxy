@@ -8,7 +8,7 @@
 export type NodeId = number;
 export type EdgeId = number;
 
-/** `GraphContext`: `"root"` or `{ subflow: <geo nodeId> }`. */
+/** `GraphContext`: `"root"` or `{ subflow: <container nodeId> }`. */
 export type GraphContext = "root" | { subflow: NodeId };
 
 // --- Parameter values (ParamValue is adjacently tagged; ParamSource wraps
@@ -68,7 +68,7 @@ export interface GraphMirror {
 
 export interface DocumentSnapshot {
   root: GraphMirror;
-  /** keyed by owning geo node id (string). */
+  /** keyed by owning container node id (string). */
   subflows: Record<string, GraphMirror>;
   annotations: Annotation[];
 }
@@ -361,7 +361,7 @@ export type Command =
   | { type: "beginTransaction"; label: string }
   | { type: "endTransaction" }
   // Resolves (creating if needed) the node a gizmo drag writes to, inside the
-  // geo's subflow. Issued inside the drag's transaction, so an appended
+  // the container's subflow. Issued inside the drag's transaction, so an
   // transform undoes together with the move.
   | { type: "ensureTransformTarget"; geo: NodeId }
   // Escape mid-drag: rolls the open transaction back and discards it, leaving
@@ -455,7 +455,7 @@ export type NodeRole =
 /** The network kinds of the typed-context model. The root
  * canvas is `obj`; a container's child canvas is whatever its descriptor
  * `opens`. */
-export type ContextKind = "obj" | "geo" | "mat" | "tex";
+export type ContextKind = "obj" | "sop" | "mat" | "cop";
 
 export interface NodeTypeSnapshot {
   typeId: string;
@@ -474,17 +474,17 @@ export interface NodeTypeSnapshot {
     | "lights"
     | "cameras"
     | "utility"
-    | "tex_generate"
-    | "tex_adjust"
-    | "tex_composite";
+    | "cop_generate"
+    | "cop_adjust"
+    | "cop_composite";
   /** Title Case label for the category; `category` stays the stable id. */
   categoryLabel: string;
   /** The network kinds this node may be placed in. Replaces the older
    * rootContext/subflowContext booleans, which could only describe two
    * kinds; the palette filters against the current canvas's kind. */
   contexts: ContextKind[];
-  /** The child-network kind this node opens, for containers (`geo` opens
-   * `"geo"`); null otherwise. A canvas's kind derives from its owner's
+  /** The child-network kind this node opens, for containers (`sopnet` opens
+   * `"sop"`); null otherwise. A canvas's kind derives from its owner's
    * descriptor through this. */
   opens: ContextKind | null;
   inputs: PortSnapshot[];

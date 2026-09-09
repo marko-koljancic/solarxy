@@ -232,7 +232,7 @@ export function Viewport() {
         const hit = getClient().pick(p.x, p.y);
         if (hit === undefined) return;
         const root = selectGraph(useMirror.getState(), "root");
-        if (root.nodes.find((n) => n.id === hit)?.typeId !== "geo") return;
+        if (root.nodes.find((n) => n.id === hit)?.typeId !== "sopnet") return;
         useMirror.getState().setCurrent({ subflow: hit });
       } catch {
         /* not booted */

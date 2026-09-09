@@ -52,8 +52,8 @@ fn default_asset_role() -> String {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
 pub struct SceneJson {
-    /// The document schema version (0 pre-beta, no guarantees; frozen at 1
-    /// at public beta).
+    /// The document schema version (0 pre-beta, no guarantees; 1 at public
+    /// beta; 2 since the context vocabulary took the field's names).
     pub schema_version: u32,
     /// The lowest reader version able to open this file; a reader below it
     /// hard-rejects with an upgrade message.
@@ -85,7 +85,7 @@ pub struct SceneJson {
 }
 
 /// The node graph: the root canvas plus one entry per subflow, keyed by the
-/// owning `geo` node id.
+/// owning container's node id.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
 pub struct GraphJson {
@@ -93,7 +93,7 @@ pub struct GraphJson {
     pub nodes: Vec<NodeJson>,
     #[serde(default)]
     pub edges: Vec<EdgeJson>,
-    /// Subflows keyed by the owning `geo` node id (string).
+    /// Subflows keyed by the owning container's node id (string).
     #[serde(default)]
     pub subflows: BTreeMap<String, SubGraphJson>,
 }
@@ -109,7 +109,8 @@ pub struct SubGraphJson {
     /// The node id whose output this subflow displays, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_output: Option<String>,
-    /// The network kind (`"geo"`, `"mat"`, `"tex"`); absent in
+    /// The network kind (`"sop"`, `"mat"`, `"cop"` since schema 2; `"geo"`,
+    /// `"mat"`, `"tex"` before it, which the migration rewrites); absent in
     /// pre-context files, whose subflows were all geometry networks. The
     /// engine resolves an absent kind from the owning node's registry
     /// descriptor on load, so this field is advisory redundancy that keeps
@@ -119,7 +120,7 @@ pub struct SubGraphJson {
 }
 
 /// One node instance. Params are plain JSON literals keyed by param id (the
-/// schema-v1 shape; the `{"$expr": "..."}` object form is reserved for the
+/// shape since schema 1; the `{"$expr": "..."}` object form is reserved for the
 /// future expression variant). The display name is surfaced top-level for
 /// readability; the mapping layer keeps it authoritative there.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -145,7 +146,7 @@ pub struct NodeJson {
     /// Unix milliseconds when the node was created and when its behaviour
     /// last changed.
     ///
-    /// Additive and optional, so `schema_version` stays 1: a document
+    /// Additive and optional, so they needed no version bump: a document
     /// written before 0.8.1 simply has neither, and a reader that predates
     /// them ignores both. Absent (rather than zero) when the writing host
     /// had no wall clock, so a reader can say "unknown" instead of
@@ -377,7 +378,7 @@ impl Default for RuntimeJson {
 pub struct EditorJson {
     #[serde(default = "default_cook_mode")]
     pub cook_mode: String,
-    /// Canvas pan/zoom per context, keyed by `"root"` or a geo node id.
+    /// Canvas pan/zoom per context, keyed by `"root"` or a container node id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub canvas_viewports: BTreeMap<String, CanvasViewportJson>,
 }

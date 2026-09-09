@@ -300,7 +300,7 @@ pub fn geo_export_descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Export Geometry",
         category: Category::Export,
-        contexts: ContextSet::GEO,
+        contexts: ContextSet::SOP,
         opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
@@ -419,7 +419,7 @@ pub fn image_export_descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Export Image",
         category: Category::Export,
-        contexts: ContextSet::TEX,
+        contexts: ContextSet::COP,
         opens: None,
         inputs: vec![
             PortSpec::single("image", "Image", DataType::Image, true)
