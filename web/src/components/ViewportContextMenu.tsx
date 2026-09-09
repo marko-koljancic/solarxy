@@ -14,7 +14,7 @@
 // session (Rust owns the truth). Positioned fixed at the click point.
 
 import { useEffect, useRef } from "react";
-import { cameraCommand, dispatch, duplicateSelection, setTool } from "../engine/session";
+import { cameraCommand, dispatch, setTool } from "../engine/session";
 import type { ParamSource, ToolMode } from "../engine/types";
 import { selectGraph, useMirror } from "../store/mirror";
 import { toolApplies, useViewState } from "../store/viewState";
@@ -162,7 +162,17 @@ export function ViewportContextMenu({
         Frame selection
       </button>
       <div className="ctx-sep" />
-      <button type="button" className="ctx-item" disabled={!hasSel} onClick={() => run(duplicateSelection)}>
+      {/* Dispatched against the root context, like Delete beside it, rather
+          than through duplicateSelection: that one acts on whatever context
+          the canvas currently has open, so with a subflow dived into it
+          duplicated the subflow's selection while this menu's enabled state
+          and its Delete both spoke about the root's. */}
+      <button
+        type="button"
+        className="ctx-item"
+        disabled={!hasSel}
+        onClick={() => run(() => dispatch({ type: "duplicateNodes", ctx: "root", ids: sel }))}
+      >
         Duplicate
       </button>
       <button

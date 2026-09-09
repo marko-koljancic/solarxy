@@ -8,7 +8,8 @@
 use winit::event::MouseButton;
 
 use solarxy_renderer::camera_state::CameraState;
-use crate::gui::ViewportContextMenu;
+use crate::gui::{ContextTarget, ViewportContextMenu};
+use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_renderer::input::PointerButton;
 use solarxy_core::preferences::PaneMode;
 
@@ -97,23 +98,35 @@ impl State {
         best.map(|(_, id)| id)
     }
 
-    /// Open the viewport right-click context menu when the cursor is over an
-    /// object; right-clicking empty space clears any open menu.
+    /// Open the viewport right-click context menu.
+    ///
+    /// It opens on empty space too, with only the entries that make sense
+    /// there enabled. A menu that sometimes fails to appear reads as a broken
+    /// gesture, and framing the view is worth reaching for wherever the
+    /// pointer happens to be.
     pub fn open_viewport_context_menu(&mut self) {
-        let hit = self
-            .hovered_object()
-            .and_then(|id| self.raster.scene().get(id).map(|o| (id, o.visible)));
-        self.viewport_context_menu = hit.map(|(object, visible)| {
-            let ppp = self.window.scale_factor() as f32;
-            ViewportContextMenu {
+        let target = self.hovered_object().and_then(|object| {
+            let visible = self.raster.scene().get(object)?.visible;
+            // Whether the node has a transform at all is the registry's
+            // answer, not a list kept here: the reset writes exactly the
+            // parameters that node declares, and a type declaring none has
+            // nothing to reset rather than a reset that does nothing.
+            let resettable = self.engine.as_ref().is_some_and(|engine| {
+                engine
+                    .transform_params(GraphContext::Root, NodeId(object.0))
+                    .is_some()
+            });
+            Some(ContextTarget {
                 object,
                 visible,
-                screen_pos: egui::pos2(
-                    self.input.cursor_pos.0 / ppp,
-                    self.input.cursor_pos.1 / ppp,
-                ),
-                suppress_dismiss: true,
-            }
+                resettable,
+            })
+        });
+        let ppp = self.window.scale_factor() as f32;
+        self.viewport_context_menu = Some(ViewportContextMenu {
+            target,
+            screen_pos: egui::pos2(self.input.cursor_pos.0 / ppp, self.input.cursor_pos.1 / ppp),
+            suppress_dismiss: true,
         });
     }
 

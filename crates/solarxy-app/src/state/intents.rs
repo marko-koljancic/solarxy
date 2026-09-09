@@ -79,6 +79,7 @@ impl State {
                     }
                 }
                 Intent::CreateCameraFromView { pane } => self.create_camera_from_view(pane),
+                Intent::Viewport(action) => self.handle_viewport_action(action),
                 Intent::LookThrough { pane, change } => {
                     // The pose lands on the next frame's follow, one frame
                     // after the click.
@@ -246,6 +247,7 @@ impl Recompute {
             | Intent::PaneProjection { .. }
             | Intent::PaneView { .. }
             | Intent::CreateCameraFromView { .. }
+            | Intent::Viewport(_)
             | Intent::LookThrough { .. }
             | Intent::Projection(_)
             | Intent::File(_)

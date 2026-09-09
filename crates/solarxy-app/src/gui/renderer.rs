@@ -9,7 +9,7 @@ use solarxy_core::preferences::PaneMode;
 use super::modals::about::draw_about_modal;
 use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
-use super::intent::{Intent, Intents, LayoutIntent, PanelIntent, ReviewIntent};
+use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
 use super::panels::node_tree::NodeTreeState;
 use super::chrome::menu::{MenuContext, draw_menu_bar};
 use super::chrome::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
@@ -592,9 +592,7 @@ impl EguiRenderer {
                 .map(|menu| draw_viewport_context_menu(ctx, menu));
             if let Some(outcome) = menu_outcome {
                 if let Some(act) = outcome.action {
-                    // The same actions the Outliner raises, deliberately: a
-                    // right-click in the viewport asks for the same things.
-                    intents.panel(PanelIntent::Outliner(act));
+                    intents.raise(Intent::Viewport(act));
                 }
                 if outcome.close {
                     *viewport_context_menu = None;

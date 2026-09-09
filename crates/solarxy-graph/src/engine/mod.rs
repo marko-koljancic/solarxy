@@ -3096,6 +3096,22 @@ impl Engine {
         Some((NodeTransform::read(&resolved, &declared), declared))
     }
 
+    /// The transform parameters `node` declares, whatever it calls them.
+    ///
+    /// Separate from [`Self::gizmo_target`] because the two answer different
+    /// questions: that one is about the selection, and this is about a node.
+    /// A menu opened on top of something acts on that thing, which need not
+    /// be selected and on one shell never is.
+    ///
+    /// `None` where the type declares no transform at all, which is what
+    /// tells a caller there is nothing to reset rather than that resetting
+    /// would do nothing.
+    #[must_use]
+    pub fn transform_params(&self, ctx: GraphContext, node: NodeId) -> Option<TransformParams> {
+        let data = self.doc.graph(ctx).ok()?.node(node)?;
+        transform_params_for(&self.registry, &data.type_id)
+    }
+
     #[must_use]
     pub fn gizmo_target(&self, ctx: GraphContext) -> Option<GizmoTarget> {
         match ctx {

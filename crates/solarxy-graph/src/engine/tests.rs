@@ -3637,6 +3637,59 @@ fn gizmo_target_at_root_drives_the_geo_itself() {
     assert!((t.parent[3][3] - 1.0).abs() < 1e-6 && t.parent[3][0].abs() < 1e-6);
 }
 
+/// The node accessor and the selection accessor agree about the same node.
+///
+/// They exist separately because they answer different questions, and the
+/// failure that would hide between them is a second table: a menu resetting
+/// one set of parameters while the handles that draw on the same node write
+/// another. Asserted against a light as well as a geo, because a light names
+/// its position differently and has no rotation, so a shared table that had
+/// quietly diverged would still look right on the geo alone.
+#[test]
+fn the_node_and_selection_transform_accessors_name_the_same_parameters() {
+    let (mut e, geo, _sub, _box_id) = displayed_box();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+
+    for node in [geo, light] {
+        select(&mut e, GraphContext::Root, vec![node]);
+        let from_selection = e
+            .gizmo_target(GraphContext::Root)
+            .expect("the node declares a transform")
+            .params
+            .names();
+        let from_node = e
+            .transform_params(GraphContext::Root, node)
+            .expect("the same node, asked directly")
+            .names();
+        assert_eq!(from_selection, from_node, "the two accessors disagree");
+        assert!(!from_node.is_empty(), "a manipulable node named nothing");
+    }
+}
+
+/// A node that declares no transform answers `None`, which is what tells a
+/// menu there is nothing to reset rather than that resetting does nothing.
+#[test]
+fn a_node_with_no_transform_has_no_parameters_to_reset() {
+    let mut e = engine();
+    // Ambient light is absent from the table on purpose: it has no position,
+    // no direction and no size, so a handle would have nothing to write.
+    let ambient = add(&mut e, GraphContext::Root, "ambient_light");
+    assert!(e.transform_params(GraphContext::Root, ambient).is_none());
+}
+
+/// A node that is not in the graph answers `None` rather than panicking.
+///
+/// The caller is a right-click menu holding an id picked a frame ago, and the
+/// node can be gone by the time it is asked.
+#[test]
+fn transform_params_of_a_missing_node_is_none() {
+    let e = engine();
+    assert!(
+        e.transform_params(GraphContext::Root, NodeId(9999))
+            .is_none()
+    );
+}
+
 #[test]
 fn gizmo_target_at_root_needs_exactly_one_node_that_declares_a_transform() {
     let (mut e, geo, sub, box_id) = displayed_box();

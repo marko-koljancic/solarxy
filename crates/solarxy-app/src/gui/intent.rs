@@ -49,6 +49,7 @@ use super::dock::SolarxyTab;
 use super::panels::node_tree::NodeTreeAction;
 use super::panels::outliner::OutlinerAction;
 use super::chrome::pane_toolbar::{LookThroughChange, PaneView};
+use super::chrome::viewport_context_menu::ViewportAction;
 
 /// One thing a panel asked for during an interface pass.
 ///
@@ -67,6 +68,8 @@ pub(crate) enum Intent {
     /// Author a `camera` node at a pane's current pose and bind that pane to
     /// it, from that pane's Camera menu.
     CreateCameraFromView { pane: usize },
+    /// The viewport's right-click menu, acting on what the pointer landed on.
+    Viewport(ViewportAction),
     /// A pane's own framing, from that pane's Views menu.
     ///
     /// Deliberately not [`Intent::Projection`]'s shape: the View menu's
@@ -301,7 +304,11 @@ impl Intent {
             Self::Panel(PanelIntent::FlyToIssue(_)) => 10,
             Self::Panel(PanelIntent::ClearHdri) => 11,
             Self::Panel(PanelIntent::LoadHdri) => 12,
-            Self::Panel(PanelIntent::Outliner(_)) => 13,
+            // The viewport's right-click menu shares this key with the
+            // Outliner deliberately: they raise the same kind of object
+            // action, and two of the menu's arms delegate to the Outliner's
+            // own handler.
+            Self::Viewport(_) | Self::Panel(PanelIntent::Outliner(_)) => 13,
             Self::Panel(PanelIntent::NodeTree(_)) => 14,
             Self::Cook(_) => 15,
             Self::Panel(PanelIntent::InvokeAction { .. }) => 16,

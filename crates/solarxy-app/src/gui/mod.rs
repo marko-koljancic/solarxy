@@ -70,4 +70,4 @@ pub(crate) use chrome::pane_toolbar::{LookThroughChange, PaneToolbarData, PaneVi
 pub(crate) use panels::properties::{NodeActionsView, ValidationView};
 pub(crate) use panels::review::overlay::ReviewPaneOverlay;
 pub(crate) use chrome::overlays::HudInfo;
-pub(crate) use chrome::viewport_context_menu::ViewportContextMenu;
+pub(crate) use chrome::viewport_context_menu::{ContextTarget, ViewportAction, ViewportContextMenu};
