@@ -418,6 +418,40 @@ impl Registry {
         self.by_id.values()
     }
 
+    /// The network kind a type opens, or `None` when it is not a container.
+    ///
+    /// This is the read half of the claim [`NodeTypeDescriptor::opens`] makes
+    /// about itself, that no container is ever special-cased by its type id.
+    /// The claim was true of container *creation* and false of everything
+    /// else: scene lowering, both pick loops, the transform role table, the
+    /// display-geometry filter and the world-matrix guard each compared
+    /// against a literal instead. They ask here now, which is what makes the
+    /// next context free rather than another sweep of the same sites.
+    #[must_use]
+    pub fn opens(&self, type_id: &str) -> Option<ContextKind> {
+        self.get(type_id).and_then(|d| d.opens)
+    }
+
+    /// Whether a type opens a network of `kind`.
+    #[must_use]
+    pub fn opens_kind(&self, type_id: &str, kind: ContextKind) -> bool {
+        self.opens(type_id) == Some(kind)
+    }
+
+    /// A container type that opens `kind`, for the callers that must *name*
+    /// one rather than test one: synthesising a document around an imported
+    /// model is the only such caller today.
+    ///
+    /// First in type-id order when several qualify, which is arbitrary and
+    /// deliberately so. Nothing in the registry says which container is the
+    /// canonical one for a kind, and inventing a rule here would put that
+    /// policy somewhere no descriptor could see it. A second container that
+    /// wanted to be the default would need a declaration of its own.
+    #[must_use]
+    pub fn container_for(&self, kind: ContextKind) -> Option<&NodeTypeDescriptor> {
+        self.descriptors().find(|d| d.opens == Some(kind))
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.by_id.len()

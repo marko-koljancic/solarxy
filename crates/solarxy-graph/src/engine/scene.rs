@@ -25,7 +25,7 @@ use solarxy_core::scene::{
 };
 
 use crate::cook::CookEngine;
-use crate::document::{Document, GraphContext, NodeId};
+use crate::document::{ContextKind, Document, GraphContext, NodeId};
 use crate::nodes::common::rotate_order_from_key;
 use crate::params::ParamValue;
 use crate::previews::{Previews, effective_params};
@@ -89,12 +89,16 @@ pub fn build_scene_delta(
     let mut environment: Option<SceneOp> = None;
 
     for node in root.nodes() {
-        match node.type_id.as_str() {
-            "geo" => {
-                if emit_geo(doc, registry, cook, previews, node.id, &mut delta) {
-                    present.insert(SceneObjectId(node.id.0));
-                }
+        // A container that opens a geometry network lowers to a scene object,
+        // whichever container that is. The arms below still name their types,
+        // because a camera is a camera and no descriptor field says so yet.
+        if registry.opens_kind(&node.type_id, ContextKind::Geo) {
+            if emit_geo(doc, registry, cook, previews, node.id, &mut delta) {
+                present.insert(SceneObjectId(node.id.0));
             }
+            continue;
+        }
+        match node.type_id.as_str() {
             "camera" => {
                 if let Some(cam) = camera_from_node(doc, registry, previews, cook, node) {
                     cameras.push(cam);
@@ -167,10 +171,13 @@ pub(crate) struct GeoRenderFlags {
     pub cast_shadow: bool,
 }
 
-/// Resolves a geo's render flags through the standard param path. Shared
-/// by scene lowering, picking, the marker projection, and the
+/// Resolves a geometry container's render flags through the standard param
+/// path. Shared by scene lowering, picking, the marker projection, and the
 /// visualization aggregation so they can never disagree about what
 /// "hidden" means.
+///
+/// Resolved against the node's OWN descriptor rather than one fetched by
+/// name, so a second container declaring different flag defaults keeps them.
 pub(crate) fn geo_render_flags(
     doc: &Document,
     registry: &Registry,
@@ -184,7 +191,7 @@ pub(crate) fn geo_render_flags(
     let Some(node) = doc.graph(GraphContext::Root).ok().and_then(|g| g.node(geo)) else {
         return on;
     };
-    let Some(desc) = registry.get("geo") else {
+    let Some(desc) = registry.get(&node.type_id) else {
         return on;
     };
     let params = effective_params(previews, node.id, &node.params);
@@ -300,11 +307,11 @@ fn effective_validation(
     None
 }
 
-/// The column-major `T * R(order) * S` world matrix for a geo container,
+/// The column-major `T * R(order) * S` world matrix for a geometry container,
 /// resolved through the standard param path (degrees to radians for `rotate`,
-/// `uniform_scale` folded into `scale`). Identity when the node, its
-/// descriptor, or its params are unavailable. Shared by scene lowering and
-/// picking so they can never disagree.
+/// `uniform_scale` folded into `scale`) against the node's own descriptor.
+/// Identity when the node, its descriptor, or its params are unavailable.
+/// Shared by scene lowering and picking so they can never disagree.
 ///
 /// Composed by the kernel's `compose_trs`, exactly like the `transform` node,
 /// with a zero pivot (a geo's pivot is its origin). It used to hand-roll
@@ -321,7 +328,7 @@ pub(crate) fn geo_world_matrix(
     let Some(node) = doc.graph(GraphContext::Root).ok().and_then(|g| g.node(geo)) else {
         return Matrix4::identity();
     };
-    let Some(desc) = registry.get("geo") else {
+    let Some(desc) = registry.get(&node.type_id) else {
         return Matrix4::identity();
     };
     let params = effective_params(previews, node.id, &node.params);
@@ -399,7 +406,7 @@ pub fn pick_node(
     let root = doc.graph(GraphContext::Root).ok()?;
     let mut best: Option<(f32, NodeId)> = None;
     for node in root.nodes() {
-        if node.type_id != "geo" {
+        if !registry.opens_kind(&node.type_id, ContextKind::Geo) {
             continue;
         }
         let geo = node.id;
@@ -542,7 +549,7 @@ pub(crate) fn pick_node_detailed(
     let root = doc.graph(GraphContext::Root).ok()?;
     let mut best: Option<super::PickDetail> = None;
     for node in root.nodes() {
-        if node.type_id != "geo" {
+        if !registry.opens_kind(&node.type_id, ContextKind::Geo) {
             continue;
         }
         let geo = node.id;

@@ -30,7 +30,7 @@
 //! rather than an event system.
 
 use crate::cook::state::CookStatus;
-use crate::document::{GraphContext, NodeId};
+use crate::document::{ContextKind, GraphContext, NodeId};
 use crate::engine::{Command, Engine, EngineEvent, EventBatch};
 use crate::params::{ParamSource, ParamValue};
 
@@ -84,11 +84,24 @@ pub fn synthesize_model_document(
 
     let engine_err = |e: &dyn std::fmt::Display| ModelDocumentError::Engine(e.to_string());
 
+    // The container is whichever type declares that it opens a geometry
+    // network, asked of the registry rather than named here. This is the only
+    // caller that has to name one rather than test one, which is why the
+    // registry answers with a descriptor and not a predicate.
+    let container = engine
+        .registry()
+        .container_for(ContextKind::Geo)
+        .ok_or_else(|| {
+            ModelDocumentError::Engine("no registered type opens a geometry network".into())
+        })?
+        .type_id
+        .to_string();
+
     let geo = added_node(
         &engine
             .apply(Command::AddNode {
                 ctx: GraphContext::Root,
-                node_type: "geo".to_string(),
+                node_type: container,
                 position: [0.0, 0.0],
             })
             .map_err(|e| engine_err(&e))?,
@@ -239,6 +252,41 @@ mod tests {
                 .any(|op| matches!(op, solarxy_core::scene::SceneOp::UpsertGeometry { .. })),
             "the cooked snapshot carries no geometry"
         );
+    }
+
+    /// The container is asked of the registry rather than named here, which is
+    /// what lets a second one ever exist.
+    ///
+    /// Proven by taking the name away: the only type that opens a geometry
+    /// network is renamed, and the synthesis still builds its document around
+    /// whatever the registry now calls it. A literal here would fail to add
+    /// the node at all, so this is the one caller whose failure would have
+    /// been loud rather than silent, and it is still worth pinning because it
+    /// is the reason the registry answers with a descriptor and not a
+    /// predicate.
+    #[test]
+    fn the_synthesis_names_no_container_of_its_own() {
+        use crate::document::ContextKind;
+
+        let mut descriptors = crate::nodes::builtin_descriptors();
+        for d in &mut descriptors {
+            if d.opens == Some(ContextKind::Geo) {
+                d.type_id = "renamed_container";
+            }
+        }
+        let registry = crate::registry::Registry::with_descriptors(descriptors)
+            .expect("renaming a container leaves the registry valid");
+        let mut engine = Engine::with_registry(registry);
+
+        let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec();
+        synthesize_model_document(&mut engine, "tri.obj", "obj", obj).expect("synthesis");
+
+        let root = engine
+            .document()
+            .graph(GraphContext::Root)
+            .expect("the root graph");
+        let types: Vec<&str> = root.nodes().map(|n| n.type_id.as_str()).collect();
+        assert_eq!(types, vec!["renamed_container"]);
     }
 
     #[test]

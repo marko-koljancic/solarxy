@@ -3688,7 +3688,7 @@ fn every_transform_param_is_declared_by_its_descriptor() {
         .into_iter()
         .chain(LIGHT_TYPE_IDS.iter().copied())
     {
-        let Some(params) = crate::engine::transform_params_for(type_id) else {
+        let Some(params) = crate::engine::transform_params_for(&registry, type_id) else {
             continue;
         };
         let desc = registry
@@ -3954,9 +3954,11 @@ fn cancelling_a_two_param_light_drag_restores_both_edges() {
 /// the table on purpose: there is nothing honest for a handle to write.
 #[test]
 fn the_scene_wide_lights_declare_no_transform() {
+    let registry = crate::registry::Registry::with_descriptors(crate::nodes::builtin_descriptors())
+        .expect("the builtin registry is valid");
     for type_id in ["ambient_light", "hemisphere_light"] {
         assert!(
-            crate::engine::transform_params_for(type_id).is_none(),
+            crate::engine::transform_params_for(&registry, type_id).is_none(),
             "{type_id} has no position to manipulate"
         );
     }
@@ -9291,5 +9293,142 @@ fn a_render_node_saved_with_an_explicit_size_still_renders_at_it() {
         (settings.width, settings.height),
         (1280, 720),
         "a preset the document never chose has overridden the authored size"
+    );
+}
+
+/// The registry's own documentation says no container type is ever
+/// special-cased by its type id. That was true of container *creation* and
+/// false of everything else, and this is what makes it true of the rest.
+///
+/// A second container is built from the first descriptor, renamed and
+/// otherwise identical, then driven through every site that used to compare
+/// against a literal: scene lowering, the display-geometry filter, the
+/// world-matrix guard, the transform role table, and both pick loops. A site
+/// still naming a type id answers for one container and silently not for its
+/// twin, which is a failure no existing test could see, because until now
+/// there was only ever one.
+#[test]
+fn a_second_container_opening_the_same_kind_behaves_as_the_first() {
+    use solarxy_core::scene::{SceneObjectId, SceneOp};
+
+    let mut descriptors = crate::nodes::builtin_descriptors();
+    let first = descriptors
+        .iter()
+        .find(|d| d.opens == Some(ContextKind::Geo))
+        .expect("some registered type opens a geometry network")
+        .type_id;
+    // Built a second time rather than cloned: a descriptor carries function
+    // pointers and implements no Clone, and a derive added for one test is a
+    // worse trade than calling the builder twice.
+    let mut twin = crate::nodes::builtin_descriptors()
+        .into_iter()
+        .find(|d| d.opens == Some(ContextKind::Geo))
+        .expect("some registered type opens a geometry network");
+    twin.type_id = "container_twin";
+    twin.display_name = "Container Twin";
+    // The twin stands to one side by its own DESCRIPTOR default rather than by
+    // a param written on the node. That is what covers the two sites that
+    // fetched the geometry container's descriptor by name while holding the
+    // node whose descriptor they wanted: with an identical twin those sites
+    // resolve the same either way and the mistake is invisible.
+    for spec in &mut twin.params {
+        match spec.key.as_str() {
+            "translate" => spec.default = ParamValue::Vec3([5.0, 0.0, 0.0]),
+            "rotate" => spec.default = ParamValue::Vec3([0.0, 90.0, 0.0]),
+            "cast_shadow" => spec.default = ParamValue::Bool(false),
+            _ => {}
+        }
+    }
+    descriptors.push(twin);
+
+    let registry = crate::registry::Registry::with_descriptors(descriptors)
+        .expect("two containers opening one kind is a valid registry");
+    let mut e = Engine::with_registry(registry);
+
+    let original = add(&mut e, GraphContext::Root, first);
+    add(&mut e, GraphContext::Subflow(original), "box");
+    let twin_node = add(&mut e, GraphContext::Root, "container_twin");
+    add(&mut e, GraphContext::Subflow(twin_node), "box");
+
+    e.cook(&mut || true);
+
+    // Scene lowering.
+    let delta = e.take_scene_delta();
+    for node in [original, twin_node] {
+        let id = SceneObjectId(node.0);
+        assert!(
+            delta
+                .ops
+                .iter()
+                .any(|op| matches!(op, SceneOp::UpsertGeometry { id: got, .. } if *got == id)),
+            "{node:?} did not lower to a scene object"
+        );
+    }
+
+    // The render flags resolve against each container's own descriptor, which
+    // is the whole of the difference between asking the node and asking for a
+    // type by name. The twin declares a different shadow default and keeps it.
+    for (node, expected) in [(original, true), (twin_node, false)] {
+        let id = SceneObjectId(node.0);
+        assert!(
+            delta.ops.iter().any(|op| matches!(
+                op,
+                SceneOp::SetCastShadow { id: got, cast_shadow } if *got == id && *cast_shadow == expected
+            )),
+            "{node:?} did not carry its own cast_shadow default of {expected}"
+        );
+    }
+
+    // The display-geometry filter, which is also what the overlays read.
+    let displayed: Vec<NodeId> = e.display_geometries().iter().map(|(n, ..)| *n).collect();
+    assert_eq!(displayed, vec![original, twin_node]);
+
+    // The world-matrix guard answers for both, and the twin's carries its own
+    // offset, which is the flag and transform resolution reading the twin's
+    // descriptor rather than one fetched by name.
+    assert!(e.geo_world_matrix(original).is_some());
+    let m = e
+        .geo_world_matrix(twin_node)
+        .expect("the twin container has a world matrix");
+    assert!(
+        (m[3][0] - 5.0).abs() < 1e-6 && m[3][1].abs() < 1e-6 && m[3][2].abs() < 1e-6,
+        "the twin's world matrix lost its translation: {:?}",
+        m[3]
+    );
+
+    // The transform role table.
+    select(&mut e, GraphContext::Root, vec![twin_node]);
+    let t = e
+        .gizmo_target(GraphContext::Root)
+        .expect("the twin container declares a transform");
+    assert_eq!(t.node, twin_node);
+    assert!((t.translate[0] - 5.0).abs() < 1e-6);
+
+    // Inside the twin, the parent frame the gizmo composes against is the
+    // twin's own rotation. This is the one site where the container's type id
+    // sat in argument position rather than in a comparison, which is why the
+    // count of these sites was one short.
+    let inside = e
+        .gizmo_target(GraphContext::Subflow(twin_node))
+        .expect("the twin's subflow has a display node");
+    assert!(
+        inside.parent_basis[0][0].abs() < 1e-6 && (inside.parent_basis[0][2] + 1.0).abs() < 1e-6,
+        "the parent frame is not the twin's own rotation: {:?}",
+        inside.parent_basis
+    );
+
+    // Both pick loops, each container hit at its own position.
+    assert_eq!(
+        e.pick([5.0, 0.0, 10.0], [0.0, 0.0, -1.0], None),
+        Some(twin_node)
+    );
+    assert_eq!(
+        e.pick([0.0, 0.0, 10.0], [0.0, 0.0, -1.0], None),
+        Some(original)
+    );
+    assert_eq!(
+        e.pick_detailed([5.0, 0.0, 10.0], [0.0, 0.0, -1.0])
+            .map(|d| d.node),
+        Some(twin_node)
     );
 }

@@ -26,7 +26,9 @@ use crate::nodes::common::rotate_order_from_key;
 use crate::registry::resolve::ResolvedParams;
 use crate::cook::state::{CookState, CookStatus};
 use crate::cook::{CookEngine, JobId, JobRequest, JobResult};
-use crate::document::{Document, DocumentData, Edge, EdgeId, GraphContext, NodeData, NodeId, PortRef};
+use crate::document::{
+    ContextKind, Document, DocumentData, Edge, EdgeId, GraphContext, NodeData, NodeId, PortRef,
+};
 use crate::params::{AssetId, ParamSource, ParamValue};
 use crate::registry::resolve::param_source_from_json;
 use crate::registry::{Arity, Registry};
@@ -773,7 +775,7 @@ fn mat3_to_array(m: Matrix3<f32>) -> [[f32; 3]; 3] {
 ///
 /// Ambient and hemisphere lights are absent on purpose. They have no position,
 /// no direction and no size, so there is nothing for a handle to write.
-fn transform_params_for(type_id: &str) -> Option<TransformParams> {
+fn transform_params_for(registry: &Registry, type_id: &str) -> Option<TransformParams> {
     const TRS: TransformParams = TransformParams {
         translate: Some("translate"),
         rotate: Some("rotate"),
@@ -785,8 +787,14 @@ fn transform_params_for(type_id: &str) -> Option<TransformParams> {
         pivot: None,
         aim: None,
     };
+    // A container that opens a geometry network carries the plain transform,
+    // whichever container that is. Its transform reaches the renderer as the
+    // scene object's own rather than baked into vertices, which is what makes
+    // the handles write these keys and not the child network's.
+    if registry.opens_kind(type_id, ContextKind::Geo) {
+        return Some(TRS);
+    }
     let params = match type_id {
-        "geo" => TRS,
         // The one type with a pivot of its own.
         "transform" => TransformParams {
             pivot: Some("pivot"),
@@ -2291,7 +2299,7 @@ impl Engine {
         };
         let mut out: Vec<_> = root
             .nodes()
-            .filter(|n| n.type_id == "geo")
+            .filter(|n| self.registry.opens_kind(&n.type_id, ContextKind::Geo))
             .filter(|n| scene::geo_visible(&self.doc, &self.registry, &self.previews, n.id))
             .filter_map(|n| {
                 let set = scene::display_output(&self.doc, &self.cook, n.id)?;
@@ -3047,7 +3055,7 @@ impl Engine {
     pub fn geo_world_matrix(&self, geo: NodeId) -> Option<[[f32; 4]; 4]> {
         let root = self.doc.graph(GraphContext::Root).ok()?;
         let node = root.node(geo)?;
-        if node.type_id != "geo" {
+        if !self.registry.opens_kind(&node.type_id, ContextKind::Geo) {
             return None;
         }
         Some(scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, geo).into())
@@ -3082,7 +3090,7 @@ impl Engine {
         type_id: &str,
     ) -> Option<(NodeTransform, TransformParams)> {
         let desc = self.registry.get(type_id)?;
-        let declared = transform_params_for(type_id)?;
+        let declared = transform_params_for(&self.registry, type_id)?;
         let effective = crate::previews::effective_params(&self.previews, node, params);
         let resolved = crate::registry::resolve::resolve_params(&effective, &desc.params).ok()?;
         Some((NodeTransform::read(&resolved, &declared), declared))
@@ -3133,7 +3141,7 @@ impl Engine {
                 let tail = sub.node(display)?;
 
                 let geo_node = self.doc.graph(GraphContext::Root).ok()?.node(geo)?;
-                let (geo_xf, _) = self.node_transform(geo, &geo_node.params, "geo")?;
+                let (geo_xf, _) = self.node_transform(geo, &geo_node.params, &geo_node.type_id)?;
                 let geo_matrix =
                     scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, geo);
 
@@ -3143,7 +3151,7 @@ impl Engine {
                 // Either way the drag writes a `transform`: the reuse path
                 // writes the tail, and the append path writes the one minted at
                 // drag start, so the names are the same in both.
-                let params = transform_params_for("transform")?;
+                let params = transform_params_for(&self.registry, "transform")?;
                 let xf = if reusable {
                     self.node_transform(display, &tail.params, "transform")?.0
                 } else {
