@@ -86,6 +86,23 @@ pub enum ContextKind {
 }
 
 impl ContextKind {
+    /// The stable lowercase token, which is also the serde form.
+    ///
+    /// This is the vocabulary a user reads in the node info card and the
+    /// one an interface prints when it names the networks a node may sit
+    /// in. It is deliberately not the reference documentation's prose
+    /// ("inside a SOP network"), which is a sentence rather than a name.
+    /// `the_token_matches_the_serde_form` holds the two together.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Obj => "obj",
+            Self::Sop => "sop",
+            Self::Mat => "mat",
+            Self::Cop => "cop",
+        }
+    }
+
     /// Every kind, in declaration order (snapshot and UI vocabularies).
     pub const ALL: [ContextKind; 4] = [
         ContextKind::Obj,
@@ -569,6 +586,16 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The token and the serde form are one vocabulary, and a rename that
+    /// moved only one of them would print a name no document uses.
+    #[test]
+    fn the_token_matches_the_serde_form() {
+        for kind in ContextKind::ALL {
+            let wire = serde_json::to_string(&kind).expect("a kind serializes");
+            assert_eq!(wire, format!("\"{}\"", kind.as_str()), "{kind:?}");
+        }
+    }
 
     fn node(g: &mut Graph, id: u64) -> NodeId {
         let nid = NodeId(id);

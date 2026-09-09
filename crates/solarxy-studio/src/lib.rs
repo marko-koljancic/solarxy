@@ -59,4 +59,6 @@
     clippy::wildcard_imports
 )]
 
+pub mod node;
+pub mod palette;
 pub mod params;
