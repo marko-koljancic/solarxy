@@ -157,6 +157,9 @@ impl ApplicationHandler<State> for App {
                     ShellKey::ToggleViewport => {
                         state.gui.toggle_tab(crate::gui::SolarxyTab::Viewport);
                     }
+                    // Outside the interface pass, so it calls the state
+                    // directly rather than raising an intent.
+                    ShellKey::CookNow => state.cook_now(),
                 }
                 pre_handled = true;
             }

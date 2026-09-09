@@ -58,9 +58,9 @@ pub use renderer::EguiRenderer;
 pub(crate) use chrome::divider::DividerInfo;
 pub(crate) use dock::SolarxyTab;
 pub(crate) use pass::{CaptureFrame, FramePaint, PanelSources, ViewportChrome};
-pub(crate) use settings::PanelSettings;
+pub(crate) use settings::{CookReadout, PanelSettings};
 pub(crate) use intent::{
-    CaptureIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
+    CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
     LayoutIntent, PaneChange, PanelIntent, PostChange, ReviewIntent,
 };
 pub(crate) use panels::node_tree::{NodeTreeAction, NodeTreeSource};

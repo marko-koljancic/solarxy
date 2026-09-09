@@ -65,6 +65,9 @@ pub(crate) enum ShellKey {
     OpenHdri,
     ToggleConsole,
     ToggleViewport,
+    /// Cook what is stale now, in manual cook mode. A chord, so it stays
+    /// global even with a text field focused.
+    CookNow,
 }
 
 /// What the window claims for a pressed key, if anything.
@@ -87,6 +90,7 @@ pub(crate) fn shell_key(
         KeyCode::KeyO if cmd_or_ctrl => Some(ShellKey::OpenModel),
         KeyCode::Backquote if !wants_text => Some(ShellKey::ToggleConsole),
         KeyCode::Digit1 if cmd_or_ctrl && !wants_text => Some(ShellKey::ToggleViewport),
+        KeyCode::Enter | KeyCode::NumpadEnter if cmd_or_ctrl => Some(ShellKey::CookNow),
         _ => None,
     }
 }
@@ -586,7 +590,11 @@ mod tests {
             // The developer harness keys are the map's, debug builds only.
             (KeyCode::F8, false, false, None),
             (KeyCode::F9, false, false, None),
-            (KeyCode::Enter, true, false, None),
+            // The explicit cook is a chord; bare Enter belongs to whatever
+            // has focus.
+            (KeyCode::Enter, true, false, Some(ShellKey::CookNow)),
+            (KeyCode::NumpadEnter, true, false, Some(ShellKey::CookNow)),
+            (KeyCode::Enter, false, false, None),
         ];
         for (code, cmd, shift, expected) in cases {
             assert_eq!(

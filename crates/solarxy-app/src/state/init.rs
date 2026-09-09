@@ -199,6 +199,7 @@ impl State {
             engine_scene: None,
             selected_object: None,
             cook_health: super::cook_health::CookHealth::default(),
+            cook_readout: crate::gui::CookReadout::default(),
             still: None,
             finished_float: None,
             tracer: None,

@@ -76,7 +76,56 @@ pub(in crate::gui) fn draw_menu_bar(
             draw_layout_menu(ui, intents, cx.has_saved_layout);
             draw_window_menu(ui, intents, present, cx);
             draw_help_menu(ui, intents);
+            draw_cook_strip(ui, settings.cook, intents);
         });
+    });
+}
+
+/// The cook strip at the right end of the bar: the mode toggle, and in manual
+/// mode the stale count and the Cook button. It lives here rather than in the
+/// status bar because the status bar retires this release and the header is
+/// where the browser keeps the same three controls.
+///
+/// Widgets are added right to left, so the first one added is the rightmost.
+fn draw_cook_strip(ui: &mut egui::Ui, cook: crate::gui::CookReadout, intents: &mut Intents) {
+    use solarxy_graph::engine::CookMode;
+
+    if !cook.open {
+        return;
+    }
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let manual = cook.mode == CookMode::Manual;
+        if manual
+            && ui
+                .add_enabled(cook.can_cook(), egui::Button::new("Cook"))
+                .on_hover_text(format!(
+                    "Cook the stale nodes now ({}+Enter)",
+                    crate::gui::MOD
+                ))
+                .on_disabled_hover_text("Nothing is stale, or a cook is already working")
+                .clicked()
+        {
+            intents.raise(Intent::Cook(crate::gui::CookIntent::CookNow));
+        }
+        if let Some(label) = cook.status_label() {
+            ui.label(egui::RichText::new(label).small());
+        }
+        let toggle = egui::Button::new(if manual { "Manual" } else { "Auto" }).selected(manual);
+        if ui
+            .add(toggle)
+            .on_hover_text(
+                "Cook mode. Manual holds the cook until you ask for it, which is \
+                 how a heavy graph stays editable.",
+            )
+            .clicked()
+        {
+            let next = if manual {
+                CookMode::Auto
+            } else {
+                CookMode::Manual
+            };
+            intents.raise(Intent::Cook(crate::gui::CookIntent::SetMode(next)));
+        }
     });
 }
 
@@ -309,6 +358,39 @@ fn draw_render_menu(
             .clicked()
         {
             intents.raise(Intent::Capture(CaptureIntent::Still));
+            ui.close();
+        }
+        ui.separator();
+
+        // The cook, for discoverability; the header strip is the working
+        // surface. Both raise the same intents.
+        let cook = settings.cook;
+        let manual = cook.mode == solarxy_graph::engine::CookMode::Manual;
+        if ui
+            .add_enabled(
+                cook.open,
+                egui::Button::new("Auto Cook").selected(cook.open && !manual),
+            )
+            .on_hover_text("Cook stale nodes as edits land. Off, the cook waits for Cook Now.")
+            .clicked()
+        {
+            let next = if manual {
+                solarxy_graph::engine::CookMode::Auto
+            } else {
+                solarxy_graph::engine::CookMode::Manual
+            };
+            intents.raise(Intent::Cook(crate::gui::CookIntent::SetMode(next)));
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                cook.can_cook(),
+                egui::Button::new("Cook Now").shortcut_text(format!("{}+Enter", crate::gui::MOD)),
+            )
+            .on_disabled_hover_text("In manual cook mode, cooks what is stale")
+            .clicked()
+        {
+            intents.raise(Intent::Cook(crate::gui::CookIntent::CookNow));
             ui.close();
         }
         ui.separator();

@@ -96,6 +96,8 @@ pub(crate) enum Intent {
     Help(HelpIntent),
     /// A panel asked for something the shell does on its behalf.
     Panel(PanelIntent),
+    /// The header strip and the Render menu: cook mode and the explicit cook.
+    Cook(CookIntent),
 }
 
 /// One of a pane's own display settings.
@@ -210,6 +212,15 @@ pub(crate) enum HelpIntent {
     OpenAbout,
 }
 
+/// Cook mode and the explicit cook, raised from the header strip and the
+/// Render menu. The engine owns both; the shell only asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CookIntent {
+    SetMode(solarxy_graph::engine::CookMode),
+    /// Cook what is stale now, in manual cook mode.
+    CookNow,
+}
+
 /// What a panel asked for.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PanelIntent {
@@ -268,6 +279,7 @@ impl Intent {
             Self::Panel(PanelIntent::LoadHdri) => 12,
             Self::Panel(PanelIntent::Outliner(_)) => 13,
             Self::Panel(PanelIntent::NodeTree(_)) => 14,
+            Self::Cook(_) => 15,
         }
     }
 }
@@ -342,8 +354,12 @@ mod tests {
             pane: 0,
             mode: ProjectionMode::Orthographic,
         });
+        intents.raise(Intent::Cook(CookIntent::CookNow));
 
-        assert_eq!(keys(&mut intents), vec![0, 1, 2, 3, 8, 10, 11, 12, 13, 14]);
+        assert_eq!(
+            keys(&mut intents),
+            vec![0, 1, 2, 3, 8, 10, 11, 12, 13, 14, 15]
+        );
     }
 
     /// Two intents in one category keep the order they were raised in, which

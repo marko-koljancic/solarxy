@@ -3687,6 +3687,20 @@ impl Engine {
         self.cook_mode
     }
 
+    /// Whether a cook is still owed: a manual cook has been asked for and
+    /// the stale set has not drained, or an automatic cook ran out of budget
+    /// with work remaining.
+    ///
+    /// The cook events cannot answer this on their own. A status event is
+    /// emitted only on a transition, so a frame that finished nothing new
+    /// reports nothing, and the remaining count the last cook wrote is never
+    /// refreshed while manual mode holds the cook off.
+    #[must_use]
+    pub fn has_pending_cook(&self) -> bool {
+        self.manual_cook_requested
+            || (self.cook_mode == CookMode::Auto && self.last_cook_remaining > 0)
+    }
+
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision

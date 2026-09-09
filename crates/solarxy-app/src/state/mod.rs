@@ -30,6 +30,7 @@
 
 mod camera;
 mod capture;
+mod cook;
 pub(crate) mod cook_health;
 #[cfg(debug_assertions)]
 mod dev;
@@ -158,6 +159,9 @@ pub struct State {
     /// stream each frame. Fresh failures toast; the standing map is what
     /// the still render consults before reporting success.
     pub(super) cook_health: cook_health::CookHealth,
+    /// What the header strip says about the cook, refreshed each frame from
+    /// the engine, so a scene opened in manual mode shows manual at once.
+    pub(super) cook_readout: crate::gui::CookReadout,
     /// The still render in flight, if any. While it runs it owns the
     /// shared render targets, so panes are not rendered.
     pub(super) still: Option<still::StillState>,

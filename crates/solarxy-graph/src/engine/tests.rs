@@ -534,6 +534,53 @@ fn manual_mode_freezes_cooking_until_cook_now() {
     assert!(e.dirty_nodes().is_empty(), "Auto cooks the stale set");
 }
 
+/// The header's "cooking" readout: a manual cook is pending from the moment
+/// it is asked for until the stale set drains, and a stale set nobody has
+/// asked to cook is not pending at all. The automatic-mode half of the
+/// answer is the remaining count the last cook wrote, which `tick`'s pacing
+/// gate already stands on.
+#[test]
+fn a_manual_cook_is_pending_from_cook_now_until_the_stale_set_drains() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    e.cook(&mut || true);
+    assert!(!e.has_pending_cook(), "a settled document owes no cook");
+
+    e.apply(Command::SetCookMode {
+        mode: CookMode::Manual,
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    assert!(
+        !e.has_pending_cook(),
+        "a stale set in manual mode is not a pending cook until it is asked for"
+    );
+    e.apply(Command::CookNow).unwrap();
+    assert!(e.has_pending_cook(), "CookNow arms a cook");
+    e.cook(&mut || true);
+    assert!(
+        !e.has_pending_cook(),
+        "the arm clears once the stale set drains"
+    );
+
+    // Back in automatic mode nothing is armed, so nothing is pending.
+    e.apply(Command::SetCookMode {
+        mode: CookMode::Auto,
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(
+        !e.has_pending_cook(),
+        "a settled automatic cook owes nothing"
+    );
+}
+
 // Undo / redo.
 
 /// A structural fingerprint of a subflow: nodes (id, type, params,

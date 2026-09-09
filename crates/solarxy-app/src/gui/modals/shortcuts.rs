@@ -28,6 +28,10 @@ const SECTIONS: &[Section] = &[
                 action: "Import HDRI",
             },
             Entry {
+                keys: "__MOD__+Enter",
+                action: "Cook now, in manual cook mode",
+            },
+            Entry {
                 keys: "C",
                 action: "Screenshot\u{2026}",
             },

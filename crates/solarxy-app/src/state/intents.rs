@@ -15,9 +15,9 @@ use super::BackgroundModeExt;
 
 use super::State;
 use crate::gui::{
-    CaptureIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
-    LayoutIntent, LookThroughChange, PaneChange, PanelIntent, PostChange, ReviewIntent,
-    NodeTreeAction, ToastSeverity,
+    CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
+    LayoutIntent, LookThroughChange, NodeTreeAction, PaneChange, PanelIntent, PostChange,
+    ReviewIntent, ToastSeverity,
 };
 
 impl State {
@@ -83,6 +83,8 @@ impl State {
                     self.screenshot_expand_review = false;
                 }
                 Intent::Capture(CaptureIntent::Still) => self.open_still_dialog(),
+                Intent::Cook(CookIntent::SetMode(mode)) => self.set_cook_mode(mode),
+                Intent::Cook(CookIntent::CookNow) => self.cook_now(),
                 Intent::Review(intent) => self.apply_review_intent(intent),
                 Intent::Layout(intent) => self.apply_layout_intent(intent),
                 Intent::Help(intent) => self.apply_help_intent(intent),
@@ -212,6 +214,7 @@ impl Recompute {
             | Intent::File(_)
             | Intent::Edit(_)
             | Intent::Capture(_)
+            | Intent::Cook(_)
             | Intent::Review(_)
             | Intent::Layout(_)
             | Intent::Help(_)
@@ -519,6 +522,22 @@ mod tests {
         assert!(!r.wireframe);
         assert!(!r.composite);
         assert!(!r.ibl);
+    }
+
+    /// A cook is an action the engine performs, and whatever it changes
+    /// arrives through the scene delta rather than through a rebuild here.
+    #[test]
+    fn a_cook_intent_makes_nothing_stale() {
+        for intent in [
+            Intent::Cook(CookIntent::CookNow),
+            Intent::Cook(CookIntent::SetMode(solarxy_graph::engine::CookMode::Manual)),
+        ] {
+            let r = marked(std::slice::from_ref(&intent));
+            assert!(!r.background, "{intent:?}");
+            assert!(!r.wireframe, "{intent:?}");
+            assert!(!r.composite, "{intent:?}");
+            assert!(!r.ibl, "{intent:?}");
+        }
     }
 
     #[test]

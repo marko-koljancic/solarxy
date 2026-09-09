@@ -265,6 +265,7 @@ impl State {
     /// anything the cook chose to defer rather than the main path.
     fn drive_engine(&mut self) {
         let Some(engine) = self.engine.as_mut() else {
+            self.cook_readout = crate::gui::CookReadout::default();
             return;
         };
 
@@ -279,6 +280,29 @@ impl State {
             let result = engine.resolve_job(&request);
             engine.submit_job_result(ctx, id, result);
         }
+
+        // The header's readout. The mode is read rather than mirrored, so a
+        // scene opened in manual mode says so with no event plumbing. The
+        // stale count walks every node, so it is taken only while the strip
+        // can show it: in manual mode, while a cook is still working in
+        // either mode, and on the frame it settles so the count reads zero
+        // rather than what it was.
+        let mode = engine.cook_mode();
+        let cooking = engine.has_pending_cook();
+        let stale = if mode == solarxy_graph::engine::CookMode::Manual
+            || cooking
+            || self.cook_readout.cooking
+        {
+            engine.dirty_nodes().len()
+        } else {
+            0
+        };
+        self.cook_readout = crate::gui::CookReadout {
+            open: true,
+            mode,
+            stale,
+            cooking,
+        };
 
         // Surface fresh cook failures. The engine emits a status event
         // only on a transition, so this toasts once per failed cook, not
