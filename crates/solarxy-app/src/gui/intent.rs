@@ -222,10 +222,17 @@ pub(crate) enum CookIntent {
 }
 
 /// What a panel asked for.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) enum PanelIntent {
     /// A validation row was clicked: frame the issue it names.
     FlyToIssue(usize),
+    /// An action parameter's button in the Properties panel. The key is the
+    /// parameter's, and the drain decides what the press does.
+    InvokeAction {
+        ctx: solarxy_graph::document::GraphContext,
+        node: solarxy_graph::document::NodeId,
+        key: String,
+    },
     /// The Properties panel's Clear HDRI button.
     ClearHdri,
     /// The Properties panel's Load HDRI button, shown when none is loaded.
@@ -280,6 +287,7 @@ impl Intent {
             Self::Panel(PanelIntent::Outliner(_)) => 13,
             Self::Panel(PanelIntent::NodeTree(_)) => 14,
             Self::Cook(_) => 15,
+            Self::Panel(PanelIntent::InvokeAction { .. }) => 16,
         }
     }
 }

@@ -62,6 +62,9 @@ pub(crate) struct PanelSources<'a> {
     /// The open document, when the Node Tree tab is mounted. The state layer
     /// passes `Empty` for a closed tab so the fold is skipped.
     pub node_tree: NodeTreeSource<'a>,
+    /// The node selected in the Node Tree and the actions it declares, for
+    /// the Properties panel's Actions section.
+    pub actions: super::panels::properties::NodeActionsView<'a>,
     pub recent_files: &'a [String],
 }
 

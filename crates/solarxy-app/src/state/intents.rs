@@ -82,7 +82,13 @@ impl State {
                     self.capture_requested = true;
                     self.screenshot_expand_review = false;
                 }
-                Intent::Capture(CaptureIntent::Still) => self.open_still_dialog(),
+                Intent::Capture(CaptureIntent::Still) => {
+                    // From the menu, the still renders the document's one
+                    // render node; a target left by a node's own action
+                    // must not outlive that press.
+                    self.still_target = None;
+                    self.open_still_dialog();
+                }
                 Intent::Cook(CookIntent::SetMode(mode)) => self.set_cook_mode(mode),
                 Intent::Cook(CookIntent::CookNow) => self.cook_now(),
                 Intent::Review(intent) => self.apply_review_intent(intent),
@@ -98,6 +104,9 @@ impl State {
                 }
                 Intent::Panel(PanelIntent::NodeTree(action)) => {
                     self.handle_node_tree_action(action);
+                }
+                Intent::Panel(PanelIntent::InvokeAction { ctx, node, key }) => {
+                    self.invoke_action(ctx, node, &key);
                 }
             }
         }

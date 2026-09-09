@@ -131,7 +131,14 @@ impl State {
             return None;
         }
 
-        match resolve_still_settings(engine) {
+        // Opened from a render node's own action, the still renders that
+        // node; opened from the menu, the document's single render node,
+        // with the refusals that rule carries.
+        let resolved = match self.still_target {
+            Some((ctx, node)) => engine.render_settings(ctx, node).map(|s| (s, None)),
+            None => resolve_still_settings(engine),
+        };
+        match resolved {
             Ok((settings, note)) => {
                 if let Some(note) = note {
                     self.gui.set_toast(&note, ToastSeverity::Info);

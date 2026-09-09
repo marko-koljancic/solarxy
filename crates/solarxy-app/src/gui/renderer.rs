@@ -281,6 +281,12 @@ impl EguiRenderer {
         self.node_tree.reset();
     }
 
+    /// The context the Node Tree is showing: where its selection lives and
+    /// where a dropped model lands.
+    pub fn node_tree_ctx(&self) -> solarxy_graph::document::GraphContext {
+        self.node_tree.ctx()
+    }
+
     /// Apply a JSON-serialized dock layout. Returns `true` if the JSON
     /// deserialized into a valid `DockState`; on failure, the existing
     /// layout is preserved and a debug line is logged.

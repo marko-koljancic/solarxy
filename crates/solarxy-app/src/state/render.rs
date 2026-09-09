@@ -476,6 +476,41 @@ impl State {
             None => crate::gui::NodeTreeSource::Empty,
         };
 
+        // The Actions section's subject: the node selected in the Node Tree's
+        // context, read from the document each frame rather than mirrored,
+        // because selection is engine state.
+        let selected = self
+            .engine
+            .as_deref()
+            .and_then(|engine| selected_node(engine.document(), self.gui.node_tree_ctx()));
+        let selected_name = match (&self.engine, selected) {
+            (Some(engine), Some((ctx, id))) => engine
+                .document()
+                .graph(ctx)
+                .ok()
+                .and_then(|g| g.node(id))
+                .map(|n| solarxy_graph::naming::node_name(n, engine.registry()))
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        let actions_source = match (&self.engine, selected) {
+            (Some(engine), Some((ctx, id))) => {
+                let descriptor = engine
+                    .document()
+                    .graph(ctx)
+                    .ok()
+                    .and_then(|g| g.node(id))
+                    .and_then(|n| engine.registry().get(&n.type_id));
+                crate::gui::NodeActionsView {
+                    node: Some((ctx, id)),
+                    name: &selected_name,
+                    type_name: descriptor.map_or("", |d| d.display_name),
+                    params: descriptor.map_or(&[], |d| d.params.as_slice()),
+                }
+            }
+            _ => crate::gui::NodeActionsView::default(),
+        };
+
         let recent_files = self.preferences.history.recent_files.clone();
         // `PaneToolbarData` is passed by value — `render_ui` consumes it,
         // releasing its `&mut self.view.pane_settings` borrow before
@@ -545,6 +580,7 @@ impl State {
                 validation,
                 outliner: outliner_source,
                 node_tree: node_tree_source,
+                actions: actions_source,
                 recent_files: &recent_files,
             },
             &mut self.review,
@@ -663,5 +699,86 @@ impl State {
             return;
         }
         self.resize_render_targets(target_w, target_h);
+    }
+}
+
+/// The node the Actions section is about: the selection in `prefer` (the
+/// Node Tree's dived context), else the root's, else the first subflow's
+/// that has one. The most recently selected id wins within a graph.
+///
+/// Read from the document rather than mirrored, because selection is engine
+/// state and this shell's only writer of it is the Node Tree's drain arm.
+fn selected_node(
+    doc: &solarxy_graph::document::Document,
+    prefer: solarxy_graph::document::GraphContext,
+) -> Option<(
+    solarxy_graph::document::GraphContext,
+    solarxy_graph::document::NodeId,
+)> {
+    use solarxy_graph::document::GraphContext;
+    std::iter::once(prefer)
+        .chain(std::iter::once(GraphContext::Root))
+        .chain(doc.subflow_owners().map(GraphContext::Subflow))
+        .find_map(|ctx| {
+            let id = doc.graph(ctx).ok()?.selection.last().copied()?;
+            Some((ctx, id))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::selected_node;
+    use solarxy_graph::document::{GraphContext, NodeId};
+    use solarxy_graph::{Command, Engine, EngineEvent};
+
+    fn add(engine: &mut Engine, ctx: GraphContext, ty: &str) -> NodeId {
+        let batch = engine
+            .apply(Command::AddNode {
+                ctx,
+                node_type: ty.to_string(),
+                position: [0.0, 0.0],
+            })
+            .expect("the node adds");
+        batch
+            .events
+            .iter()
+            .find_map(|ev| match ev {
+                EngineEvent::NodeAdded { node, .. } => Some(node.id),
+                _ => None,
+            })
+            .expect("a node was added")
+    }
+
+    /// Selection is read off the document, preferring the context the Node
+    /// Tree is showing, so a dive changes what the section is about.
+    #[test]
+    fn the_selected_node_is_read_from_the_document_preferring_the_tree_context() {
+        let mut engine = Engine::new().expect("engine");
+        assert_eq!(selected_node(engine.document(), GraphContext::Root), None);
+
+        let container = add(&mut engine, GraphContext::Root, "sopnet");
+        let inner = GraphContext::Subflow(container);
+        let inner_box = add(&mut engine, inner, "box");
+        engine
+            .apply(Command::SetSelection {
+                ctx: inner,
+                ids: vec![inner_box],
+            })
+            .expect("selects");
+        engine
+            .apply(Command::SetSelection {
+                ctx: GraphContext::Root,
+                ids: vec![container],
+            })
+            .expect("selects");
+
+        assert_eq!(
+            selected_node(engine.document(), inner),
+            Some((inner, inner_box))
+        );
+        assert_eq!(
+            selected_node(engine.document(), GraphContext::Root),
+            Some((GraphContext::Root, container))
+        );
     }
 }

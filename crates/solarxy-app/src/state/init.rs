@@ -201,6 +201,7 @@ impl State {
             cook_health: super::cook_health::CookHealth::default(),
             cook_readout: crate::gui::CookReadout::default(),
             still: None,
+            still_target: None,
             finished_float: None,
             tracer: None,
             traced_env_dirty: false,

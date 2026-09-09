@@ -66,7 +66,7 @@ pub(crate) use intent::{
 pub(crate) use panels::node_tree::{NodeTreeAction, NodeTreeSource};
 pub(crate) use panels::outliner::{OutlinerAction, OutlinerSource};
 pub(crate) use chrome::pane_toolbar::{LookThroughChange, PaneToolbarData};
-pub(crate) use panels::properties::ValidationView;
+pub(crate) use panels::properties::{NodeActionsView, ValidationView};
 pub(crate) use panels::review::overlay::ReviewPaneOverlay;
 pub(crate) use chrome::overlays::HudInfo;
 pub(crate) use chrome::viewport_context_menu::ViewportContextMenu;

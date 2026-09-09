@@ -1,16 +1,21 @@
-//! The Properties panel — a docked tab with three sections: **Model**
-//! (geometry / file stats, the former floating Stats window), **HDRI**
-//! (environment file + IBL mode + rotation), and **Validation** (the
-//! issue list, click-a-row to fly the active camera to the defect).
+//! The Properties panel: a docked tab with four sections. **Model** (or
+//! **Scene**: geometry and file stats), **HDRI** (environment file, IBL mode
+//! and rotation), **Validation** (the issue list; click a row to fly the
+//! active camera to the defect), and **Actions** (the action parameters the
+//! node selected in the Node Tree declares, one button each).
 //!
-//! Replaced `gui::stats` in RC2 — `ModelInfo` moved here unchanged; file
-//! sizes format via `solarxy_core::format_number`. Read-only except the
-//! HDRI IBL-mode and rotation controls, which raise intents like everything
-//! else, drained by `state/intents.rs` after the egui pass.
+//! Read-only except the HDRI controls and the action buttons, which raise
+//! intents like everything else, drained by `state/intents.rs` after the
+//! egui pass. The Actions section is the seed of the parameter panel that
+//! replaces this panel later in the release: it interprets the registry's
+//! declaration and branches on no node type, so a node that declares an
+//! action in Rust gets its button with no change here.
 
 use solarxy_core::format_number;
 use solarxy_core::preferences::IblMode;
 use solarxy_core::validation::ValidationReport;
+use solarxy_graph::document::{GraphContext, NodeId};
+use solarxy_graph::registry::param_spec::{ParamSpec, ParamType};
 use solarxy_renderer::resources::ModelStats;
 
 use crate::state::engine_scene::SceneGeometryCounts;
@@ -18,6 +23,35 @@ use crate::state::hdri_info::HdriInfo;
 
 use crate::gui::intent::{DisplayChange, Intent, Intents, PanelIntent};
 use crate::gui::settings::PanelSettings;
+
+/// The Actions section's input: the selected node and what it declares.
+///
+/// Borrowed from the engine for the frame, like the Node Tree's source. The
+/// whole parameter list rides rather than a filtered copy, so the view stays
+/// `Copy` and the filter is one pure function the test can call.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct NodeActionsView<'a> {
+    /// The node the section is about, or nothing selected.
+    pub node: Option<(GraphContext, NodeId)>,
+    /// The node's display name; empty with nothing selected.
+    pub name: &'a str,
+    /// The node type's display name; empty with nothing selected.
+    pub type_name: &'a str,
+    /// Every parameter the node's type declares, in declaration order.
+    pub params: &'a [ParamSpec],
+}
+
+/// The parameters that are buttons.
+///
+/// Visibility conditions are not evaluated here, which is safe only while no
+/// action declares one; a test pins that. The parameter panel evaluates them
+/// when it lands.
+pub(super) fn action_specs(params: &[ParamSpec]) -> Vec<&ParamSpec> {
+    params
+        .iter()
+        .filter(|spec| matches!(spec.ty, ParamType::Action))
+        .collect()
+}
 
 /// The Validation section's input: the report to list, plus the owning
 /// object's name per issue.
@@ -101,6 +135,7 @@ pub(in crate::gui) fn draw_properties_content(
     model_info: Option<&ModelInfo>,
     hdri_info: Option<&HdriInfo>,
     validation: ValidationView<'_>,
+    actions: NodeActionsView<'_>,
     settings: PanelSettings<'_>,
     intents: &mut Intents,
 ) {
@@ -135,8 +170,51 @@ pub(in crate::gui) fn draw_properties_content(
             .default_open(true)
             .show(ui, |ui| draw_validation_section(ui, validation, intents));
 
+        ui.separator();
+
+        egui::CollapsingHeader::new("Actions")
+            .default_open(true)
+            .show(ui, |ui| draw_actions_section(ui, actions, intents));
+
         ui.add_space(8.0);
     });
+}
+
+/// One button per action the selected node declares. The press is routed by
+/// the drain, not here: the panel knows the declaration and nothing about
+/// what any node does with it.
+fn draw_actions_section(ui: &mut egui::Ui, view: NodeActionsView<'_>, intents: &mut Intents) {
+    let Some((ctx, node)) = view.node else {
+        ui.label(egui::RichText::new("Select a node in the Node Tree").weak());
+        return;
+    };
+    ui.label(
+        egui::RichText::new(format!("{} \u{00b7} {}", view.name, view.type_name))
+            .small()
+            .weak(),
+    );
+    let specs = action_specs(view.params);
+    if specs.is_empty() {
+        ui.label(egui::RichText::new("This node declares no actions").weak());
+        return;
+    }
+    ui.add_space(2.0);
+    for spec in specs {
+        if ui
+            .button(&spec.label)
+            .on_hover_text(format!(
+                "{}\n\nActs on the node's last cook; in manual cook mode, cook first.",
+                spec.doc
+            ))
+            .clicked()
+        {
+            intents.panel(PanelIntent::InvokeAction {
+                ctx,
+                node,
+                key: spec.key.clone(),
+            });
+        }
+    }
 }
 
 fn draw_model_section(ui: &mut egui::Ui, info: &ModelInfo) {
@@ -409,6 +487,47 @@ fn draw_validation_section(
             .on_hover_text("Click to frame this issue in the active viewport");
         if resp.clicked() {
             intents.panel(PanelIntent::FlyToIssue(idx));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::action_specs;
+    use solarxy_graph::Engine;
+
+    /// The buttons are read off the declaration, so the two export nodes and
+    /// the render node get theirs and a geometry node gets none.
+    #[test]
+    fn only_action_params_become_buttons() {
+        let engine = Engine::new().expect("engine");
+        let keys = |ty: &str| -> Vec<String> {
+            let descriptor = engine.registry().get(ty).unwrap_or_else(|| panic!("{ty}"));
+            action_specs(&descriptor.params)
+                .iter()
+                .map(|s| s.key.clone())
+                .collect()
+        };
+        assert_eq!(keys("geo_export"), ["save"]);
+        assert_eq!(keys("image_export"), ["save"]);
+        assert_eq!(keys("render"), ["render"]);
+        assert!(keys("box").is_empty());
+    }
+
+    /// The section does not evaluate visibility conditions, which is safe
+    /// only while no action declares one. This is what says so.
+    #[test]
+    fn no_action_param_declares_a_visibility_condition() {
+        let engine = Engine::new().expect("engine");
+        for descriptor in engine.registry().descriptors() {
+            for spec in action_specs(&descriptor.params) {
+                assert!(
+                    spec.show_if.is_empty(),
+                    "{}.{} declares a visibility condition the Actions section would have to evaluate",
+                    descriptor.type_id,
+                    spec.key
+                );
+            }
         }
     }
 }

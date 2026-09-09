@@ -180,6 +180,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.open_file.model_info,
                     self.open_file.hdri_info,
                     self.sources.validation,
+                    self.sources.actions,
                     self.sources.settings,
                     self.intents,
                 );

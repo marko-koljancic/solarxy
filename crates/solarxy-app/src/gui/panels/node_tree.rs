@@ -201,6 +201,12 @@ impl NodeTreeState {
         self.ctx = GraphContext::Root;
         self.collapsed.clear();
     }
+
+    /// The context the panel is showing, which is where a selection made in
+    /// it lives and where a dropped model lands.
+    pub(crate) fn ctx(&self) -> GraphContext {
+        self.ctx
+    }
 }
 
 /// One Node Tree interaction, raised during an egui pass and drained by

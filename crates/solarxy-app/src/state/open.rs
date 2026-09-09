@@ -586,6 +586,7 @@ impl State {
         self.unresolved_binding = [false; 4];
         self.cook_health.clear();
         self.cancel_still_render();
+        self.still_target = None;
 
         let mut engine = engine;
         // Queued behind the `Clear` above, so the outgoing document leaves and
@@ -653,6 +654,7 @@ impl State {
         self.unresolved_binding = [false; 4];
         self.cook_health.clear();
         self.cancel_still_render();
+        self.still_target = None;
         self.clear_scene_objects();
         self.environment.invalidate();
         self.reset_env_for_empty_scene();

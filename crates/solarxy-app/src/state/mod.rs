@@ -28,6 +28,7 @@
 //!   `solarxy_core::raycast` so web picking can run in Rust; re-exported here
 //!   so call sites keep their paths.
 
+mod actions;
 mod camera;
 mod capture;
 mod cook;
@@ -165,6 +166,14 @@ pub struct State {
     /// The still render in flight, if any. While it runs it owns the
     /// shared render targets, so panes are not rendered.
     pub(super) still: Option<still::StillState>,
+    /// The render node whose own action opened the still dialog, so the
+    /// still renders that node rather than the document's single one. Set by
+    /// the action, cleared when the menu opens the dialog and when the
+    /// document changes.
+    pub(super) still_target: Option<(
+        solarxy_graph::document::GraphContext,
+        solarxy_graph::document::NodeId,
+    )>,
     /// The finished floating-point picture, waiting for a save path.
     ///
     /// Beside the modal's eight-bit copy rather than inside it: the modal shows
