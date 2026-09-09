@@ -48,7 +48,7 @@ use crate::state::view_state::{BoundsMode, ViewLayout};
 use super::dock::SolarxyTab;
 use super::panels::node_tree::NodeTreeAction;
 use super::panels::outliner::OutlinerAction;
-use super::chrome::pane_toolbar::LookThroughChange;
+use super::chrome::pane_toolbar::{LookThroughChange, PaneView};
 
 /// One thing a panel asked for during an interface pass.
 ///
@@ -64,6 +64,12 @@ pub(crate) enum Intent {
         pane: usize,
         change: LookThroughChange,
     },
+    /// A pane's own framing, from that pane's Views menu.
+    ///
+    /// Deliberately not [`Intent::Projection`]'s shape: the View menu's
+    /// framing follows the camera link, and a pane menu writes the pane it
+    /// was drawn on and nothing else.
+    PaneView { pane: usize, view: PaneView },
     /// One per-pane display setting, on the pane a widget was drawn for.
     ///
     /// One variant for every pane and not two, which is the point: the active
@@ -118,6 +124,9 @@ pub(crate) enum PaneChange {
     ShowValidation(bool),
     UvBackground(UvMapBackground),
     ShowUvOverlap(bool),
+    /// Per-pane turntable spin. The *speed* is deliberately not here: it is
+    /// scene-global on both shells, so it travels as a [`DisplayChange`].
+    TurntableActive(bool),
 }
 
 /// One scene-global display setting.
@@ -258,7 +267,10 @@ impl Intent {
     /// the test that pins the sequence.
     pub(crate) fn order(&self) -> u8 {
         match self {
-            Self::PaneProjection { .. } => 0,
+            // Both write one pane's camera and both release that pane's
+            // look-through binding on the way, so they share a key: only one
+            // of them can be raised in a frame, since each is one click.
+            Self::PaneProjection { .. } | Self::PaneView { .. } => 0,
             Self::LookThrough { .. } => 1,
             // Everything a menu raises sat in one block before the queue
             // existed, in the field order of the struct it wrote. Only one

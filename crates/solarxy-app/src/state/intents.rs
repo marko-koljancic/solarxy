@@ -16,7 +16,7 @@ use super::BackgroundModeExt;
 use super::State;
 use crate::gui::{
     CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
-    LayoutIntent, LookThroughChange, NodeTreeAction, PaneChange, PanelIntent, PostChange,
+    LayoutIntent, LookThroughChange, NodeTreeAction, PaneChange, PanelIntent, PaneView, PostChange,
     ReviewIntent, ToastSeverity,
 };
 
@@ -52,6 +52,24 @@ impl State {
                     self.release_look_through_pane(pane);
                     if let Some(Some(cam)) = self.view.cameras.get_mut(pane) {
                         cam.set_projection(mode);
+                    }
+                }
+                Intent::PaneView { pane, view } => {
+                    // Bounds first: the borrow it takes is immutable and the
+                    // camera write below is not, so reading it inside the
+                    // write would not compile.
+                    let bounds = self.scene_bounds();
+                    // Framing a bound pane takes the view over, for the same
+                    // reason a projection pick does: the per-frame follow
+                    // would otherwise revert it on the next frame.
+                    self.release_look_through_pane(pane);
+                    if let Some(Some(cam)) = self.view.cameras.get_mut(pane) {
+                        match view {
+                            PaneView::Fit => cam.reset_to_bounds(&bounds),
+                            PaneView::Axis(axis) => {
+                                solarxy_host::cameras::reset_to_view(cam, &bounds, axis);
+                            }
+                        }
                     }
                 }
                 Intent::LookThrough { pane, change } => {
@@ -197,7 +215,8 @@ impl Recompute {
                 | PaneChange::ShowLocalAxes(_)
                 | PaneChange::ShowValidation(_)
                 | PaneChange::UvBackground(_)
-                | PaneChange::ShowUvOverlap(_) => {}
+                | PaneChange::ShowUvOverlap(_)
+                | PaneChange::TurntableActive(_) => {}
             },
             // Intensity joins the mode below because both are IBL-derived
             // uniforms that reach the GPU only through the lighting
@@ -218,6 +237,7 @@ impl Recompute {
             )
             | Intent::LinkCameras(_)
             | Intent::PaneProjection { .. }
+            | Intent::PaneView { .. }
             | Intent::LookThrough { .. }
             | Intent::Projection(_)
             | Intent::File(_)
@@ -257,6 +277,7 @@ fn apply_pane_change(pds: &mut crate::state::view_state::PaneDisplaySettings, ch
         PaneChange::ShowValidation(v) => pds.show_validation = v,
         PaneChange::UvBackground(v) => pds.uv_bg = v,
         PaneChange::ShowUvOverlap(v) => pds.show_uv_overlap = v,
+        PaneChange::TurntableActive(v) => pds.turntable_active = v,
     }
 }
 
@@ -522,6 +543,101 @@ mod tests {
             recompute.mark(intent);
         }
         recompute
+    }
+
+    /// Every [`PaneChange`] writes the one field it names, and no other.
+    ///
+    /// The failure this catches is a transposed arm, which nothing else can
+    /// see: every arm has the same shape and several share a type, so a
+    /// `TurntableActive` writing `show_validation` compiles, passes the
+    /// staleness tests above, and shows up only as a menu entry doing
+    /// somebody else's job.
+    ///
+    /// Each case both asserts the change moved something and, after putting
+    /// the named field back, that nothing else moved. An arm that writes
+    /// nothing at all fails the first half rather than passing vacuously.
+    #[test]
+    fn every_pane_change_writes_only_the_field_it_names() {
+        use solarxy_core::preferences::{
+            InspectionMode, MaterialOverride, NormalsMode, PaneMode, UvMapBackground, UvMode,
+            ViewMode,
+        };
+        use solarxy_core::view_config::PaneDisplaySettings;
+
+        type Restore = fn(&mut PaneDisplaySettings, &PaneDisplaySettings);
+        let base = PaneDisplaySettings::for_still(BackgroundMode::GRADIENT);
+        let cases: &[(PaneChange, Restore)] = &[
+            (PaneChange::PaneMode(PaneMode::UvMap), |p, b| {
+                p.pane_mode = b.pane_mode;
+            }),
+            (PaneChange::ViewMode(ViewMode::WireframeOnly), |p, b| {
+                p.view_mode = b.view_mode;
+            }),
+            (PaneChange::InspectionMode(InspectionMode::Depth), |p, b| {
+                p.inspection_mode = b.inspection_mode;
+            }),
+            (
+                PaneChange::MaterialOverride(MaterialOverride::Chrome),
+                |p, b| {
+                    p.material_override = b.material_override;
+                },
+            ),
+            (
+                PaneChange::BackgroundMode(BackgroundMode::Builtin(
+                    solarxy_core::preferences::BuiltinBg::Black,
+                )),
+                |p, b| {
+                    p.background_mode = b.background_mode;
+                },
+            ),
+            (PaneChange::NormalsMode(NormalsMode::Face), |p, b| {
+                p.normals_mode = b.normals_mode;
+            }),
+            (PaneChange::UvMode(UvMode::Checker), |p, b| {
+                p.uv_mode = b.uv_mode;
+            }),
+            (
+                PaneChange::BoundsMode(solarxy_core::view_config::BoundsMode::WholeModel),
+                |p, b| {
+                    p.bounds_mode = b.bounds_mode;
+                },
+            ),
+            (PaneChange::LineWeight(LineWeight::Bold), |p, b| {
+                p.line_weight = b.line_weight;
+            }),
+            (PaneChange::ShowGrid(true), |p, b| {
+                p.show_grid = b.show_grid;
+            }),
+            (PaneChange::ShowAxisGizmo(true), |p, b| {
+                p.show_axis_gizmo = b.show_axis_gizmo;
+            }),
+            (PaneChange::ShowLocalAxes(true), |p, b| {
+                p.show_local_axes = b.show_local_axes;
+            }),
+            (PaneChange::ShowValidation(true), |p, b| {
+                p.show_validation = b.show_validation;
+            }),
+            (
+                PaneChange::UvBackground(UvMapBackground::Checker),
+                |p, b| {
+                    p.uv_bg = b.uv_bg;
+                },
+            ),
+            (PaneChange::ShowUvOverlap(true), |p, b| {
+                p.show_uv_overlap = b.show_uv_overlap;
+            }),
+            (PaneChange::TurntableActive(true), |p, b| {
+                p.turntable_active = b.turntable_active;
+            }),
+        ];
+
+        for (change, restore) in cases {
+            let mut pds = base;
+            apply_pane_change(&mut pds, *change);
+            assert_ne!(pds, base, "{change:?} wrote nothing");
+            restore(&mut pds, &base);
+            assert_eq!(pds, base, "{change:?} wrote a field it does not name");
+        }
     }
 
     #[test]

@@ -556,6 +556,7 @@ impl State {
             uv_overlap_pct,
             cameras: &scene_cameras,
             look_through: look_through_mirror,
+            turntable_rpm: self.view.display.turntable_rpm,
         };
         self.gui.render_ui(
             crate::gui::FramePaint {
