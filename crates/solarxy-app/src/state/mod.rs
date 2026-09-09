@@ -179,8 +179,26 @@ pub struct State {
     /// navigation releases the pane back to a free view rather than writing
     /// the pose back to the node the way the web's locked mode does. That
     /// write-back is authoring machinery, and it waits for the desktop node
-    /// canvas. Session state, deliberately not persisted, matching the web.
+    /// canvas.
+    ///
+    /// Restored from a scene file's per-pane `look_through` on open, because
+    /// a binding is part of how the scene was authored rather than of how
+    /// this window is arranged; never written, because this shell has no
+    /// save. The web persists the binding and its lock; only the binding
+    /// crosses here, since the lock is the write-back this shell lacks.
     pub(super) look_through: [Option<solarxy_core::scene::SceneObjectId>; 4],
+    /// Panes whose restored binding has not yet been checked against the
+    /// cooked scene.
+    ///
+    /// At the moment a scene opens nothing has cooked, so the camera a
+    /// binding names does not exist yet and cannot be looked up. Each frame,
+    /// a flagged pane is resolved once the answer is knowable: the camera
+    /// appeared, so the binding stands and the follow poses the pane; or the
+    /// cook settled without it, so the binding is dropped rather than left
+    /// naming a camera the document no longer has. A binding made live from
+    /// the pane toolbar is never flagged, since it was picked from cameras
+    /// that exist.
+    pub(super) unresolved_binding: [bool; 4],
     /// The rasterizer, behind the render backend contract, owning the
     /// multi-object dynamic scene drawn beside `scene`.
     ///
@@ -225,7 +243,10 @@ pub struct State {
     /// opens there is nothing to frame on and the panes would seed on the
     /// placeholder box and stay there, because the seeding is idempotent and
     /// nothing re-frames afterwards. A pane the file's own saved view supplied
-    /// a camera for is never marked: an authored camera outranks framing.
+    /// a camera for is never marked: an authored camera outranks framing. A
+    /// marked pane that is bound to a scene camera is never framed either:
+    /// the follow poses it, and framing it first would be a visible jump
+    /// before the binding took over.
     pub(super) pending_frame: [bool; 4],
     pub(super) pending_hdri: Option<PendingHdri>,
     pub(super) pending_capture: Option<PendingCapture>,

@@ -62,6 +62,9 @@ impl State {
                             LookThroughChange::Bind(id) => Some(SceneObjectId(id)),
                             LookThroughChange::Free => None,
                         };
+                        // Picked from the cameras that exist, so there is
+                        // nothing left to check, whatever an open left flagged.
+                        self.unresolved_binding[pane] = false;
                     }
                 }
                 Intent::Projection(mode) => {

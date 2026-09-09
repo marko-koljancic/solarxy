@@ -32,6 +32,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
+use solarxy_core::scene::SceneObjectId;
 use solarxy_graph::Engine;
 
 use crate::gui::ToastSeverity;
@@ -355,8 +356,8 @@ impl State {
         }
     }
 
-    /// Adopt the per-pane cameras and display settings a scene was saved
-    /// with, and leave the viewport arrangement alone.
+    /// Adopt the per-pane cameras, display settings and camera bindings a
+    /// scene was saved with, and leave the viewport arrangement alone.
     ///
     /// The file also carries a layout, a split ratio and an active pane, and
     /// this deliberately ignores all three. On the web the saved view is the
@@ -364,6 +365,14 @@ impl State {
     /// is something the user set up around their own work, and clobbering it
     /// on every open would be a worse trade than opening a scene framed as
     /// authored inside the panes they already have.
+    ///
+    /// The binding is restored while those are not, because it is part of
+    /// how the scene was authored rather than of how this window is arranged:
+    /// a shot looked through a camera in one shell is the same shot in the
+    /// other. The web's camera lock beside it is not restored, since it is
+    /// the write-back this shell does not do. Nothing has cooked at this
+    /// point, so a binding cannot be checked here; `resolve_restored_bindings`
+    /// does that over the following frames.
     fn apply_scene_view(&mut self, view: &solarxy_scenefile::ViewJson) {
         let bounds = self.scene_bounds();
         let (tw, th) = self.target_dimensions();
@@ -400,6 +409,9 @@ impl State {
                 });
                 apply_camera_json(&mut cam.camera, &pane.camera);
             }
+            // Restored unchecked: the camera it names has not cooked yet.
+            self.look_through[i] = restored_binding(pane);
+            self.unresolved_binding[i] = self.look_through[i].is_some();
         }
         self.ensure_pane_cameras();
     }
@@ -472,22 +484,87 @@ impl State {
     /// exactly as it would have with the bounds in hand, including the
     /// orthographic Top, Front and Left views slots one to three start on.
     ///
+    /// A pane bound to a scene camera is never framed: the follow poses it
+    /// from the camera node, and framing it first would be a visible jump
+    /// before the binding took over. While its binding is still unresolved
+    /// it waits, because the binding may yet be dropped, and then the pane
+    /// frames like any other.
+    ///
     /// A document that never produces bounds is empty, and an empty document
     /// keeps the placeholder framing it already has.
     pub(super) fn apply_pending_frame(&mut self) {
+        self.resolve_restored_bindings();
         if !self.pending_frame.iter().any(|p| *p) {
+            return;
+        }
+        let actions: [FrameAction; 4] = std::array::from_fn(|i| {
+            frame_action(
+                self.pending_frame[i],
+                self.look_through[i].is_some(),
+                self.unresolved_binding[i],
+            )
+        });
+        for (i, action) in actions.iter().enumerate() {
+            if *action == FrameAction::Settle {
+                self.pending_frame[i] = false;
+            }
+        }
+        if !actions.contains(&FrameAction::Frame) {
             return;
         }
         let Some(bounds) = self.raster.scene().visible_bounds() else {
             return;
         };
-        for (slot, pending) in self.view.cameras.iter_mut().zip(self.pending_frame) {
-            if pending {
-                *slot = None;
+        for (i, action) in actions.iter().enumerate() {
+            if *action == FrameAction::Frame {
+                self.view.cameras[i] = None;
+                self.pending_frame[i] = false;
             }
         }
-        self.pending_frame = [false; 4];
         self.ensure_pane_cameras_with(&bounds);
+    }
+
+    /// Check each binding a scene open restored against the cooked scene,
+    /// once the scene can answer for it.
+    ///
+    /// A binding whose camera has appeared stands, and the follow takes it
+    /// from there. One whose camera has not appeared waits while the cook is
+    /// still working, and is dropped once the cook has settled without it,
+    /// rather than left naming a camera the document no longer contains.
+    fn resolve_restored_bindings(&mut self) {
+        if !self.unresolved_binding.iter().any(|u| *u) {
+            return;
+        }
+        for i in 0..4 {
+            if !self.unresolved_binding[i] {
+                continue;
+            }
+            let Some(id) = self.look_through[i] else {
+                self.unresolved_binding[i] = false;
+                continue;
+            };
+            let exists = self
+                .raster
+                .scene()
+                .cameras()
+                .is_some_and(|defs| defs.iter().any(|c| c.id == id));
+            // The settled check walks every node in the document, so it is
+            // asked only for a binding whose camera is missing, which is a
+            // few frames at most.
+            let settled = !exists
+                && self
+                    .engine
+                    .as_ref()
+                    .is_none_or(|e| e.dirty_nodes().is_empty());
+            match binding_resolution(exists, settled) {
+                BindingResolution::Keep => self.unresolved_binding[i] = false,
+                BindingResolution::Wait => {}
+                BindingResolution::Release => {
+                    self.look_through[i] = None;
+                    self.unresolved_binding[i] = false;
+                }
+            }
+        }
     }
 
     /// Install a freshly built document as the open one.
@@ -506,6 +583,7 @@ impl State {
         self.clear_scene_objects();
         self.environment.invalidate();
         self.look_through = [None; 4];
+        self.unresolved_binding = [false; 4];
         self.cook_health.clear();
         self.cancel_still_render();
 
@@ -572,6 +650,7 @@ impl State {
         self.engine = None;
         self.engine_scene = None;
         self.look_through = [None; 4];
+        self.unresolved_binding = [false; 4];
         self.cook_health.clear();
         self.cancel_still_render();
         self.clear_scene_objects();
@@ -583,6 +662,60 @@ impl State {
         self.window.set_title("Solarxy");
         self.renderer.uv_overlap.overlap_pct = None;
         self.renderer.uv_overlap.stats_dirty = false;
+    }
+}
+
+/// The camera binding a saved pane carries, in this shell's vocabulary.
+///
+/// The file names the `camera` node's id; the scene object the pane follows
+/// is keyed by the same number, which is what lets a binding written by the
+/// browser be read here without a lookup.
+fn restored_binding(pane: &solarxy_scenefile::PaneJson) -> Option<SceneObjectId> {
+    pane.look_through.map(SceneObjectId)
+}
+
+/// What a frame does about one pane the open left waiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrameAction {
+    /// Not waiting.
+    Nothing,
+    /// Bound, and the binding is still unresolved: framing now would be a
+    /// jump the follow undoes a frame later, or a frame a drop then wastes.
+    Wait,
+    /// Bound to a camera that exists: the follow poses it, so the wait ends
+    /// with no framing.
+    Settle,
+    /// A free pane frames on the scene's bounds.
+    Frame,
+}
+
+fn frame_action(pending: bool, bound: bool, unresolved: bool) -> FrameAction {
+    match (pending, bound, unresolved) {
+        (false, _, _) => FrameAction::Nothing,
+        (true, true, true) => FrameAction::Wait,
+        (true, true, false) => FrameAction::Settle,
+        (true, false, _) => FrameAction::Frame,
+    }
+}
+
+/// What to do with a restored binding once the scene can answer for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BindingResolution {
+    /// The camera exists; the binding stands.
+    Keep,
+    /// The camera has not appeared and the cook is still working.
+    Wait,
+    /// The cook settled without the camera; the binding is dropped.
+    Release,
+}
+
+fn binding_resolution(camera_exists: bool, cook_settled: bool) -> BindingResolution {
+    if camera_exists {
+        BindingResolution::Keep
+    } else if cook_settled {
+        BindingResolution::Release
+    } else {
+        BindingResolution::Wait
     }
 }
 
@@ -614,6 +747,50 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         build_model_document(path, &cancel)
             .unwrap_or_else(|e| panic!("{} did not open: {e}", path.display()))
+    }
+
+    /// The binding is read from the field the web writes, so a scene bound
+    /// in the browser opens bound here, and a scene saved before bindings
+    /// existed opens free.
+    #[test]
+    fn the_binding_is_read_from_the_pane_the_web_writes() {
+        let pane = solarxy_scenefile::PaneJson {
+            look_through: Some(42),
+            ..solarxy_scenefile::PaneJson::default()
+        };
+        let json = serde_json::to_value(&pane).expect("a pane serializes");
+        let back: solarxy_scenefile::PaneJson =
+            serde_json::from_value(json).expect("a pane deserializes");
+        assert_eq!(restored_binding(&back), Some(SceneObjectId(42)));
+        assert_eq!(
+            restored_binding(&solarxy_scenefile::PaneJson::default()),
+            None
+        );
+    }
+
+    /// A restored binding whose camera has cooked stands. One whose camera
+    /// has not appeared waits while the cook is working and is dropped once
+    /// the cook settles without it, because at the moment a scene opens no
+    /// camera exists yet and an eager check would reject every valid binding.
+    #[test]
+    fn a_restored_binding_is_kept_waited_on_or_dropped_by_what_the_scene_can_say() {
+        assert_eq!(binding_resolution(true, false), BindingResolution::Keep);
+        assert_eq!(binding_resolution(true, true), BindingResolution::Keep);
+        assert_eq!(binding_resolution(false, false), BindingResolution::Wait);
+        assert_eq!(binding_resolution(false, true), BindingResolution::Release);
+    }
+
+    /// A bound pane is posed by the follow and never framed on the scene; one
+    /// whose binding is still unresolved waits rather than jumping; a free
+    /// pane frames as it always has.
+    #[test]
+    fn a_bound_pane_is_never_framed_on_the_scene() {
+        assert_eq!(frame_action(false, true, true), FrameAction::Nothing);
+        assert_eq!(frame_action(false, false, false), FrameAction::Nothing);
+        assert_eq!(frame_action(true, true, true), FrameAction::Wait);
+        assert_eq!(frame_action(true, true, false), FrameAction::Settle);
+        assert_eq!(frame_action(true, false, false), FrameAction::Frame);
+        assert_eq!(frame_action(true, false, true), FrameAction::Frame);
     }
 
     /// The round trip, on a model that names companions beside itself, so the

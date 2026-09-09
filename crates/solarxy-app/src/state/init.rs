@@ -204,6 +204,7 @@ impl State {
             tracer: None,
             traced_env_dirty: false,
             look_through: [None; 4],
+            unresolved_binding: [false; 4],
             raster,
             env,
             env_bounds,
