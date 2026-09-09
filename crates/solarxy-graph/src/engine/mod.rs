@@ -216,7 +216,7 @@ pub enum Command {
         #[serde(default)]
         updated_at: String,
     },
-    /// Resolves the node a viewport gizmo should write to inside `geo`'s
+    /// Resolves the node a viewport gizmo should write to inside `sop`'s
     /// subflow, creating it if necessary (the ratified reuse-tail-transform
     /// policy): if the subflow's display node is already a non-bypassed
     /// `transform`, that node is the target; otherwise a fresh `transform` is
@@ -229,7 +229,7 @@ pub enum Command {
     /// Issued inside the drag's transaction, so appending undoes together with
     /// the drag in one step.
     EnsureTransformTarget {
-        geo: NodeId,
+        sop: NodeId,
     },
     /// Groups following commands into one undo step until `EndTransaction`
     /// (drags, marquee moves).
@@ -425,7 +425,7 @@ pub const REPORT_EVENT_ISSUE_CAP: usize = 2000;
 /// source ([`Engine::pick_detailed`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PickDetail {
-    /// The root `geo` container hit (anchor semantics: geometry resolves
+    /// The root `sopnet` container hit (anchor semantics: geometry resolves
     /// through its subflow's display output).
     pub node: NodeId,
     /// Mesh index within the displayed `GeometrySet`.
@@ -533,8 +533,8 @@ pub enum EngineError {
     ContextIllegal { type_id: String },
     #[error("param '{key}' rejected: {reason}")]
     InvalidParam { key: String, reason: String },
-    #[error("geo {geo:?} has no display node, so there is nothing to transform")]
-    NoDisplayNode { geo: NodeId },
+    #[error("sop {sop:?} has no display node, so there is nothing to transform")]
+    NoDisplayNode { sop: NodeId },
     /// A `SetParam` would create a reference cycle (a network depending,
     /// through any chain of node references, on its own result). Refused
     /// at set time so the cook never has to detect one.
@@ -599,7 +599,7 @@ pub struct ActionResult {
 /// writes two different params depending on the handle.
 ///
 /// It also carries the NAMES of those params rather than leaving the host to
-/// assume them, which is what lets a node other than a `geo` be manipulated at
+/// assume them, which is what lets a node other than a `sopnet` be manipulated at
 /// all: a point light names its position `position`, and a host that wrote
 /// `translate` would be refused by the parameter write and would have already
 /// tripped the resolver's debug assert on the way there.
@@ -644,7 +644,7 @@ pub struct GizmoTarget {
     /// world. Its own frame because it is a different PLACE from `anchor`,
     /// not a different orientation of the same one.
     pub aim_anchor: [[f32; 4]; 4],
-    /// The target's local pivot. Zero on a `geo` (its pivot is its origin).
+    /// The target's local pivot. Zero on a `sopnet` (its pivot is its origin).
     pub pivot: [f32; 3],
     /// World matrix placing the manipulator, **pivot included**: rotation and
     /// scale happen about `translate + pivot`, so that is where the rings and
@@ -689,7 +689,7 @@ struct NodeTransform {
     extent: [f32; 2],
     /// The point the node aims at; zero when it aims at nothing.
     aim: [f32; 3],
-    /// Zero on a `geo`, which has no pivot param and rotates about its origin.
+    /// Zero on a `sopnet`, which has no pivot param and rotates about its origin.
     pivot: [f32; 3],
 }
 
@@ -1160,8 +1160,8 @@ impl Engine {
                 self.set_active_output(ctx, node, events, inv)
             }
             Command::SetSelection { ctx, ids } => self.set_selection(ctx, ids, events, inv),
-            Command::EnsureTransformTarget { geo } => {
-                self.ensure_transform_target(geo, events, inv).map(|_| ())
+            Command::EnsureTransformTarget { sop } => {
+                self.ensure_transform_target(sop, events, inv).map(|_| ())
             }
             Command::SetBypass {
                 ctx,
@@ -1465,17 +1465,17 @@ impl Engine {
     /// shadow-caster cascade uses.
     fn ensure_transform_target(
         &mut self,
-        geo: NodeId,
+        sop: NodeId,
         events: &mut Vec<EngineEvent>,
         inv: &mut Vec<UndoOp>,
     ) -> Result<NodeId, EngineError> {
-        let ctx = GraphContext::Subflow(geo);
+        let ctx = GraphContext::Subflow(sop);
         let graph = self.doc.graph(ctx)?;
         let Some(display) = graph.active_output else {
             // Nothing is displayed, so there is nothing to transform. The host
             // does not offer a gizmo in this state; treat it as a hard error
             // rather than silently inventing geometry.
-            return Err(EngineError::NoDisplayNode { geo });
+            return Err(EngineError::NoDisplayNode { sop });
         };
 
         // Reuse: the tail already IS a transform. A BYPASSED transform is
@@ -3067,7 +3067,7 @@ impl Engine {
     /// side so it is testable and platform-neutral; the host does routing and
     /// arithmetic only.
     ///
-    /// - **Root**: the selected `geo`'s OWN transform. The renderer applies it as
+    /// - **Root**: the selected `sopnet`'s OWN transform. The renderer applies it as
     ///   the object transform, so a drag costs one small buffer write -- no cook,
     ///   no re-upload, and it works on any geo including a heavy import.
     /// - **Subflow**: the tail `transform` inside that geo (reuse-or-append, see
@@ -3571,7 +3571,7 @@ impl Engine {
     }
 
     /// Picks the node under the cursor: a light's marker if `markers` is
-    /// supplied and one is under it, else the root `geo` container the ray
+    /// supplied and one is under it, else the root `sopnet` container the ray
     /// hits nearest over the committed, world-transformed display geometry
     /// (single-pane picking). Runs in Rust over CPU-retained geometry, so
     /// nothing crosses into JavaScript. The host builds the ray from the

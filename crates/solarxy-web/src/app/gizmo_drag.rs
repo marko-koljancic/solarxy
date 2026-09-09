@@ -80,12 +80,12 @@ impl SolarxyApp {
         // reports the tail transform; on the append path it creates one.
         let mut target = target;
         if target.append_pending {
-            let GraphContext::Subflow(geo) = target.ctx else {
+            let GraphContext::Subflow(sop) = target.ctx else {
                 return Ok(None);
             };
             let batch = self
                 .engine
-                .apply(Command::EnsureTransformTarget { geo })
+                .apply(Command::EnsureTransformTarget { sop })
                 .map_err(|e| JsError::new(&format!("{e}")))?;
             // The paired event is the ONLY channel carrying the id (the reuse
             // path emits no NodeAdded).

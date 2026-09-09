@@ -1,9 +1,18 @@
-// Hand-authored TypeScript mirror of the frozen Rust serde boundary shapes
-// (solarxy-graph). These are the wasm boundary contract; they are pinned on
-// the Rust side by `command_boundary_json_shape_is_camelcase` and exercised
-// live. A generated .d.ts via tsify is a documented follow-up; until then
-// keep this file in lockstep with the Rust `Command`/`EngineEvent`/snapshot
-// definitions (all camelCase).
+// Hand-authored TypeScript mirror of the Rust serde boundary shapes. These
+// are the wasm boundary contract, and Rust owns the schema: when the two
+// disagree, this file is normally the side that moves.
+//
+// Two Rust guards hold it in step, and they catch different failures.
+// `crates/solarxy-core/tests/boundary_mirror.rs` compares every type that
+// crosses, variant by variant and field by field, and names whatever is
+// missing or stale on either side. The camelCase assertions in
+// `crates/solarxy-graph/src/engine/tests.rs` serialize real values and prove
+// the serde attributes are right, which a comparison of two declarations
+// cannot see: a declaration can look correct and still go out in snake case.
+//
+// Generation was considered and ruled against in
+// `docs/architecture/adr/0015-the-boundary-mirror-is-checked-not-generated.md`.
+// Hand-mirroring is the deliberate choice; the check is what keeps it honest.
 
 export type NodeId = number;
 export type EdgeId = number;
@@ -361,9 +370,9 @@ export type Command =
   | { type: "beginTransaction"; label: string }
   | { type: "endTransaction" }
   // Resolves (creating if needed) the node a gizmo drag writes to, inside the
-  // the container's subflow. Issued inside the drag's transaction, so an
-  // transform undoes together with the move.
-  | { type: "ensureTransformTarget"; geo: NodeId }
+  // named container's subflow. Issued inside the drag's transaction, so the
+  // appended transform undoes together with the move.
+  | { type: "ensureTransformTarget"; sop: NodeId }
   // Escape mid-drag: rolls the open transaction back and discards it, leaving
   // no document mutation AND no redo entry.
   | { type: "cancelTransaction" }

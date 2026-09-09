@@ -3988,7 +3988,9 @@ fn gizmo_target_in_a_subflow_reports_append_pending_over_a_box() {
 fn ensure_transform_target_appends_and_moves_the_display_flag() {
     let (mut e, geo, sub, box_id) = displayed_box();
 
-    let batch = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let batch = e
+        .apply(Command::EnsureTransformTarget { sop: geo })
+        .unwrap();
     let target = batch
         .events
         .iter()
@@ -4016,7 +4018,9 @@ fn ensure_transform_target_reuses_a_tail_transform() {
     let (mut e, geo, sub, _box_id) = displayed_box();
 
     // First drag appends.
-    let first = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let first = e
+        .apply(Command::EnsureTransformTarget { sop: geo })
+        .unwrap();
     let appended = first
         .events
         .iter()
@@ -4028,7 +4032,9 @@ fn ensure_transform_target_reuses_a_tail_transform() {
 
     // A second drag must REUSE it, not stack another transform on top.
     let before = e.document().graph(sub).unwrap().nodes().count();
-    let second = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let second = e
+        .apply(Command::EnsureTransformTarget { sop: geo })
+        .unwrap();
     let reused = second
         .events
         .iter()
@@ -4060,7 +4066,9 @@ fn ensure_transform_target_treats_a_bypassed_tail_as_absent() {
     // A bypassed transform passes geometry through unchanged, so dragging it
     // would move nothing the user can see. Append a live one instead.
     let (mut e, geo, sub, _box_id) = displayed_box();
-    let first = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let first = e
+        .apply(Command::EnsureTransformTarget { sop: geo })
+        .unwrap();
     let appended = first
         .events
         .iter()
@@ -4081,7 +4089,9 @@ fn ensure_transform_target_treats_a_bypassed_tail_as_absent() {
         e.gizmo_target(sub).unwrap().append_pending,
         "a bypassed tail is not a usable target"
     );
-    let second = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let second = e
+        .apply(Command::EnsureTransformTarget { sop: geo })
+        .unwrap();
     let fresh = second
         .events
         .iter()
@@ -4103,7 +4113,7 @@ fn ensure_transform_target_errors_without_a_display_node() {
     // An empty subflow displays nothing, so there is nothing to transform.
     assert!(e.gizmo_target(GraphContext::Subflow(geo)).is_none());
     assert!(matches!(
-        e.apply(Command::EnsureTransformTarget { geo }),
+        e.apply(Command::EnsureTransformTarget { sop: geo }),
         Err(EngineError::NoDisplayNode { .. })
     ));
 }
@@ -4119,7 +4129,9 @@ fn an_append_drag_is_exactly_one_undo_step() {
         label: "move".into(),
     })
     .unwrap();
-    let batch = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let batch = e
+        .apply(Command::EnsureTransformTarget { sop: geo })
+        .unwrap();
     let target = batch
         .events
         .iter()
@@ -4162,7 +4174,8 @@ fn cancel_transaction_rolls_back_an_append_without_touching_redo() {
         label: "move".into(),
     })
     .unwrap();
-    e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    e.apply(Command::EnsureTransformTarget { sop: geo })
+        .unwrap();
     e.apply(Command::CancelTransaction).unwrap();
 
     assert_eq!(
@@ -4213,9 +4226,9 @@ fn gizmo_command_boundary_json_shape_is_camelcase() {
     // Pins the hand-authored TS mirror (web/src/engine/types.ts) to the Rust
     // serde shapes for the additions, the same way the other boundary
     // guards do for theirs.
-    let ensure = serde_json::to_value(Command::EnsureTransformTarget { geo: NodeId(7) }).unwrap();
+    let ensure = serde_json::to_value(Command::EnsureTransformTarget { sop: NodeId(7) }).unwrap();
     assert_eq!(ensure["type"], "ensureTransformTarget");
-    assert_eq!(ensure["geo"], 7);
+    assert_eq!(ensure["sop"], 7);
 
     let cancel = serde_json::to_value(Command::CancelTransaction).unwrap();
     assert_eq!(cancel["type"], "cancelTransaction");
@@ -4224,7 +4237,7 @@ fn gizmo_command_boundary_json_shape_is_camelcase() {
     let round: Command = serde_json::from_value(ensure).unwrap();
     assert!(matches!(
         round,
-        Command::EnsureTransformTarget { geo } if geo == NodeId(7)
+        Command::EnsureTransformTarget { sop } if sop == NodeId(7)
     ));
     let round: Command = serde_json::from_value(cancel).unwrap();
     assert!(matches!(round, Command::CancelTransaction));
@@ -4373,7 +4386,7 @@ fn gizmo_target_reports_rotation_in_degrees_not_radians() {
 fn the_gizmo_anchors_on_the_pivot_a_transform_actually_rotates_about() {
     let (mut e, geo, sub, _box_id) = displayed_box();
     let node = e
-        .apply(Command::EnsureTransformTarget { geo })
+        .apply(Command::EnsureTransformTarget { sop: geo })
         .unwrap()
         .events
         .iter()
@@ -4447,7 +4460,7 @@ fn the_gizmo_basis_carries_rotation_but_never_scale() {
 fn a_subflow_basis_composes_the_container_and_the_node() {
     let (mut e, geo, sub, _box_id) = displayed_box();
     let node = e
-        .apply(Command::EnsureTransformTarget { geo })
+        .apply(Command::EnsureTransformTarget { sop: geo })
         .unwrap()
         .events
         .iter()
