@@ -31,7 +31,7 @@ impl fmt::Display for Severity {
 #[cfg_attr(
     feature = "serde",
     derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "camelCase")
+    serde(rename_all = "camelCase", rename_all_fields = "camelCase")
 )]
 pub enum IssueScope {
     Mesh(usize),
