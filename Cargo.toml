@@ -8,6 +8,7 @@ members = [
     "crates/solarxy-bvh",
     "crates/solarxy-graph",
     "crates/solarxy-scenefile",
+    "crates/solarxy-studio",
     "crates/solarxy-web",
     "crates/solarxy-renderer",
     "crates/solarxy-host",

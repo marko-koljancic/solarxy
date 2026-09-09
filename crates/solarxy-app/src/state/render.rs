@@ -495,17 +495,14 @@ impl State {
         };
         let actions_source = match (&self.engine, selected) {
             (Some(engine), Some((ctx, id))) => {
-                let descriptor = engine
-                    .document()
-                    .graph(ctx)
-                    .ok()
-                    .and_then(|g| g.node(id))
-                    .and_then(|n| engine.registry().get(&n.type_id));
+                let data = engine.document().graph(ctx).ok().and_then(|g| g.node(id));
+                let descriptor = data.and_then(|n| engine.registry().get(&n.type_id));
                 crate::gui::NodeActionsView {
                     node: Some((ctx, id)),
                     name: &selected_name,
                     type_name: descriptor.map_or("", |d| d.display_name),
                     params: descriptor.map_or(&[], |d| d.params.as_slice()),
+                    stored: data.map(|n| &n.params),
                 }
             }
             _ => crate::gui::NodeActionsView::default(),

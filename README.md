@@ -210,7 +210,7 @@ The `getrandom_backend="wasm_js"` rustflag for `wasm32` lives in the workspace `
 
 ## Workspace Structure
 
-Solarxy is a Rust workspace of 15 members: the root GUI binary plus 14 crates spanning the desktop GUI, the CLI, headless rendering, and the web shell, alongside the `web/` React frontend.
+Solarxy is a Rust workspace of 16 members: the root GUI binary plus 15 crates spanning the desktop GUI, the CLI, headless rendering, and the web shell, alongside the `web/` React frontend.
 
 | Crate | Description |
 |---|---|
@@ -222,6 +222,7 @@ Solarxy is a Rust workspace of 15 members: the root GUI binary plus 14 crates sp
 | [`solarxy-bvh`](crates/solarxy-bvh/) | GPU-free bounding volume hierarchy for ray queries: the 32-byte node, a binned-SAH BVH2 builder, the two-level structure, and the CPU traversal the shader kernel is a twin of. Depends on `solarxy-core` alone, so the import worker can build one without a GPU. |
 | [`solarxy-graph`](crates/solarxy-graph/) | The headless studio core: node-graph document, topology, cook engine, node registry (77 node types + typed-port coercion), undo, review, and the `Engine` facade (Command in, EventBatch out). No wgpu, no winit. |
 | [`solarxy-scenefile`](crates/solarxy-scenefile/) | The `.slxy` self-contained scene file: schema-owned scene/manifest types, the ZIP container with content-addressed asset blobs, SHA-256 integrity, and the schema-version migration gate. |
+| [`solarxy-studio`](crates/solarxy-studio/) | The shared interface derivation: the rules that decide how a node and its parameters are presented, written once and read by both shells. Presentation only, and it never decides how to draw. No engine ownership, no toolkit, no clock, no filesystem. |
 | [`solarxy-renderer`](crates/solarxy-renderer/) | All wgpu state: pipelines, shaders, IBL / SSAO / bloom / shadow / composite, the multi-object `SceneObjects` path, and the GPU compute path tracer with its texture atlas and a-trous filter. Declares the backend contract the raster and traced engines both implement. winit/egui-decoupled; compiles to wasm32. |
 | [`solarxy-host`](crates/solarxy-host/) | Shared host orchestration both shells drive: the per-pane pass chain and composite, the uniform writes, the lighting chokepoint, the per-pane camera lifecycle, the view-state model, and the gizmo drag solver. Also the raster implementation of the renderer's backend contract, which owns the multi-object scene. No engine dependency. |
 | [`solarxy-app`](crates/solarxy-app/) | winit `ApplicationHandler` + egui: the desktop shell (sidebar, menu, console, dialogs, dock, review UI). |

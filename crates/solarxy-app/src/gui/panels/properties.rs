@@ -15,7 +15,9 @@ use solarxy_core::format_number;
 use solarxy_core::preferences::IblMode;
 use solarxy_core::validation::ValidationReport;
 use solarxy_graph::document::{GraphContext, NodeId};
+use solarxy_graph::params::ParamSource;
 use solarxy_graph::registry::param_spec::{ParamSpec, ParamType};
+use solarxy_graph::registry::visibility::param_visible;
 use solarxy_renderer::resources::ModelStats;
 
 use crate::state::engine_scene::SceneGeometryCounts;
@@ -39,17 +41,29 @@ pub(crate) struct NodeActionsView<'a> {
     pub type_name: &'a str,
     /// Every parameter the node's type declares, in declaration order.
     pub params: &'a [ParamSpec],
+    /// The node's stored parameter values, which the visibility rules read.
+    /// `None` with nothing selected, and treated as empty, which resolves
+    /// every clause against the declared defaults.
+    pub stored: Option<&'a std::collections::BTreeMap<String, ParamSource>>,
 }
 
-/// The parameters that are buttons.
+/// The parameters that are buttons, and are currently visible.
 ///
-/// Visibility conditions are not evaluated here, which is safe only while no
-/// action declares one; a test pins that. The parameter panel evaluates them
-/// when it lands.
-pub(super) fn action_specs(params: &[ParamSpec]) -> Vec<&ParamSpec> {
+/// Both halves are the registry's answer rather than this panel's: the type
+/// says which parameters are actions, and the shared evaluator says which
+/// clauses hold. Until the evaluator existed this filter could only do the
+/// first half, and a test asserted that no action declared a condition so
+/// that the gap could not bite.
+pub(super) fn action_specs<'a>(
+    params: &'a [ParamSpec],
+    stored: Option<&std::collections::BTreeMap<String, ParamSource>>,
+) -> Vec<&'a ParamSpec> {
+    let empty = std::collections::BTreeMap::new();
+    let values = stored.unwrap_or(&empty);
     params
         .iter()
         .filter(|spec| matches!(spec.ty, ParamType::Action))
+        .filter(|spec| param_visible(spec, params, values))
         .collect()
 }
 
@@ -193,7 +207,7 @@ fn draw_actions_section(ui: &mut egui::Ui, view: NodeActionsView<'_>, intents: &
             .small()
             .weak(),
     );
-    let specs = action_specs(view.params);
+    let specs = action_specs(view.params, view.stored);
     if specs.is_empty() {
         ui.label(egui::RichText::new("This node declares no actions").weak());
         return;
@@ -495,6 +509,8 @@ fn draw_validation_section(
 mod tests {
     use super::action_specs;
     use solarxy_graph::Engine;
+    use solarxy_graph::params::{ParamSource, ParamValue};
+    use solarxy_graph::registry::param_spec::{ParamSpec, ParamType, Pred};
 
     /// The buttons are read off the declaration, so the two export nodes and
     /// the render node get theirs and a geometry node gets none.
@@ -503,7 +519,7 @@ mod tests {
         let engine = Engine::new().expect("engine");
         let keys = |ty: &str| -> Vec<String> {
             let descriptor = engine.registry().get(ty).unwrap_or_else(|| panic!("{ty}"));
-            action_specs(&descriptor.params)
+            action_specs(&descriptor.params, None)
                 .iter()
                 .map(|s| s.key.clone())
                 .collect()
@@ -514,20 +530,51 @@ mod tests {
         assert!(keys("box").is_empty());
     }
 
-    /// The section does not evaluate visibility conditions, which is safe
-    /// only while no action declares one. This is what says so.
+    /// The half this section could not do until the shared evaluator
+    /// existed. No registered action declares a condition today, so the
+    /// case is built rather than found; the point is that the filter now
+    /// asks instead of assuming.
     #[test]
-    fn no_action_param_declares_a_visibility_condition() {
-        let engine = Engine::new().expect("engine");
-        for descriptor in engine.registry().descriptors() {
-            for spec in action_specs(&descriptor.params) {
-                assert!(
-                    spec.show_if.is_empty(),
-                    "{}.{} declares a visibility condition the Actions section would have to evaluate",
-                    descriptor.type_id,
-                    spec.key
-                );
-            }
-        }
+    fn an_action_hidden_by_its_own_condition_is_not_drawn() {
+        let params = vec![
+            ParamSpec::new(
+                "mode",
+                "Mode",
+                "general",
+                ParamType::Enum { variants: vec![] },
+                ParamValue::Enum("file".into()),
+            ),
+            ParamSpec::new(
+                "save",
+                "Save",
+                "general",
+                ParamType::Action,
+                ParamValue::Bool(false),
+            )
+            .show_if("mode", Pred::Eq(ParamValue::Enum("file".into()))),
+        ];
+        let stored = |mode: &str| -> std::collections::BTreeMap<String, ParamSource> {
+            std::iter::once((
+                "mode".to_string(),
+                ParamSource::Literal(ParamValue::Enum(mode.into())),
+            ))
+            .collect()
+        };
+
+        let shown = stored("file");
+        assert_eq!(
+            action_specs(&params, Some(&shown))
+                .iter()
+                .map(|s| s.key.as_str())
+                .collect::<Vec<_>>(),
+            ["save"]
+        );
+
+        let hidden = stored("stream");
+        assert!(action_specs(&params, Some(&hidden)).is_empty());
+
+        // No stored values resolves against the declared default, which is
+        // the mode that shows the button.
+        assert_eq!(action_specs(&params, None).len(), 1);
     }
 }

@@ -4281,6 +4281,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "solarxy-studio"
+version = "0.9.0"
+dependencies = [
+ "serde",
+ "solarxy-graph",
+]
+
+[[package]]
 name = "solarxy-validate"
 version = "0.9.0"
 dependencies = [

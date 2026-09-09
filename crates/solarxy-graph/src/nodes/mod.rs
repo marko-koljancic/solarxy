@@ -244,9 +244,9 @@ mod tests {
                 .count()
         };
         assert!(in_context(ContextKind::Obj) > 0, "the Obj context is empty");
-        assert!(in_context(ContextKind::Sop) > 0, "the Geo context is empty");
+        assert!(in_context(ContextKind::Sop) > 0, "the Sop context is empty");
         assert!(in_context(ContextKind::Mat) > 0, "the Mat context is empty");
-        assert!(in_context(ContextKind::Cop) > 0, "the Tex context is empty");
+        assert!(in_context(ContextKind::Cop) > 0, "the Cop context is empty");
     }
 
     /// The taxonomy is presentation: pinning the per-category counts makes

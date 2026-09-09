@@ -10,6 +10,7 @@ pub mod coerce;
 pub mod param_spec;
 pub mod resolve;
 pub mod scalar;
+pub mod visibility;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -321,7 +322,7 @@ pub struct NodeTypeDescriptor {
     pub category: Category,
     pub contexts: ContextSet,
     /// The network kind this node's child canvas is, for container nodes
-    /// (`geo` opens `Geo`, `matnet` opens `Mat`, `texnet` opens `Tex`).
+    /// (`sopnet` opens `Sop`, `matnet` opens `Mat`, `copnet` opens `Cop`).
     /// `None` for everything else. The engine creates and kinds the child
     /// network from this, so no container type is ever special-cased by
     /// its `type_id`.

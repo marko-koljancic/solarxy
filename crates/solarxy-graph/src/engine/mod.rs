@@ -3381,6 +3381,24 @@ impl Engine {
         })
     }
 
+    /// The keys of a node's currently visible parameters, in declaration
+    /// order, or `None` when the node or its type is gone.
+    ///
+    /// A pull query for the same reason [`Engine::node_report`] is one: the
+    /// answer moves whenever any parameter the clauses read moves, so as
+    /// events these would be a message per node per edit. One call answers
+    /// for a whole node, which is what keeps the parameter panel to a
+    /// single crossing on the WebAssembly boundary rather than one per row.
+    #[must_use]
+    pub fn visible_params(&self, ctx: GraphContext, node: NodeId) -> Option<Vec<String>> {
+        let data = self.doc.graph(ctx).ok()?.node(node)?;
+        let desc = self.registry.get(&data.type_id)?;
+        Some(crate::registry::visibility::visible_param_keys(
+            &desc.params,
+            &data.params,
+        ))
+    }
+
     /// The lane inventory of a node's cooked geometry (the attribute-name
     /// pickers and the Attributes pane header), or `None` while nothing is
     /// committed.
