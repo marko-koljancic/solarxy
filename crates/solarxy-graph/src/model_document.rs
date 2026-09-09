@@ -7,9 +7,10 @@
 //! container holding one import node, flagged as what to display: the
 //! smallest thing that is a real document rather than a special case, which
 //! is what lets it enter the identical render path. The terminal's render
-//! command and the desktop's still render both build it here, so the two
-//! shells answer a bare model identically by construction rather than by
-//! care.
+//! command and the desktop's open path both build it here, so the two shells
+//! answer a bare model identically by construction rather than by care; a
+//! model dropped onto an open desktop document takes the second half alone,
+//! [`add_import_node`], into the network the drop lands in.
 //!
 //! This module takes bytes and a file name, never a path: the crate has no
 //! filesystem dependency and must keep none, so the caller does the reading.
@@ -78,9 +79,10 @@ pub fn synthesize_model_document(
     ext: &str,
     bytes: Vec<u8>,
 ) -> Result<(), ModelDocumentError> {
-    let node_type = import_type_for(ext)
+    // Refused before anything is created, so an unsupported file leaves the
+    // document untouched.
+    import_type_for(ext)
         .ok_or_else(|| ModelDocumentError::UnsupportedExtension(ext.to_string()))?;
-    let asset = engine.stage_asset(file_name.to_string(), String::new(), bytes);
 
     let engine_err = |e: &dyn std::fmt::Display| ModelDocumentError::Engine(e.to_string());
 
@@ -109,10 +111,45 @@ pub fn synthesize_model_document(
     .ok_or_else(|| ModelDocumentError::Engine("the geometry container was not created".into()))?;
 
     let inner = GraphContext::Subflow(geo);
+    let import = add_import_node(engine, inner, file_name, ext, bytes)?;
+    engine
+        .apply(Command::SetActiveOutput {
+            ctx: inner,
+            node: Some(import),
+        })
+        .map_err(|e| engine_err(&e))?;
+
+    Ok(())
+}
+
+/// Adds an import node for one model into an existing network: its bytes
+/// staged, the node added, and its `file` parameter pointed at the bytes.
+///
+/// The half of [`synthesize_model_document`] that a drop onto an open
+/// document needs, which is why it is its own function. The network's display
+/// flag is left alone: the engine gives it to the first node added to an empty
+/// network, and a model dropped into a network that already shows something
+/// must not take the view over. Companions must already be staged by the
+/// caller.
+///
+/// # Errors
+/// An extension nothing imports, or an engine command failing.
+pub fn add_import_node(
+    engine: &mut Engine,
+    ctx: GraphContext,
+    file_name: &str,
+    ext: &str,
+    bytes: Vec<u8>,
+) -> Result<NodeId, ModelDocumentError> {
+    let node_type = import_type_for(ext)
+        .ok_or_else(|| ModelDocumentError::UnsupportedExtension(ext.to_string()))?;
+    let engine_err = |e: &dyn std::fmt::Display| ModelDocumentError::Engine(e.to_string());
+    let asset = engine.stage_asset(file_name.to_string(), String::new(), bytes);
+
     let import = added_node(
         &engine
             .apply(Command::AddNode {
-                ctx: inner,
+                ctx,
                 node_type: node_type.to_string(),
                 position: [0.0, 0.0],
             })
@@ -122,20 +159,14 @@ pub fn synthesize_model_document(
 
     engine
         .apply(Command::SetParam {
-            ctx: inner,
+            ctx,
             node: import,
             key: "file".to_string(),
             value: ParamSource::Literal(ParamValue::Asset(asset)),
         })
         .map_err(|e| engine_err(&e))?;
-    engine
-        .apply(Command::SetActiveOutput {
-            ctx: inner,
-            node: Some(import),
-        })
-        .map_err(|e| engine_err(&e))?;
 
-    Ok(())
+    Ok(import)
 }
 
 /// Which import node reads a given extension.
@@ -156,7 +187,8 @@ pub fn import_type_for(ext: &str) -> Option<&'static str> {
 }
 
 /// The id of the node an `AddNode` batch reports as added.
-fn added_node(batch: &EventBatch) -> Option<NodeId> {
+#[must_use]
+pub fn added_node(batch: &EventBatch) -> Option<NodeId> {
     batch.events.iter().find_map(|e| match e {
         EngineEvent::NodeAdded { node, .. } => Some(node.id),
         _ => None,

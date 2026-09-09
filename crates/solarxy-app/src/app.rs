@@ -170,9 +170,11 @@ impl ApplicationHandler<State> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
-            WindowEvent::DroppedFile(path) => {
-                state.open_file(path);
-            }
+            // One event per dropped item, with no event to say the gesture
+            // is complete. Collected, and handled once per frame, so a
+            // folder of models is one gesture rather than a document replaced
+            // once per file.
+            WindowEvent::DroppedFile(path) => state.drop_path(path),
             WindowEvent::RedrawRequested => {
                 self.frame_count = self.frame_count.wrapping_add(1);
                 state.update();

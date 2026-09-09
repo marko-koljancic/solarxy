@@ -178,6 +178,18 @@ impl State {
             return;
         }
 
+        // A folder reaches here only from Recent Files or the command line,
+        // since a dropped one is handled by the drop path. Named rather than
+        // reported as a file with no extension.
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("That");
+            self.gui.set_toast(
+                &format!("{name} is a folder. Drop it onto the window to import its models."),
+                ToastSeverity::Warning,
+            );
+            return;
+        }
+
         if !resources::is_supported_model_extension(&path) {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("none");
             self.gui.set_toast(
@@ -567,19 +579,22 @@ impl State {
         }
     }
 
-    /// Install a freshly built document as the open one.
+    /// Install a document as the open one.
     ///
     /// **The only place `engine` is assigned.** Everything a document swap has
     /// to forget lives here rather than at each opening site, which is what
-    /// makes a model file and a scene file the same act: bindings name camera
-    /// nodes of the outgoing document, the cook ledger describes it, the
-    /// thumbnail cache is keyed only by material index and role, and the
-    /// tree's dived context addresses node ids the new document need not
-    /// contain. A still mid-render over the outgoing scene is cancelled
-    /// rather than left rendering a document that no longer exists.
+    /// makes a model file, a scene file and a drop onto an empty window the
+    /// same act: bindings name camera nodes of the outgoing document, the cook
+    /// ledger describes it, the thumbnail cache is keyed only by material
+    /// index and role, and the tree's dived context addresses node ids the
+    /// new document need not contain. A still mid-render over the outgoing
+    /// scene is cancelled rather than left rendering a document that no
+    /// longer exists.
     ///
-    /// Called only on success, so a failed open never reaches it.
-    fn adopt_document(&mut self, engine: Box<Engine>, filename: &str, path: &str, file_size: u64) {
+    /// Called only on success, so a failed open never reaches it. Recent
+    /// Files is the caller's business, because a document that came from no
+    /// file has nothing to record there.
+    fn install_engine(&mut self, engine: Box<Engine>, info: EngineSceneInfo, title: &str) {
         self.clear_scene_objects();
         self.environment.invalidate();
         self.look_through = [None; 4];
@@ -600,16 +615,11 @@ impl State {
         self.engine = Some(engine);
         // Identity now; the counters and the merged report fill in as the
         // delta drains.
-        self.engine_scene = Some(EngineSceneInfo::new(
-            filename.to_string(),
-            path.to_string(),
-            file_size,
-        ));
+        self.engine_scene = Some(info);
         self.gui.reset_node_tree();
         self.selected_object = None;
 
-        preferences::add_recent_file(&mut self.preferences, path);
-        self.window.set_title(&format!("Solarxy - {filename}"));
+        self.window.set_title(title);
 
         // Applied here rather than left to the top of the next frame, so what
         // follows an open reads the document rather than the one before it. A
@@ -617,6 +627,40 @@ impl State {
         // lets its panes be framed on real bounds in this same call; a scene
         // file has only the `Clear` to apply and fills in over the frame loop.
         self.apply_pending_scene_deltas();
+    }
+
+    /// Install a document built from a file, and remember the file.
+    fn adopt_document(&mut self, engine: Box<Engine>, filename: &str, path: &str, file_size: u64) {
+        self.install_engine(
+            engine,
+            EngineSceneInfo::new(filename.to_string(), path.to_string(), file_size),
+            &format!("Solarxy - {filename}"),
+        );
+        preferences::add_recent_file(&mut self.preferences, path);
+    }
+
+    /// Install a document that came from no file, for a drop onto an empty
+    /// window. Nothing goes to Recent Files, and every pane frames once the
+    /// dropped models have cooked far enough to have bounds.
+    pub(super) fn adopt_untitled_document(&mut self) -> bool {
+        match Engine::new() {
+            Ok(engine) => {
+                self.install_engine(
+                    Box::new(engine),
+                    EngineSceneInfo::new("Untitled".to_string(), String::new(), 0),
+                    "Solarxy - Untitled",
+                );
+                self.pending_frame = [true; 4];
+                true
+            }
+            Err(e) => {
+                self.gui.set_toast(
+                    &format!("Could not start a document: {e}"),
+                    ToastSeverity::Error,
+                );
+                false
+            }
+        }
     }
 
     /// Put the primary pane back to the display settings a new document

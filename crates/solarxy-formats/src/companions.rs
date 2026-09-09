@@ -9,13 +9,13 @@
 //! # Collection, not staging
 //!
 //! This module reads the companions and hands them back as named blobs; what
-//! a caller does with them is its own affair. The two native callers stage
-//! them into an engine's asset table, where the import node resolves
-//! companions by trailing file-name component, so handing over the siblings
-//! is the whole fix. It lives here, beside the [`DirResolver`] that guards
-//! the reads, rather than in either caller: the terminal's render command
-//! and the desktop's still render must not each carry a walk that can drift
-//! from the other. The browser reaches the same table by a different route
+//! a caller does with them is its own affair. The native callers stage them
+//! into an engine's asset table, where the import node resolves companions
+//! by trailing file-name component, so handing over the siblings is the
+//! whole fix. It lives here, beside the [`DirResolver`] that guards the
+//! reads, rather than in any caller: the terminal's render command and the
+//! desktop's open and drop paths must not each carry a walk that can drift
+//! from the others. The browser reaches the same table by a different route
 //! (its picker stages whole folders), and its preflight in
 //! `web/src/engine/sidecars.ts` carries the same required-versus-optional
 //! split, so the surfaces cannot disagree about what a format needs.

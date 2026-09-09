@@ -35,6 +35,7 @@ mod cook;
 pub(crate) mod cook_health;
 #[cfg(debug_assertions)]
 mod dev;
+mod drop;
 pub(crate) mod engine_scene;
 pub(crate) mod hdri_info;
 mod init;
@@ -249,6 +250,11 @@ pub struct State {
     pub(super) input: InputState,
     pub(super) review: review::ReviewState,
     pub(super) pending_open: Option<PendingOpen>,
+    /// Paths dropped onto the window since the last frame. The window
+    /// delivers one event per item with nothing to say the gesture is
+    /// complete, so they are collected here and handled once per frame,
+    /// which is what makes a folder of models one gesture.
+    pub(super) pending_drop: Vec<std::path::PathBuf>,
     /// Panes waiting to be framed on the document once it has cooked far
     /// enough to have bounds.
     ///

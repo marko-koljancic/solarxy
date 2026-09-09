@@ -536,6 +536,7 @@ impl State {
         }
 
         self.poll_pending_open();
+        self.handle_pending_drop();
 
         self.drive_engine();
         self.gui.set_scene_open(self.engine.is_some());

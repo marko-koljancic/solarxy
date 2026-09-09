@@ -228,6 +228,7 @@ impl State {
                 ..super::review::ReviewState::default()
             },
             pending_open: None,
+            pending_drop: Vec::new(),
             pending_frame: [false; 4],
             viz_dirty: true,
             pending_hdri: None,
