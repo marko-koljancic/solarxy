@@ -1,11 +1,22 @@
 //! The per-session view state both shells own.
 //!
-//! Five fields, and only five: the ones the desktop and the web shell both
-//! have. The web shell additionally tracks which `camera` node each pane looks
-//! through, whether that pane is locked, whether it is mid-navigation, and each
-//! pane's own look. Those are camera-node concerns, and the desktop has no
-//! camera nodes until it gains an engine, so they stay on the web shell rather
-//! than sitting here as four fields one caller sets and the other never reads.
+//! Five fields, and only five, but the reason has changed and the shape has
+//! not yet caught up.
+//!
+//! These were the fields both shells had, against a desktop with no camera
+//! nodes. That desktop is gone: it holds an engine, and it tracks which
+//! `camera` node each pane looks through exactly as the web shell does, in
+//! its own array of its own id type. So the look-through binding is now
+//! **duplicated rather than shell-specific**, and the only thing keeping it
+//! out of here is that the two shells name the node with different types and
+//! this crate may not see the engine's.
+//!
+//! What genuinely does stay on the web shell: whether a bound pane is locked,
+//! whether it is mid-navigation, and each pane's own look. The lock's *rule*
+//! is shared, as [`crate::cameras::CameraLocks`]; the flags are not, because
+//! the desktop cannot act on one until it can write a pose back to a node.
+//! The mid-navigation flag exists only to serve that write-back and has
+//! nothing to suppress without it.
 
 use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings};
 use solarxy_renderer::camera_state::CameraState;

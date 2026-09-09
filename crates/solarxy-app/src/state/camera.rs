@@ -63,6 +63,47 @@ impl State {
         }
     }
 
+    /// Author a `camera` node at a pane's current pose, and bind that pane to
+    /// it.
+    ///
+    /// How a framing decision made by flying around becomes part of the
+    /// document. One transaction, so the node and its two pose parameters
+    /// undo together: a user who regrets it wants one undo, not three.
+    ///
+    /// The binding is marked **unresolved** rather than settled, which is the
+    /// difference from picking an existing camera. The node does not reach
+    /// the scene until the next cook, so the resolver is what waits for it,
+    /// and it already knows both how to wait and when to give up.
+    pub(super) fn create_camera_from_view(&mut self, pane: usize) {
+        if pane >= 4 {
+            return;
+        }
+        // Read the pose before the engine borrow: it answers with owned
+        // arrays, so the two borrows never overlap.
+        let (position, target) =
+            solarxy_host::cameras::pane_pose(self.view.cameras.get(pane).and_then(Option::as_ref));
+        let Some(engine) = self.engine.as_mut() else {
+            self.gui.set_toast(
+                "No document to add a camera to",
+                crate::gui::ToastSeverity::Warning,
+            );
+            return;
+        };
+        let Some(node) = author_camera(engine, position, target) else {
+            self.gui.set_toast(
+                "The camera could not be created",
+                crate::gui::ToastSeverity::Error,
+            );
+            return;
+        };
+        self.look_through[pane] = Some(solarxy_core::scene::SceneObjectId(node.0));
+        self.unresolved_binding[pane] = true;
+        self.gui.set_toast(
+            "Camera created from view",
+            crate::gui::ToastSeverity::Success,
+        );
+    }
+
     /// Fly the active pane's camera to frame the mesh a validation issue
     /// lives on (Properties → Validation row click) and enable that
     /// pane's per-face validation overlay so the defect is visible.
@@ -127,4 +168,62 @@ impl State {
             max: center + offset,
         });
     }
+}
+
+/// Run the add-and-pose sequence as one undo step, answering with the node.
+///
+/// A free function rather than a method because it borrows only the engine,
+/// which is what lets the caller above toast on failure without holding a
+/// borrow of the whole shell across the transaction.
+///
+/// Any failure cancels rather than leaving the transaction open: an abandoned
+/// one swallows every later edit into itself.
+fn author_camera(
+    engine: &mut solarxy_graph::engine::Engine,
+    position: [f32; 3],
+    target: [f32; 3],
+) -> Option<solarxy_graph::document::NodeId> {
+    use solarxy_graph::Command;
+    use solarxy_graph::document::GraphContext;
+    use solarxy_graph::params::{ParamSource, ParamValue};
+
+    engine
+        .apply(Command::BeginTransaction {
+            label: "Add Camera".to_string(),
+        })
+        .ok()?;
+    let added = engine
+        .apply(Command::AddNode {
+            ctx: GraphContext::Root,
+            node_type: "camera".to_string(),
+            position: [0.0, 0.0],
+        })
+        .ok()
+        .as_ref()
+        .and_then(solarxy_graph::model_document::added_node);
+    let Some(node) = added else {
+        let _ = engine.apply(Command::CancelTransaction);
+        return None;
+    };
+    for (key, value) in [("position", position), ("target", target)] {
+        let value = ParamValue::Vec3([
+            f64::from(value[0]),
+            f64::from(value[1]),
+            f64::from(value[2]),
+        ]);
+        if engine
+            .apply(Command::SetParam {
+                ctx: GraphContext::Root,
+                node,
+                key: key.to_string(),
+                value: ParamSource::Literal(value),
+            })
+            .is_err()
+        {
+            let _ = engine.apply(Command::CancelTransaction);
+            return None;
+        }
+    }
+    engine.apply(Command::EndTransaction).ok()?;
+    Some(node)
 }

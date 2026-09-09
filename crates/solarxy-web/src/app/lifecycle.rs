@@ -188,7 +188,7 @@ impl SolarxyApp {
             },
             pane_looks: [PaneLook::default(); 4],
             look_through: [None; 4],
-            camera_locked: [false; 4],
+            camera_locked: solarxy_host::cameras::CameraLocks::default(),
             camera_editing: [false; 4],
             engine,
             host_events: Vec::new(),

@@ -791,7 +791,8 @@ impl SolarxyApp {
     /// Whether pane `pane` is a locked look-through pane (navigation reframes
     /// its bound camera node).
     pub(super) fn is_locked_look_through(&self, pane: usize) -> bool {
-        pane < 4 && self.look_through[pane].is_some() && self.camera_locked[pane]
+        self.camera_locked
+            .is_locked(pane, pane < 4 && self.look_through[pane].is_some())
     }
 
     /// Writes a locked look-through pane's current camera pose back to its bound
@@ -1414,7 +1415,7 @@ impl SolarxyApp {
             pane_rects: self.pane_rects_css(),
             pane_looks: self.pane_looks,
             pane_look_through,
-            pane_camera_locked: self.camera_locked,
+            pane_camera_locked: self.camera_locked.flags(),
             pane_gate_aspect,
             attr_viz: self.attr_viz.clone(),
         }

@@ -3,8 +3,89 @@
 use cgmath::Vector3;
 use solarxy_core::AABB;
 use solarxy_core::preferences::ProjectionMode;
+use solarxy_core::scene::SceneObjectId;
 use solarxy_renderer::camera::Camera;
 use solarxy_renderer::camera_state::CameraState;
+use solarxy_renderer::scene_objects::SceneObjects;
+
+/// Which panes are locked to the camera they look through.
+///
+/// A type rather than the bare `[bool; 4]` both shells would otherwise hold,
+/// because the rule that makes the flags mean anything is not in the array:
+/// a lock says nothing about a pane that is not bound to a camera, and
+/// releasing the binding releases the lock. That rule was spread across
+/// three call sites in one shell and would have been rewritten from memory
+/// in the other.
+///
+/// The pane index is checked here rather than by every caller, so an
+/// out-of-range pane is a no-op and a false answer rather than a panic.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CameraLocks([bool; 4]);
+
+impl CameraLocks {
+    /// Whether `pane` is locked, given whether it is bound to a camera at
+    /// all. A free view is never locked, whatever the stored flag says.
+    #[must_use]
+    pub fn is_locked(self, pane: usize, bound: bool) -> bool {
+        bound && pane < 4 && self.0[pane]
+    }
+
+    /// Set `pane`'s lock. Ignored on a pane that is not bound, because a
+    /// free view has no camera node to write a pose back to.
+    pub fn set(&mut self, pane: usize, locked: bool, bound: bool) {
+        if pane < 4 && bound {
+            self.0[pane] = locked;
+        }
+    }
+
+    /// Release `pane`'s lock, which is what releasing its binding does.
+    pub fn release(&mut self, pane: usize) {
+        if pane < 4 {
+            self.0[pane] = false;
+        }
+    }
+
+    /// The raw flags, for a shell that mirrors them to a frontend or writes
+    /// them into a scene file.
+    #[must_use]
+    pub fn flags(self) -> [bool; 4] {
+        self.0
+    }
+}
+
+/// Point `cam` at the pose of the scene's camera `id`, answering whether the
+/// scene had one.
+///
+/// The bookmark jump, and it is navigation rather than a binding: the pane's
+/// look-through state is untouched and the camera node is not written. That
+/// separation is the whole point of the entry, since jumping to a camera and
+/// working through one are different things a user wants at different times.
+pub fn jump_to_camera(cam: &mut Camera, scene: &SceneObjects, id: SceneObjectId) -> bool {
+    let Some(def) = scene
+        .cameras()
+        .and_then(|defs| defs.iter().find(|c| c.id == id))
+    else {
+        return false;
+    };
+    apply_camera_def(cam, def);
+    true
+}
+
+/// A pane camera's current pose as `(position, target)`, which is what
+/// authoring a camera node from the view needs.
+///
+/// The fallback is the seed pose a pane starts at, so a camera created
+/// before any pane camera exists is framed somewhere sensible rather than at
+/// the origin looking at itself.
+#[must_use]
+pub fn pane_pose(cam: Option<&CameraState>) -> ([f32; 3], [f32; 3]) {
+    cam.map_or(([7.0, 5.0, 7.0], [0.0, 0.0, 0.0]), |c| {
+        (
+            [c.camera.eye.x, c.camera.eye.y, c.camera.eye.z],
+            [c.camera.target.x, c.camera.target.y, c.camera.target.z],
+        )
+    })
+}
 
 /// The near and far planes that put `bounds` exactly inside the Depth
 /// inspection mode's visible range, for `camera`.
@@ -433,5 +514,51 @@ mod tests {
                 "{bad} survived into the sampler"
             );
         }
+    }
+    /// A lock says nothing about a pane that is not bound to a camera.
+    ///
+    /// This is the rule the type exists for, and it was previously spread
+    /// across a setter, a reader and an unbind in one shell. The failure it
+    /// prevents is a pane that reports itself locked after its binding is
+    /// gone, which would make navigation try to write a pose back to a
+    /// camera the pane is no longer looking through.
+    #[test]
+    fn a_free_view_is_never_locked() {
+        let mut locks = super::CameraLocks::default();
+        locks.set(1, true, true);
+        assert!(locks.is_locked(1, true));
+        // The same stored flag, read against an unbound pane.
+        assert!(!locks.is_locked(1, false), "a free view reported locked");
+    }
+
+    /// Locking a pane that is not bound stores nothing, so binding it later
+    /// does not silently arrive already locked.
+    #[test]
+    fn locking_an_unbound_pane_stores_nothing() {
+        let mut locks = super::CameraLocks::default();
+        locks.set(2, true, false);
+        assert!(!locks.is_locked(2, true), "an unbound lock was remembered");
+    }
+
+    /// Releasing a binding releases its lock, and leaves the other panes be.
+    #[test]
+    fn releasing_one_pane_leaves_the_others_locked() {
+        let mut locks = super::CameraLocks::default();
+        locks.set(0, true, true);
+        locks.set(3, true, true);
+        locks.release(0);
+        assert!(!locks.is_locked(0, true));
+        assert!(locks.is_locked(3, true), "release reached the wrong pane");
+    }
+
+    /// Every entry point tolerates a pane index past the four slots, because
+    /// the alternative is four call sites each remembering to check.
+    #[test]
+    fn an_out_of_range_pane_is_a_no_op() {
+        let mut locks = super::CameraLocks::default();
+        locks.set(9, true, true);
+        locks.release(9);
+        assert!(!locks.is_locked(9, true));
+        assert_eq!(locks.flags(), [false; 4]);
     }
 }

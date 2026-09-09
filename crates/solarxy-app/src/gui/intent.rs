@@ -64,6 +64,9 @@ pub(crate) enum Intent {
         pane: usize,
         change: LookThroughChange,
     },
+    /// Author a `camera` node at a pane's current pose and bind that pane to
+    /// it, from that pane's Camera menu.
+    CreateCameraFromView { pane: usize },
     /// A pane's own framing, from that pane's Views menu.
     ///
     /// Deliberately not [`Intent::Projection`]'s shape: the View menu's
@@ -271,7 +274,9 @@ impl Intent {
             // look-through binding on the way, so they share a key: only one
             // of them can be raised in a frame, since each is one click.
             Self::PaneProjection { .. } | Self::PaneView { .. } => 0,
-            Self::LookThrough { .. } => 1,
+            // Both end by writing a pane's binding, and both must land after
+            // any framing raised in the same frame rather than before it.
+            Self::CreateCameraFromView { .. } | Self::LookThrough { .. } => 1,
             // Everything a menu raises sat in one block before the queue
             // existed, in the field order of the struct it wrote. Only one
             // of them can be raised in a frame, because they are one click

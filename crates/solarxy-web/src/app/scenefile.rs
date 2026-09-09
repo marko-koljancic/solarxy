@@ -191,7 +191,7 @@ impl SolarxyApp {
                     camera,
                     display,
                     look_through: self.look_through[i].map(|n| n.0),
-                    camera_locked: self.camera_locked[i],
+                    camera_locked: self.camera_locked.flags()[i],
                     ..solarxy_scenefile::PaneJson::default()
                 }
             })
@@ -245,7 +245,11 @@ impl SolarxyApp {
             // Restore the look-through binding + lock. The follow will
             // drive the pane from the node once it cooks.
             self.look_through[i] = pane.look_through.map(NodeId);
-            self.camera_locked[i] = pane.camera_locked;
+            // The binding is written first: a lock is only accepted on a
+            // bound pane, so restoring them the other way round would drop
+            // every saved lock.
+            self.camera_locked
+                .set(i, pane.camera_locked, self.look_through[i].is_some());
             self.camera_editing[i] = false;
         }
         self.ensure_pane_cameras();

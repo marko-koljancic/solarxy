@@ -31,6 +31,7 @@ use solarxy_core::preferences::{
     NormalsMode, PaneMode, ProjectionMode, UvMapBackground, ViewMode,
 };
 use solarxy_core::view_config::PANE_TOOLBAR_HEIGHT;
+use solarxy_core::scene::SceneObjectId;
 use solarxy_host::cameras::StandardView;
 
 use crate::gui::intent::{DisplayChange, Intent, Intents, PaneChange};
@@ -130,6 +131,12 @@ pub(crate) enum PaneView {
     Fit,
     /// Snap to one of the six standard views.
     Axis(StandardView),
+    /// Jump to a camera node's authored pose, without binding to it.
+    ///
+    /// Framing rather than a binding, which is why it lives here: jumping to
+    /// a camera and working through one are different things, wanted at
+    /// different moments, and conflating them is the easy mistake.
+    Bookmark(SceneObjectId),
 }
 
 /// Draw the toolbar strip atop every pane. Called inside the Viewport
@@ -413,6 +420,37 @@ fn draw_camera_menu(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inten
                 ui.close();
             }
         }
+    }
+
+    // The lock is what gates writing a navigated pose back onto the camera
+    // node. Without that write-back there is nothing for it to gate, and a
+    // toggle that remembers a state nothing reads is worse than one that
+    // says why it is off.
+    let mut locked = false;
+    ui.add_enabled(
+        false,
+        egui::Checkbox::new(&mut locked, "Lock camera to view"),
+    )
+    .on_disabled_hover_text("Locking arrives with camera write-back, in the viewport work.");
+
+    // Guarded on there being a camera, unlike the browser's, whose heading
+    // renders over an empty list in a scene with none.
+    if !cameras.is_empty() {
+        heading(ui, "Bookmarks");
+        for (id, name) in cameras {
+            if ui.button(format!("Jump to {name}")).clicked() {
+                intents.raise(Intent::PaneView {
+                    pane: index,
+                    view: PaneView::Bookmark(SceneObjectId(*id)),
+                });
+                ui.close();
+            }
+        }
+    }
+
+    if ui.button("Create camera from view").clicked() {
+        intents.raise(Intent::CreateCameraFromView { pane: index });
+        ui.close();
     }
 }
 

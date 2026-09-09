@@ -460,8 +460,9 @@ pub struct SolarxyApp {
     /// Which `camera` node each pane looks through (`None` = free view).
     look_through: [Option<NodeId>; 4],
     /// Whether a look-through pane is locked so navigation reframes the camera
-    /// node. Only meaningful when the same slot's `look_through` is `Some`.
-    camera_locked: [bool; 4],
+    /// node. The type carries the rule that a lock means nothing on a pane
+    /// that is not bound, so no call site here restates it.
+    camera_locked: solarxy_host::cameras::CameraLocks,
     /// Transient: a locked look-through pane is mid-navigation, so the
     /// node-to-pane follow is suppressed until the gesture commits (it would
     /// otherwise fight live navigation). Not persisted.

@@ -61,17 +61,24 @@ impl State {
                     let bounds = self.scene_bounds();
                     // Framing a bound pane takes the view over, for the same
                     // reason a projection pick does: the per-frame follow
-                    // would otherwise revert it on the next frame.
+                    // would otherwise revert it on the next frame. A bookmark
+                    // needs it most of all, since the follow would put the
+                    // pane straight back where it was.
                     self.release_look_through_pane(pane);
+                    let scene = self.raster.scene();
                     if let Some(Some(cam)) = self.view.cameras.get_mut(pane) {
                         match view {
                             PaneView::Fit => cam.reset_to_bounds(&bounds),
                             PaneView::Axis(axis) => {
                                 solarxy_host::cameras::reset_to_view(cam, &bounds, axis);
                             }
+                            PaneView::Bookmark(id) => {
+                                solarxy_host::cameras::jump_to_camera(&mut cam.camera, scene, id);
+                            }
                         }
                     }
                 }
+                Intent::CreateCameraFromView { pane } => self.create_camera_from_view(pane),
                 Intent::LookThrough { pane, change } => {
                     // The pose lands on the next frame's follow, one frame
                     // after the click.
@@ -238,6 +245,7 @@ impl Recompute {
             | Intent::LinkCameras(_)
             | Intent::PaneProjection { .. }
             | Intent::PaneView { .. }
+            | Intent::CreateCameraFromView { .. }
             | Intent::LookThrough { .. }
             | Intent::Projection(_)
             | Intent::File(_)

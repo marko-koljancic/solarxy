@@ -48,7 +48,7 @@ impl SolarxyApp {
                 None
             };
             if self.look_through[pane].is_none() {
-                self.camera_locked[pane] = false;
+                self.camera_locked.release(pane);
             }
             self.camera_editing[pane] = false;
         }
@@ -58,8 +58,9 @@ impl SolarxyApp {
     /// Toggles lock-camera-to-view for a look-through pane (Blender semantics:
     /// navigation reframes the bound camera). No effect on a free view.
     pub fn set_pane_camera_lock(&mut self, pane: usize, locked: bool) -> Result<JsValue, JsError> {
-        if pane < 4 && self.look_through[pane].is_some() {
-            self.camera_locked[pane] = locked;
+        if pane < 4 {
+            self.camera_locked
+                .set(pane, locked, self.look_through[pane].is_some());
             self.camera_editing[pane] = false;
         }
         self.view_state()
@@ -70,13 +71,9 @@ impl SolarxyApp {
     pub fn jump_to_camera(&mut self, pane: usize, camera: f64) -> Result<JsValue, JsError> {
         if pane < 4 && camera.is_finite() && camera >= 0.0 {
             let id = SceneObjectId(camera as u64);
-            let def = self
-                .raster
-                .scene()
-                .cameras()
-                .and_then(|cams| cams.iter().find(|c| c.id == id).cloned());
-            if let (Some(def), Some(cam)) = (def, self.view.cameras[pane].as_mut()) {
-                solarxy_host::cameras::apply_camera_def(&mut cam.camera, &def);
+            let scene = self.raster.scene();
+            if let Some(cam) = self.view.cameras[pane].as_mut() {
+                solarxy_host::cameras::jump_to_camera(&mut cam.camera, scene, id);
             }
         }
         self.view_state()
@@ -87,15 +84,8 @@ impl SolarxyApp {
     /// is a frontend-orchestrated `AddNode` + `SetParam`, keeping the
     /// mirror-and-command model intact).
     pub fn pane_camera_pose(&self, pane: usize) -> Result<JsValue, JsError> {
-        let (position, target) = self.view.cameras.get(pane).and_then(|c| c.as_ref()).map_or(
-            ([7.0, 5.0, 7.0], [0.0, 0.0, 0.0]),
-            |c| {
-                (
-                    [c.camera.eye.x, c.camera.eye.y, c.camera.eye.z],
-                    [c.camera.target.x, c.camera.target.y, c.camera.target.z],
-                )
-            },
-        );
+        let (position, target) =
+            solarxy_host::cameras::pane_pose(self.view.cameras.get(pane).and_then(|c| c.as_ref()));
         to_js(&CameraPoseDto { position, target })
     }
 
