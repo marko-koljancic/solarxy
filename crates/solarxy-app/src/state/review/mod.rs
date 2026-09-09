@@ -3,16 +3,16 @@
 //! draft, panel filters).
 //!
 //! Owns the [`ReviewAnnotation`] set for the currently-loaded model.
-//! Markers are drawn as an egui overlay (see `gui::review_overlay`)
+//! Markers are drawn as an egui overlay (see `gui::panels::review::overlay`)
 //! using this state directly — no GPU buffer involved.
 //!
-//! Persistence (load/save sidecar, model + mesh hashing, stale detection)
-//! lives in task #7; this module is the in-memory authority.
+//! Persistence lives in `sidecar.rs`, the only half that touches disk; this
+//! module is the in-memory authority.
 
-// model_hash / mesh_hashes / sidecar_path / panel_open and the
-// `clear_for_new_model` method are populated/called by the sidecar I/O
-// in task #7 and the side panel in task #8 — kept as part of the type
-// today so those tasks are pure additions, not breaking changes.
+// Several fields here describe a file-loaded model's meshes, which the one
+// document root no longer supplies, so review cannot arm this release and
+// their writers are quiet. Kept, because the repointed review reads the same
+// shape; the allowance goes when it lands.
 #![allow(dead_code)]
 
 use std::path::PathBuf;
@@ -21,7 +21,7 @@ use solarxy_core::review::{AnchorPosition, AnnotationCategory, ReviewAnnotation}
 
 /// Top-level review-mode state on `State`. Initialized via [`Default`]
 /// (which seeds sensible filter/dock defaults); populated on model load
-/// (task #7) and mutated through the popup + side panel.
+/// by the sidecar reader and mutated through the popup and the side panel.
 #[derive(Debug)]
 pub struct ReviewState {
     /// True between R-press and R-press-again. Click handling in
@@ -42,7 +42,7 @@ pub struct ReviewState {
     pub editing: Option<EditDraft>,
 
     /// SHA-256 of the model file at load time. Used by the save path
-    /// (task #7) to populate `ReviewFile.model_hash`.
+    /// in `sidecar.rs` to populate `ReviewFile.model_hash`.
     pub model_hash: Option<String>,
 
     /// Per-mesh SHA-256 (positions||indices), indexed identically to
@@ -62,7 +62,7 @@ pub struct ReviewState {
     /// when prefs change.
     pub author: Option<String>,
 
-    /// Whether the side panel (task #8) is visible. Mirrors
+    /// Whether the side panel is visible. Mirrors
     /// `Preferences::review.panel_open` at startup; toggleable via
     /// `Window → Review Panel` and auto-opens on Shift+R when off.
     pub panel_open: bool,
@@ -113,7 +113,7 @@ pub struct ReviewState {
 
     /// `id` of the marker currently under the cursor, if any. Updated
     /// on mouse-move by `state::input` and consumed by
-    /// `gui::review_overlay` to decide which pin should expand into a
+    /// `gui::panels::review::overlay` to decide which pin should expand into a
     /// card. Cleared (set to `None`) when the cursor leaves all pins.
     pub hovered: Option<String>,
 
@@ -193,7 +193,7 @@ pub struct EditDraft {
     /// `Some(parent_id)` when the draft is a reply to an existing
     /// annotation; `None` for top-level notes. Replies share the
     /// parent's anchor and don't get their own 3D marker (see
-    /// `gui::review_overlay`).
+    /// `gui::panels::review::overlay`).
     pub reply_to: Option<String>,
 
     /// Unique per-draft-session seq, allocated via

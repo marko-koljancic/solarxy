@@ -113,12 +113,15 @@ views and raises an [`Intent`]; one drain applies the whole queue after the inte
 is what keeps the engine the single writer, and it is why there is no mirror struct to keep in
 step any more.
 
-- `app.rs` - `ApplicationHandler`, the event loop, and the handful of keys handled before egui
-  sees them. Panel shortcuts route through `EguiRenderer::toggle_tab`, the one add-or-remove
-  helper the Window menu and every shortcut share. Fires `flush_dock_layout_on_exit` on
-  `WindowEvent::CloseRequested` so the arrangement survives a quit.
+- `app.rs` - `ApplicationHandler`, the event loop, and the handful of window bindings claimed
+  before egui sees them, through the pure `shell_key` claims in `state/input/keyboard.rs`; a
+  claimed press never reaches the key map, which is what stops one press from running two
+  handlers. Panel shortcuts route through `EguiRenderer::toggle_tab`, the one add-or-remove
+  helper the Window menu and every shortcut share. Dropped paths are collected and handled
+  once per frame. Fires `flush_dock_layout_on_exit` and `flush_review_on_exit` from
+  `ApplicationHandler::exiting` so the arrangement survives a quit.
 - `state/` - the app's central `State`:
-  - `mod.rs` - the struct, `Pane`, `PendingLoad`, `InputState`, and the renderer re-exports.
+  - `mod.rs` - the struct, `Pane`, `PendingOpen`, `InputState`, and the renderer re-exports.
   - `init.rs` - startup. `update.rs` - per-frame updates, plus `rebuild_light_bind_group`, the
     **single IBL and lights chokepoint** (see Key Patterns).
   - `render.rs` - `State::render`, surface handling, per-pane orchestration, and the one call
@@ -138,7 +141,20 @@ step any more.
     cooking to quiescence blocks for the whole parse; a scene file is cheap to load and cooks
     progressively on the frame loop instead. `pending_frame` is what reconciles the two: one
     rule, a pane frames on the cooked scene's visible bounds, and only the moment those bounds
-    exist differs.
+    exist differs. A scene's per-pane camera bindings are restored here too, and checked over
+    the following frames once the cameras have cooked, since nothing exists to check against at
+    the moment of the open.
+  - `cook.rs` - cook mode and the explicit cook, dispatched from the menu bar's cook strip. The
+    readout the strip draws (`CookReadout` on `PanelSettings`) is refreshed from the engine every
+    frame in `update.rs`, so a scene opened in manual mode shows manual at once.
+  - `actions.rs` - an action parameter's press, from the Properties panel's Actions section: the
+    render node's opens the still dialog for that node, every other one runs
+    `Engine::invoke_action` and offers the bytes a native save dialog. The one branch on a node
+    type in this shell's action handling.
+  - `drop.rs` - what a drop does: the paths collected per frame, folders walked, every model
+    imported into the network the Node Tree shows through `model_document::add_import_node`; a
+    lone scene file opens as the document and a single model onto an empty window takes the
+    worker-parsed open path.
   - `visibility.rs` - what is shown and hidden. **Hiding is a parameter change, never a direct
     write**: an object's visibility is re-emitted from its owning node on every cook, so writing
     the renderer's copy would look right for one frame and be undone by the next edit.
@@ -155,7 +171,10 @@ step any more.
   - `still/` - `mod.rs` the job's lifecycle, `settings.rs` what a document says a render should
     be (a pure function of the document, and where the cross-shell parity test lives),
     `pixels.rs` the tile blit, the preview downscale and the file write. Not `image.rs`: a module
-    of that name shadows the crate of that name in every sibling.
+    of that name shadows the crate of that name in every sibling. The still keeps the render
+    node's auxiliary planes beside the picture in the host's `StillPasses`; the modal's Showing
+    combo replays them and Save All writes them as float siblings named as the command line
+    names them.
   - `review/` - `mod.rs` the annotation state, `anchor.rs` the marker hit test and the re-anchor
     sub-mode, `sidecar.rs` the only half that touches disk. Sidecar location honours
     `ProjectConfig.review.sidecar_dir` from `solarxy.toml`. **Review cannot arm in 0.10.0**: it
@@ -297,23 +316,20 @@ Types used on **both** sides of the CPU/GPU boundary live in `solarxy-core` so b
 - `solarxy_core::preferences` — every enum shared by sidebar + shader (`MaterialOverride`, `InspectionMode`, `PaneMode`, `UvMapBackground`, `ToneMode`, `NormalsMode`, `UvMode`, `IblMode`, `ViewMode`). `BackgroundMode` is a tagged sum (`Builtin(BuiltinBg)` | `Custom(u32)`), resolved to colors against `Preferences::view::custom_backgrounds`.
 - `solarxy_core::validation` — `ValidationReport`, `IssueKind`, `Severity`, etc.
 
-The renderer re-exports a few things it owns (`frame::*`, `scene::*`) to the app via `solarxy_app::state::mod.rs` `pub(super) use` blocks — grep those imports when you need to know what the app is allowed to touch.
+The app re-exports the few renderer items it reaches for (`CompositeLook`, `Renderer`, `BackgroundModeExt`) in `pub(super) use` lines in `solarxy_app::state::mod.rs`; grep those when you need to know what the app is allowed to touch.
 
 ### Dock layout persistence
-All six panels (Sidebar / Review Panel / Console / Material Inspector / Properties / Outliner) plus the Viewport live as tabs in a single `egui_dock::DockState<SolarxyTab>` owned by `EguiRenderer`. `solarxy_core::preferences::DockPrefs` holds two `Option<String>` JSON blobs that serialize that state via `egui_dock`'s `serde` feature (workspace dep `egui_dock = "0.18"` with `features = ["serde"]`):
+All seven panels (Sidebar / Review Panel / Console / Material Inspector / Properties / Outliner / Node Tree) plus the Viewport, eight `SolarxyTab` variants, live as tabs in a single `egui_dock::DockState<SolarxyTab>` owned by `EguiRenderer`. `solarxy_core::preferences::DockPrefs` holds two `Option<String>` JSON blobs that serialize that state via `egui_dock`'s `serde` feature (workspace dep `egui_dock = "0.18"` with `features = ["serde"]`):
 
-- `last_layout_json` — auto-saved on app quit (`State::flush_dock_layout_on_exit` in `state/input/mod.rs`, called from `app.rs` on `WindowEvent::CloseRequested`). Restored on startup in `state/init.rs` so the window comes back exactly how you left it. Write is short-circuited if the JSON hasn't changed.
+- `last_layout_json` — auto-saved on app quit (`State::flush_dock_layout_on_exit` in `state/persist.rs`, called from `ApplicationHandler::exiting` in `app.rs`). Restored on startup in `state/init.rs` so the window comes back exactly how you left it. Write is short-circuited if the JSON hasn't changed.
 - `saved_layout_json` — only ever written by `Window → Save Layout`; never overwritten automatically. `Window → Restore Saved Layout` reads it back; the menu entry stays disabled when it's `None` (driven by `EguiRenderer::has_saved_layout`, mirrored from `Preferences.dock.saved_layout_json.is_some()` at startup).
 
 If you add a `SolarxyTab` variant, **handle the serde compatibility carefully** — old `last_layout_json` blobs in users' `config.toml` will fail to deserialize otherwise, and the silent fallback is the default layout (data not lost, but the user loses their arrangement). `Window → Reset Layout` calls `EguiRenderer::reset_dock_layout` to rebuild from `default_dock_state` in `gui/dock.rs` without touching either persisted blob — that's the user-facing escape hatch when a layout gets wedged.
 
 ### Review System click routing
-Left-click in review mode (`Shift+R`) walks a three-step ladder in `state/input/pointer.rs::try_review_pick`:
-1. **Re-anchor pending** (`review.reanchor_target.is_some()`) → raycast → `complete_reanchor`; consumes the click unconditionally so a miss doesn't fall through to creation.
-2. **Marker hit-test** — project visible markers to pane-relative pixels; within ~20 px of cursor wins. Sets `selected` + flips `scroll_to_selected` so the panel jumps to that row. Resolved markers stay hit-testable (they render dimmed, not hidden).
-3. **Geometry raycast** — Möller-Trumbore → open `EditDraft` popup at the click position.
+Review cannot arm in 0.10.0: it anchored against a file-loaded model's meshes, and the one document root supplies none, so entering review mode toasts and returns. The three-step click ladder that lived in `state/input/pointer.rs` (re-anchor completion, then a marker hit-test within about 20 px, then a geometry raycast opening the draft popup) came out with the second root; it returns pointed at the engine's review store, where the browser's already is.
 
-`Esc` runs an analogous priority chain inside `gui/renderer.rs::render_ui` (after the popup and the delete-confirm modal have had their own chance to consume): re-anchor cancel, then review-mode exit. Each consumes the key, writes the state it owns, and raises `ReviewIntent::ReanchorCancelled` or `ReviewIntent::Exited` for the toast, which is the shell's to give rather than a panel's. `Cmd/Ctrl+S` while review mode is active saves the sidecar.
+`Esc` still runs a priority chain inside `gui/renderer.rs::render_ui` (after the popup and the delete-confirm modal have had their own chance to consume): re-anchor cancel, then review-mode exit. Each consumes the key, writes the state it owns, and raises `ReviewIntent::ReanchorCancelled` or `ReviewIntent::Exited` for the toast, which is the shell's to give rather than a panel's. `Cmd/Ctrl+S` while review mode is active saves the sidecar.
 
 ### Other
 - wgpu bind groups for GPU resource access; pipelines created at init and reused.

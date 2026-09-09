@@ -7,7 +7,7 @@
 //! that is already about sources, and the entry point and the tab viewer both
 //! see it without either signature moving.
 //!
-//! They are groups rather than one bundle because the four have genuinely
+//! They are groups rather than one bundle because the six have genuinely
 //! different lifetimes and mutability, and a single struct would have to be
 //! the loosest of them.
 

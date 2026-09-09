@@ -32,8 +32,8 @@ const fn rgb(c: Rgb) -> egui::Color32 {
 /// category hues against its cream ground.
 ///
 /// These four are the strongest visual-correlation cue in the product: the
-/// same hue must color a viewport pin and its panel chip. `review_panel`
-/// and `review_overlay` both read them from here.
+/// same hue must color a viewport pin and its panel chip. The review panel
+/// and the review overlay both read them from here.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ReviewColors {
     pub info: egui::Color32,

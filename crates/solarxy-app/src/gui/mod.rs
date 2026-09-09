@@ -29,7 +29,7 @@
 //! display state panels draw from. `theme` is the egui adapter over the shared
 //! palette and authors no colours of its own.
 //!
-//! One rule cuts across all of it: `overlays::push_toast` emits its own
+//! One rule cuts across all of it: `EguiRenderer::push_toast` emits its own
 //! `tracing` event on `target: "solarxy::toast"`, so a caller must not also
 //! log the same message.
 //!

@@ -1,13 +1,15 @@
 //! Side panel for browsing the open `.solarxy-review.json` annotation set.
 //!
-//! Docked-or-floating like the Console (`crate::gui::console_view`):
-//! [`draw_review_panel_docked`] and [`draw_review_panel_floating`] share
-//! [`draw_review_panel_content`]; a Dock/Detach toggle in the header
-//! lets the user swap modes at runtime.
+//! A dock tab like every other panel, so where it sits is the dock's
+//! business. `draw_review_panel_content` draws it and
+//! `draw_delete_confirm_modal` the cascade-delete confirmation. It carries
+//! the four category filter chips, the text filter, the open and resolved
+//! lists with a "Needs re-anchor" badge, a scroll-to-selected jump, and the
+//! inline editor with its resolve toggle, re-anchor cancel and delete.
 //!
-//! Scaffold version (commit 8a): filter chips + text search + grouped
-//! list with click-to-select. Inline editor (commit 8b) and marker
-//! hit-test / re-place flow (commit 8c) follow.
+//! Review cannot arm against the one document root this release, so the
+//! panel shows a set authored in an earlier session or nothing. It returns
+//! pointed at the engine's review store, where the browser's already is.
 
 use solarxy_core::review::AnnotationCategory;
 

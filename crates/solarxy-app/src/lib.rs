@@ -1,3 +1,12 @@
+//! The desktop shell: a winit window, an egui interface and the shared render
+//! host, over one open document held in the engine.
+//!
+//! The shape to know before anything else: **panels never write.** A panel
+//! draws against read-only views and raises an `Intent`; one drain applies
+//! the whole queue after the interface pass. That is what keeps the engine
+//! the single writer. `gui/intent.rs` states the two rules a raise obeys and
+//! `state/intents.rs` is the exhaustive drain.
+
 #![warn(clippy::pedantic)]
 #![allow(
     clippy::cast_possible_truncation,

@@ -1,5 +1,6 @@
-//! Central application state: [`State`], the GUI's root struct, plus `Pane`,
-//! `PendingOpen`, `InputState`, and the per-pane geometry helpers.
+//! Central application state: [`State`], the GUI's root struct, plus
+//! `PendingOpen`, `InputState`, and the pane geometry re-exported from the
+//! renderer (`Pane` is `PaneRect` under its old name).
 //!
 //! Submodules:
 //! - `init.rs`, startup wiring (surface, device, queue, renderer).
@@ -15,6 +16,9 @@
 //! - `camera.rs`, where the pane cameras point. `visibility.rs`, what is
 //!   shown and hidden. `persist.rs`, preference write-back and the flushes on
 //!   the way out.
+//! - `cook.rs`, cook mode and the explicit cook. `actions.rs`, an action
+//!   parameter's press. `drop.rs`, what a drop onto the window does.
+//! - `dev.rs`, the debug-build developer harness on F8 and F9.
 //! - `panes.rs`, split-viewport layout math. `overlap.rs`, the UV-overlap
 //!   readback poll. `capture.rs`, the shell's half of a screenshot.
 //! - `still/`, the tiled still render job. `review/`, the annotation state,

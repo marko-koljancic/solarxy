@@ -255,7 +255,7 @@ impl State {
                 }
             }
             KeyCode::KeyS => {
-                // `Shift+S` (save preferences) was retired in RC2 — view
+                // `Shift+S` (save preferences) was retired in the 0.5.0 release candidates — view
                 // settings now persist via Edit → Save View Settings as
                 // Default. `Cmd/Ctrl+S` still saves the review sidecar.
                 let cmd_or_ctrl = if cfg!(target_os = "macos") {

@@ -1,8 +1,8 @@
 //! Shared category visuals for the Review System.
 //!
 //! Single source of truth for the four category colors + their letter
-//! glyphs. Consumed by `review_panel` (chips) and `review_overlay` (pins,
-//! cards). The colors are theme-scoped (see [`crate::gui::theme::ReviewColors`])
+//! glyphs. Consumed by `panel` (chips) and `overlay` (pins, cards), the two
+//! siblings beside this file. The colors are theme-scoped (see [`crate::gui::theme::ReviewColors`])
 //! so they re-contrast on the light theme — keep marker color and panel
 //! chip color in sync (the user's #1 visual-correlation cue).
 

@@ -1,10 +1,10 @@
 //! `egui_dock` integration — the unified panel + viewport docking layer.
 //!
-//! All six user-facing panels (Sidebar, Review Panel, Console, Material
-//! Inspector, Properties, Outliner) plus the 3D Viewport live as tabs inside a
-//! single [`egui_dock::DockState`]. Users drag tab titles between leaves
-//! to dock left/right/bottom/top; drag outside the dock area to tear out
-//! into a floating window. The Viewport tab is **closeable but
+//! All seven user-facing panels (Sidebar, Review Panel, Console, Material
+//! Inspector, Properties, Outliner, Node Tree) plus the 3D Viewport live as
+//! tabs inside a single [`egui_dock::DockState`], eight variants in all.
+//! Users drag tab titles between leaves to dock left/right/bottom/top; drag
+//! outside the dock area to tear out into a floating window. The Viewport tab is **closeable but
 //! non-floatable and transparent** — `egui_dock` never paints over the
 //! wgpu surface, and the user can recover a closed Viewport via the
 //! Window menu (`Window → Viewport`).
@@ -21,9 +21,9 @@
 //! ## Toggling tabs from the Window menu
 //!
 //! [`tab_present`] / [`toggle_tab`] are the canonical add-or-remove
-//! helpers. `gui/renderer.rs` projects `MenuBarVisibility.*_visible`
-//! flags from these each frame so the Window menu's checkmark state
-//! stays in sync without a duplicate source of truth.
+//! helpers. The Window menu asks `tab_present` through a closure each
+//! frame for its checkmarks, so the dock tree is the one source of a
+//! panel's open state and nothing mirrors it.
 
 use egui_dock::{DockState, NodeIndex, TabViewer};
 

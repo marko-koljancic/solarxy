@@ -43,7 +43,7 @@ fn slider(
 /// Lives this way so `gui::dock` can host the sidebar as an `egui_dock`
 /// tab (which provides its own `Ui`).
 ///
-/// RC2: the sidebar is the canonical surface for **scene-global**
+/// The sidebar is the canonical surface for **scene-global**
 /// display / post-processing / material settings only. Per-pane view
 /// state lives on the per-pane toolbar; validation and HDRI/IBL moved to
 /// the Properties panel.

@@ -12,8 +12,8 @@
 //!
 //! `egui::Context::run` re-invokes its closure when something requests a
 //! discard, up to `max_passes`, which defaults to two. `egui::Grid` requests
-//! one the first time it appears, and three panels here draw a grid, so a
-//! twice-run frame is ordinary rather than exotic. On the repeat pass the raw
+//! one the first time it appears, and the Properties panel and two modals
+//! draw grids, so a twice-run frame is ordinary rather than exotic. On the repeat pass the raw
 //! input has been taken, so no widget reports a click and no key is consumed.
 //!
 //! Two rules follow, and breaking either is silent.

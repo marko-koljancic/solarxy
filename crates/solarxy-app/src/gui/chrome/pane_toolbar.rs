@@ -1,12 +1,10 @@
 //! Per-pane viewport toolbar — the slim strip atop each pane.
 //!
-//! Every pane gets its own toolbar whose controls mutate that pane's
-//! display settings. The **active** pane writes through the
-//! [`GuiSnapshot`] (so `apply_to_state` carries the change — it rewrites
-//! every active-pane field unconditionally); the other panes write their
-//! [`PaneDisplaySettings`] directly. Projection lives on the camera, not
-//! `PaneDisplaySettings`, so a change is recorded as a request the state
-//! layer applies after the egui pass.
+//! Every pane gets its own toolbar whose controls change that pane's
+//! display settings. Each change is raised as an `Intent` stamped with the
+//! pane's index, and the drain writes the real settings after the egui
+//! pass; projection lives on the camera rather than in
+//! `PaneDisplaySettings`, so it travels the same way as its own intent.
 //!
 //! The controls are 3ds Max-style **viewport label menus**: a few frameless
 //! bracketed text labels (`[ Scene 3D ]` / `[ Shaded ]` / `[ Perspective ]`;

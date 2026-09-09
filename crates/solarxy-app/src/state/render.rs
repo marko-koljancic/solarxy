@@ -1,10 +1,10 @@
-//! `State::render`: per-frame entry point. Computes the pane rectangles,
-//! assembles each pane's parameters and hands them to `solarxy_host::render_pane`,
-//! then drives the egui sidebar/menu/HUD/console paint at the end.
+//! `State::render`: the per-frame entry point. Computes the pane rectangles,
+//! assembles each pane's parameters in `render_pane`, hands the pass chain
+//! and the composite to `solarxy_host` (`setup_pane_lighting`,
+//! `composite_and_submit`), and runs the one interface pass at the end.
 //!
-//! The pane body itself is not here. It lives in `solarxy-host` beside the web
-//! shell's copy of the same call, which is the point: what remains in this file
-//! is the assembly only a desktop shell can do.
+//! The shared body lives in `solarxy-host`, which both shells drive; what
+//! remains in this file is the assembly only a desktop shell can do.
 //!
 //! Hands the panels a read-only view of the display settings and drains the
 //! intents they raise afterwards; the drain is what triggers any expensive
@@ -514,7 +514,7 @@ impl State {
         let recent_files = self.preferences.history.recent_files.clone();
         // `PaneToolbarData` is passed by value — `render_ui` consumes it,
         // releasing its `&mut self.view.pane_settings` borrow before
-        // `apply_to_state` re-borrows the same field below.
+        // the drain re-borrows the same field below.
         let hdri_available = self.renderer.ibl_res.ibl.equirect.is_some();
         let uv_overlap_pct = self.renderer.uv_overlap.overlap_pct;
         // The open scene's cameras, named the way the Node Tree names them,
