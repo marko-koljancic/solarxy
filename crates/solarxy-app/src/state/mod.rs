@@ -37,6 +37,7 @@ pub(crate) mod engine_scene;
 pub(crate) mod hdri_info;
 mod init;
 mod input;
+pub(crate) use input::{ShellKey, shell_key};
 mod intents;
 mod open;
 mod overlap;
@@ -227,7 +228,7 @@ pub struct State {
     /// Invalidated whenever the sidebar or the HDRI dialog replaces the
     /// IBL behind the scene contract's back.
     pub(super) environment: solarxy_renderer::environment::EnvironmentTracker,
-    /// Whether the `F10` developer harness has a synthetic environment
+    /// Whether the `F8` developer harness has a synthetic environment
     /// installed. Debug builds only; see `state/dev.rs`.
     #[cfg(debug_assertions)]
     pub(super) dev_environment_on: bool,

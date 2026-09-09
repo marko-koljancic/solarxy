@@ -4,6 +4,13 @@
 //! modal, which is the drift this shell has not closed yet: they are two
 //! hand-maintained lists of the same thing and the modal already omits four
 //! bindings this file has.
+//!
+//! Two dispatchers see a press, in order. The window claims a handful of
+//! bindings first, through [`shell_key`], before the interface pass sees the
+//! key; the map in `handle_key` runs only for a press the window did not
+//! claim. That order is what keeps one press from running twice: the window
+//! used to handle its keys and fall through, so a chord such as the open
+//! dialog's also ran the bare key's arm here.
 
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::KeyCode;
@@ -40,6 +47,48 @@ fn background_cycle_options(customs: &[CustomBackground], has_hdri: bool) -> Vec
         .collect();
     options.extend(customs.iter().map(|c| BackgroundMode::Custom(c.id)));
     options
+}
+
+/// A binding the window handles before the interface sees the key.
+///
+/// These are the bindings that have to work whatever has focus: the ones
+/// that show and hide chrome, and the file dialogs. A press one of these
+/// claims never reaches the key map, which is the rule the collision this
+/// replaced had broken: every window arm fell through, so a claimed key ran
+/// its window action and then the map's arm for the same key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShellKey {
+    ToggleSidebar,
+    ToggleMenuBar,
+    ToggleFullscreen,
+    OpenModel,
+    OpenHdri,
+    ToggleConsole,
+    ToggleViewport,
+}
+
+/// What the window claims for a pressed key, if anything.
+///
+/// `cmd_or_ctrl` is resolved by the caller, because which key it is depends
+/// on the platform. `wants_text` says a text field has focus, which keeps
+/// the bare keys typeable there while the function keys and the chords stay
+/// global.
+pub(crate) fn shell_key(
+    code: KeyCode,
+    cmd_or_ctrl: bool,
+    shift: bool,
+    wants_text: bool,
+) -> Option<ShellKey> {
+    match code {
+        KeyCode::Tab if !wants_text => Some(ShellKey::ToggleSidebar),
+        KeyCode::F10 => Some(ShellKey::ToggleMenuBar),
+        KeyCode::F11 => Some(ShellKey::ToggleFullscreen),
+        KeyCode::KeyO if cmd_or_ctrl && shift => Some(ShellKey::OpenHdri),
+        KeyCode::KeyO if cmd_or_ctrl => Some(ShellKey::OpenModel),
+        KeyCode::Backquote if !wants_text => Some(ShellKey::ToggleConsole),
+        KeyCode::Digit1 if cmd_or_ctrl && !wants_text => Some(ShellKey::ToggleViewport),
+        _ => None,
+    }
 }
 
 impl State {
@@ -375,10 +424,10 @@ impl State {
             #[cfg(debug_assertions)]
             KeyCode::F9 => self.toggle_dev_objects(),
             // Debug-build-only: toggle a synthesized environment through
-            // the real SetEnvironment op, which nothing else on the
-            // desktop emits until the shell gains the node engine.
+            // the real SetEnvironment op with no document open. F8 rather
+            // than F10, which the window claims for the menu bar.
             #[cfg(debug_assertions)]
-            KeyCode::F10 => self.toggle_dev_environment(),
+            KeyCode::F8 => self.toggle_dev_environment(),
             _ => {
                 if let Some(key) = to_camera_key(code) {
                     self.release_look_through_for_gesture();
@@ -504,5 +553,68 @@ impl State {
             BoundsMode::PerMesh => "Bounds: Per Mesh",
         };
         self.gui.set_toast(msg, ToastSeverity::Success);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The window's claims, in full, beside the bare keys the map keeps.
+    /// Cmd+O and Cmd+1 used to run both dispatchers in every build, and
+    /// F10 both in a debug build, because the window never said it had
+    /// handled a press.
+    #[test]
+    fn the_window_claims_these_keys_and_leaves_the_rest_to_the_map() {
+        let cases = [
+            (KeyCode::F10, false, false, Some(ShellKey::ToggleMenuBar)),
+            (KeyCode::F11, false, false, Some(ShellKey::ToggleFullscreen)),
+            (KeyCode::Tab, false, false, Some(ShellKey::ToggleSidebar)),
+            (
+                KeyCode::Backquote,
+                false,
+                false,
+                Some(ShellKey::ToggleConsole),
+            ),
+            (KeyCode::KeyO, true, false, Some(ShellKey::OpenModel)),
+            (KeyCode::KeyO, true, true, Some(ShellKey::OpenHdri)),
+            (KeyCode::Digit1, true, false, Some(ShellKey::ToggleViewport)),
+            // The bare keys belong to the map: projection, overlap, shaded.
+            (KeyCode::KeyO, false, false, None),
+            (KeyCode::KeyO, false, true, None),
+            (KeyCode::Digit1, false, false, None),
+            // The developer harness keys are the map's, debug builds only.
+            (KeyCode::F8, false, false, None),
+            (KeyCode::F9, false, false, None),
+            (KeyCode::Enter, true, false, None),
+        ];
+        for (code, cmd, shift, expected) in cases {
+            assert_eq!(
+                shell_key(code, cmd, shift, false),
+                expected,
+                "{code:?} cmd={cmd} shift={shift}"
+            );
+        }
+    }
+
+    /// A focused text field keeps the keys it could be typing into, and the
+    /// function keys and chords stay global.
+    #[test]
+    fn a_focused_text_field_keeps_its_typeable_keys() {
+        assert_eq!(shell_key(KeyCode::Tab, false, false, true), None);
+        assert_eq!(shell_key(KeyCode::Backquote, false, false, true), None);
+        assert_eq!(shell_key(KeyCode::Digit1, true, false, true), None);
+        assert_eq!(
+            shell_key(KeyCode::F10, false, false, true),
+            Some(ShellKey::ToggleMenuBar)
+        );
+        assert_eq!(
+            shell_key(KeyCode::F11, false, false, true),
+            Some(ShellKey::ToggleFullscreen)
+        );
+        assert_eq!(
+            shell_key(KeyCode::KeyO, true, false, true),
+            Some(ShellKey::OpenModel)
+        );
     }
 }

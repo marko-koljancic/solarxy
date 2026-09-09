@@ -9,13 +9,13 @@ use winit::{
     application::ApplicationHandler,
     event::*,
     event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{Key, KeyCode, PhysicalKey},
+    keyboard::{Key, PhysicalKey},
     window::Window,
 };
 
 use crate::console::LogBuffer;
 use solarxy_core::preferences::Preferences;
-use crate::state::State;
+use crate::state::{ShellKey, State, shell_key};
 
 /// Returns `true` when a pointer/mouse event should drive the 3D camera
 /// (orbit / pan / zoom) — i.e., the cursor is inside the Viewport tab's
@@ -122,8 +122,16 @@ impl ApplicationHandler<State> for App {
             return;
         };
 
+        // The window's own bindings, claimed before the interface sees the
+        // key. A claimed press is consumed: the key map below never sees it,
+        // which is what stops one press from running two handlers. The
+        // interface still sees every event, because its key state is built
+        // from press and release pairs and a release with no press is a
+        // no-op there.
+        let mut pre_handled = false;
         if let WindowEvent::KeyboardInput { ref event, .. } = event
             && event.state.is_pressed()
+            && let PhysicalKey::Code(code) = event.physical_key
         {
             let mods = state.input.modifiers;
             let cmd_or_ctrl = if cfg!(target_os = "macos") {
@@ -131,32 +139,26 @@ impl ApplicationHandler<State> for App {
             } else {
                 mods.control_key()
             };
-            match event.physical_key {
-                PhysicalKey::Code(KeyCode::Tab) if !state.gui.wants_keyboard_input() => {
-                    state.gui.toggle_tab(crate::gui::SolarxyTab::Sidebar);
-                }
-                PhysicalKey::Code(KeyCode::F10) => {
-                    state.gui.menu_bar_visible = !state.gui.menu_bar_visible;
-                }
-                PhysicalKey::Code(KeyCode::F11) => {
-                    state.toggle_fullscreen();
-                }
-                PhysicalKey::Code(KeyCode::KeyO) if cmd_or_ctrl => {
-                    if mods.shift_key() {
-                        state.open_hdri_dialog();
-                    } else {
-                        state.open_model_dialog();
+            let wants_text = state.gui.wants_keyboard_input();
+            if let Some(key) = shell_key(code, cmd_or_ctrl, mods.shift_key(), wants_text) {
+                match key {
+                    ShellKey::ToggleSidebar => {
+                        state.gui.toggle_tab(crate::gui::SolarxyTab::Sidebar);
+                    }
+                    ShellKey::ToggleMenuBar => {
+                        state.gui.menu_bar_visible = !state.gui.menu_bar_visible;
+                    }
+                    ShellKey::ToggleFullscreen => state.toggle_fullscreen(),
+                    ShellKey::OpenModel => state.open_model_dialog(),
+                    ShellKey::OpenHdri => state.open_hdri_dialog(),
+                    ShellKey::ToggleConsole => {
+                        state.gui.toggle_tab(crate::gui::SolarxyTab::Console);
+                    }
+                    ShellKey::ToggleViewport => {
+                        state.gui.toggle_tab(crate::gui::SolarxyTab::Viewport);
                     }
                 }
-                PhysicalKey::Code(KeyCode::Backquote) if !state.gui.wants_keyboard_input() => {
-                    state.gui.toggle_tab(crate::gui::SolarxyTab::Console);
-                }
-                PhysicalKey::Code(KeyCode::Digit1)
-                    if cmd_or_ctrl && !state.gui.wants_keyboard_input() =>
-                {
-                    state.gui.toggle_tab(crate::gui::SolarxyTab::Viewport);
-                }
-                _ => {}
+                pre_handled = true;
             }
         }
 
@@ -242,7 +244,7 @@ impl ApplicationHandler<State> for App {
                 state.set_modifiers(modifiers.state());
             }
             WindowEvent::KeyboardInput { ref event, .. }
-                if !egui_consumed && !state.gui.wants_keyboard_input() =>
+                if !pre_handled && !egui_consumed && !state.gui.wants_keyboard_input() =>
             {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     state.handle_key(event_loop, code, event.state.is_pressed());

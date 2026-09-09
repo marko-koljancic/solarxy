@@ -1,7 +1,10 @@
 //! Debug-build-only developer harness for the multi-object scene: a key
 //! toggle (F9) that inserts two cubes with independent transforms through
 //! the real `SceneDelta` path, proving that a hidden dev command renders
-//! two objects with independent transforms without any engine.
+//! two objects with independent transforms without any document, and a
+//! second toggle (F8) that installs a synthesized environment through the
+//! real `SetEnvironment` op the same way. Neither key is listed in the
+//! shortcuts modal, because neither exists in a release build.
 
 use std::sync::Arc;
 
@@ -77,13 +80,13 @@ impl State {
     /// Toggle a synthesized environment through the real
     /// `SceneOp::SetEnvironment` path.
     ///
-    /// The desktop shell has no node engine yet, so nothing here emits that
-    /// op in normal use. This is what makes the host half verifiable on
-    /// hardware before the engine arrives: press once and the scene lights
-    /// from a synthetic sky with a bright sun low on one side, press again
-    /// and it clears back to the procedural background. Pressing repeatedly
-    /// also exercises the tracker, which must install the environment only
-    /// on the transitions.
+    /// A scene's environment node emits that op when it cooks; this emits it
+    /// with no document open, which is what keeps the host half checkable on
+    /// hardware without a scene: press once and the scene lights from a
+    /// synthetic sky with a bright sun low on one side, press again and it
+    /// clears back to the procedural background. Pressing repeatedly also
+    /// exercises the tracker, which must install the environment only on the
+    /// transitions.
     ///
     /// The HDRI is generated rather than loaded so the harness needs no
     /// file and no fixture, and so the sun's position makes a wrong

@@ -9,8 +9,10 @@
 //! are: the drain arms and the recompute helpers beside the drain in
 //! `state/intents.rs`, the framing to `state/camera.rs`, the show-and-hide to
 //! `state/visibility.rs`, and the preference writers to
-//! `state/preferences.rs`.
+//! `state/persist.rs`.
 
 mod dialogs;
 mod keyboard;
 mod pointer;
+
+pub(crate) use keyboard::{ShellKey, shell_key};
