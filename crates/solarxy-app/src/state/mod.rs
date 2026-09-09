@@ -180,6 +180,10 @@ pub struct State {
     /// Beside the modal's eight-bit copy rather than inside it: the modal shows
     /// a screen image, and this one is only ever written to a file.
     pub(super) finished_float: Option<solarxy_host::still::FloatImage>,
+    /// The finished still's auxiliary planes, when the render node asked for
+    /// any: what the Showing combo replays and what Save All writes beside
+    /// the picture. Kept with the float image, for the same reason.
+    pub(super) finished_passes: Option<solarxy_host::still::StillPasses>,
     /// The traced backend, built on the first traced still and kept for
     /// the session. It sees no per-frame deltas (those feed the raster
     /// backend alone), so every still start snapshots the scene into it.

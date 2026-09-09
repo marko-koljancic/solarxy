@@ -880,17 +880,8 @@ impl EguiRenderer {
     }
 
     /// Open the still-render modal for a fresh run.
-    pub fn open_still_modal(
-        &mut self,
-        width: u32,
-        height: u32,
-        traced: bool,
-        samples: u32,
-        denoise: bool,
-        filename: String,
-    ) {
-        self.still_modal
-            .start(width, height, traced, samples, denoise, filename);
+    pub(crate) fn open_still_modal(&mut self, opening: super::modals::still::StillOpening) {
+        self.still_modal.start(opening);
     }
 
     /// Update the still modal's tile and sample readout.
@@ -918,8 +909,13 @@ impl EguiRenderer {
     /// The job has started; the dialog stops being idle. `transparent` comes
     /// from the job's own spec, so the preview's checker cannot drift from
     /// what the render actually carries.
-    pub fn begin_still(&mut self, transparent: bool) {
-        self.still_modal.begin(transparent);
+    pub fn begin_still(
+        &mut self,
+        transparent: bool,
+        requested: Vec<solarxy_host::passes::AovKind>,
+        writes_aovs: bool,
+    ) {
+        self.still_modal.begin(transparent, requested, writes_aovs);
     }
 
     /// Hand the modal the render's elapsed and remaining, both computed by the
@@ -956,6 +952,21 @@ impl EguiRenderer {
     /// Drain a pending `Save As…` request from the still modal.
     pub fn take_still_save_request(&mut self) -> bool {
         self.still_modal.take_save_request()
+    }
+
+    /// Drain a pending `Save All…` request from the still modal.
+    pub fn take_still_save_all_request(&mut self) -> bool {
+        self.still_modal.take_save_all_request()
+    }
+
+    /// Drain a change of the still modal's Showing combo.
+    pub fn take_still_pass_request(&mut self) -> Option<solarxy_host::passes::PassKind> {
+        self.still_modal.take_pass_request()
+    }
+
+    /// The finished still, for a replay of the beauty into the preview.
+    pub fn still_image(&self) -> Option<&image::RgbaImage> {
+        self.still_modal.image()
     }
 
     /// The still modal's suggested file name.

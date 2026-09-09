@@ -494,6 +494,7 @@ fn run(
     // the render node rather than from a flag, and the answer has to be the
     // same either way. Still before any device exists.
     check_options(opts, Some(settings.engine))?;
+    warn_node_passes_without_an_engine(&settings, opts, &mut warnings);
     let delta = {
         let mut e = engine;
         e.take_scene_delta()
@@ -601,7 +602,13 @@ fn run(
     sink.report(&RenderProgress::Writing {
         output: output.display(),
     });
-    let aovs = write_all(&output, opts, assembled, spec, &mut warnings)?;
+    let aovs = write_all(
+        &output,
+        &effective_aovs(&settings, opts),
+        assembled,
+        spec,
+        &mut warnings,
+    )?;
 
     Ok(RenderOutcome {
         report: report(&output, spec, &settings, tiles, started, warnings, aovs),
@@ -614,7 +621,7 @@ fn run(
 /// of no use to anybody.
 fn write_all(
     output: &Output,
-    opts: &RenderOptions,
+    aovs: &[AovKind],
     assembled: Assembled,
     spec: StillSpec,
     warnings: &mut Vec<String>,
@@ -653,7 +660,7 @@ fn write_all(
     output.write(&encoded)?;
     write_passes(
         output,
-        opts,
+        aovs,
         aux.as_deref(),
         depth.as_deref(),
         spec,
@@ -664,17 +671,26 @@ fn write_all(
 /// Writes every requested pass beside the image, and names what it wrote.
 fn write_passes(
     output: &Output,
-    opts: &RenderOptions,
+    aovs: &[AovKind],
     aux: Option<&[u8]>,
     depth: Option<&[u8]>,
     spec: StillSpec,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<String>, RenderError> {
     let Output::File(image_path) = output else {
+        // A flag against standard output is refused before the render, so
+        // what reaches here is the render node's own request.
+        if !aovs.is_empty() {
+            warnings.push(
+                "the render node asks for passes, and standard output has no beside; \
+                 they were not written"
+                    .into(),
+            );
+        }
         return Ok(Vec::new());
     };
     let mut written = Vec::new();
-    for kind in &opts.aovs {
+    for kind in aovs {
         let plane = match kind {
             AovKind::Albedo => aux.map(|a| files::albedo_from_auxiliary(&files::floats_of(a))),
             AovKind::Normal => aux.map(|a| files::normal_from_auxiliary(&files::floats_of(a))),
@@ -821,8 +837,55 @@ fn triangle_count(delta: &solarxy_core::scene::SceneDelta) -> u64 {
 /// cannot be honoured. `--exr-space` then chooses which floats, and its default
 /// is scene-referred, because a compositing package has not decided the look
 /// yet and a tone-mapped float is a decision already taken.
+/// The node's own passes against an engine that writes none is said rather
+/// than refused: the node belongs to the scene, and a flag would have been
+/// this run's. The flag-against-engine case is refused by `check_options`.
+fn warn_node_passes_without_an_engine(
+    settings: &RenderSettings,
+    opts: &RenderOptions,
+    warnings: &mut Vec<String>,
+) {
+    if !opts.aovs.is_empty() || caps_of(settings.engine).writes_aovs {
+        return;
+    }
+    let asked: Vec<&str> = node_aovs(settings).iter().map(|k| k.as_str()).collect();
+    if !asked.is_empty() {
+        warnings.push(format!(
+            "the render node asks for the {} pass(es), and the raster engine writes none",
+            asked.join(", ")
+        ));
+    }
+}
+
+/// The passes this run writes: the flags when any were given, else what the
+/// render node itself turns on, so a scene that asks for a pass gets it from
+/// this surface as it does from the browser. An explicit flag replaces the
+/// node's set rather than adding to it, because a flag is this run's own
+/// statement of what it wants beside the picture.
+fn effective_aovs(settings: &RenderSettings, opts: &RenderOptions) -> Vec<AovKind> {
+    if opts.aovs.is_empty() {
+        node_aovs(settings)
+    } else {
+        opts.aovs.clone()
+    }
+}
+
+/// The passes the render node turns on, in the order the command line names
+/// them.
+fn node_aovs(settings: &RenderSettings) -> Vec<AovKind> {
+    [
+        (settings.aov_albedo, AovKind::Albedo),
+        (settings.aov_normal, AovKind::Normal),
+        (settings.aov_depth, AovKind::Depth),
+    ]
+    .into_iter()
+    .filter_map(|(on, kind)| on.then_some(kind))
+    .collect()
+}
+
 fn still_spec(settings: &RenderSettings, output: &Output, opts: &RenderOptions) -> StillSpec {
     use solarxy_host::still::StillReadback;
+    let aovs = effective_aovs(settings, opts);
     let readback = match output {
         Output::File(path) if files::is_exr(path) => match opts.exr_space.unwrap_or_default() {
             ExrSpace::SceneLinear => StillReadback::SceneLinear,
@@ -847,8 +910,8 @@ fn still_spec(settings: &RenderSettings, output: &Output, opts: &RenderOptions) 
         readback,
         // Albedo and normal come out of one store, so either of them asks for
         // the same copy.
-        aux: opts.aovs.iter().any(|k| k.from_auxiliary()),
-        depth: opts.aovs.contains(&AovKind::Depth),
+        aux: aovs.iter().any(|k| k.from_auxiliary()),
+        depth: aovs.contains(&AovKind::Depth),
         // No mid-tile previews. A sink here is fed a whole picture when a tile
         // lands, and a surface that wants to watch one arrive asks for smaller
         // tiles instead; paying for a composite and a readback four times a
@@ -1368,6 +1431,35 @@ mod tests {
     /// The film back reaches the still spec too: the job is what substitutes
     /// the transparent background for the rasterizer and tells the composite
     /// to carry the lane, and it can only do either if the spec says so.
+    /// A scene that asks for a pass on its render node gets it from this
+    /// surface with no flag, as it does from the browser; a flag replaces
+    /// the node's set rather than adding to it.
+    #[test]
+    fn the_node_s_passes_are_written_when_no_flag_asks() {
+        let mut settings = RenderSettings::defaults();
+        settings.aov_depth = true;
+        settings.aov_normal = true;
+        let no_flag = RenderOptions::default();
+        assert_eq!(
+            effective_aovs(&settings, &no_flag),
+            [AovKind::Normal, AovKind::Depth]
+        );
+        let spec = still_spec(&settings, &Output::Stdout, &no_flag);
+        assert!(spec.aux, "the normal pass needs the auxiliary store");
+        assert!(spec.depth);
+
+        let flagged = RenderOptions {
+            aovs: vec![AovKind::Albedo],
+            ..RenderOptions::default()
+        };
+        assert_eq!(effective_aovs(&settings, &flagged), [AovKind::Albedo]);
+        let spec = still_spec(&settings, &Output::Stdout, &flagged);
+        assert!(spec.aux);
+        assert!(!spec.depth, "the flag replaced the node's depth pass");
+
+        assert!(effective_aovs(&RenderSettings::defaults(), &no_flag).is_empty());
+    }
+
     #[test]
     fn the_film_back_reaches_the_still_spec() {
         let mut s = RenderSettings::defaults();

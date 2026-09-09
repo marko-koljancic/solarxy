@@ -203,6 +203,7 @@ impl State {
             still: None,
             still_target: None,
             finished_float: None,
+            finished_passes: None,
             tracer: None,
             traced_env_dirty: false,
             look_through: [None; 4],

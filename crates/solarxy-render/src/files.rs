@@ -58,7 +58,7 @@ pub fn sibling(image: &Path, kind: AovKind) -> PathBuf {
         || "render".to_string(),
         |s| s.to_string_lossy().into_owned(),
     );
-    image.with_file_name(format!("{stem}.{}.exr", kind.as_str()))
+    image.with_file_name(kind.sibling_name(&stem))
 }
 
 /// Drops the alpha lane of an RGBA float readback.

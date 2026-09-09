@@ -42,6 +42,7 @@ use solarxy_kernel::transfer;
 use solarxy_renderer::manipulator::{self, ManipulatorState};
 
 use solarxy_host::{HostViewState, RasterBackend};
+use solarxy_host::still::StillPasses;
 use solarxy_host::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
 use solarxy_host::display_defaults::{self, DisplayDefaults};
 use solarxy_core::gizmo::TransformParams;
@@ -704,85 +705,6 @@ const MAX_PASS_PLANE_BYTES: u64 = 192 * 1024 * 1024;
 #[allow(clippy::cast_precision_loss)]
 fn megapixels(pixels: u64) -> f64 {
     pixels as f64 / 1_000_000.0
-}
-
-/// The auxiliary planes a still is keeping, when any were asked for.
-///
-/// Held as the bytes the job hands back rather than as typed floats, because
-/// that is what the shared display mappings read and what the extraction
-/// helpers read on the way to a file. One conversion, at the point that needs
-/// one, rather than a conversion on every tile.
-struct StillPasses {
-    width: u32,
-    height: u32,
-    /// `width * height * 16`: albedo in the first three lanes of every four,
-    /// the packed normal in the fourth. One store, because the kernel writes
-    /// one and asking for either pass fetches both.
-    aux: Option<Vec<u8>>,
-    /// `width * height * 4`.
-    depth: Option<Vec<u8>>,
-}
-
-impl StillPasses {
-    /// The planes this run will keep, or `None` when it asked for none.
-    fn new(spec: &solarxy_host::still::StillSpec) -> Option<Self> {
-        if !spec.aux && !spec.depth {
-            return None;
-        }
-        let pixels = (spec.width as usize) * (spec.height as usize);
-        Some(Self {
-            width: spec.width,
-            height: spec.height,
-            aux: spec.aux.then(|| vec![0u8; pixels * 16]),
-            depth: spec.depth.then(|| vec![0u8; pixels * 4]),
-        })
-    }
-
-    /// What the planes will cost, for the refusal that happens before the
-    /// render rather than during it.
-    fn cost(spec: &solarxy_host::still::StillSpec) -> u64 {
-        let pixels = u64::from(spec.width) * u64::from(spec.height);
-        let per_pixel = u64::from(spec.aux) * 16 + u64::from(spec.depth) * 4;
-        pixels * per_pixel
-    }
-
-    fn place(&mut self, tile: &solarxy_host::still::StillTile) {
-        if let (Some(dst), Some(src)) = (self.aux.as_mut(), tile.aux.as_ref()) {
-            place_plane(dst, self.width, self.height, tile.rect, src, 16);
-        }
-        if let (Some(dst), Some(src)) = (self.depth.as_mut(), tile.depth.as_ref()) {
-            place_plane(dst, self.width, self.height, tile.rect, src, 4);
-        }
-    }
-}
-
-/// Copies one tile's plane into its place in the whole one.
-///
-/// Row by row rather than pixel by pixel: a plane is contiguous within a row
-/// and the stride is the only thing that differs between the two.
-fn place_plane(
-    dst: &mut [u8],
-    width: u32,
-    height: u32,
-    rect: solarxy_host::still::TileRect,
-    src: &[u8],
-    bytes_per_pixel: usize,
-) {
-    let row_bytes = rect.width as usize * bytes_per_pixel;
-    for row in 0..rect.height {
-        let y = rect.y + row;
-        if y >= height || rect.x >= width {
-            continue;
-        }
-        let dst_at = (y as usize * width as usize + rect.x as usize) * bytes_per_pixel;
-        let src_at = row as usize * row_bytes;
-        if let (Some(slot), Some(bytes)) = (
-            dst.get_mut(dst_at..dst_at + row_bytes),
-            src.get(src_at..src_at + row_bytes),
-        ) {
-            slot.copy_from_slice(bytes);
-        }
-    }
 }
 
 /// The traced preview's settings: one sample per animation frame (the

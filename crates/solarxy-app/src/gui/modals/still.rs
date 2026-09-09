@@ -10,8 +10,33 @@
 //! escape chain, which is the same priority the web dialog implements.
 
 use image::RgbaImage;
+use solarxy_host::passes::{AovKind, PassKind, PassSelector};
 
 use crate::gui::theme::Theme;
+
+/// What a fresh run opens with: the picture's shape from the render node, and
+/// the passes the node asks for beside whether the engine it names can write
+/// any. One bundle rather than eight arguments.
+pub(crate) struct StillOpening {
+    pub width: u32,
+    pub height: u32,
+    pub traced: bool,
+    pub samples: u32,
+    pub denoise: bool,
+    pub filename: String,
+    pub requested: Vec<AovKind>,
+    pub writes_aovs: bool,
+}
+
+/// A pass in the Showing combo, which needs a name to show.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Shown(PassKind);
+
+impl std::fmt::Display for Shown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.label())
+    }
+}
 
 /// What the render is doing, which is what the modal shows.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -137,19 +162,34 @@ pub(crate) struct StillRenderModal {
     /// it does, so transparency reads as transparency here the way it does in
     /// the browser's render window.
     transparent: bool,
+    /// Which produced pass the preview shows, and which this run can show at
+    /// all. Told the capability at open and again at begin, since what
+    /// renders is what the node says when Render is pressed.
+    selector: PassSelector,
+    /// Set when the Showing combo changes; drained by the state layer, which
+    /// replays the chosen plane into the preview without rendering.
+    pass_request: Option<PassKind>,
+    /// Set when `Save All…` is clicked; drained by the state layer.
+    save_all_request: bool,
 }
 
 impl StillRenderModal {
     /// Open for a fresh run.
-    pub fn start(
-        &mut self,
-        width: u32,
-        height: u32,
-        traced: bool,
-        samples: u32,
-        denoise: bool,
-        filename: String,
-    ) {
+    pub fn start(&mut self, opening: StillOpening) {
+        let StillOpening {
+            width,
+            height,
+            traced,
+            samples,
+            denoise,
+            filename,
+            requested,
+            writes_aovs,
+        } = opening;
+        self.selector = PassSelector::new(&requested);
+        self.selector.saw_capability(writes_aovs);
+        self.pass_request = None;
+        self.save_all_request = false;
         self.open = true;
         // Idle, not running. The job starts when Render is pressed, which is
         // what gives the format choice somewhere to be made.
@@ -173,9 +213,15 @@ impl StillRenderModal {
 
     /// The job has begun. Everything the previous run left behind is cleared
     /// here rather than at open, so the format chosen while idle survives.
-    pub fn begin(&mut self, transparent: bool) {
+    pub fn begin(&mut self, transparent: bool, requested: Vec<AovKind>, writes_aovs: bool) {
         self.phase = StillPhase::Running;
         self.transparent = transparent;
+        // What renders is what the node says when Render is pressed, so the
+        // passes are told again here rather than carried from the opening.
+        self.selector = PassSelector::new(&requested);
+        self.selector.saw_capability(writes_aovs);
+        self.pass_request = None;
+        self.save_all_request = false;
         self.progress = (0, 0, 0, self.samples);
         self.elapsed_ms = 0;
         self.remaining_ms = None;
@@ -252,6 +298,64 @@ impl StillRenderModal {
 
     pub fn take_save_request(&mut self) -> bool {
         std::mem::take(&mut self.save_request)
+    }
+
+    /// Drain a change of the Showing combo: the pass the preview should now
+    /// show, replayed from what the render produced.
+    pub fn take_pass_request(&mut self) -> Option<PassKind> {
+        self.pass_request.take()
+    }
+
+    pub fn take_save_all_request(&mut self) -> bool {
+        std::mem::take(&mut self.save_all_request)
+    }
+
+    /// The finished picture, for a replay of the beauty into the preview.
+    pub fn image(&self) -> Option<&RgbaImage> {
+        self.image.as_ref()
+    }
+
+    /// Whether this run can show any pass beside the beauty.
+    fn has_passes(&self) -> bool {
+        PassKind::ALL
+            .iter()
+            .any(|k| k.aov().is_some() && self.selector.available(*k))
+    }
+
+    /// What the render produces beside the picture, said in every phase so
+    /// the useful moment to learn it is before Render is pressed. The
+    /// browser's wording, reused.
+    fn passes_note(&self) -> String {
+        if self.selector.beauty_only() {
+            return "Passes: None: this engine writes no auxiliary passes".to_owned();
+        }
+        let names: Vec<&str> = PassKind::ALL
+            .iter()
+            .filter(|k| k.aov().is_some() && self.selector.available(**k))
+            .map(|k| k.label())
+            .collect();
+        if names.is_empty() {
+            "Passes: None".to_owned()
+        } else {
+            format!("Passes: {}", names.join(", "))
+        }
+    }
+
+    /// The passes this run could have produced and did not ask for, for the
+    /// combo's hint about what would produce them.
+    fn missing_passes(&self) -> Vec<&'static str> {
+        PassKind::ALL
+            .iter()
+            .filter(|k| k.aov().is_some() && !self.selector.available(**k))
+            .map(|k| k.label())
+            .collect()
+    }
+
+    /// What the planes will hold while the render runs, in bytes per pixel.
+    fn plane_bytes_per_pixel(&self) -> u64 {
+        let aux =
+            self.selector.available(PassKind::Albedo) || self.selector.available(PassKind::Normal);
+        u64::from(aux) * 16 + u64::from(self.selector.available(PassKind::Depth)) * 4
     }
 
     pub fn suggested_filename(&self) -> &str {
@@ -331,6 +435,47 @@ pub(in crate::gui) fn draw_still_modal(
             .small()
             .color(theme.muted),
         );
+        // What leaves beside the picture, in every phase, so the useful moment
+        // to learn that your passes will not be in the render is before you
+        // wait for it.
+        ui.label(
+            egui::RichText::new(modal.passes_note())
+                .small()
+                .color(theme.muted),
+        );
+        // The pass selector is a viewing control, not a rendering one: it
+        // chooses among planes the finished render already carries, and never
+        // renders again. Only the produced passes are listed, because egui's
+        // combo cannot disable a row the way the browser's select does; the
+        // hint about the rest lives in the tooltip instead.
+        if modal.phase == StillPhase::Finished && modal.has_passes() {
+            let options: Vec<Shown> = PassKind::ALL
+                .iter()
+                .copied()
+                .filter(|k| modal.selector.available(*k))
+                .map(Shown)
+                .collect();
+            let missing = modal.missing_passes();
+            let hint = if missing.is_empty() {
+                "Which produced pass the preview shows. Never renders again.".to_owned()
+            } else {
+                format!(
+                    "Which produced pass the preview shows. Never renders again. Not \
+                     produced: {}. Turn them on on the render node and render again.",
+                    missing.join(", ")
+                )
+            };
+            if let Some(v) = crate::gui::widgets::combo_with_tooltip(
+                ui,
+                "Showing",
+                &hint,
+                Shown(modal.selector.selected()),
+                &options,
+            ) {
+                modal.selector.choose(v.0);
+                modal.pass_request = Some(modal.selector.selected());
+            }
+        }
         ui.add_space(6.0);
 
         // The output choice, in the sidebar's established labelled-combo idiom.
@@ -452,6 +597,20 @@ pub(in crate::gui) fn draw_still_modal(
                         .color(theme.muted),
                     );
                 }
+                // The planes are held whole, so their cost is owed the same
+                // way the float picture's is.
+                let per_pixel = modal.plane_bytes_per_pixel();
+                if per_pixel > 0 {
+                    let pixels = u64::from(modal.width) * u64::from(modal.height);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "The passes hold about {} MB more while it renders.",
+                            pixels * per_pixel / (1024 * 1024)
+                        ))
+                        .small()
+                        .color(theme.muted),
+                    );
+                }
             }
             StillPhase::Cancelled => {
                 ui.label(egui::RichText::new("Cancelled").small().color(theme.muted));
@@ -488,6 +647,17 @@ pub(in crate::gui) fn draw_still_modal(
                 }
                 if ui.button("Save As\u{2026}").clicked() {
                     modal.save_request = true;
+                }
+                if modal.has_passes()
+                    && ui
+                        .button("Save All\u{2026}")
+                        .on_hover_text(
+                            "The picture, and one floating-point EXR beside it per produced \
+                             pass, named as the command line names them",
+                        )
+                        .clicked()
+                {
+                    modal.save_all_request = true;
                 }
                 if ui.button("Render again").clicked() {
                     modal.render_request = true;

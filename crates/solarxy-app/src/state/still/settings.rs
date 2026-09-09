@@ -7,9 +7,49 @@
 //! and is a written check instead.
 
 use solarxy_graph::document::{GraphContext, NodeId};
-use solarxy_graph::nodes::RenderSettings;
-use solarxy_renderer::pathtrace::backend::TraceSettings;
+use solarxy_graph::nodes::{RenderEngine, RenderSettings};
+use solarxy_host::passes::AovKind;
+use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
 use solarxy_renderer::pathtrace::denoise::DenoiseSettings;
+
+/// What a render asks to keep beside the picture.
+pub(super) struct PassRequest {
+    /// Whether the job reads the auxiliary store back: albedo and normal come
+    /// out of one store, so either asks for the same copy.
+    pub aux: bool,
+    pub depth: bool,
+    /// The passes by name, for the selector and the files.
+    pub requested: Vec<AovKind>,
+}
+
+/// The still spec's two flags and the selector's request, from the node's
+/// three, derived exactly as the browser and the headless command derive
+/// them, so a scene renders the same passes wherever it is opened.
+pub(super) fn pass_request(settings: &RenderSettings) -> PassRequest {
+    let requested: Vec<AovKind> = [
+        (settings.aov_albedo, AovKind::Albedo),
+        (settings.aov_normal, AovKind::Normal),
+        (settings.aov_depth, AovKind::Depth),
+    ]
+    .into_iter()
+    .filter_map(|(on, kind)| on.then_some(kind))
+    .collect();
+    PassRequest {
+        aux: requested.iter().any(|k| k.from_auxiliary()),
+        depth: requested.contains(&AovKind::Depth),
+        requested,
+    }
+}
+
+/// Whether the engine the node names writes auxiliary passes at all. Read
+/// from the backend's constant rather than a live backend, as the browser
+/// reads it, so the dialog knows before Render is pressed.
+pub(super) fn writes_aovs(engine: RenderEngine) -> bool {
+    match engine {
+        RenderEngine::PathTraced => PathBackend::CAPS.writes_aovs,
+        RenderEngine::Raster => solarxy_host::RasterBackend::CAPS.writes_aovs,
+    }
+}
 
 /// The render node's settings, or the defaults when the scene has none.
 ///
@@ -349,5 +389,41 @@ mod parity {
     #[test]
     fn a_scene_with_no_render_node_falls_to_one_set_of_defaults() {
         assert_eq!(default_still_settings(), RenderSettings::defaults());
+    }
+}
+
+#[cfg(test)]
+mod pass_tests {
+    use super::*;
+
+    /// Albedo and normal share one store, so either alone asks for the
+    /// auxiliary copy and neither asks for depth; depth is its own flag. The
+    /// same rule the browser and the headless command derive the spec by.
+    #[test]
+    fn albedo_alone_asks_for_the_shared_aux_store() {
+        let mut settings = RenderSettings::defaults();
+        settings.aov_albedo = true;
+        let request = pass_request(&settings);
+        assert!(request.aux);
+        assert!(!request.depth);
+        assert_eq!(request.requested, [AovKind::Albedo]);
+
+        let mut settings = RenderSettings::defaults();
+        settings.aov_depth = true;
+        let request = pass_request(&settings);
+        assert!(!request.aux);
+        assert!(request.depth);
+        assert_eq!(request.requested, [AovKind::Depth]);
+
+        let none = pass_request(&RenderSettings::defaults());
+        assert!(!none.aux && !none.depth && none.requested.is_empty());
+    }
+
+    /// The traced engine writes passes and the rasterizer does not, read
+    /// from the same constants the browser reads.
+    #[test]
+    fn only_the_traced_engine_writes_passes() {
+        assert!(writes_aovs(RenderEngine::PathTraced));
+        assert!(!writes_aovs(RenderEngine::Raster));
     }
 }

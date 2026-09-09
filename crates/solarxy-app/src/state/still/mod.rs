@@ -22,7 +22,7 @@
 use solarxy_core::preferences::BackgroundMode;
 use solarxy_core::view_config::{PaneDisplaySettings, PaneLook};
 use solarxy_graph::nodes::{RenderEngine, RenderSettings};
-use solarxy_host::still::{StillEngine, StillSpec, StillStep, TILE_BUDGET_PIXELS};
+use solarxy_host::still::{StillEngine, StillPasses, StillSpec, StillStep, TILE_BUDGET_PIXELS};
 use solarxy_host::{StillCtx, StillRenderJob};
 use solarxy_renderer::backend::RenderBackend;
 use solarxy_renderer::camera_state::CameraState;
@@ -39,8 +39,10 @@ use super::update::find_node_name;
 mod pixels;
 mod settings;
 
-use pixels::{blit_rect, blit_tile, preview_of, still_filename, write_exr};
-use settings::{denoise_settings_for, resolve_still_settings, trace_settings_for};
+use pixels::{blit_rect, blit_tile, preview_of, still_filename, write_exr, write_passes_beside};
+use settings::{
+    denoise_settings_for, pass_request, resolve_still_settings, trace_settings_for, writes_aovs,
+};
 
 /// The largest edge of the modal's live preview. Small enough that the
 /// per-tile nearest-neighbour downscale reads only preview-many pixels.
@@ -62,6 +64,10 @@ pub(crate) struct StillState {
     /// The assembled floating-point picture, when the render is one. `None`
     /// for an eight-bit still, which costs nothing.
     pub float: Option<solarxy_host::still::FloatImage>,
+    /// The auxiliary planes, whole, when the render node asked for any. Held
+    /// beside the picture for the same reason the browser holds them: the
+    /// depth display normalizes over the whole picture's range.
+    pub passes: Option<StillPasses>,
     /// When the render began, which is the shell's own clock: the job takes a
     /// reading rather than reading one, because it also compiles for the
     /// browser where there is no `Instant`.
@@ -83,14 +89,16 @@ impl State {
         let Some(settings) = self.resolve_still_request() else {
             return;
         };
-        self.gui.open_still_modal(
-            settings.width,
-            settings.height,
-            settings.engine == RenderEngine::PathTraced,
-            settings.samples,
-            settings.denoise,
-            still_filename(),
-        );
+        self.gui.open_still_modal(crate::gui::StillOpening {
+            width: settings.width,
+            height: settings.height,
+            traced: settings.engine == RenderEngine::PathTraced,
+            samples: settings.samples,
+            denoise: settings.denoise,
+            filename: still_filename(),
+            requested: pass_request(&settings).requested,
+            writes_aovs: writes_aovs(settings.engine),
+        });
     }
 
     /// What this render would be, or nothing with the reason already said.
@@ -286,6 +294,10 @@ impl State {
         let background = self.view.pane_settings[ap].background_mode;
         let (format, space) = self.gui.still_output_choice();
         let readback = solarxy_host::still::readback_for(format, space);
+        // What leaves beside the picture, from the node, derived the way the
+        // browser and the headless command derive it, so a scene renders the
+        // same passes wherever it is opened.
+        let request = pass_request(&settings);
         let spec = StillSpec {
             width,
             height,
@@ -298,8 +310,8 @@ impl State {
             // From the dialog, through the rule all three shells read, which is
             // what makes the choice spelled the same way on each of them.
             readback,
-            aux: false,
-            depth: false,
+            aux: request.aux,
+            depth: request.depth,
             // The modal is watching, so the job publishes what it has on the
             // shared interval rather than only when a tile lands. Without it a
             // still that fits in one tile shows a blank frame for its whole
@@ -320,7 +332,11 @@ impl State {
             spec.transparent,
         );
 
-        self.gui.begin_still(spec.transparent);
+        self.gui.begin_still(
+            spec.transparent,
+            request.requested.clone(),
+            writes_aovs(settings.engine),
+        );
         self.still = Some(StillState {
             job,
             camera,
@@ -329,6 +345,7 @@ impl State {
             engine: engine_kind,
             image,
             float,
+            passes: StillPasses::new(&spec),
             started: std::time::Instant::now(),
         });
     }
@@ -399,6 +416,13 @@ impl State {
                     } else {
                         blit_tile(&mut still.image, spec.width, &t);
                     }
+                    // The auxiliary planes land in their own stores, whole,
+                    // because the depth display normalizes over the whole
+                    // picture and a plane mapped tile by tile would band at
+                    // every seam.
+                    if let Some(p) = still.passes.as_mut() {
+                        p.place(&t);
+                    }
                 }
                 self.gui
                     .set_still_preview(preview_of(&still.image, spec.width, spec.height));
@@ -456,6 +480,7 @@ impl State {
         // modal shows a screen image and the float one is only ever written,
         // so the two live where each is used.
         self.finished_float = done.float;
+        self.finished_passes = done.passes;
         let Some(image) = image::RgbaImage::from_raw(spec.width, spec.height, done.image) else {
             self.gui.fail_still();
             return;
@@ -483,13 +508,49 @@ impl State {
         if self.gui.take_still_render_request() {
             self.start_still_render();
         }
-        if !self.gui.take_still_save_request() {
+        self.replay_still_pass();
+        let with_passes = self.gui.take_still_save_all_request();
+        if !with_passes && !self.gui.take_still_save_request() {
             return;
         }
-        // The float image is taken before the picker opens, because taking it
-        // is also what closes the dialog and a cancelled picker should leave
-        // both where they were. The eight-bit image follows the same rule.
+        self.save_still(with_passes);
+    }
+
+    /// Replay the pass the Showing combo chose into the preview.
+    ///
+    /// A replay of a plane the render already produced, never a render: the
+    /// beauty comes back from the finished picture, a pass from the planes the
+    /// still kept beside it, through the display mappings every surface shows
+    /// a pass with.
+    fn replay_still_pass(&mut self) {
+        let Some(kind) = self.gui.take_still_pass_request() else {
+            return;
+        };
+        let frame = match kind.aov() {
+            None => self
+                .gui
+                .still_image()
+                .map(|img| preview_of(img.as_raw(), img.width(), img.height())),
+            Some(aov) => self.finished_passes.as_ref().and_then(|p| {
+                p.display(aov)
+                    .map(|bytes| preview_of(&bytes, p.width(), p.height()))
+            }),
+        };
+        if let Some(frame) = frame {
+            self.gui.set_still_preview(frame);
+        }
+    }
+
+    /// Write the finished still where the native dialog says, and with
+    /// `with_passes` one floating-point file beside it per produced pass,
+    /// named as the command line names them.
+    fn save_still(&mut self, with_passes: bool) {
+        // The float image and the planes are taken before the picker opens,
+        // because taking the picture is also what closes the dialog and a
+        // cancelled picker should leave everything where it was. The
+        // eight-bit image follows the same rule.
         let float = self.finished_float.take();
+        let passes = self.finished_passes.take();
         let is_float = self.gui.still_is_float() && float.is_some();
         let (filter, ext) = if is_float {
             ("OpenEXR image", "exr")
@@ -501,9 +562,10 @@ impl State {
             .add_filter(filter, &[ext])
             .save_file()
         else {
-            // Put it back: the dialog is still open and Save can be pressed
+            // Put them back: the dialog is still open and Save can be pressed
             // again.
             self.finished_float = float;
+            self.finished_passes = passes;
             return;
         };
         let written = if let Some(f) = float.filter(|_| is_float) {
@@ -517,15 +579,26 @@ impl State {
                 None => Err("the picture is no longer available".to_owned()),
             }
         };
+        // The picture first, because it is what was asked for and a pass
+        // without one is of no use to anybody.
+        let written = written.and_then(|()| match (with_passes, passes.as_ref()) {
+            (true, Some(p)) => write_passes_beside(&path, p),
+            _ => Ok(0),
+        });
         match written {
-            Ok(()) => {
+            Ok(pass_count) => {
                 let name = path
                     .file_name()
                     .and_then(std::ffi::OsStr::to_str)
                     .unwrap_or("still")
                     .to_string();
+                let message = match pass_count {
+                    0 => format!("Saved {name}"),
+                    1 => format!("Saved {name} and 1 pass beside it"),
+                    n => format!("Saved {name} and {n} passes beside it"),
+                };
                 self.gui
-                    .set_toast(&format!("Saved {name}"), crate::gui::ToastSeverity::Success);
+                    .set_toast(&message, crate::gui::ToastSeverity::Success);
             }
             Err(e) => {
                 self.gui.set_toast(

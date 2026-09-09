@@ -56,6 +56,18 @@ impl AovKind {
     pub fn from_auxiliary(self) -> bool {
         matches!(self, Self::Albedo | Self::Normal)
     }
+
+    /// The file name a pass is written under beside a picture with `stem`.
+    ///
+    /// `beauty.exr` and `beauty.png` both put the albedo at
+    /// `beauty.albedo.exr`: the stem is what identifies the shot, and a set of
+    /// passes that changed names with the beauty's format would be a set
+    /// nobody could glob. One rule here, so the command line and the desktop
+    /// cannot name the same pass two ways.
+    #[must_use]
+    pub fn sibling_name(self, stem: &str) -> String {
+        format!("{stem}.{}.exr", self.as_str())
+    }
 }
 
 /// A pass a surface can show, including the beauty the others sit beside.
@@ -148,6 +160,13 @@ impl PassSelector {
         if self.available(kind) {
             self.selected = kind;
         }
+    }
+}
+
+/// A selector that knows nothing yet offers the beauty alone.
+impl Default for PassSelector {
+    fn default() -> Self {
+        Self::new(&[])
     }
 }
 

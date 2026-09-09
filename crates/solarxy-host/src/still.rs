@@ -1814,3 +1814,238 @@ mod tests {
         assert_eq!(image.rgb(), &[0.4, 0.3, 0.2, 0.1, 0.2, 0.3]);
     }
 }
+
+/// The auxiliary planes a still keeps, when any were asked for.
+///
+/// Held whole rather than tile by tile, because the depth display normalizes
+/// over the whole picture's range and a plane mapped tile by tile would band
+/// at every seam. Held as the bytes the job hands back rather than as typed
+/// floats, because that is what the display mappings read and what the
+/// extraction helpers read on the way to a file: one conversion at the point
+/// that needs one, rather than one per tile.
+///
+/// Shared by both graphical shells for the reason [`FloatImage`] is: two
+/// copies of the placement were two chances to band differently, and the
+/// browser's copy had no native test until it moved here.
+pub struct StillPasses {
+    width: u32,
+    height: u32,
+    /// `width * height * 16`: albedo in the first three lanes of every four,
+    /// the packed normal in the fourth. One store, because the kernel writes
+    /// one and asking for either pass fetches both.
+    aux: Option<Vec<u8>>,
+    /// `width * height * 4`.
+    depth: Option<Vec<u8>>,
+}
+
+impl StillPasses {
+    /// The planes this run will keep, or `None` when it asked for none.
+    #[must_use]
+    pub fn new(spec: &StillSpec) -> Option<Self> {
+        if !spec.aux && !spec.depth {
+            return None;
+        }
+        let pixels = (spec.width as usize) * (spec.height as usize);
+        Some(Self {
+            width: spec.width,
+            height: spec.height,
+            aux: spec.aux.then(|| vec![0u8; pixels * AUX_BYTES_PER_PIXEL]),
+            depth: spec
+                .depth
+                .then(|| vec![0u8; pixels * DEPTH_BYTES_PER_PIXEL]),
+        })
+    }
+
+    /// What the planes will cost in bytes, for a refusal that happens before
+    /// the render rather than during it.
+    #[must_use]
+    pub fn cost(spec: &StillSpec) -> u64 {
+        let pixels = u64::from(spec.width) * u64::from(spec.height);
+        let per_pixel = u64::from(spec.aux) * AUX_BYTES_PER_PIXEL as u64
+            + u64::from(spec.depth) * DEPTH_BYTES_PER_PIXEL as u64;
+        pixels * per_pixel
+    }
+
+    #[must_use]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[must_use]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Copies a finished tile's planes into their place.
+    pub fn place(&mut self, tile: &StillTile) {
+        if let (Some(dst), Some(src)) = (self.aux.as_mut(), tile.aux.as_ref()) {
+            place_plane(
+                dst,
+                self.width,
+                self.height,
+                tile.rect,
+                src,
+                AUX_BYTES_PER_PIXEL,
+            );
+        }
+        if let (Some(dst), Some(src)) = (self.depth.as_mut(), tile.depth.as_ref()) {
+            place_plane(
+                dst,
+                self.width,
+                self.height,
+                tile.rect,
+                src,
+                DEPTH_BYTES_PER_PIXEL,
+            );
+        }
+    }
+
+    /// Whether the run kept the plane this pass reads from.
+    #[must_use]
+    pub fn has(&self, kind: crate::passes::AovKind) -> bool {
+        self.plane_bytes(kind).is_some()
+    }
+
+    /// The raw plane a pass reads from: the shared auxiliary store for albedo
+    /// and normal, the depth store for depth.
+    #[must_use]
+    pub fn plane_bytes(&self, kind: crate::passes::AovKind) -> Option<&[u8]> {
+        use crate::passes::AovKind;
+        match kind {
+            AovKind::Albedo | AovKind::Normal => self.aux.as_deref(),
+            AovKind::Depth => self.depth.as_deref(),
+        }
+    }
+
+    /// The pass as floats in image order, three per pixel for albedo and
+    /// normal and one for depth, which is what a file encoder takes.
+    #[must_use]
+    pub fn plane(&self, kind: crate::passes::AovKind) -> Option<Vec<f32>> {
+        use crate::passes::{AovKind, albedo_from_auxiliary, floats_of, normal_from_auxiliary};
+        let bytes = self.plane_bytes(kind)?;
+        Some(match kind {
+            AovKind::Albedo => albedo_from_auxiliary(&floats_of(bytes)),
+            AovKind::Normal => normal_from_auxiliary(&floats_of(bytes)),
+            AovKind::Depth => floats_of(bytes),
+        })
+    }
+
+    /// The pass as display pixels, RGBA8 over the whole image, through the
+    /// shared mappings, so every surface that shows a pass shows the same
+    /// picture of it.
+    #[must_use]
+    pub fn display(&self, kind: crate::passes::AovKind) -> Option<Vec<u8>> {
+        use crate::passes::{AovKind, albedo_rgba8, depth_rgba8, normal_rgba8};
+        let bytes = self.plane_bytes(kind)?;
+        Some(match kind {
+            AovKind::Albedo => albedo_rgba8(bytes),
+            AovKind::Normal => normal_rgba8(bytes),
+            AovKind::Depth => depth_rgba8(bytes),
+        })
+    }
+}
+
+/// Copies one tile's plane into its place in the whole one.
+///
+/// Row by row rather than pixel by pixel: a plane is contiguous within a row
+/// and the stride is the only thing that differs between the two.
+fn place_plane(
+    dst: &mut [u8],
+    width: u32,
+    height: u32,
+    rect: TileRect,
+    src: &[u8],
+    bytes_per_pixel: usize,
+) {
+    let row_bytes = rect.width as usize * bytes_per_pixel;
+    for row in 0..rect.height {
+        let y = rect.y + row;
+        if y >= height || rect.x >= width {
+            continue;
+        }
+        let dst_at = (y as usize * width as usize + rect.x as usize) * bytes_per_pixel;
+        let src_at = row as usize * row_bytes;
+        if let (Some(slot), Some(bytes)) = (
+            dst.get_mut(dst_at..dst_at + row_bytes),
+            src.get(src_at..src_at + row_bytes),
+        ) {
+            slot.copy_from_slice(bytes);
+        }
+    }
+}
+
+#[cfg(test)]
+mod pass_store_tests {
+    use super::*;
+    use crate::passes::AovKind;
+
+    fn spec(width: u32, height: u32, aux: bool, depth: bool) -> StillSpec {
+        StillSpec {
+            width,
+            height,
+            aux,
+            depth,
+            ..StillSpec::default()
+        }
+    }
+
+    /// A tile's planes land at the tile's rectangle inside the whole plane,
+    /// and nowhere else. The values are exact integers the test placed, so
+    /// strict equality is the intent.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn a_tile_plane_lands_at_its_rect_in_the_whole_plane() {
+        let mut passes = StillPasses::new(&spec(4, 3, true, true)).expect("planes were asked for");
+        let rect = TileRect {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        };
+        let depth: Vec<u8> = [1.0f32, 2.0, 3.0, 4.0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let aux: Vec<u8> = (0..4u32)
+            .flat_map(|i| [i as f32, 0.0, 0.0, 0.0])
+            .flat_map(f32::to_le_bytes)
+            .collect();
+        passes.place(&StillTile {
+            rect,
+            pixels: Vec::new(),
+            aux: Some(aux),
+            depth: Some(depth),
+        });
+
+        let depth_plane = passes.plane(AovKind::Depth).expect("a depth plane");
+        let expect = |x: u32, y: u32| depth_plane[(y * 4 + x) as usize];
+        assert_eq!(expect(1, 1), 1.0);
+        assert_eq!(expect(2, 1), 2.0);
+        assert_eq!(expect(1, 2), 3.0);
+        assert_eq!(expect(2, 2), 4.0);
+        assert_eq!(expect(0, 0), 0.0, "outside the tile stayed untouched");
+        assert_eq!(expect(3, 2), 0.0, "outside the tile stayed untouched");
+
+        let albedo = passes.plane(AovKind::Albedo).expect("an albedo plane");
+        let red_lane = |x: usize, y: usize| (y * 4 + x) * 3;
+        assert_eq!(
+            albedo[red_lane(2, 1)],
+            1.0,
+            "the second tile pixel's red lane"
+        );
+        assert!(passes.has(AovKind::Normal));
+    }
+
+    /// A run that asked for nothing keeps no planes and costs nothing.
+    #[test]
+    fn a_run_that_asked_for_nothing_keeps_no_planes() {
+        assert!(StillPasses::new(&spec(8, 8, false, false)).is_none());
+        assert_eq!(StillPasses::cost(&spec(8, 8, false, false)), 0);
+        assert_eq!(StillPasses::cost(&spec(8, 8, true, false)), 64 * 16);
+        assert_eq!(StillPasses::cost(&spec(8, 8, true, true)), 64 * 20);
+        let only_depth = StillPasses::new(&spec(2, 2, false, true)).expect("depth was asked for");
+        assert!(!only_depth.has(AovKind::Albedo));
+        assert!(only_depth.has(AovKind::Depth));
+        assert!(only_depth.display(AovKind::Normal).is_none());
+    }
+}

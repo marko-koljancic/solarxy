@@ -1,6 +1,7 @@
 //! The still render's boundary: starting a job, draining its tiles and
 //! previews, and the passes it can hand back.
 
+use solarxy_host::passes::AovKind;
 use super::*;
 
 #[wasm_bindgen]
@@ -356,21 +357,7 @@ impl SolarxyApp {
         let Some(p) = self.still_passes.as_ref() else {
             return JsValue::UNDEFINED;
         };
-        let bytes = match pass {
-            "albedo" => p
-                .aux
-                .as_ref()
-                .map(|a| solarxy_host::passes::albedo_rgba8(a)),
-            "normal" => p
-                .aux
-                .as_ref()
-                .map(|a| solarxy_host::passes::normal_rgba8(a)),
-            "depth" => p
-                .depth
-                .as_ref()
-                .map(|d| solarxy_host::passes::depth_rgba8(d)),
-            _ => None,
-        };
+        let bytes = pass_kind(pass).and_then(|kind| p.display(kind));
         bytes.map_or(JsValue::UNDEFINED, |b| {
             JsValue::from(js_sys::Uint8Array::from(b.as_slice()))
         })
@@ -390,34 +377,19 @@ impl SolarxyApp {
         let Some(p) = self.still_passes.as_ref() else {
             return Err(JsError::new("this render produced no auxiliary passes"));
         };
-        let bytes = match pass {
-            "albedo" | "normal" => {
-                let aux = p
-                    .aux
-                    .as_ref()
-                    .ok_or_else(|| JsError::new("this render produced no auxiliary plane"))?;
-                let floats = solarxy_host::passes::floats_of(aux);
-                let plane = if pass == "albedo" {
-                    solarxy_host::passes::albedo_from_auxiliary(&floats)
-                } else {
-                    solarxy_host::passes::normal_from_auxiliary(&floats)
-                };
-                solarxy_formats::export::encode_exr_rgb_bytes(
-                    &solarxy_core::geometry::RawImageHdr::new(plane, p.width, p.height),
-                )
-                .map_err(|e| JsError::new(&format!("encoding the {pass} pass failed: {e}")))?
+        let kind = pass_kind(pass).ok_or_else(|| JsError::new(&format!("{pass} is not a pass")))?;
+        let plane = p
+            .plane(kind)
+            .ok_or_else(|| JsError::new(&format!("this render produced no {pass} pass")))?;
+        let bytes = match kind {
+            AovKind::Albedo | AovKind::Normal => solarxy_formats::export::encode_exr_rgb_bytes(
+                &solarxy_core::geometry::RawImageHdr::new(plane, p.width(), p.height()),
+            ),
+            AovKind::Depth => {
+                solarxy_formats::export::encode_exr_depth_bytes(&plane, p.width(), p.height())
             }
-            "depth" => {
-                let depth = p
-                    .depth
-                    .as_ref()
-                    .ok_or_else(|| JsError::new("this render produced no depth pass"))?;
-                let floats = solarxy_host::passes::floats_of(depth);
-                solarxy_formats::export::encode_exr_depth_bytes(&floats, p.width, p.height)
-                    .map_err(|e| JsError::new(&format!("encoding the depth pass failed: {e}")))?
-            }
-            other => return Err(JsError::new(&format!("{other} is not a pass"))),
-        };
+        }
+        .map_err(|e| JsError::new(&format!("encoding the {pass} pass failed: {e}")))?;
         Ok(js_sys::Uint8Array::from(bytes.as_slice()))
     }
 
@@ -608,5 +580,15 @@ impl SolarxyApp {
         } else {
             self.still = Some(job);
         }
+    }
+}
+
+/// The pass a window names, in the shared vocabulary.
+fn pass_kind(pass: &str) -> Option<AovKind> {
+    match pass {
+        "albedo" => Some(AovKind::Albedo),
+        "normal" => Some(AovKind::Normal),
+        "depth" => Some(AovKind::Depth),
+        _ => None,
     }
 }
