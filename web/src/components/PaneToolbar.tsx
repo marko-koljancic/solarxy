@@ -279,7 +279,7 @@ function PaneControls({ pane, settings, projection, active }: {
   const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
   const cameras = useMemo(() => rootNodes.filter((n) => n.typeId === "camera"), [rootNodes]);
   const lookThrough = useViewState((s) => s.view?.paneLookThrough?.[pane] ?? null);
-  const cameraLocked = useViewState((s) => s.view?.paneCameraLock?.[pane] ?? false);
+  const cameraLocked = useViewState((s) => s.view?.paneCameraLocked?.[pane] ?? false);
   // The global display settings: the turntable-speed submenu writes the
   // scene-wide rpm (per-pane is only the on/off toggle).
   const display = useViewState((s) => s.view?.display);

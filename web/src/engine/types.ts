@@ -726,6 +726,9 @@ export interface DisplaySettingsDto {
   metallicScale: number;
   hdriRotation: number;
   hdriIntensity: number;
+  /** On-screen point size in pixels. Global rather than per pane, unlike
+   * `lineWeight`: there is no comparison worth two point sizes side by side. */
+  pointSize: number;
 }
 
 export interface PaneRectDto {
@@ -749,7 +752,7 @@ export interface ViewStateDto {
   /** The camera node each pane looks through (id), or null for a free view. */
   paneLookThrough: (number | null)[];
   /** Whether each look-through pane is locked (reframes the camera). */
-  paneCameraLock: boolean[];
+  paneCameraLocked: boolean[];
   /** The look-through camera's framing aspect per pane (for the gate), or null. */
   paneGateAspect: (number | null)[];
   /** The host-owned attribute-visualization state (the right strip). */
