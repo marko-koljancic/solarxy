@@ -8802,7 +8802,7 @@
                   "fill": "$ink-tertiary",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "state/review.rs marker_at_screen_pos, screen-space, resolved markers stay hit-testable.",
+                  "content": "state/review/anchor.rs marker_at_screen_pos, screen-space, resolved markers stay hit-testable.",
                   "lineHeight": 1.4,
                   "fontFamily": "$font-ui",
                   "fontSize": 11,
@@ -8850,7 +8850,7 @@
                   "fill": "$ink-tertiary",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "gui/status_bar.rs drops the backend string, then the perf readout, then the pane label.",
+                  "content": "gui/chrome/status_bar.rs drops the backend string, then the perf readout, then the pane label.",
                   "lineHeight": 1.4,
                   "fontFamily": "$font-ui",
                   "fontSize": 11,
@@ -9340,13 +9340,24 @@
               "fill": "$ink-tertiary",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "Eight menus. Review sits between Render and View because it is a viewport mode, not a utility, and its label turns amber while review mode is active. Window's checkmarks are projected each frame from the dock tree, so the tree is the authoritative panel-visibility state and the menu only mirrors it.",
+              "content": "Eight menus. Review sits between Render and View because it is a viewport mode, not a utility, and its label turns amber while review mode is active. Window's checkmarks are projected each frame from the dock tree, so the tree is the authoritative panel-visibility state and the menu only mirrors it. The right end of the bar carries the cook strip: the Auto or Manual toggle, and in manual mode the stale count and the Cook button, which is disabled at zero and while a cook is still working. It lives in the header rather than the status bar because the status bar retires this release and the header is where the browser keeps the same three controls, beside undo and redo once the desktop has them.",
               "lineHeight": 1.5,
               "fontFamily": "$font-ui",
               "fontSize": 12,
               "fontWeight": "normal"
             }
           ]
+        },
+        {
+          "type": "text",
+          "id": "IdQra",
+          "name": "Caption manual",
+          "fill": "$ink-muted",
+          "content": "Manual cook mode, three nodes stale",
+          "lineHeight": 1.4,
+          "fontFamily": "$font-ui",
+          "fontSize": 11,
+          "fontWeight": "600"
         },
         {
           "type": "frame",
@@ -9535,6 +9546,371 @@
                   "fontFamily": "$font-ui",
                   "fontSize": 13,
                   "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "r2Chz",
+              "name": "spacer",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "A8Rxo",
+              "name": "Cook strip",
+              "gap": 6,
+              "padding": [
+                0,
+                8
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "gLIAd",
+                  "name": "Mode toggle, manual",
+                  "fill": "$surface-raised",
+                  "stroke": "$accent",
+                  "strokeWidth": 1,
+                  "padding": [
+                    2,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "vjDG4",
+                      "name": "Label",
+                      "fill": "$ink-primary",
+                      "content": "Manual",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "ZD5XH",
+                  "name": "Stale count",
+                  "fill": "$ink-secondary",
+                  "content": "3 stale",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "vXko8",
+                  "name": "Cook button",
+                  "fill": "$surface-raised",
+                  "padding": [
+                    2,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ZGrb3",
+                      "name": "Label",
+                      "fill": "$ink-primary",
+                      "content": "Cook",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "PThK1",
+          "name": "Caption auto",
+          "fill": "$ink-muted",
+          "content": "Auto cook mode, the count and the button leave",
+          "lineHeight": 1.4,
+          "fontFamily": "$font-ui",
+          "fontSize": 11,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "dexWj",
+          "name": "Bar, auto cook mode",
+          "width": 1000,
+          "height": 26,
+          "fill": "$surface-app",
+          "stroke": "$border-subtle",
+          "strokeWidth": 1,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "vj47l",
+              "name": "File",
+              "fill": "$hover-bg",
+              "stroke": "$accent",
+              "strokeWidth": 1,
+              "padding": [
+                4,
+                11
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "K0gpX4",
+                  "name": "Label",
+                  "fill": "$ink-primary",
+                  "content": "File",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "KvjW6",
+              "name": "Edit",
+              "padding": [
+                4,
+                11
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "onBZ4",
+                  "name": "Label",
+                  "fill": "$ink-primary",
+                  "content": "Edit",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "BPPU9",
+              "name": "Render",
+              "padding": [
+                4,
+                11
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "mKc0q",
+                  "name": "Label",
+                  "fill": "$ink-primary",
+                  "content": "Render",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "b9xadn",
+              "name": "Review",
+              "padding": [
+                4,
+                11
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "dq9Zz",
+                  "name": "Label",
+                  "fill": "$accent",
+                  "content": "● Review",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "iToxh",
+              "name": "View",
+              "padding": [
+                4,
+                11
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "kbfLH",
+                  "name": "Label",
+                  "fill": "$ink-primary",
+                  "content": "View",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "nfKVI",
+              "name": "Layout",
+              "padding": [
+                4,
+                11
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "l2hu8u",
+                  "name": "Label",
+                  "fill": "$ink-primary",
+                  "content": "Layout",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "FjQAU",
+              "name": "Window",
+              "padding": [
+                4,
+                11
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "SDkDW",
+                  "name": "Label",
+                  "fill": "$ink-primary",
+                  "content": "Window",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ZjLTh",
+              "name": "Help",
+              "padding": [
+                4,
+                11
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "aPZ9i",
+                  "name": "Label",
+                  "fill": "$ink-primary",
+                  "content": "Help",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "iwZvn",
+              "name": "spacer",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "IaAst",
+              "name": "Cook strip",
+              "gap": 6,
+              "padding": [
+                0,
+                8
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "a2zaE",
+                  "name": "Mode toggle, manual",
+                  "fill": "$surface-raised",
+                  "stroke": "$border-subtle",
+                  "strokeWidth": 1,
+                  "padding": [
+                    2,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "JGv6q",
+                      "name": "Label",
+                      "fill": "$ink-primary",
+                      "content": "Auto",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "W8Qf6",
+                  "x": 72,
+                  "y": 2,
+                  "name": "Stale count",
+                  "enabled": false,
+                  "fill": "$ink-secondary",
+                  "content": "3 stale",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "ZzPyW",
+                  "x": 116,
+                  "y": 0,
+                  "name": "Cook button",
+                  "enabled": false,
+                  "fill": "$surface-raised",
+                  "padding": [
+                    2,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "UlnJE",
+                      "name": "Label",
+                      "fill": "$ink-primary",
+                      "content": "Cook",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             }
@@ -10449,6 +10825,101 @@
                           "fontWeight": "normal"
                         }
                       ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "SQvYX",
+                      "name": "Sep",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "padding": [
+                        4,
+                        0
+                      ],
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "id": "d5cl0",
+                          "name": "Line",
+                          "fill": "$divider",
+                          "width": "fill_container",
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BkSRV",
+                      "name": "Auto Cook",
+                      "width": "fill_container",
+                      "height": 24,
+                      "gap": 16,
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "Z1yMh",
+                          "name": "Check",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "check",
+                          "library": "lucide",
+                          "fill": "#00000000"
+                        },
+                        {
+                          "type": "text",
+                          "id": "cDN8W",
+                          "name": "Label",
+                          "fill": "$ink-primary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Auto Cook",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "P2EFY",
+                      "name": "Cook Now",
+                      "width": "fill_container",
+                      "height": 24,
+                      "gap": 16,
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "hxXzK",
+                          "name": "Label",
+                          "fill": "$ink-primary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Cook Now",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "P1blD",
+                          "name": "Key",
+                          "fill": "$ink-muted",
+                          "content": "⌘Enter",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -10829,7 +11300,7 @@
       "type": "frame",
       "id": "h3hQu",
       "x": -1060,
-      "y": 4315,
+      "y": 4467,
       "name": "AS-IS 05 / Status bar",
       "clip": true,
       "width": 1056,
@@ -11697,7 +12168,7 @@
       "type": "frame",
       "id": "Xkpjf",
       "x": -1060,
-      "y": 4817,
+      "y": 4969,
       "name": "AS-IS 06 / Pane toolbar",
       "clip": true,
       "width": 1056,
@@ -12772,7 +13243,7 @@
       "type": "frame",
       "id": "hINdB",
       "x": -1060,
-      "y": 5552,
+      "y": 5704,
       "name": "AS-IS 07 / Shell composition and layouts",
       "clip": true,
       "width": 1056,
@@ -13795,7 +14266,7 @@
       "type": "frame",
       "id": "MZamq",
       "x": -1060,
-      "y": 6337,
+      "y": 6489,
       "name": "AS-IS 08 / Properties and Console",
       "clip": true,
       "width": 1056,
@@ -13829,7 +14300,7 @@
               "fill": "$ink-tertiary",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "Traced from a running instance. Properties carries three collapsing sections, and the Model section groups internally into file, geometry and bounds without those sub-groups being collapsible themselves. Values are monospace so digits align down the column; keys are UI type. A validation row click flies the active camera to the affected mesh. The Console buffer captures trace level by default and the dropdown filters what is shown, so lowering it reveals rather than re-records.",
+              "content": "Traced from a running instance. Properties carries four collapsing sections: Model, HDRI, Validation and Actions. The Model section groups internally into file, geometry and bounds without those sub-groups being collapsible themselves. Values are monospace so digits align down the column; keys are UI type. A validation row click flies the active camera to the affected mesh. Actions lists the action parameters the node selected in the Node Tree declares, one button each: the render node's opens the Render Still dialog for that node, and every other one encodes the node's last cook and asks where to save it through the native dialog. With nothing selected the section says so. It is the seed of the parameter panel that replaces this panel later in the release. The Console buffer captures trace level by default and the dropdown filters what is shown, so lowering it reveals rather than re-records.",
               "lineHeight": 1.5,
               "fontFamily": "$font-ui",
               "fontSize": 12,
@@ -14600,6 +15071,90 @@
                     },
                     {
                       "type": "frame",
+                      "id": "t1L87",
+                      "name": "Actions hdr",
+                      "width": "fill_container",
+                      "height": 20,
+                      "gap": 5,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "tFTe5",
+                          "name": "Tw",
+                          "width": 11,
+                          "height": 11,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "$ink-secondary"
+                        },
+                        {
+                          "type": "text",
+                          "id": "lL3rh",
+                          "name": "L",
+                          "fill": "$ink-secondary",
+                          "content": "Actions",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "L0IL2e",
+                      "name": "Actions body",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 5,
+                      "padding": [
+                        0,
+                        8,
+                        6,
+                        16
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "qz3nM",
+                          "name": "Selected node",
+                          "fill": "$ink-secondary",
+                          "content": "geo_export1 · Geometry Export",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "fgff8",
+                          "name": "Save to Disk",
+                          "fill": "$surface-raised",
+                          "padding": [
+                            3,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "OBMcZ",
+                              "name": "Label",
+                              "fill": "$ink-primary",
+                              "content": "Save to Disk",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "b02bo",
                       "name": "pad",
                       "width": "fill_container",
@@ -15070,7 +15625,7 @@
       "type": "frame",
       "id": "J303j",
       "x": -1060,
-      "y": 7085,
+      "y": 7354,
       "name": "AS-IS 09 / Modals",
       "clip": true,
       "width": 1056,
@@ -15104,7 +15659,7 @@
               "fill": "$ink-tertiary",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "All are draggable rather than pinned, and dismiss on Escape. Preferences is scoped to what the sidebar cannot reach at runtime, which is why it holds window size and MSAA but no display settings. Its footer carries a modified marker in the accent colour once a field changes, which is the only signal that OK will commit something.",
+              "content": "All are draggable rather than pinned, and dismiss on Escape. Preferences is scoped to what the sidebar cannot reach at runtime, which is why it holds window size and MSAA but no display settings. Its footer carries a modified marker in the accent colour once a field changes, which is the only signal that OK will commit something. Render Still is the one modal that is not a settings dialog: it shows the picture arriving tile by tile and, once it has, which produced pass is shown. The Passes line says what the render node asked for, or that a rasterized still writes none; the Showing combo lists only the passes that were produced and never re-renders; Save As writes the beauty alone, and Save All writes it with one float EXR beside it per pass, named as the command line names them.",
               "lineHeight": 1.5,
               "fontFamily": "$font-ui",
               "fontSize": 12,
@@ -17255,6 +17810,531 @@
               ]
             }
           ]
+        },
+        {
+          "type": "frame",
+          "id": "LVgSR",
+          "name": "Row 3",
+          "width": "fill_container",
+          "gap": 26,
+          "children": [
+            {
+              "type": "frame",
+              "id": "m6YiZ",
+              "name": "Render Still, finished, path traced with passes col",
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Jx76Q",
+                  "name": "Cap",
+                  "fill": "$ink-muted",
+                  "content": "Render Still, finished, path traced with passes",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 11,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "C9sSPl",
+                  "name": "Render Still, finished, path traced with passes",
+                  "width": 400,
+                  "fill": "$surface-app",
+                  "stroke": "$border-strong",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#00000066",
+                    "offset": {
+                      "x": 0,
+                      "y": 3
+                    },
+                    "blur": 14
+                  },
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "REKuF",
+                      "name": "TB",
+                      "width": "fill_container",
+                      "height": 24,
+                      "fill": "$surface-raised",
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "REmEv",
+                          "name": "s1",
+                          "width": "fill_container",
+                          "height": 1
+                        },
+                        {
+                          "type": "text",
+                          "id": "rWeCQ",
+                          "name": "T",
+                          "fill": "$ink-primary",
+                          "content": "Render Still",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "XkHRA",
+                          "name": "s2",
+                          "width": "fill_container",
+                          "height": 1
+                        },
+                        {
+                          "type": "icon",
+                          "id": "AB9vT",
+                          "name": "X",
+                          "width": 11,
+                          "height": 11,
+                          "icon": "x",
+                          "library": "lucide",
+                          "fill": "$ink-muted"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Tm8ZL",
+                      "name": "Body",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 12,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "KKSzl",
+                          "name": "Meta",
+                          "fill": "$ink-muted",
+                          "content": "1920 × 1080 · path traced · 256 spp, denoised",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "RuEFV",
+                          "name": "Format row",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "YLJmc",
+                              "name": "L",
+                              "fill": "$ink-tertiary",
+                              "textGrowth": "fixed-width",
+                              "width": 64,
+                              "content": "Format",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "id": "jxeh9",
+                              "type": "ref",
+                              "ref": "bE9Pi",
+                              "name": "Format combo",
+                              "descendants": {
+                                "Ebhrz": {
+                                  "content": "EXR"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "UQ6n8",
+                          "name": "Space row",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "x4vZeR",
+                              "name": "L",
+                              "fill": "$ink-tertiary",
+                              "textGrowth": "fixed-width",
+                              "width": 64,
+                              "content": "Space",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "id": "HFmto",
+                              "type": "ref",
+                              "ref": "bE9Pi",
+                              "name": "Space combo",
+                              "descendants": {
+                                "Ebhrz": {
+                                  "content": "Scene linear"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "FRmJG",
+                          "name": "Passes",
+                          "fill": "$ink-secondary",
+                          "content": "Passes: Albedo, Normal, Depth",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "o60F2",
+                          "name": "Showing row",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "JhPsp",
+                              "name": "L",
+                              "fill": "$ink-tertiary",
+                              "textGrowth": "fixed-width",
+                              "width": 64,
+                              "content": "Showing",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "id": "XPi1H",
+                              "type": "ref",
+                              "ref": "bE9Pi",
+                              "name": "Showing combo",
+                              "descendants": {
+                                "Ebhrz": {
+                                  "content": "Albedo"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "rectangle",
+                          "id": "n0rq9",
+                          "name": "Preview",
+                          "fill": "#8a8a8a",
+                          "width": "fill_container",
+                          "height": 160,
+                          "stroke": "$border-default",
+                          "strokeWidth": 1
+                        },
+                        {
+                          "type": "text",
+                          "id": "D64nS",
+                          "name": "Status",
+                          "fill": "$ink-primary",
+                          "content": "Done: 12 tiles in 1m 12s",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "rxiHH",
+                          "name": "Filename",
+                          "fill": "$ink-muted",
+                          "content": "still_20260909-141500",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "rectangle",
+                          "id": "E4K8T",
+                          "name": "Sep",
+                          "fill": "$divider",
+                          "width": "fill_container",
+                          "height": 1
+                        },
+                        {
+                          "type": "frame",
+                          "id": "U3XBb",
+                          "name": "Footer",
+                          "width": "fill_container",
+                          "gap": 9,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "id": "M8U69O",
+                              "type": "ref",
+                              "ref": "FWPVf",
+                              "name": "Close",
+                              "descendants": {
+                                "LWE4W": {
+                                  "content": "Close"
+                                }
+                              }
+                            },
+                            {
+                              "id": "mpLd8",
+                              "type": "ref",
+                              "ref": "FWPVf",
+                              "name": "Save As…",
+                              "descendants": {
+                                "LWE4W": {
+                                  "content": "Save As…"
+                                }
+                              }
+                            },
+                            {
+                              "id": "RWFfa",
+                              "type": "ref",
+                              "ref": "FWPVf",
+                              "name": "Save All…",
+                              "descendants": {
+                                "LWE4W": {
+                                  "content": "Save All…"
+                                }
+                              }
+                            },
+                            {
+                              "id": "i767A",
+                              "type": "ref",
+                              "ref": "FWPVf",
+                              "name": "Render again",
+                              "descendants": {
+                                "LWE4W": {
+                                  "content": "Render again"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Coa44",
+              "name": "Render Still, idle, rasterized col",
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "tK03J",
+                  "name": "Cap",
+                  "fill": "$ink-muted",
+                  "content": "Render Still, idle, rasterized",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 11,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "Mly5x",
+                  "name": "Render Still, idle, rasterized",
+                  "width": 400,
+                  "fill": "$surface-app",
+                  "stroke": "$border-strong",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#00000066",
+                    "offset": {
+                      "x": 0,
+                      "y": 3
+                    },
+                    "blur": 14
+                  },
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "zeqXe",
+                      "name": "TB",
+                      "width": "fill_container",
+                      "height": 24,
+                      "fill": "$surface-raised",
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "U2PPi",
+                          "name": "s1",
+                          "width": "fill_container",
+                          "height": 1
+                        },
+                        {
+                          "type": "text",
+                          "id": "oDIBZ",
+                          "name": "T",
+                          "fill": "$ink-primary",
+                          "content": "Render Still",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "LZC0B",
+                          "name": "s2",
+                          "width": "fill_container",
+                          "height": 1
+                        },
+                        {
+                          "type": "icon",
+                          "id": "FaOyW",
+                          "name": "X",
+                          "width": 11,
+                          "height": 11,
+                          "icon": "x",
+                          "library": "lucide",
+                          "fill": "$ink-muted"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "gIjBn",
+                      "name": "Body",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 12,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "uIURH",
+                          "name": "Meta",
+                          "fill": "$ink-muted",
+                          "content": "1920 × 1080 · raster",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "RnZBK",
+                          "name": "Format row",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "iOLSU",
+                              "name": "L",
+                              "fill": "$ink-tertiary",
+                              "textGrowth": "fixed-width",
+                              "width": 64,
+                              "content": "Format",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "id": "fNaUT",
+                              "type": "ref",
+                              "ref": "bE9Pi",
+                              "name": "Format combo",
+                              "descendants": {
+                                "Ebhrz": {
+                                  "content": "PNG"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "WU0iF",
+                          "name": "Passes",
+                          "fill": "$ink-muted",
+                          "content": "Passes: None: this engine writes no auxiliary passes",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "y58gLf",
+                          "name": "Status",
+                          "fill": "$ink-muted",
+                          "content": "Ready. Press Render to begin.",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "rectangle",
+                          "id": "ZPfoB",
+                          "name": "Sep",
+                          "fill": "$divider",
+                          "width": "fill_container",
+                          "height": 1
+                        },
+                        {
+                          "type": "frame",
+                          "id": "MLzbm",
+                          "name": "Footer",
+                          "width": "fill_container",
+                          "gap": 9,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "id": "eebYY",
+                              "type": "ref",
+                              "ref": "FWPVf",
+                              "name": "Close",
+                              "descendants": {
+                                "LWE4W": {
+                                  "content": "Close"
+                                }
+                              }
+                            },
+                            {
+                              "id": "mEV7p",
+                              "type": "ref",
+                              "ref": "FWPVf",
+                              "name": "Render",
+                              "descendants": {
+                                "LWE4W": {
+                                  "content": "Render"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -17262,7 +18342,7 @@
       "type": "frame",
       "id": "PBnVt",
       "x": -1060,
-      "y": 8018,
+      "y": 8812,
       "name": "AS-IS 10 / Outliner and Review Panel",
       "clip": true,
       "width": 1056,
@@ -18745,7 +19825,7 @@
       "type": "frame",
       "id": "qIiPE",
       "x": -1060,
-      "y": 8683,
+      "y": 9477,
       "name": "AS-IS 11 / Overlays, toasts and review",
       "clip": true,
       "width": 1056,
@@ -19902,7 +20982,7 @@
       "type": "frame",
       "id": "EO3Yi",
       "x": -1060,
-      "y": 9557,
+      "y": 10351,
       "name": "AS-IS 12 / Material Inspector",
       "clip": true,
       "width": 1056,
@@ -22071,7 +23151,7 @@
       "type": "frame",
       "id": "PKhCC",
       "x": -1060,
-      "y": 10535,
+      "y": 11329,
       "name": "AS-IS 13 / Sidebar, Screenshot and Update",
       "clip": true,
       "width": 1056,
