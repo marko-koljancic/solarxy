@@ -34,7 +34,7 @@ impl State {
     pub(in crate::state) fn drain_intents(&mut self, intents: &mut Intents) {
         let mut recompute = Recompute::default();
         for intent in intents.take_ordered() {
-            recompute.mark(&intent);
+            recompute.mark(&intent, self.view.active_pane);
             match intent {
                 Intent::Pane { pane, change } => {
                     if let Some(pds) = self.view.pane_settings.get_mut(pane) {
@@ -151,8 +151,8 @@ impl State {
         if recompute.background {
             self.apply_background_change();
         }
-        if recompute.wireframe_only() {
-            self.update_wireframe_params();
+        if let Some(pane) = recompute.wireframe_only() {
+            self.update_wireframe_params(pane);
         }
         if recompute.composite {
             self.apply_composite_params();
@@ -187,7 +187,13 @@ fn apply_display_change(
 #[derive(Debug, Default, Clone, Copy)]
 struct Recompute {
     background: bool,
-    wireframe: bool,
+    /// Which pane's wireframe settings moved, rather than whether any did.
+    ///
+    /// The push reads one pane's settings, so it has to know which. It read
+    /// pane 0 unconditionally before this, which was wrong for every pane but
+    /// the first and invisible only because the per-pane write rewrites the
+    /// shared buffer before each pane's passes.
+    wireframe: Option<usize>,
     composite: bool,
     ibl: bool,
 }
@@ -204,11 +210,17 @@ impl Recompute {
     /// That question is gone rather than answered, because a widget reports
     /// whether it moved and no longer has to be asked whether its value
     /// differs.
-    fn mark(&mut self, intent: &Intent) {
+    fn mark(&mut self, intent: &Intent, active_pane: usize) {
         match intent {
-            Intent::Pane { change, .. } => match change {
-                PaneChange::BackgroundMode(_) => self.background = true,
-                PaneChange::LineWeight(_) => self.wireframe = true,
+            Intent::Pane { pane, change } => match change {
+                // Only the active pane's background drives the one scene-wide
+                // image-based light, which is the policy `apply_background_change`
+                // states. Marking on any pane meant a change to a non-active
+                // pane regenerated the light from the active pane's colours,
+                // which had not moved: work with no effect, and a rule that
+                // read as if it had one.
+                PaneChange::BackgroundMode(_) => self.background |= *pane == active_pane,
+                PaneChange::LineWeight(_) => self.wireframe = Some(*pane),
                 // The rest are read by the per-pane draw every frame, so
                 // writing them is the whole of the work.
                 PaneChange::PaneMode(_)
@@ -265,8 +277,8 @@ impl Recompute {
     ///
     /// A background change rebuilds them on its way through, so asking for
     /// both would do the second piece of work twice.
-    fn wireframe_only(self) -> bool {
-        self.wireframe && !self.background
+    fn wireframe_only(self) -> Option<usize> {
+        self.wireframe.filter(|_| !self.background)
     }
 }
 
@@ -547,10 +559,16 @@ mod tests {
     /// The five tests below are the retired mirror's diff tests, re-expressed
     /// against the rule that replaced it. They ask the same question: which
     /// expensive rebuild does this change make necessary.
+    /// Marks against pane 0 as the active one, which is what the cases below
+    /// raise on unless they say otherwise.
     fn marked(intents: &[Intent]) -> Recompute {
+        marked_with_active(intents, 0)
+    }
+
+    fn marked_with_active(intents: &[Intent], active_pane: usize) -> Recompute {
         let mut recompute = Recompute::default();
         for intent in intents {
-            recompute.mark(intent);
+            recompute.mark(intent, active_pane);
         }
         recompute
     }
@@ -654,7 +672,7 @@ mod tests {
     fn nothing_raised_makes_nothing_stale() {
         let r = marked(&[]);
         assert!(!r.background);
-        assert!(!r.wireframe);
+        assert!(r.wireframe.is_none());
         assert!(!r.composite);
         assert!(!r.ibl);
     }
@@ -669,7 +687,7 @@ mod tests {
         ] {
             let r = marked(std::slice::from_ref(&intent));
             assert!(!r.background, "{intent:?}");
-            assert!(!r.wireframe, "{intent:?}");
+            assert!(r.wireframe.is_none(), "{intent:?}");
             assert!(!r.composite, "{intent:?}");
             assert!(!r.ibl, "{intent:?}");
         }
@@ -736,12 +754,47 @@ mod tests {
             },
         ]);
         assert!(r.background);
-        assert!(r.wireframe, "the raise is still recorded");
+        assert_eq!(r.wireframe, Some(0), "the raise is still recorded");
         assert!(
-            !r.wireframe_only(),
+            r.wireframe_only().is_none(),
             "a background rebuild covers the wireframe parameters, so asking \
              for both would do the second piece of work twice"
         );
+    }
+
+    /// Only the active pane's background drives the one scene-wide light.
+    ///
+    /// The push reads the active pane's colours, so marking on any pane meant
+    /// a change to a non-active pane regenerated the light from colours that
+    /// had not moved. Invisible in the picture, and a rule that read as if it
+    /// did something.
+    #[test]
+    fn a_non_active_pane_background_does_not_relight_the_scene() {
+        let change = Intent::Pane {
+            pane: 2,
+            change: PaneChange::BackgroundMode(BackgroundMode::WHITE),
+        };
+        assert!(
+            !marked_with_active(std::slice::from_ref(&change), 0).background,
+            "a background change on a pane nobody is working in relit the scene"
+        );
+        assert!(
+            marked_with_active(&[change], 2).background,
+            "the active pane's own background must still relight"
+        );
+    }
+
+    /// The wireframe push reads one pane's settings, so the rule has to carry
+    /// which pane raised the change rather than assuming the first.
+    #[test]
+    fn a_line_weight_change_records_the_pane_that_raised_it() {
+        for pane in 0..4 {
+            let r = marked(&[Intent::Pane {
+                pane,
+                change: PaneChange::LineWeight(LineWeight::Bold),
+            }]);
+            assert_eq!(r.wireframe_only(), Some(pane));
+        }
     }
 
     #[test]
@@ -750,7 +803,7 @@ mod tests {
             pane: 0,
             change: PaneChange::LineWeight(LineWeight::Light),
         }]);
-        assert!(r.wireframe_only());
+        assert_eq!(r.wireframe_only(), Some(0));
         assert!(!r.background);
     }
 }

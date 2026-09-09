@@ -236,8 +236,16 @@ impl State {
         );
     }
 
-    pub(super) fn update_wireframe_params(&self) {
-        let pds = &self.view.pane_settings[0];
+    /// Push one pane's wireframe uniform.
+    ///
+    /// **This is very likely redundant and is deliberately not deleted here.**
+    /// The shared buffer is rewritten before every pane's passes, by the 3D
+    /// path and by the image path, so nothing this writes can survive to a
+    /// draw. It is kept, now reading the right pane rather than pane 0, so the
+    /// removal is a considered change rather than a side effect of a defect
+    /// fix.
+    pub(super) fn update_wireframe_params(&self, pane: usize) {
+        let pds = &self.view.pane_settings[pane.min(3)];
         solarxy_host::write_wireframe_params(
             &self.queue,
             &self.renderer,
