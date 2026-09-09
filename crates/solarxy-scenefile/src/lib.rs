@@ -286,6 +286,21 @@ fn read_u32(value: &serde_json::Value, key: &str) -> u32 {
 /// Steps a raw `scene.json` value up from an older `schema_version` to the
 /// current one, one version at a time, editing raw JSON before it is typed.
 ///
+/// # It is a chain, and that is the whole point of the loop
+///
+/// This used to apply exactly one step and return. Correct while only one
+/// step existed, and wrong on the day a second was added: a version-0 file
+/// would run the 0 step, be restamped to 1, and then be handed to a reader
+/// expecting the newest shape, with no error anywhere. The defect was written
+/// down before it could bite, in this crate's own comment claiming stepwise
+/// behaviour, in the architecture set, and in the scene-format decision
+/// record. The loop is what makes the claim true.
+///
+/// **The driver stamps the version, never a step.** A step that forgot would
+/// leave a document that migrates again on every open, which is invisible
+/// while the steps happen to be idempotent and destructive the moment one is
+/// not.
+///
 /// # 0 -> 1 (the public-beta freeze, v0.7.0)
 ///
 /// Structurally a no-op, and deliberately written out rather than assumed.
@@ -295,20 +310,28 @@ fn read_u32(value: &serde_json::Value, key: &str) -> u32 {
 ///
 /// The step still exists, and is still tested, because the alternative is worse:
 /// without an explicit `0` arm every pre-beta `.slxy` would fall through to the
-/// catch-all and be rejected as `UnsupportedVersion(0)`. The bump only rewrites
-/// the stamp so the file is not re-migrated on the next open.
+/// catch-all and be rejected as `UnsupportedVersion(0)`.
 fn migrate_scene(value: &mut serde_json::Value, from: u32) -> Result<(), SceneFileError> {
-    match from {
-        0 => {
-            // No field rewrites needed (see the doc comment). Restamp only.
-            if let Some(obj) = value.as_object_mut() {
-                obj.insert("schema_version".to_string(), serde_json::json!(1));
-            }
-            Ok(())
-        }
-        v if v == SCHEMA_VERSION_CURRENT => Ok(()),
-        other => Err(SceneFileError::UnsupportedVersion(other)),
+    // A version this build has no step for. The caller warns rather than
+    // migrating on a future version, so this is reachable only by a direct
+    // call, and it answers the way the flat match it replaced did.
+    if from > SCHEMA_VERSION_CURRENT {
+        return Err(SceneFileError::UnsupportedVersion(from));
     }
+
+    let mut version = from;
+    while version < SCHEMA_VERSION_CURRENT {
+        match version {
+            // No field rewrites needed (see the doc comment above).
+            0 => {}
+            other => return Err(SceneFileError::UnsupportedVersion(other)),
+        }
+        version += 1;
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("schema_version".to_string(), serde_json::json!(version));
+        }
+    }
+    Ok(())
 }
 
 /// Generates the [`SceneJson`] JSON Schema as a pretty string, stripping the
@@ -409,6 +432,53 @@ mod tests {
             mime: "model/obj".to_string(),
             bytes: bytes.to_vec(),
         }
+    }
+
+    /// The chain reaches the current version from every version behind it.
+    ///
+    /// Written now rather than when it can fail, because the failure it
+    /// catches is silent: with one step defined, applying one step and
+    /// applying the chain are indistinguishable, and the day a second step
+    /// exists the difference is a document read at the wrong shape with no
+    /// error. Looping over every older version means this test grows a case
+    /// per format version without anyone remembering to add one.
+    #[test]
+    fn the_chain_reaches_the_current_version_from_every_older_one() {
+        for from in 0..SCHEMA_VERSION_CURRENT {
+            let mut value = serde_json::json!({
+                "schema_version": from,
+                "min_reader": 0,
+                "generator": "",
+                "graph": {},
+            });
+            migrate_scene(&mut value, from)
+                .unwrap_or_else(|e| panic!("version {from} has no path forward: {e}"));
+            assert_eq!(
+                read_u32(&value, "schema_version"),
+                SCHEMA_VERSION_CURRENT,
+                "a document at version {from} stopped short of the current version, \
+                 so the migration applied one step rather than the chain"
+            );
+        }
+    }
+
+    /// The two ends the chain must refuse or leave alone.
+    #[test]
+    fn the_chain_leaves_a_current_document_alone_and_refuses_a_future_one() {
+        let at_current = serde_json::json!({ "schema_version": SCHEMA_VERSION_CURRENT });
+        let mut value = at_current.clone();
+        migrate_scene(&mut value, SCHEMA_VERSION_CURRENT).expect("nothing to do");
+        assert_eq!(value, at_current, "a current document was rewritten");
+
+        let future = SCHEMA_VERSION_CURRENT + 1;
+        let mut value = serde_json::json!({ "schema_version": future });
+        assert!(
+            matches!(
+                migrate_scene(&mut value, future),
+                Err(SceneFileError::UnsupportedVersion(v)) if v == future
+            ),
+            "a version this build has no step for must be refused by name"
+        );
     }
 
     /// The freeze's load-bearing test. A pre-beta v0 scene must still open, and
