@@ -80,6 +80,9 @@ pub(super) struct CanvasViewer<'a> {
     pub dive: Option<NodeId>,
     /// The node the pointer is resting on, and its box, for the ring.
     pub hovered: Option<(NodeId, egui::Rect)>,
+    /// The note whose text is being typed, so its own draw leaves room
+    /// for the editor rather than painting under it.
+    pub editing_note: Option<NodeId>,
     /// The canvas transform, captured before any node is drawn, so a rect
     /// in graph space can be put on the screen where the ring reads in
     /// pixels rather than in graph units.
@@ -92,6 +95,8 @@ pub(super) struct CanvasViewer<'a> {
     /// The area the canvas is drawn into, so a fit knows what it is
     /// fitting into.
     pub viewport: egui::Rect,
+    /// What a gesture on a note asked for.
+    pub note: Option<(NodeId, super::note::NoteAction)>,
     /// The node a plain or modified click landed on.
     ///
     /// The substrate does not select on an unmodified click at all, and
@@ -525,10 +530,37 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
         let Some(&CanvasNode { id }) = snarl.get_node(node) else {
             return;
         };
-        let (box_rect, _) = ui.allocate_exact_size(NODE_BOX, Sense::hover());
+        // A note is as big as its author made it; every other role
+        // occupies the one fixed layout box. That is the only place the
+        // canvas asks a node how large it is, and it asks the ROLE rather
+        // than the type identifier, so a second kind of annotation added
+        // in Rust draws here with no change.
+        let is_note = self
+            .node_data(id)
+            .and_then(|data| self.scene.registry.get(&data.type_id))
+            .is_some_and(|desc| desc.role == NodeRole::Note);
+        let wanted = if is_note {
+            self.node_data(id).map_or(NODE_BOX, |data| {
+                super::note::size(data, self.scene.registry)
+            })
+        } else {
+            NODE_BOX
+        };
+        let (box_rect, _) = ui.allocate_exact_size(wanted, Sense::hover());
         // Recorded before the sockets are drawn, so each one can sit on
         // this box's edge rather than on the side the substrate expects.
         self.boxes.insert(node, box_rect);
+        if is_note {
+            if let Some(data) = self.node_data(id) {
+                let editing = self.editing_note == Some(id);
+                if let Some(action) =
+                    super::note::draw(ui, box_rect, data, self.scene.registry, editing, self.theme)
+                {
+                    self.note = Some((id, action));
+                }
+            }
+            return;
+        }
         self.watch_for_dive(ui, box_rect, id);
         self.watch_for_click(ui, box_rect, id);
         if ui

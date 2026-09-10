@@ -623,6 +623,47 @@ impl State {
         }
     }
 
+    /// Write one or more parameters, grouping a set so the gesture that
+    /// produced it is one undo step.
+    fn set_params(
+        &mut self,
+        ctx: GraphContext,
+        node: solarxy_graph::document::NodeId,
+        params: Vec<(String, solarxy_graph::params::ParamValue)>,
+    ) {
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        let grouped = params.len() > 1;
+        if grouped
+            && engine
+                .apply(solarxy_graph::Command::BeginTransaction {
+                    label: "edit".to_string(),
+                })
+                .is_err()
+        {
+            return;
+        }
+        for (key, value) in params {
+            if let Err(err) = engine.apply(solarxy_graph::Command::SetParam {
+                ctx,
+                node,
+                key,
+                value: solarxy_graph::params::ParamSource::Literal(value),
+            }) {
+                if grouped {
+                    let _ = engine.apply(solarxy_graph::Command::CancelTransaction);
+                }
+                self.gui
+                    .set_toast(&format!("{err}"), crate::gui::ToastSeverity::Error);
+                return;
+            }
+        }
+        if grouped {
+            let _ = engine.apply(solarxy_graph::Command::EndTransaction);
+        }
+    }
+
     /// Apply one canvas gesture.
     ///
     /// A move is one command carrying every node the gesture moved, which
@@ -690,6 +731,12 @@ impl State {
                     crate::gui::CanvasToggle::Minimap => canvas.minimap = !canvas.minimap,
                     crate::gui::CanvasToggle::Controls => canvas.controls = !canvas.controls,
                 }
+            }
+            // One write is atomic already; more than one is grouped, so
+            // a gesture that changes a note's width and height is one
+            // entry in the history rather than two.
+            CanvasAction::SetParams(ctx, node, params) => {
+                self.set_params(ctx, node, params);
             }
             CanvasAction::Refuse(message) => {
                 self.gui

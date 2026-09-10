@@ -32,6 +32,7 @@ mod chrome;
 mod glyphs;
 mod layout;
 mod list;
+mod note;
 mod pins;
 mod radial;
 mod seed;
@@ -72,6 +73,13 @@ pub(crate) enum CanvasAction {
     RemoveNodes(GraphContext, Vec<NodeId>),
     /// A canvas reading preference the toolbar toggled.
     ToggleChrome(chrome::Toggle),
+    /// One or more parameters written together. More than one travels in
+    /// a transaction, so a gesture that changes two is one undo step.
+    SetParams(
+        GraphContext,
+        NodeId,
+        Vec<(String, solarxy_graph::params::ParamValue)>,
+    ),
     /// A node's name, which is an ordinary parameter and undoes like one.
     Rename(GraphContext, NodeId, String),
     /// The next wire routing. A reading preference, so it changes no
@@ -170,6 +178,8 @@ pub(in crate::gui) fn draw_nodes_content(
         dive: None,
         clicked: None,
         hovered: None,
+        note: None,
+        editing_note: state.note_edit.as_ref().map(|(id, _)| *id),
         to_screen: egui::emath::TSTransform::IDENTITY,
         zoom,
         extent,
@@ -187,6 +197,7 @@ pub(in crate::gui) fn draw_nodes_content(
         dive,
         clicked,
         hovered,
+        note,
         to_screen,
         ..
     } = canvas_viewer;
@@ -232,6 +243,8 @@ pub(in crate::gui) fn draw_nodes_content(
         intents.panel(PanelIntent::Canvas(CanvasAction::CycleRouting));
     }
 
+    apply_note(note, *ctx, doc, state, intents);
+    draw_note_editor(ui, doc, *ctx, state, to_screen, intents, theme);
     draw_rename(ui, doc, registry, *ctx, state, to_screen, intents, theme);
     draw_info(ui, doc, registry, *ctx, state, theme);
 
@@ -489,6 +502,133 @@ fn paint_ticks(painter: &egui::Painter, a: egui::Pos2, b: egui::Pos2, ticks: usi
         #[allow(clippy::cast_precision_loss)]
         let offset = along * ((tick as f32) - (ticks as f32 - 1.0) / 2.0) * 4.0;
         painter.line_segment([mid + offset - across, mid + offset + across], stroke);
+    }
+}
+
+/// Turn a gesture on a note into a parameter write.
+///
+/// Every one of them is an ordinary parameter, so a note undoes like any
+/// other edit and needs nothing written for it in the scene file. The
+/// resize is the only one that writes two, and it groups them so a drag
+/// is one entry in the history rather than two.
+fn apply_note(
+    note: Option<(NodeId, note::NoteAction)>,
+    ctx: GraphContext,
+    doc: &solarxy_graph::document::Document,
+    state: &mut CanvasState,
+    intents: &mut Intents,
+) {
+    let Some((id, action)) = note else {
+        return;
+    };
+    match action {
+        note::NoteAction::Edit => {
+            let existing = doc
+                .graph(ctx)
+                .ok()
+                .and_then(|g| g.node(id))
+                .map(note::text)
+                .unwrap_or_default();
+            state.note_edit = Some((id, existing));
+        }
+        note::NoteAction::Colour(rgba) => {
+            intents.panel(PanelIntent::Canvas(CanvasAction::SetParams(
+                ctx,
+                id,
+                vec![(
+                    "color".to_string(),
+                    solarxy_graph::params::ParamValue::Color(rgba),
+                )],
+            )));
+        }
+        note::NoteAction::Resize { width, height } => {
+            intents.panel(PanelIntent::Canvas(CanvasAction::SetParams(
+                ctx,
+                id,
+                vec![
+                    (
+                        "width".to_string(),
+                        solarxy_graph::params::ParamValue::Float(f64::from(width)),
+                    ),
+                    (
+                        "height".to_string(),
+                        solarxy_graph::params::ParamValue::Float(f64::from(height)),
+                    ),
+                ],
+            )));
+        }
+    }
+}
+
+/// The note's text editor, over the note it edits.
+fn draw_note_editor(
+    ui: &egui::Ui,
+    doc: &solarxy_graph::document::Document,
+    ctx: GraphContext,
+    state: &mut CanvasState,
+    to_screen: egui::emath::TSTransform,
+    intents: &mut Intents,
+    theme: Theme,
+) {
+    let Some((id, _)) = state.note_edit else {
+        return;
+    };
+    if doc.graph(ctx).ok().and_then(|g| g.node(id)).is_none() {
+        state.note_edit = None;
+        return;
+    }
+    let Some(box_rect) = state.screen_box(id, to_screen) else {
+        state.note_edit = None;
+        return;
+    };
+
+    let mut commit = false;
+    let mut cancel = false;
+    egui::Area::new(ui.id().with(("note-edit", id.0)))
+        .order(egui::Order::Foreground)
+        .fixed_pos(box_rect.min)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style())
+                .fill(theme.bg_elevated)
+                .show(ui, |ui| {
+                    let Some((_, text)) = state.note_edit.as_mut() else {
+                        return;
+                    };
+                    let field = ui.add(
+                        egui::TextEdit::multiline(text)
+                            .desired_width(box_rect.width().max(160.0))
+                            .desired_rows(3),
+                    );
+                    field.request_focus();
+                    // Enter is a newline in prose, so the commit is the
+                    // platform chord or clicking away, which is what the
+                    // browser does for the same reason.
+                    let chord =
+                        ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
+                    if chord
+                        || field.lost_focus() && !ui.input(|i| i.key_pressed(egui::Key::Escape))
+                    {
+                        commit = true;
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        cancel = true;
+                    }
+                });
+        });
+
+    if cancel {
+        state.note_edit = None;
+        return;
+    }
+    if commit && let Some((id, text)) = state.note_edit.take() {
+        intents.panel(PanelIntent::Canvas(CanvasAction::SetParams(
+            ctx,
+            id,
+            vec![(
+                "text".to_string(),
+                solarxy_graph::params::ParamValue::Text(text),
+            )],
+        )));
     }
 }
 
