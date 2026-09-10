@@ -60,6 +60,12 @@ pub(crate) enum CanvasAction {
     /// The trailing wing at the root: an object's additive `visible`
     /// param, which is an ordinary parameter edit and undoes like one.
     SetVisible(GraphContext, NodeId, bool),
+    /// What is selected now, as one command. Selection is document state
+    /// rather than canvas state, which is what makes it agree across
+    /// every panel without any panel telling another.
+    SetSelection(GraphContext, Vec<NodeId>),
+    /// Remove the selection, in one command and therefore one undo step.
+    RemoveNodes(GraphContext, Vec<NodeId>),
     /// The next wire routing. A reading preference, so it changes no
     /// document state and adds nothing to the undo history.
     CycleRouting,
@@ -127,6 +133,7 @@ pub(in crate::gui) fn draw_nodes_content(
         sockets: HashMap::new(),
         pending: viewer::Pending::default(),
         dive: None,
+        clicked: None,
     };
     state
         .snarl_mut()
@@ -138,6 +145,7 @@ pub(in crate::gui) fn draw_nodes_content(
         boxes,
         pending,
         dive,
+        clicked,
         ..
     } = canvas_viewer;
 
@@ -146,6 +154,9 @@ pub(in crate::gui) fn draw_nodes_content(
 
     let released = ui.ctx().input(|i| i.pointer.any_released());
     resolve_rewiring(pending, state, *ctx, released, intents);
+
+    let over = ui.rect_contains_pointer(ui.max_rect());
+    resolve_selection(ui, doc, *ctx, state, clicked, over, intents);
 
     // Diving is the canvas's own, not the engine's: which graph is on
     // screen is session state that the tree beside it shares, so it is
@@ -159,7 +170,6 @@ pub(in crate::gui) fn draw_nodes_content(
     // one: the same key types an `s` anywhere a field has focus, so it is
     // claimed only while the pointer is over this panel and nothing is
     // taking text.
-    let over = ui.rect_contains_pointer(ui.max_rect());
     if over
         && ui
             .ctx()
@@ -168,6 +178,15 @@ pub(in crate::gui) fn draw_nodes_content(
         intents.panel(PanelIntent::Canvas(CanvasAction::CycleRouting));
     }
 
+    // Escape abandons a drag, and abandoning has to mean it never
+    // happened: applying the move and undoing it would leave an entry in
+    // the history a user did not make.
+    if ui
+        .ctx()
+        .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        state.cancel_drag();
+    }
     read_back_positions(released, state, *ctx, intents);
 }
 
@@ -351,6 +370,89 @@ fn paint_ticks(painter: &egui::Painter, a: egui::Pos2, b: egui::Pos2, ticks: usi
         #[allow(clippy::cast_precision_loss)]
         let offset = along * ((tick as f32) - (ticks as f32 - 1.0) / 2.0) * 4.0;
         painter.line_segment([mid + offset - across, mid + offset + across], stroke);
+    }
+}
+
+/// Everything a frame did to the selection, as at most one command.
+///
+/// Three gestures reach here and they compose in one place because the
+/// document holds one selection: a press on a node, a press on empty
+/// canvas, and a box the substrate drew.
+///
+/// **The substrate's own selected set is a buffer, not the truth.** Its
+/// type is private, so a selection made in the scene tree cannot be
+/// pushed into it, and reading it as authoritative every frame would undo
+/// that selection immediately. Only a *change* in it is a gesture, which
+/// is what lets box selection work without the two fighting. What a user
+/// sees selected on the canvas is drawn from the document, so the two
+/// surfaces agree whichever of them made the selection.
+fn resolve_selection(
+    ui: &egui::Ui,
+    doc: &solarxy_graph::document::Document,
+    ctx: GraphContext,
+    state: &mut CanvasState,
+    clicked: Option<NodeId>,
+    over: bool,
+    intents: &mut Intents,
+) {
+    let Ok(graph) = doc.graph(ctx) else {
+        return;
+    };
+    let current = graph.selection.clone();
+
+    // A box the substrate drew, or a modifier gesture it understood.
+    let substrate =
+        egui_snarl::ui::get_selected_nodes(ui.id().with("solarxy-node-canvas"), ui.ctx());
+    if let Some(ids) = state.substrate_selection_change(substrate)
+        && ids != current
+    {
+        intents.panel(PanelIntent::Canvas(CanvasAction::SetSelection(ctx, ids)));
+        return;
+    }
+
+    if let Some(node) = clicked {
+        // The platform's own modifier, which is what the browser canvas
+        // uses too, so one habit serves both shells.
+        let additive = ui.input(|i| i.modifiers.command);
+        let mut ids = if additive {
+            current.clone()
+        } else {
+            Vec::new()
+        };
+        if additive && ids.contains(&node) {
+            ids.retain(|id| *id != node);
+        } else if !ids.contains(&node) {
+            ids.push(node);
+        }
+        if ids != current {
+            intents.panel(PanelIntent::Canvas(CanvasAction::SetSelection(ctx, ids)));
+        }
+        return;
+    }
+
+    if !over {
+        return;
+    }
+
+    // A press on the canvas itself clears the selection, which is how a
+    // user says "nothing", and it is raised only when there is something
+    // to clear so an idle click asks for nothing.
+    let pressed_empty = ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
+    if pressed_empty && !current.is_empty() {
+        intents.panel(PanelIntent::Canvas(CanvasAction::SetSelection(
+            ctx,
+            Vec::new(),
+        )));
+        return;
+    }
+
+    if !current.is_empty()
+        && ui.ctx().input_mut(|i| {
+            i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+        })
+    {
+        intents.panel(PanelIntent::Canvas(CanvasAction::RemoveNodes(ctx, current)));
     }
 }
 
@@ -936,6 +1038,66 @@ mod tests {
             state.snarl_mut().wires().count(),
             wired,
             "the canvas must show what the document holds, not what a gesture left"
+        );
+    }
+
+    /// A box the substrate drew is one selection command, whatever it
+    /// encloses, which is what makes it one undo step.
+    #[test]
+    fn a_box_selection_is_one_command_for_the_whole_set() {
+        let (engine, geo, boxy, merge) = scene();
+        let ctx = GraphContext::Subflow(geo);
+        let mut state = seeded(&engine, ctx);
+        let mut intents = Intents::default();
+
+        let keys: Vec<_> = state
+            .snarl_mut()
+            .nodes_ids_data()
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(keys.len(), 2, "the fixture holds a box and a merge");
+
+        let selected = state
+            .substrate_selection_change(keys)
+            .expect("a set that was empty has changed");
+        let mut expected = vec![boxy, merge];
+        expected.sort_unstable_by_key(|id| id.0);
+        assert_eq!(selected, expected);
+
+        // And the same set again is no gesture at all, which is what
+        // stops the canvas re-raising a selection every frame and undoing
+        // one made anywhere else.
+        let keys: Vec<_> = state
+            .snarl_mut()
+            .nodes_ids_data()
+            .map(|(key, _)| key)
+            .collect();
+        assert!(state.substrate_selection_change(keys).is_none());
+        assert!(raised(&mut intents).is_empty());
+    }
+
+    /// Escape during a drag has to mean the drag never happened. Applying
+    /// the move and undoing it would leave an entry in the history the
+    /// user did not make.
+    #[test]
+    fn a_cancelled_drag_leaves_the_document_and_the_history_alone() {
+        let (engine, geo, boxy, _) = scene();
+        let ctx = GraphContext::Subflow(geo);
+        let mut state = seeded(&engine, ctx);
+        let mut intents = Intents::default();
+
+        move_in_snarl(&mut state, boxy, [400.0, 300.0]);
+        state.cancel_drag();
+
+        assert_eq!(
+            position_in_snarl(&mut state, boxy),
+            Some([0.0, 0.0]),
+            "the node goes back where the document has it"
+        );
+        read_back_positions(true, &mut state, ctx, &mut intents);
+        assert!(
+            raised(&mut intents).is_empty(),
+            "and nothing is asked for, so the history gains nothing"
         );
     }
 

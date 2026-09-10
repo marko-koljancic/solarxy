@@ -526,18 +526,34 @@ impl State {
     /// scene ops for it.
     pub(super) fn handle_node_tree_action(&mut self, action: NodeTreeAction) {
         let NodeTreeAction::Select(ctx, node) = action;
+        self.handle_selection(ctx, vec![node]);
+    }
+
+    /// Apply a selection, whichever surface made it.
+    ///
+    /// One command whatever its size, so a box select is one undo step
+    /// and so the two graph surfaces cannot end up describing different
+    /// selections: the document is what a selection is, and both of them
+    /// read it back.
+    ///
+    /// The viewport outline follows the **last** node of the set, which is
+    /// the one a user just added, and follows nothing at all inside a
+    /// container, since a node in a child network is not a scene object.
+    pub(super) fn handle_selection(
+        &mut self,
+        ctx: GraphContext,
+        ids: Vec<solarxy_graph::document::NodeId>,
+    ) {
         let Some(engine) = self.engine.as_mut() else {
             return;
         };
-        if let Err(e) = engine.apply(solarxy_graph::Command::SetSelection {
-            ctx,
-            ids: vec![node],
-        }) {
+        let last = ids.last().copied();
+        if let Err(e) = engine.apply(solarxy_graph::Command::SetSelection { ctx, ids }) {
             tracing::warn!("Could not select node: {e}");
             return;
         }
-        self.selected_object = match ctx {
-            GraphContext::Root => {
+        self.selected_object = match (ctx, last) {
+            (GraphContext::Root, Some(node)) => {
                 let id = SceneObjectId(node.0);
                 // Absent or hidden objects are filtered out of the draw
                 // list entirely, so pointing at one would outline nothing
@@ -548,7 +564,7 @@ impl State {
                     .filter(|o| o.visible)
                     .map(|_| id)
             }
-            GraphContext::Subflow(_) => None,
+            _ => None,
         };
     }
 
@@ -640,6 +656,17 @@ impl State {
             // is re-emitted from its owning node on every cook, so a
             // renderer-side write would look right for one frame and be
             // undone by the next edit.
+            // Selection travels through the same handler the tree uses,
+            // so a node picked on the canvas outlines in the viewport the
+            // same way one picked in the tree does.
+            CanvasAction::SetSelection(ctx, ids) => {
+                self.handle_selection(ctx, ids);
+            }
+            CanvasAction::RemoveNodes(ctx, ids) => {
+                if !ids.is_empty() {
+                    self.apply_node_command(solarxy_graph::Command::RemoveNodes { ctx, ids });
+                }
+            }
             CanvasAction::Refuse(message) => {
                 self.gui
                     .set_toast(&message, crate::gui::ToastSeverity::Error);

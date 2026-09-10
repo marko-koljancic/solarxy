@@ -78,6 +78,12 @@ pub(super) struct CanvasViewer<'a> {
     pub pending: Pending,
     /// The container a double-click asked to enter.
     pub dive: Option<NodeId>,
+    /// The node a plain or modified click landed on.
+    ///
+    /// The substrate does not select on an unmodified click at all, and
+    /// its two modifier gestures are its own choice rather than this
+    /// product's, so clicking to select is the canvas's job.
+    pub clicked: Option<NodeId>,
 }
 
 /// What the four mutation points recorded this frame.
@@ -203,6 +209,30 @@ impl CanvasViewer<'_> {
             && opens_a_network(self.scene.registry, &data.type_id)
         {
             self.dive = Some(id);
+        }
+    }
+
+    /// A press inside a node's box is a selection.
+    ///
+    /// Read from the input for the same reason the dive is: the substrate
+    /// interacts with the node's frame for dragging, and a widget over the
+    /// same rectangle would take the press and stop the node moving.
+    ///
+    /// The press rather than the release, because a drag begins with a
+    /// press on the node being dragged and a user expects it selected as
+    /// it moves rather than after it lands.
+    fn watch_for_click(&mut self, ui: &egui::Ui, box_rect: egui::Rect, id: NodeId) {
+        if self.clicked.is_some() {
+            return;
+        }
+        let hit = ui.input(|i| {
+            i.pointer.button_pressed(egui::PointerButton::Primary)
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| box_rect.contains(p))
+        });
+        if hit {
+            self.clicked = Some(id);
         }
     }
 
@@ -470,6 +500,7 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
         // this box's edge rather than on the side the substrate expects.
         self.boxes.insert(node, box_rect);
         self.watch_for_dive(ui, box_rect, id);
+        self.watch_for_click(ui, box_rect, id);
         let Some(painted) = self.gather(id) else {
             return;
         };

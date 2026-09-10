@@ -213,6 +213,15 @@ pub(crate) struct CanvasState {
     /// reconnect be one undo step and a wire dropped on nothing be a
     /// disconnect rather than a wire that silently reappears.
     seeded_wires: HashMap<(egui_snarl::OutPinId, egui_snarl::InPinId), EdgeId>,
+    /// The substrate's own selected set as the previous frame left it.
+    ///
+    /// **Read as a change rather than as a value**, because the
+    /// substrate's selection can be read and not written: its type is
+    /// private, so a selection made in another panel cannot be pushed
+    /// into it. Treating it as authoritative would fight the document
+    /// every frame; treating a *change* in it as a gesture is what makes
+    /// box selection work without that fight.
+    substrate_selection: Vec<egui_snarl::NodeId>,
     /// Each node's layout box, as its own draw recorded it.
     ///
     /// **One frame behind, and it has to be**: the substrate draws a
@@ -235,6 +244,7 @@ impl Default for CanvasState {
             seeded_pos: HashMap::new(),
             sockets: HashMap::new(),
             seeded_wires: HashMap::new(),
+            substrate_selection: Vec::new(),
             boxes: HashMap::new(),
         }
     }
@@ -251,6 +261,7 @@ impl CanvasState {
         self.seeded_pos.clear();
         self.sockets.clear();
         self.seeded_wires.clear();
+        self.substrate_selection.clear();
         self.boxes.clear();
     }
 
@@ -377,6 +388,44 @@ impl CanvasState {
             }
         }
         moves
+    }
+
+    /// The engine nodes the substrate has selected, and whether that set
+    /// has moved since the last frame.
+    ///
+    /// Only a change is a gesture. The document is what a selection
+    /// actually is, and this set is a buffer the substrate fills as a
+    /// user boxes or shift-clicks; reading it every frame as though it
+    /// were the truth would undo a selection made anywhere else.
+    pub(super) fn substrate_selection_change(
+        &mut self,
+        selected: Vec<egui_snarl::NodeId>,
+    ) -> Option<Vec<NodeId>> {
+        if selected == self.substrate_selection {
+            return None;
+        }
+        self.substrate_selection.clone_from(&selected);
+        let mut ids: Vec<NodeId> = selected
+            .iter()
+            .filter_map(|key| self.snarl.get_node(*key).map(|node: &CanvasNode| node.id))
+            .collect();
+        ids.sort_unstable_by_key(|id| id.0);
+        Some(ids)
+    }
+
+    /// Put every node back where the document has it, and forget the
+    /// gesture that moved them.
+    ///
+    /// A cancelled drag must leave the document alone **and** add nothing
+    /// to the history, which means it cannot be applied and undone: it
+    /// has to not happen. The substrate has no cancel of its own, so the
+    /// positions it wrote are simply overwritten with the seeded ones.
+    pub(super) fn cancel_drag(&mut self) {
+        for (_, info) in self.snarl.nodes_ids_data_mut() {
+            if let Some(position) = self.seeded_pos.get(&info.value.id) {
+                info.pos = egui::pos2(position[0], position[1]);
+            }
+        }
     }
 
     /// Take over what the frame just drew: where every socket landed,
