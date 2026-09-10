@@ -78,6 +78,86 @@ impl State {
         }
     }
 
+    /// Pick files for a file-reference parameter, stage them, and point
+    /// the parameter at the primary.
+    ///
+    /// **Multi-select, and with no extension filter**, which is the
+    /// browser's rule and looks like a bug until the reason is stated: a
+    /// multi-file model is a primary plus companions (a glTF beside its
+    /// binary buffer and its textures), the companions are resolved by
+    /// name at parse time, and a filter built from `accept` would make
+    /// them unselectable. So everything selected is staged, and `accept`
+    /// decides only which of the staged files the parameter names.
+    pub(super) fn choose_asset(&mut self, ctx: GraphContext, node: NodeId, key: &str) {
+        let accept: Vec<String> = {
+            let Some(engine) = self.engine.as_deref() else {
+                return;
+            };
+            let Some(spec) = engine
+                .document()
+                .graph(ctx)
+                .ok()
+                .and_then(|g| g.node(node))
+                .and_then(|data| engine.registry().get(&data.type_id))
+                .and_then(|desc| desc.param(key))
+            else {
+                return;
+            };
+            match &spec.ty {
+                solarxy_graph::registry::param_spec::ParamType::AssetRef { accept } => {
+                    accept.iter().map(|ext| ext.to_ascii_lowercase()).collect()
+                }
+                _ => return,
+            }
+        };
+        let Some(paths) = rfd::FileDialog::new().set_title("Select file").pick_files() else {
+            return;
+        };
+        let mut primary: Option<solarxy_graph::params::AssetId> = None;
+        let mut first: Option<solarxy_graph::params::AssetId> = None;
+        let mut failed = Vec::new();
+        for path in &paths {
+            let Ok(bytes) = std::fs::read(path) else {
+                failed.push(file_name(path));
+                continue;
+            };
+            let name = file_name(path);
+            let matches = accept
+                .iter()
+                .any(|ext| name.to_ascii_lowercase().ends_with(ext));
+            let Some(engine) = self.engine.as_mut() else {
+                return;
+            };
+            let id = engine.stage_asset(name, String::new(), bytes);
+            if matches && primary.is_none() {
+                primary = Some(id.clone());
+            }
+            if first.is_none() {
+                first = Some(id);
+            }
+        }
+        if !failed.is_empty() {
+            self.gui.set_toast(
+                &format!("Could not read {}", failed.join(", ")),
+                ToastSeverity::Warning,
+            );
+        }
+        // The first accepted file, or the first file at all: a selection
+        // of only companions is a mistake worth pointing the parameter at
+        // something for, so the import can say what it could not parse.
+        let Some(id) = primary.or(first) else {
+            return;
+        };
+        self.apply_node_command(solarxy_graph::Command::SetParam {
+            ctx,
+            node,
+            key: key.to_string(),
+            value: solarxy_graph::params::ParamSource::Literal(
+                solarxy_graph::params::ParamValue::Asset(id),
+            ),
+        });
+    }
+
     /// Offer the encoded bytes a save path through the native dialog, as
     /// the screenshot and the still do, and write them there.
     fn save_action_result(&mut self, result: &ActionResult) {
@@ -107,6 +187,14 @@ impl State {
             ),
         }
     }
+}
+
+/// A path's file name, or the whole path when it has none.
+fn file_name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into(),
+    )
 }
 
 #[cfg(test)]

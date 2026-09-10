@@ -144,6 +144,9 @@ impl State {
                 Intent::Panel(PanelIntent::InvokeAction { ctx, node, key }) => {
                     self.invoke_action(ctx, node, &key);
                 }
+                Intent::Panel(PanelIntent::ChooseAsset { ctx, node, key }) => {
+                    self.choose_asset(ctx, node, &key);
+                }
             }
         }
         self.apply_recompute(recompute);
@@ -636,7 +639,7 @@ impl State {
         &mut self,
         ctx: GraphContext,
         node: solarxy_graph::document::NodeId,
-        params: Vec<(String, solarxy_graph::params::ParamValue)>,
+        params: Vec<(String, solarxy_graph::params::ParamSource)>,
     ) {
         let Some(engine) = self.engine.as_mut() else {
             return;
@@ -656,7 +659,7 @@ impl State {
                 ctx,
                 node,
                 key,
-                value: solarxy_graph::params::ParamSource::Literal(value),
+                value,
             }) {
                 if grouped {
                     let _ = engine.apply(solarxy_graph::Command::CancelTransaction);

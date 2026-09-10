@@ -80,10 +80,16 @@ pub(crate) enum CanvasAction {
     ToggleChrome(chrome::Toggle),
     /// One or more parameters written together. More than one travels in
     /// a transaction, so a gesture that changes two is one undo step.
+    ///
+    /// **A source rather than a value**, because a parameter may be
+    /// driven by an expression and an expression is not a value. Carrying
+    /// only values here would make the expression affordance impossible
+    /// to write rather than merely absent, and it would look like the
+    /// affordance simply did not work.
     SetParams(
         GraphContext,
         NodeId,
-        Vec<(String, solarxy_graph::params::ParamValue)>,
+        Vec<(String, solarxy_graph::params::ParamSource)>,
     ),
     /// A node's name, which is an ordinary parameter and undoes like one.
     Rename(GraphContext, NodeId, String),
@@ -587,7 +593,9 @@ fn apply_note(
                 id,
                 vec![(
                     "color".to_string(),
-                    solarxy_graph::params::ParamValue::Color(rgba),
+                    solarxy_graph::params::ParamSource::Literal(
+                        solarxy_graph::params::ParamValue::Color(rgba),
+                    ),
                 )],
             )));
         }
@@ -598,11 +606,15 @@ fn apply_note(
                 vec![
                     (
                         "width".to_string(),
-                        solarxy_graph::params::ParamValue::Float(f64::from(width)),
+                        solarxy_graph::params::ParamSource::Literal(
+                            solarxy_graph::params::ParamValue::Float(f64::from(width)),
+                        ),
                     ),
                     (
                         "height".to_string(),
-                        solarxy_graph::params::ParamValue::Float(f64::from(height)),
+                        solarxy_graph::params::ParamSource::Literal(
+                            solarxy_graph::params::ParamValue::Float(f64::from(height)),
+                        ),
                     ),
                 ],
             )));
@@ -676,7 +688,9 @@ fn draw_note_editor(
             id,
             vec![(
                 "text".to_string(),
-                solarxy_graph::params::ParamValue::Text(text),
+                solarxy_graph::params::ParamSource::Literal(
+                    solarxy_graph::params::ParamValue::Text(text),
+                ),
             )],
         )));
     }

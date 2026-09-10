@@ -249,6 +249,14 @@ pub(crate) enum PanelIntent {
         node: solarxy_graph::document::NodeId,
         key: String,
     },
+    /// A file-reference parameter asked for a file chooser. The dialog is
+    /// the shell's, not the panel's: a panel that opened one would block
+    /// inside an interface pass.
+    ChooseAsset {
+        ctx: solarxy_graph::document::GraphContext,
+        node: solarxy_graph::document::NodeId,
+        key: String,
+    },
     /// The Properties panel's Clear HDRI button.
     ClearHdri,
     /// The Properties panel's Load HDRI button, shown when none is loaded.
@@ -326,7 +334,7 @@ impl Intent {
                 PanelIntent::NodeTree(_) | PanelIntent::Canvas(_) | PanelIntent::ResetParams(..),
             ) => 14,
             Self::Cook(_) => 15,
-            Self::Panel(PanelIntent::InvokeAction { .. }) => 16,
+            Self::Panel(PanelIntent::InvokeAction { .. } | PanelIntent::ChooseAsset { .. }) => 16,
         }
     }
 }

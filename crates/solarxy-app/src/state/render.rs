@@ -514,11 +514,36 @@ impl State {
         // borrows the engine alone: a method on `&self` would hold all of
         // it for as long as the source lives, and the interface pass
         // needs the renderer mutably.
+        // Owned here rather than inside the source, because the source
+        // holds borrows and the engine builds this list fresh. Gathered
+        // only when the tab is up: it walks every staged asset.
+        let staged: Vec<(String, String)> = self
+            .engine
+            .as_deref()
+            .filter(|_| self.gui.params_tab_present())
+            .map(solarxy_graph::Engine::asset_manifest)
+            .unwrap_or_default();
+        let params_subject = params_subject(
+            self.engine.as_deref(),
+            self.gui.params_tab_present(),
+            self.gui.graph_ctx(),
+            self.gui.params_pin(),
+        );
+        // Owned here for the same reason the manifest is: the lanes come
+        // from a cooked geometry the engine assembles on request, and the
+        // failure text is the shell's own cook-health record.
+        let lanes: Vec<(String, String)> = params_subject
+            .and_then(|node| upstream_lanes(self.engine.as_deref()?, self.gui.graph_ctx(), node))
+            .unwrap_or_default();
+        let node_error = params_subject.and_then(|node| self.cook_health.failure(node));
         let params_scene = params_source(
             self.engine.as_deref(),
             self.gui.params_tab_present(),
             self.gui.graph_ctx(),
             self.gui.params_pin(),
+            &staged,
+            &lanes,
+            node_error,
         );
         let params_source = params_scene.as_ref().map_or(
             crate::gui::ParamPanelSource::Empty,
@@ -828,20 +853,17 @@ fn selected_node(
 /// statistics and the validation report are engine reads and have to be
 /// taken for the node the panel will actually draw. The pin belongs to
 /// the panel, so it is passed in.
-fn params_source(
-    engine: Option<&solarxy_graph::Engine>,
+fn params_source<'a>(
+    engine: Option<&'a solarxy_graph::Engine>,
     tab_present: bool,
     ctx: GraphContext,
     pin: Option<NodeId>,
-) -> Option<crate::gui::ParamScene<'_>> {
+    assets: &'a [(String, String)],
+    lanes: &'a [(String, String)],
+    error: Option<&'a str>,
+) -> Option<crate::gui::ParamScene<'a>> {
     let engine = engine.filter(|_| tab_present)?;
-    let subject = pin.or_else(|| {
-        engine
-            .document()
-            .graph(ctx)
-            .ok()
-            .and_then(|g| g.selection.first().copied())
-    });
+    let subject = params_subject(Some(engine), tab_present, ctx, pin);
     let validation = subject.and_then(|node| engine.validation(node));
     Some(crate::gui::ParamScene {
         doc: engine.document(),
@@ -858,7 +880,68 @@ fn params_source(
                 v.report.warning_count() as u32,
             )
         }),
+        assets,
+        lanes,
+        error,
     })
+}
+
+/// Which node the parameter panel will draw.
+///
+/// The pin, else the selection's first. Resolved once and read by three
+/// callers, because the statistics, the lanes and the cook failure all
+/// have to describe the node the panel actually shows: taking one of them
+/// for a different node is the kind of mistake that looks like a stale
+/// readout rather than like a bug.
+fn params_subject(
+    engine: Option<&solarxy_graph::Engine>,
+    tab_present: bool,
+    ctx: GraphContext,
+    pin: Option<NodeId>,
+) -> Option<NodeId> {
+    let engine = engine.filter(|_| tab_present)?;
+    pin.or_else(|| {
+        engine
+            .document()
+            .graph(ctx)
+            .ok()
+            .and_then(|g| g.selection.first().copied())
+    })
+}
+
+/// The attribute lanes on the geometry feeding a node.
+///
+/// **The node's default geometry input, else its first**, which is the
+/// browser's rule. Nothing when the input is unwired or the upstream node
+/// has not cooked: an attribute name is free text and a node with no
+/// completions is ordinary rather than broken.
+fn upstream_lanes(
+    engine: &solarxy_graph::Engine,
+    ctx: GraphContext,
+    node: NodeId,
+) -> Option<Vec<(String, String)>> {
+    let graph = engine.document().graph(ctx).ok()?;
+    let desc = engine.registry().get(&graph.node(node)?.type_id)?;
+    let geometry = |port: &&solarxy_graph::registry::PortSpec| {
+        port.data_type == solarxy_graph::registry::coerce::DataType::Geometry
+    };
+    let input = desc
+        .inputs
+        .iter()
+        .find(|port| port.is_default && geometry(port))
+        .or_else(|| desc.inputs.iter().find(geometry))?;
+    let edge = graph
+        .edges()
+        .find(|edge| edge.to == node && edge.to_port == input.key)?;
+    let summary = engine.attribute_summary(edge.from)?;
+    Some(
+        summary
+            .point
+            .iter()
+            .chain(summary.primitive.iter())
+            .map(|lane| (lane.name.clone(), lane.ty.to_string()))
+            .collect(),
+    )
 }
 
 #[cfg(test)]

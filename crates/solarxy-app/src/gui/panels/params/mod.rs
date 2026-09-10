@@ -18,6 +18,8 @@
 //! name and its slug throughout, because those names are serialized into
 //! a user's saved dock arrangement.
 
+mod controls;
+mod draft;
 mod frame;
 
 pub(crate) use frame::{ParamPanelSource, ParamPanelState, ParamScene, draw_params_content};

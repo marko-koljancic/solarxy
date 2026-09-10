@@ -9,7 +9,9 @@ use solarxy_graph::registry::param_spec::ParamSpec;
 use solarxy_graph::registry::visibility::param_visible;
 use solarxy_studio::params::{self, VALIDATION_TAB};
 
+use super::controls::{self, ControlEdit, ControlEnv};
 use crate::gui::intent::Intents;
+use crate::gui::panels::nodes::CanvasAction;
 use crate::gui::theme::Theme;
 
 /// The document and everything the panel draws beside it.
@@ -41,6 +43,19 @@ pub(crate) struct ParamScene<'a> {
     /// Errors and warnings from the whole report, which is a
     /// different number from the rows a list can show.
     pub counts: (u32, u32),
+    /// Every staged asset, as its hash and the name it was staged under,
+    /// so a file reference reads as a file name. The engine holds the
+    /// names and a panel cannot reach the engine.
+    pub assets: &'a [(String, String)],
+    /// The attribute lanes on the subject's upstream geometry, as name and
+    /// type. Resolved against the same input the wrangle's completions
+    /// read, because two answers to "which lanes exist here" would be one
+    /// too many.
+    pub lanes: &'a [(String, String)],
+    /// The subject's last cook failure, which is where a snippet's bad
+    /// line comes from: a wrangle parse error is a cook error, not a
+    /// second channel.
+    pub error: Option<&'a str>,
 }
 
 /// What the panel draws, or nothing.
@@ -55,6 +70,11 @@ pub(crate) enum ParamPanelSource<'a> {
 pub(crate) struct ParamPanelState {
     /// A node the panel follows instead of the selection.
     pin: Option<NodeId>,
+    /// The row being typed into, if any. Held here rather than in the
+    /// widget because a text editor needs a buffer that survives the
+    /// frame, and re-reading the document every frame would discard
+    /// every keystroke. See [`super::draft`].
+    draft: Option<super::draft::Draft>,
     /// The tab last chosen, by name. Asked of the shared resolver every
     /// frame rather than trusted, because a group whose parameters all
     /// hide stops being a tab and the stored name then names nothing.
@@ -72,6 +92,7 @@ impl ParamPanelState {
     pub(crate) fn reset(&mut self) {
         self.pin = None;
         self.tab.clear();
+        self.draft = None;
     }
 
     pub(crate) fn pinned(&self) -> Option<NodeId> {
@@ -197,6 +218,9 @@ pub(crate) fn draw_params_content(
         stats,
         has_report,
         counts,
+        assets,
+        lanes,
+        error,
     } = scene;
     let Ok(graph) = doc.graph(ctx) else {
         return placeholder(ui, "No document open", theme);
@@ -295,6 +319,10 @@ pub(crate) fn draw_params_content(
             let Some(active) = active else {
                 return placeholder(ui, "No parameters.", theme);
             };
+            // Node-path candidates come from the **root** graph, which is
+            // the browser's rule; offering nested containers would give
+            // the two shells different candidate lists for one document.
+            let candidates = node_path_candidates(doc, registry, &desc.params);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 if active == VALIDATION_TAB {
                     ui.label(
@@ -329,14 +357,67 @@ pub(crate) fn draw_params_content(
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new(&spec.label).size(11.0))
                                 .on_hover_text(&spec.doc);
-                            // The control itself is the next task; the
-                            // row is drawn so the frame's tabs, sections
-                            // and visibility are legible without it.
-                            ui.label(
-                                egui::RichText::new(spec.ty.describe())
-                                    .color(theme.muted)
-                                    .size(10.0),
-                            );
+                            // A driven row draws its control disabled
+                            // rather than omitting it: the stored value is
+                            // still what the node falls back to when the
+                            // wire goes, and hiding the row makes that
+                            // impossible to read or to set in advance.
+                            let env = ControlEnv {
+                                node,
+                                candidates: &candidates,
+                                assets,
+                                lanes,
+                                specs: &desc.params,
+                                error,
+                                theme,
+                            };
+                            let edit = ui
+                                .add_enabled_ui(!is_driven, |ui| {
+                                    controls::draw(
+                                        ui,
+                                        spec,
+                                        data.params.get(&spec.key),
+                                        &env,
+                                        &mut state.draft,
+                                    )
+                                })
+                                .inner;
+                            match edit {
+                                Some(ControlEdit::Write(writes)) => {
+                                    intents.panel(crate::gui::PanelIntent::Canvas(
+                                        CanvasAction::SetParams(
+                                            ctx,
+                                            node,
+                                            writes
+                                                .into_iter()
+                                                .map(|(key, value)| {
+                                                    (
+                                                        key,
+                                                        solarxy_graph::params::ParamSource::Literal(
+                                                            value,
+                                                        ),
+                                                    )
+                                                })
+                                                .collect(),
+                                        ),
+                                    ));
+                                }
+                                Some(ControlEdit::Invoke) => {
+                                    intents.panel(crate::gui::PanelIntent::InvokeAction {
+                                        ctx,
+                                        node,
+                                        key: spec.key.clone(),
+                                    });
+                                }
+                                Some(ControlEdit::ChooseAsset) => {
+                                    intents.panel(crate::gui::PanelIntent::ChooseAsset {
+                                        ctx,
+                                        node,
+                                        key: spec.key.clone(),
+                                    });
+                                }
+                                None => {}
+                            }
                         });
                         if is_driven {
                             ui.label(
@@ -351,6 +432,39 @@ pub(crate) fn draw_params_content(
             });
         }
     }
+}
+
+/// Every node the node-path parameters on this type could point at.
+///
+/// Gathered once per frame rather than once per row, and only when a row
+/// actually asks: the walk is over the whole root graph, and most node
+/// types declare no node-path parameter at all.
+fn node_path_candidates(
+    doc: &Document,
+    registry: &Registry,
+    specs: &[ParamSpec],
+) -> Vec<(NodeId, String)> {
+    let accepts: Vec<_> = specs
+        .iter()
+        .filter_map(|spec| match &spec.ty {
+            solarxy_graph::registry::param_spec::ParamType::NodePath { accept } => Some(accept),
+            _ => None,
+        })
+        .collect();
+    if accepts.is_empty() {
+        return Vec::new();
+    }
+    let Ok(root) = doc.graph(GraphContext::Root) else {
+        return Vec::new();
+    };
+    root.nodes()
+        .filter(|data| {
+            registry
+                .get(&data.type_id)
+                .is_some_and(|desc| accepts.iter().any(|accept| controls::accepts(accept, desc)))
+        })
+        .map(|data| (data.id, solarxy_graph::naming::node_name(data, registry)))
+        .collect()
 }
 
 fn placeholder(ui: &mut Ui, message: &str, theme: Theme) {
