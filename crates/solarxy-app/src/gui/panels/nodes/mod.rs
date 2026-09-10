@@ -37,7 +37,8 @@ mod viewer;
 use std::collections::HashMap;
 
 use solarxy_core::preferences::WireRouting;
-use solarxy_graph::document::{GraphContext, NodeId};
+use solarxy_graph::document::{EdgeId, GraphContext, NodeId};
+use solarxy_graph::engine::PortRefDto;
 
 pub(crate) use seed::{CanvasScene, CanvasSource, CanvasState, NodeCook};
 
@@ -62,6 +63,27 @@ pub(crate) enum CanvasAction {
     /// The next wire routing. A reading preference, so it changes no
     /// document state and adds nothing to the undo history.
     CycleRouting,
+    /// A gesture the coercion matrix would not carry. Named rather than
+    /// silently dropped, and with both wire types in it, because that is
+    /// the information needed to fix it.
+    Refuse(String),
+    /// A gesture that happened and is worth saying out loud: a lossy
+    /// connection, or a wire dropped on nothing.
+    Warn(String),
+    /// Every rewiring gesture, in one shape.
+    ///
+    /// Connect, disconnect, reconnect and drop-to-void differ only in
+    /// which halves are present, so they travel as one variant and the
+    /// drain wraps a pair in a transaction. Writing them as four
+    /// variants would put the one-gesture-one-undo-step rule in four
+    /// places, and it is the kind of rule that holds in three of them.
+    Rewire {
+        ctx: GraphContext,
+        /// Edges to remove first, in the order the document holds them.
+        remove: Vec<EdgeId>,
+        /// The connection to make afterwards.
+        add: Option<(PortRefDto, PortRefDto)>,
+    },
 }
 
 /// Render the node canvas into `ui` (the `egui_dock` tab supplies it).
@@ -102,12 +124,16 @@ pub(in crate::gui) fn draw_nodes_content(
         routing,
         boxes: state.boxes(),
         sockets: HashMap::new(),
+        pending: viewer::Pending::default(),
     };
     state
         .snarl_mut()
         .show(&mut canvas_viewer, &style, "solarxy-node-canvas", ui);
     state.accept_frame(canvas_viewer.sockets, canvas_viewer.boxes);
     mark_coercions(ui, doc, registry, *ctx, state, theme);
+
+    let released = ui.ctx().input(|i| i.pointer.any_released());
+    resolve_rewiring(canvas_viewer.pending, state, *ctx, released, intents);
 
     // Cycling the routing is a canvas-scoped binding rather than a global
     // one: the same key types an `s` anywhere a field has focus, so it is
@@ -122,8 +148,65 @@ pub(in crate::gui) fn draw_nodes_content(
         intents.panel(PanelIntent::Canvas(CanvasAction::CycleRouting));
     }
 
-    let released = ui.ctx().input(|i| i.pointer.any_released());
     read_back_positions(released, state, *ctx, intents);
+}
+
+/// Turn the frame's rewiring gestures into at most one command batch.
+///
+/// **Four gestures, one shape, and the substrate is why there are four.**
+/// A fresh drag onto a socket arrives as a connection. Right-clicking a
+/// wire or a socket arrives as a removal. But grabbing a connected
+/// endpoint to move it arrives as neither: the library takes that wire off
+/// its own graph without asking, so it is noticed by comparing what is on
+/// the canvas against what was seeded. Pairing that with the connection
+/// that follows is what makes a reconnect one undo step, and pairing it
+/// with nothing is what makes a wire dropped on empty space a disconnect
+/// rather than a wire that quietly comes back.
+fn resolve_rewiring(
+    pending: viewer::Pending,
+    state: &mut CanvasState,
+    ctx: GraphContext,
+    released: bool,
+    intents: &mut Intents,
+) {
+    if let Some(message) = pending.refusal {
+        intents.panel(PanelIntent::Canvas(CanvasAction::Refuse(message)));
+    }
+    if let Some(message) = pending.warning {
+        intents.panel(PanelIntent::Canvas(CanvasAction::Warn(message)));
+    }
+
+    let detached = state.detached_edges();
+    // Still dragging a detached endpoint: leave the canvas showing the
+    // wire in flight and decide when the gesture ends.
+    if !detached.is_empty() && !released && pending.connect.is_none() {
+        return;
+    }
+
+    let mut remove = pending.remove;
+    let dropped_to_void = pending.connect.is_none() && !detached.is_empty();
+    remove.extend(detached);
+    remove.sort_unstable_by_key(|e| e.0);
+    remove.dedup();
+
+    if remove.is_empty() && pending.connect.is_none() {
+        return;
+    }
+    if dropped_to_void {
+        intents.panel(PanelIntent::Canvas(CanvasAction::Warn(
+            "Disconnected".to_string(),
+        )));
+    }
+    // The canvas is put back the way the document has it, because the
+    // command has not been applied yet and the frame after this one seeds
+    // from a document that has moved. Without this a refused or failed
+    // rewiring would leave the canvas short a wire the scene still has.
+    state.restore_detached();
+    intents.panel(PanelIntent::Canvas(CanvasAction::Rewire {
+        ctx,
+        remove,
+        add: pending.connect,
+    }));
 }
 
 /// Mark every wire that does not carry its value across unchanged.
@@ -579,6 +662,219 @@ mod tests {
             declared,
             "the canvas placed a different number of sockets than the document declares"
         );
+    }
+
+    /// Every rewiring assertion reads the same way: run the resolution
+    /// against a set of gestures and see what it asked the engine for.
+    fn raised(intents: &mut Intents) -> Vec<CanvasAction> {
+        intents
+            .take_ordered()
+            .into_iter()
+            .filter_map(|intent| match intent {
+                crate::gui::Intent::Panel(PanelIntent::Canvas(action)) => Some(action),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn port(node: NodeId, port: &str) -> solarxy_graph::engine::PortRefDto {
+        solarxy_graph::engine::PortRefDto {
+            node,
+            port: port.to_string(),
+        }
+    }
+
+    fn seeded(engine: &Engine, ctx: GraphContext) -> CanvasState {
+        let mut state = CanvasState::default();
+        state.seed_if_stale(
+            engine.document(),
+            engine.registry(),
+            ctx,
+            engine.revision(),
+            false,
+        );
+        state
+    }
+
+    /// One connect gesture, one command, and no transaction: a lone
+    /// connection is already atomic and wrapping it would put an empty
+    /// pair of markers in the history.
+    #[test]
+    fn a_connect_gesture_raises_exactly_one_rewiring() {
+        let (engine, geo, boxy, merge) = scene();
+        let ctx = GraphContext::Subflow(geo);
+        let mut state = seeded(&engine, ctx);
+        let mut intents = Intents::default();
+
+        let pending = viewer::Pending {
+            connect: Some((port(boxy, "geometry"), port(merge, "inputs"))),
+            ..viewer::Pending::default()
+        };
+        resolve_rewiring(pending, &mut state, ctx, true, &mut intents);
+
+        let actions = raised(&mut intents);
+        assert_eq!(actions.len(), 1);
+        let CanvasAction::Rewire { remove, add, .. } = &actions[0] else {
+            panic!("a connect asks for a rewiring");
+        };
+        assert!(remove.is_empty(), "a connect removes nothing");
+        assert!(add.is_some());
+    }
+
+    /// A disconnect is one command too, and it names the edge rather than
+    /// the ports, so a variadic port's third wire is the one that goes.
+    #[test]
+    fn a_disconnect_gesture_raises_exactly_one_rewiring() {
+        let (engine, geo, _, _) = scene();
+        let ctx = GraphContext::Subflow(geo);
+        let edge = engine
+            .document()
+            .graph(ctx)
+            .expect("the network exists")
+            .edges()
+            .next()
+            .expect("the fixture is wired")
+            .id;
+        let mut state = seeded(&engine, ctx);
+        let mut intents = Intents::default();
+
+        let pending = viewer::Pending {
+            remove: vec![edge],
+            ..viewer::Pending::default()
+        };
+        resolve_rewiring(pending, &mut state, ctx, true, &mut intents);
+
+        let actions = raised(&mut intents);
+        assert_eq!(actions.len(), 1);
+        let CanvasAction::Rewire { remove, add, .. } = &actions[0] else {
+            panic!("a disconnect asks for a rewiring");
+        };
+        assert_eq!(remove, &vec![edge]);
+        assert!(add.is_none());
+    }
+
+    /// Moving a connected endpoint is a removal and a connection in one
+    /// gesture, and it must be one entry in the history rather than two.
+    /// The substrate takes the wire off its own graph without asking, so
+    /// the removal is noticed rather than reported.
+    #[test]
+    fn a_reconnect_is_one_rewiring_carrying_both_halves() {
+        let (engine, geo, boxy, merge) = scene();
+        let ctx = GraphContext::Subflow(geo);
+        let edge = engine
+            .document()
+            .graph(ctx)
+            .expect("the network exists")
+            .edges()
+            .next()
+            .expect("the fixture is wired")
+            .id;
+        let mut state = seeded(&engine, ctx);
+        detach_every_wire(&mut state);
+        let mut intents = Intents::default();
+
+        let pending = viewer::Pending {
+            connect: Some((port(boxy, "geometry"), port(merge, "inputs"))),
+            ..viewer::Pending::default()
+        };
+        resolve_rewiring(pending, &mut state, ctx, true, &mut intents);
+
+        let actions = raised(&mut intents);
+        assert_eq!(actions.len(), 1, "one gesture is one entry");
+        let CanvasAction::Rewire { remove, add, .. } = &actions[0] else {
+            panic!("a reconnect asks for a rewiring");
+        };
+        assert_eq!(remove, &vec![edge], "the detached wire is what goes");
+        assert!(add.is_some(), "and the new one is what arrives");
+    }
+
+    /// A wire dragged off and dropped on nothing disconnects, and says so.
+    #[test]
+    fn a_wire_dropped_on_nothing_disconnects_and_says_so() {
+        let (engine, geo, _, _) = scene();
+        let ctx = GraphContext::Subflow(geo);
+        let mut state = seeded(&engine, ctx);
+        detach_every_wire(&mut state);
+        let mut intents = Intents::default();
+
+        resolve_rewiring(
+            viewer::Pending::default(),
+            &mut state,
+            ctx,
+            true,
+            &mut intents,
+        );
+
+        let actions = raised(&mut intents);
+        assert_eq!(actions.len(), 2, "the disconnect, and the word for it");
+        assert!(
+            matches!(&actions[0], CanvasAction::Warn(m) if m == "Disconnected"),
+            "a dropped wire must say what happened: {:?}",
+            actions[0]
+        );
+        assert!(matches!(
+            &actions[1],
+            CanvasAction::Rewire { add: None, remove, .. } if !remove.is_empty()
+        ));
+    }
+
+    /// A gesture still in flight asks for nothing. Deciding at the moment
+    /// the wire leaves its socket would disconnect it before the user had
+    /// chosen where to put it.
+    #[test]
+    fn a_detached_wire_asks_for_nothing_until_the_gesture_ends() {
+        let (engine, geo, _, _) = scene();
+        let ctx = GraphContext::Subflow(geo);
+        let mut state = seeded(&engine, ctx);
+        detach_every_wire(&mut state);
+        let mut intents = Intents::default();
+
+        resolve_rewiring(
+            viewer::Pending::default(),
+            &mut state,
+            ctx,
+            false,
+            &mut intents,
+        );
+        assert!(raised(&mut intents).is_empty());
+    }
+
+    /// Whatever the substrate took off its own graph is put back, because
+    /// the command has not been applied yet and a refused one never will
+    /// be. Without this the canvas sits missing a wire the scene has.
+    #[test]
+    fn the_canvas_is_put_back_the_way_the_document_has_it() {
+        let (engine, geo, _, _) = scene();
+        let ctx = GraphContext::Subflow(geo);
+        let mut state = seeded(&engine, ctx);
+        let wired = state.snarl_mut().wires().count();
+        assert_eq!(wired, 1, "the fixture is wired");
+
+        detach_every_wire(&mut state);
+        assert_eq!(state.snarl_mut().wires().count(), 0);
+
+        let mut intents = Intents::default();
+        resolve_rewiring(
+            viewer::Pending::default(),
+            &mut state,
+            ctx,
+            true,
+            &mut intents,
+        );
+        assert_eq!(
+            state.snarl_mut().wires().count(),
+            wired,
+            "the canvas must show what the document holds, not what a gesture left"
+        );
+    }
+
+    /// The substrate's own detach, reproduced: it drops the wire from its
+    /// graph and never tells the viewer.
+    fn detach_every_wire(state: &mut CanvasState) {
+        let wires: Vec<_> = state.snarl_mut().wires().collect();
+        for (out_pin, in_pin) in wires {
+            state.snarl_mut().disconnect(out_pin, in_pin);
+        }
     }
 
     fn move_in_snarl(state: &mut CanvasState, node: NodeId, to: [f32; 2]) {

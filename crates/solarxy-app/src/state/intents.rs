@@ -552,6 +552,61 @@ impl State {
         };
     }
 
+    /// Remove some edges, then perhaps make a connection, as one step.
+    ///
+    /// A transaction is opened only for a pair. `CancelTransaction` on a
+    /// failure is what keeps a half-applied rewiring out of the document:
+    /// the connect is the half that can be refused, and rolling back
+    /// leaves no redo entry either, so the history reads as though the
+    /// gesture never happened.
+    fn rewire(
+        &mut self,
+        ctx: GraphContext,
+        remove: &[solarxy_graph::document::EdgeId],
+        add: Option<(
+            solarxy_graph::engine::PortRefDto,
+            solarxy_graph::engine::PortRefDto,
+        )>,
+    ) {
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        let grouped = !remove.is_empty() && add.is_some();
+        if grouped
+            && engine
+                .apply(solarxy_graph::Command::BeginTransaction {
+                    label: "reconnect".to_string(),
+                })
+                .is_err()
+        {
+            return;
+        }
+        for edge in remove {
+            if let Err(err) = engine.apply(solarxy_graph::Command::Disconnect { ctx, edge: *edge })
+            {
+                if grouped {
+                    let _ = engine.apply(solarxy_graph::Command::CancelTransaction);
+                }
+                self.gui
+                    .set_toast(&format!("{err}"), crate::gui::ToastSeverity::Error);
+                return;
+            }
+        }
+        if let Some((from, to)) = add
+            && let Err(err) = engine.apply(solarxy_graph::Command::Connect { ctx, from, to })
+        {
+            if grouped {
+                let _ = engine.apply(solarxy_graph::Command::CancelTransaction);
+            }
+            self.gui
+                .set_toast(&format!("{err}"), crate::gui::ToastSeverity::Error);
+            return;
+        }
+        if grouped {
+            let _ = engine.apply(solarxy_graph::Command::EndTransaction);
+        }
+    }
+
     /// Apply one canvas gesture.
     ///
     /// A move is one command carrying every node the gesture moved, which
@@ -585,6 +640,21 @@ impl State {
             // is re-emitted from its owning node on every cook, so a
             // renderer-side write would look right for one frame and be
             // undone by the next edit.
+            CanvasAction::Refuse(message) => {
+                self.gui
+                    .set_toast(&message, crate::gui::ToastSeverity::Error);
+            }
+            CanvasAction::Warn(message) => {
+                self.gui
+                    .set_toast(&message, crate::gui::ToastSeverity::Warning);
+            }
+            // One gesture, one undo step, and the transaction is opened
+            // only when there are two halves to group. A lone connect or
+            // a lone disconnect is already atomic, and wrapping it would
+            // put an empty pair of markers in the history for nothing.
+            CanvasAction::Rewire { ctx, remove, add } => {
+                self.rewire(ctx, &remove, add);
+            }
             // Not an engine write at all: the routing is how wires are
             // drawn, so it changes a preference and repaints.
             CanvasAction::CycleRouting => {

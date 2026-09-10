@@ -73,6 +73,31 @@ pub(super) struct CanvasViewer<'a> {
     /// a per-wire widget hook and never calls it, so a wire that narrows
     /// its value has to be marked from outside.
     pub sockets: HashMap<PinKey, Pos2>,
+    /// What the frame's rewiring gestures asked for, gathered rather than
+    /// applied.
+    pub pending: Pending,
+}
+
+/// What the four mutation points recorded this frame.
+///
+/// One bundle rather than four, because the gestures compose: a
+/// reconnect is a removal and a connection, and a wire dropped on nothing
+/// is a removal with no connection. Resolving them together after the
+/// frame is what makes each of those one undo step without the four hooks
+/// having to know about each other.
+#[derive(Debug, Default)]
+pub(super) struct Pending {
+    pub remove: Vec<solarxy_graph::document::EdgeId>,
+    pub connect: Option<(
+        solarxy_graph::engine::PortRefDto,
+        solarxy_graph::engine::PortRefDto,
+    )>,
+    /// A refusal to show, when the coercion matrix would not carry the
+    /// value. Names both wire types, which is the information a user
+    /// needs to fix it.
+    pub refusal: Option<String>,
+    /// A warning for a connection that is legal and narrows the value.
+    pub warning: Option<String>,
 }
 
 /// One socket, on the side it belongs to.
@@ -141,6 +166,63 @@ impl CanvasViewer<'_> {
             title.push_str(&spec.doc);
         }
         Some(title)
+    }
+
+    /// One end of a gesture, as the engine names it.
+    fn port_ref(
+        &self,
+        node: egui_snarl::NodeId,
+        side: PortSide,
+        index: usize,
+        snarl: &Snarl<CanvasNode>,
+    ) -> Option<solarxy_graph::engine::PortRefDto> {
+        let id = snarl.get_node(node)?.id;
+        let slots = match side {
+            PortSide::Input => input_slots(self.scene.doc, self.scene.registry, self.ctx, id),
+            PortSide::Output => output_slots(self.scene.doc, self.scene.registry, self.ctx, id),
+        };
+        Some(solarxy_graph::engine::PortRefDto {
+            node: id,
+            port: slots.get(index)?.port.clone(),
+        })
+    }
+
+    /// The document edge a pair of sockets stands for.
+    ///
+    /// The occurrence is what makes this more than a port lookup: a
+    /// merge's third wire is a different edge from its first, and
+    /// disconnecting the wrong one looks like the gesture did nothing.
+    fn edge_between(
+        &self,
+        from: egui_snarl::OutPinId,
+        to: egui_snarl::InPinId,
+        snarl: &Snarl<CanvasNode>,
+    ) -> Option<solarxy_graph::document::EdgeId> {
+        let (source, target) = (snarl.get_node(from.node)?.id, snarl.get_node(to.node)?.id);
+        let out_slot = output_slots(self.scene.doc, self.scene.registry, self.ctx, source)
+            .into_iter()
+            .nth(from.output)?;
+        let in_slot = input_slots(self.scene.doc, self.scene.registry, self.ctx, target)
+            .into_iter()
+            .nth(to.input)?;
+        let graph = self.scene.doc.graph(self.ctx).ok()?;
+        let node = graph.node(target)?;
+        if let Some(order) = node.port_order.get(&in_slot.port) {
+            return order.get(in_slot.occurrence).copied();
+        }
+        graph
+            .edges()
+            .find(|e| {
+                e.from == source
+                    && e.from_port == out_slot.port
+                    && e.to == target
+                    && e.to_port == in_slot.port
+            })
+            .map(|e| e.id)
+    }
+
+    fn node_type_id(&self, id: NodeId) -> Option<String> {
+        Some(self.node_data(id)?.type_id.clone())
     }
 
     fn registry_descriptor(&self, id: NodeId) -> Option<&NodeTypeDescriptor> {
@@ -405,17 +487,73 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
         false
     }
 
-    // The four mutation points. Empty bodies rather than absent ones: the
-    // default implementations mutate the substrate's own wire set, and
-    // inheriting even one of them would put a wire on the canvas that no
-    // command ever created.
-    fn connect(&mut self, _from: &OutPin, _to: &InPin, _snarl: &mut Snarl<CanvasNode>) {}
+    // The four mutation points. Every one of them records and returns
+    // without touching the graph it is handed: the default
+    // implementations mutate the substrate's own wire set, and inheriting
+    // even one would put a wire on the canvas that no command created.
 
-    fn disconnect(&mut self, _from: &OutPin, _to: &InPin, _snarl: &mut Snarl<CanvasNode>) {}
+    /// A wire was dropped on a socket.
+    ///
+    /// Refused here rather than by the engine when the coercion matrix
+    /// says the value cannot arrive, because a refusal a user can read is
+    /// worth more than an error a user has to interpret, and because the
+    /// document must not move at all. A legal but lossy connection is
+    /// allowed with a warning, which is what the browser does and what
+    /// the matrix means by lossy.
+    fn connect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<CanvasNode>) {
+        let (Some(source), Some(target)) = (
+            self.port_ref(from.id.node, PortSide::Output, from.id.output, snarl),
+            self.port_ref(to.id.node, PortSide::Input, to.id.input, snarl),
+        ) else {
+            return;
+        };
+        let (Some(from_type), Some(to_type)) = (
+            self.node_type_id(source.node),
+            self.node_type_id(target.node),
+        ) else {
+            return;
+        };
+        match judge(
+            self.scene.registry,
+            &from_type,
+            &source.port,
+            &to_type,
+            &target.port,
+        ) {
+            Judgement::Refused(message) => self.pending.refusal = Some(message),
+            Judgement::Lossy => {
+                self.pending.warning = Some(LOSSY_WARNING.to_string());
+                self.pending.connect = Some((source, target));
+            }
+            Judgement::Clean => self.pending.connect = Some((source, target)),
+        }
+    }
 
-    fn drop_outputs(&mut self, _pin: &OutPin, _snarl: &mut Snarl<CanvasNode>) {}
+    /// A wire was removed from the canvas, which is the right-click on it.
+    fn disconnect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<CanvasNode>) {
+        if let Some(edge) = self.edge_between(from.id, to.id, snarl) {
+            self.pending.remove.push(edge);
+        }
+    }
 
-    fn drop_inputs(&mut self, _pin: &InPin, _snarl: &mut Snarl<CanvasNode>) {}
+    /// Every wire leaving one output socket, which is the right-click on
+    /// it.
+    fn drop_outputs(&mut self, pin: &OutPin, snarl: &mut Snarl<CanvasNode>) {
+        for remote in &pin.remotes {
+            if let Some(edge) = self.edge_between(pin.id, *remote, snarl) {
+                self.pending.remove.push(edge);
+            }
+        }
+    }
+
+    /// Every wire arriving at one input socket.
+    fn drop_inputs(&mut self, pin: &InPin, snarl: &mut Snarl<CanvasNode>) {
+        for remote in &pin.remotes {
+            if let Some(edge) = self.edge_between(*remote, pin.id, snarl) {
+                self.pending.remove.push(edge);
+            }
+        }
+    }
 }
 
 impl CanvasViewer<'_> {
@@ -676,6 +814,64 @@ fn authored_description(data: &NodeData) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+/// What a lossy but legal connection says.
+pub(super) const LOSSY_WARNING: &str = "Lossy connection (value narrowed)";
+
+/// What the canvas does with a proposed connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Judgement {
+    /// The matrix will not carry the value. The message names both wire
+    /// types, which is the information needed to fix it.
+    Refused(String),
+    /// Legal, and the value narrows on the way. Allowed with a warning
+    /// rather than refused, which is what the matrix means by lossy.
+    Lossy,
+    Clean,
+}
+
+/// Judge a proposed connection before the document moves.
+///
+/// Judged here rather than by the engine for two reasons. A refusal a
+/// user can read is worth more than an error a user has to interpret; and
+/// the document must not move at all, which means the gesture cannot be
+/// tried and rolled back. `connection_verdict` is the only public
+/// pre-flight answer, since the engine's own check is private.
+///
+/// An unknown type or port is refused rather than assumed legal, which is
+/// the shared rule's own choice and the safe one: a shell reading a newer
+/// engine refuses a wire it cannot vouch for instead of writing one the
+/// engine will reject anyway.
+pub(super) fn judge(
+    registry: &solarxy_graph::registry::Registry,
+    from_type: &str,
+    from_port: &str,
+    to_type: &str,
+    to_port: &str,
+) -> Judgement {
+    let verdict = types::connection_verdict(registry, from_type, from_port, to_type, to_port);
+    if !verdict.legal {
+        let named = |type_id: &str, port: &str, side| {
+            types::port_data_type(registry, type_id, port, side).map_or_else(
+                || "unknown".to_string(),
+                |dt| format!("{dt:?}").to_ascii_lowercase(),
+            )
+        };
+        return Judgement::Refused(format!(
+            "Cannot connect {} to {}",
+            named(from_type, from_port, PortSide::Output),
+            named(to_type, to_port, PortSide::Input),
+        ));
+    }
+    if matches!(
+        verdict.coercion,
+        Some(solarxy_graph::registry::coerce::Coercion::Lossy)
+    ) {
+        Judgement::Lossy
+    } else {
+        Judgement::Clean
+    }
+}
+
 /// The routing a wire is drawn with.
 ///
 /// The four the browser offers map one to one onto the four the substrate
@@ -721,6 +917,61 @@ mod tests {
         }
         assert_eq!(at.next(), WireRouting::default());
         assert_eq!(seen.len(), WireRouting::ALL.len());
+    }
+
+    /// A refusal names both wire types, because "cannot connect" alone
+    /// tells a user nothing they can act on. Driven off the real registry
+    /// rather than a fixture, so it says something about what ships.
+    #[test]
+    fn a_refused_connection_names_both_wire_types() {
+        let registry = solarxy_graph::nodes::builtin_registry().expect("builtin registry");
+        // An image cannot become geometry, and the matrix says so.
+        let Judgement::Refused(message) =
+            judge(&registry, "import_image", "image", "merge", "inputs")
+        else {
+            panic!("an image feeding a geometry port must be refused");
+        };
+        assert!(
+            message.contains("image") && message.contains("geometry"),
+            "the refusal must name both ends: {message}"
+        );
+    }
+
+    /// Lossy is allowed and warned about rather than refused, which is
+    /// what the matrix means by lossy and what the browser does.
+    #[test]
+    fn a_lossy_connection_is_allowed_with_a_warning() {
+        let registry = solarxy_graph::nodes::builtin_registry().expect("builtin registry");
+        let lossy = DataType::ALL
+            .into_iter()
+            .flat_map(|from| DataType::ALL.into_iter().map(move |to| (from, to)))
+            .find(|(from, to)| {
+                solarxy_graph::registry::coerce::can_coerce(*from, *to)
+                    == solarxy_graph::registry::coerce::Coercion::Lossy
+            });
+        assert!(lossy.is_some(), "the matrix declares no lossy pair at all");
+
+        assert_eq!(
+            judge(&registry, "box", "geometry", "merge", "inputs"),
+            Judgement::Clean,
+            "geometry into geometry loses nothing"
+        );
+    }
+
+    /// A type or a port this build has never heard of is refused rather
+    /// than assumed legal, which is the safe direction: a shell reading a
+    /// newer engine writes no wire it cannot vouch for.
+    #[test]
+    fn an_unknown_type_or_port_is_refused_rather_than_assumed() {
+        let registry = solarxy_graph::nodes::builtin_registry().expect("builtin registry");
+        assert!(matches!(
+            judge(&registry, "hologram", "out", "merge", "inputs"),
+            Judgement::Refused(_)
+        ));
+        assert!(matches!(
+            judge(&registry, "box", "geometry", "merge", "phantom"),
+            Judgement::Refused(_)
+        ));
     }
 
     /// A socket's two channels both come from the shared rules, and a

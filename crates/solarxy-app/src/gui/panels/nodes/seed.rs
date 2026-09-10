@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use egui_snarl::Snarl;
 use solarxy_graph::cook::state::CookState;
-use solarxy_graph::document::{Document, GraphContext, NodeId};
+use solarxy_graph::document::{Document, EdgeId, GraphContext, NodeId};
 use solarxy_graph::registry::{Arity, Registry};
 
 /// What a node's last cook says about it, which the document does not
@@ -203,6 +203,16 @@ pub(crate) struct CanvasState {
     /// canvas has drawn. The marker pass reads it, and a test reads it to
     /// assert that every declared socket got a position.
     sockets: HashMap<super::viewer::PinKey, egui::Pos2>,
+    /// Every wire the seed put on the canvas, and the edge it stands
+    /// for.
+    ///
+    /// Kept because the substrate takes a wire off its own graph without
+    /// asking, on the one gesture that detaches an endpoint to move it.
+    /// Comparing what is there against what was seeded is how that
+    /// gesture is noticed at all, and noticing it is what lets a
+    /// reconnect be one undo step and a wire dropped on nothing be a
+    /// disconnect rather than a wire that silently reappears.
+    seeded_wires: HashMap<(egui_snarl::OutPinId, egui_snarl::InPinId), EdgeId>,
     /// Each node's layout box, as its own draw recorded it.
     ///
     /// **One frame behind, and it has to be**: the substrate draws a
@@ -224,6 +234,7 @@ impl Default for CanvasState {
             seeded: None,
             seeded_pos: HashMap::new(),
             sockets: HashMap::new(),
+            seeded_wires: HashMap::new(),
             boxes: HashMap::new(),
         }
     }
@@ -239,6 +250,7 @@ impl CanvasState {
         self.seeded = None;
         self.seeded_pos.clear();
         self.sockets.clear();
+        self.seeded_wires.clear();
         self.boxes.clear();
     }
 
@@ -274,6 +286,7 @@ impl CanvasState {
         self.snarl = Snarl::new();
         self.to_snarl.clear();
         self.seeded_pos.clear();
+        self.seeded_wires.clear();
 
         let Ok(graph) = doc.graph(ctx) else {
             return;
@@ -300,16 +313,54 @@ impl CanvasState {
             let Some(in_index) = slot_index(&inputs, doc, ctx, edge) else {
                 continue;
             };
-            self.snarl.connect(
-                egui_snarl::OutPinId {
-                    node: from,
-                    output: out_index,
-                },
-                egui_snarl::InPinId {
-                    node: to,
-                    input: in_index,
-                },
-            );
+            let out_pin = egui_snarl::OutPinId {
+                node: from,
+                output: out_index,
+            };
+            let in_pin = egui_snarl::InPinId {
+                node: to,
+                input: in_index,
+            };
+            self.snarl.connect(out_pin, in_pin);
+            self.seeded_wires.insert((out_pin, in_pin), edge.id);
+        }
+    }
+
+    /// The edges the substrate has taken off its own graph since the seed.
+    ///
+    /// Empty on every frame but the one where a user has grabbed a
+    /// connected endpoint to move it. What comes back is the document's
+    /// edges, not the substrate's wires, because the document is what a
+    /// command has to name.
+    pub(super) fn detached_edges(&self) -> Vec<EdgeId> {
+        let present: std::collections::HashSet<_> = self.snarl.wires().collect();
+        let mut out: Vec<EdgeId> = self
+            .seeded_wires
+            .iter()
+            .filter(|(pins, _)| !present.contains(pins))
+            .map(|(_, edge)| *edge)
+            .collect();
+        out.sort_unstable_by_key(|e| e.0);
+        out
+    }
+
+    /// Put back whatever the substrate took, without going near the
+    /// engine.
+    ///
+    /// The frame after a gesture that detached a wire and then connected
+    /// nothing anywhere is the one case: the document never changed, so
+    /// there is no new revision to re-seed on, and the canvas would sit
+    /// there missing a wire the scene still has.
+    pub(super) fn restore_detached(&mut self) {
+        let present: std::collections::HashSet<_> = self.snarl.wires().collect();
+        let missing: Vec<_> = self
+            .seeded_wires
+            .keys()
+            .filter(|pins| !present.contains(*pins))
+            .copied()
+            .collect();
+        for (out_pin, in_pin) in missing {
+            self.snarl.connect(out_pin, in_pin);
         }
     }
 
