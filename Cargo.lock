@@ -4094,6 +4094,7 @@ dependencies = [
  "solarxy-render",
  "solarxy-renderer",
  "solarxy-scenefile",
+ "solarxy-studio",
  "time",
  "tracing",
  "tracing-subscriber",

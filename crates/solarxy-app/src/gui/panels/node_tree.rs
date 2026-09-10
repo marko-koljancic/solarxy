@@ -17,98 +17,34 @@
 //! breadcrumb back out. Both come from `web/src/components/TreePane.tsx`;
 //! the desktop keeps the same gestures so the two shells are learned once.
 //!
-//! ## One fold, both views
+//! ## One fold, both views, and one fold across both shells
 //!
-//! [`build_node_tree`] folds the whole document from the root exactly once,
-//! and the dived view is a subtree of that result ([`find_subtree`]). The
-//! breadcrumb falls out of the same walk, so there is no second parent
-//! lookup that could disagree with the first about who owns what.
+//! [`solarxy_studio::tree::scene_tree`] folds the whole document from the
+//! root exactly once, and the dived view is a subtree of that result
+//! ([`find_subtree`]). The breadcrumb falls out of the same walk, so there
+//! is no second parent lookup that could disagree with the first about who
+//! owns what.
+//!
+//! The fold itself is **not** this panel's. It was, and it was a
+//! line-for-line reimplementation of the browser's, down to the depth
+//! guard and the choice to store collapsed keys rather than expanded ones.
+//! Two implementations of one outline is exactly the pair the shared
+//! interface crate exists to remove, so this panel now reads
+//! `solarxy-studio` and draws what comes back.
 
 use std::collections::HashSet;
 
 use solarxy_graph::document::{Document, GraphContext, NodeId};
-use solarxy_graph::naming::node_name;
 use solarxy_graph::registry::Registry;
+use solarxy_studio::tree::TreeRow;
 
 use crate::gui::intent::{Intents, PanelIntent};
 use crate::gui::theme::Theme;
-
-/// A malformed document (a container recurring inside its own subtree)
-/// would recurse forever. Real documents are a few levels deep.
-const MAX_DEPTH: usize = 64;
-
-/// One row of the tree.
-pub(crate) struct NodeTreeRow {
-    /// The context the node **lives in**, which is where its selection
-    /// dispatches — not the context it opens.
-    pub ctx: GraphContext,
-    pub id: NodeId,
-    pub label: String,
-    pub type_id: String,
-    /// A container opens a child network and can be dived into.
-    pub is_container: bool,
-    /// Holds its own context's display flag.
-    pub is_display: bool,
-    pub bypassed: bool,
-    pub children: Vec<NodeTreeRow>,
-}
-
-impl NodeTreeRow {
-    /// The context this row's children live in, for containers.
-    fn opened_ctx(&self) -> GraphContext {
-        GraphContext::Subflow(self.id)
-    }
-}
 
 /// One breadcrumb step: where it jumps to, and what it reads.
 pub(crate) struct Crumb {
     pub ctx: GraphContext,
     pub label: String,
-}
-
-/// Fold the document into a tree rooted at the root context.
-///
-/// A container whose subflow is missing renders as a leaf rather than
-/// vanishing: the node is really there, and hiding it would make the tree
-/// disagree with the document about what the scene contains.
-pub(crate) fn build_node_tree(doc: &Document, registry: &Registry) -> Vec<NodeTreeRow> {
-    build_rows(doc, registry, GraphContext::Root, 0)
-}
-
-fn build_rows(
-    doc: &Document,
-    registry: &Registry,
-    ctx: GraphContext,
-    depth: usize,
-) -> Vec<NodeTreeRow> {
-    if depth >= MAX_DEPTH {
-        return Vec::new();
-    }
-    let Ok(graph) = doc.graph(ctx) else {
-        return Vec::new();
-    };
-    graph
-        .nodes()
-        .map(|node| {
-            let desc = registry.get(&node.type_id);
-            let is_container = desc.is_some_and(|d| d.opens.is_some());
-            let children = if is_container {
-                build_rows(doc, registry, GraphContext::Subflow(node.id), depth + 1)
-            } else {
-                Vec::new()
-            };
-            NodeTreeRow {
-                ctx,
-                id: node.id,
-                label: node_name(node, registry),
-                type_id: node.type_id.clone(),
-                is_container,
-                is_display: graph.active_output == Some(node.id),
-                bypassed: node.bypassed,
-                children,
-            }
-        })
-        .collect()
 }
 
 /// Resolve a dived context to the rows it shows plus the breadcrumb back
@@ -119,9 +55,9 @@ fn build_rows(
 /// The root crumb is always present and always first, so a dived view can
 /// always be escaped.
 pub(crate) fn find_subtree(
-    rows: &[NodeTreeRow],
+    rows: &[TreeRow],
     ctx: GraphContext,
-) -> Option<(&[NodeTreeRow], Vec<Crumb>)> {
+) -> Option<(&[TreeRow], Vec<Crumb>)> {
     let mut crumbs = vec![Crumb {
         ctx: GraphContext::Root,
         label: "/obj".to_string(),
@@ -136,19 +72,19 @@ pub(crate) fn find_subtree(
 /// it on the way back up, so `crumbs` ends as the path to whatever is
 /// returned and is left untouched when nothing is.
 fn descend<'a>(
-    rows: &'a [NodeTreeRow],
+    rows: &'a [TreeRow],
     ctx: GraphContext,
     crumbs: &mut Vec<Crumb>,
-) -> Option<&'a [NodeTreeRow]> {
+) -> Option<&'a [TreeRow]> {
     for row in rows {
-        if !row.is_container {
+        if row.opens.is_none() {
             continue;
         }
         crumbs.push(Crumb {
-            ctx: row.opened_ctx(),
+            ctx: GraphContext::Subflow(row.node),
             label: row.label.clone(),
         });
-        if row.opened_ctx() == ctx {
+        if GraphContext::Subflow(row.node) == ctx {
             return Some(&row.children);
         }
         if let Some(found) = descend(&row.children, ctx, crumbs) {
@@ -230,7 +166,7 @@ pub(in crate::gui) fn draw_node_tree_content(
         NodeTreeSource::Scene { doc, registry } => (doc, registry),
     };
 
-    let rows = build_node_tree(doc, registry);
+    let rows = solarxy_studio::tree::scene_tree(doc, registry);
     // A dive that no longer resolves falls back to the root rather than
     // leaving the panel blank with no way out.
     if find_subtree(&rows, state.ctx).is_none() {
@@ -301,16 +237,16 @@ fn draw_breadcrumb(ui: &mut egui::Ui, crumbs: &[Crumb], state: &mut NodeTreeStat
 /// a fragment indented off the edge of the panel.
 fn draw_row(
     ui: &mut egui::Ui,
-    row: &NodeTreeRow,
+    row: &TreeRow,
     depth: usize,
     selection: &[NodeId],
     state: &mut NodeTreeState,
     intents: &mut Intents,
     theme: Theme,
 ) {
-    let key = (row.ctx, row.id);
+    let key = (row.ctx, row.node);
     let expanded = !state.collapsed.contains(&key);
-    let selected = selection.contains(&row.id);
+    let selected = selection.contains(&row.node);
 
     let mut toggle = false;
     ui.horizontal(|ui| {
@@ -320,7 +256,7 @@ fn draw_row(
         // shares one left edge.
         let (twisty_rect, twisty) =
             ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::click());
-        if row.is_container {
+        if row.opens.is_some() {
             let openness = if expanded { 1.0 } else { 0.0 };
             egui::collapsing_header::paint_default_icon(ui, openness, &twisty);
             if twisty.clicked() {
@@ -341,18 +277,18 @@ fn draw_row(
         }
         let response = ui
             .selectable_label(selected, label)
-            .on_hover_text(if row.is_container {
+            .on_hover_text(if row.opens.is_some() {
                 "Click to select, double-click to open"
             } else {
                 "Click to select"
             });
         if response.clicked() {
             intents.panel(PanelIntent::NodeTree(NodeTreeAction::Select(
-                row.ctx, row.id,
+                row.ctx, row.node,
             )));
         }
-        if response.double_clicked() && row.is_container {
-            state.ctx = row.opened_ctx();
+        if response.double_clicked() && row.opens.is_some() {
+            state.ctx = GraphContext::Subflow(row.node);
         }
 
         if row.is_display {
@@ -381,7 +317,7 @@ fn draw_row(
         }
     }
 
-    if row.is_container && expanded {
+    if row.opens.is_some() && expanded {
         for child in &row.children {
             draw_row(ui, child, depth + 1, selection, state, intents, theme);
         }
@@ -442,18 +378,21 @@ mod tests {
     #[test]
     fn containers_nest_and_leaves_do_not() {
         let (engine, geo, leaf) = scene();
-        let rows = build_node_tree(engine.document(), engine.registry());
+        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
 
-        let container = rows.iter().find(|r| r.id == geo).expect("geo row present");
-        assert!(container.is_container, "a geo opens a child network");
+        let container = rows
+            .iter()
+            .find(|r| r.node == geo)
+            .expect("geo row present");
+        assert!(container.opens.is_some(), "a geo opens a child network");
         assert_eq!(container.children.len(), 1, "the box is its only child");
-        assert_eq!(container.children[0].id, leaf);
+        assert_eq!(container.children[0].node, leaf);
 
         let leaf = rows
             .iter()
-            .find(|r| r.id != geo)
+            .find(|r| r.node != geo)
             .expect("the light row is present");
-        assert!(!leaf.is_container, "a light opens nothing");
+        assert!(leaf.opens.is_none(), "a light opens nothing");
         assert!(leaf.children.is_empty());
     }
 
@@ -463,12 +402,15 @@ mod tests {
     #[test]
     fn a_child_row_carries_its_own_context() {
         let (engine, geo, leaf) = scene();
-        let rows = build_node_tree(engine.document(), engine.registry());
-        let container = rows.iter().find(|r| r.id == geo).expect("geo row present");
+        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
+        let container = rows
+            .iter()
+            .find(|r| r.node == geo)
+            .expect("geo row present");
 
         assert_eq!(container.ctx, GraphContext::Root);
         assert_eq!(container.children[0].ctx, GraphContext::Subflow(geo));
-        assert_eq!(container.children[0].id, leaf);
+        assert_eq!(container.children[0].node, leaf);
     }
 
     /// The display flag is per-context: the box holds the geo subflow's,
@@ -476,8 +418,11 @@ mod tests {
     #[test]
     fn the_display_flag_is_read_per_context() {
         let (engine, geo, leaf) = scene();
-        let rows = build_node_tree(engine.document(), engine.registry());
-        let container = rows.iter().find(|r| r.id == geo).expect("geo row present");
+        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
+        let container = rows
+            .iter()
+            .find(|r| r.node == geo)
+            .expect("geo row present");
 
         assert!(
             container.children[0].is_display,
@@ -501,15 +446,18 @@ mod tests {
             })
             .expect("a box is bypassable");
 
-        let rows = build_node_tree(engine.document(), engine.registry());
-        let container = rows.iter().find(|r| r.id == geo).expect("geo row present");
+        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
+        let container = rows
+            .iter()
+            .find(|r| r.node == geo)
+            .expect("geo row present");
         assert!(container.children[0].bypassed);
     }
 
     #[test]
     fn the_root_subtree_is_the_whole_tree_with_one_crumb() {
         let (engine, _, _) = scene();
-        let rows = build_node_tree(engine.document(), engine.registry());
+        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
 
         let (visible, crumbs) =
             find_subtree(&rows, GraphContext::Root).expect("the root always resolves");
@@ -524,12 +472,12 @@ mod tests {
     #[test]
     fn diving_yields_the_children_and_a_walkable_breadcrumb() {
         let (engine, geo, leaf) = scene();
-        let rows = build_node_tree(engine.document(), engine.registry());
+        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
 
         let (visible, crumbs) =
             find_subtree(&rows, GraphContext::Subflow(geo)).expect("the geo subflow resolves");
         assert_eq!(visible.len(), 1);
-        assert_eq!(visible[0].id, leaf);
+        assert_eq!(visible[0].node, leaf);
 
         assert_eq!(crumbs.len(), 2, "root, then the container dived into");
         assert_eq!(crumbs[0].ctx, GraphContext::Root);
@@ -542,7 +490,7 @@ mod tests {
     #[test]
     fn a_context_outside_the_tree_does_not_resolve() {
         let (engine, _, _) = scene();
-        let rows = build_node_tree(engine.document(), engine.registry());
+        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
         assert!(find_subtree(&rows, GraphContext::Subflow(NodeId(9_999))).is_none());
     }
 }

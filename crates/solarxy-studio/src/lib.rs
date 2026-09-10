@@ -59,7 +59,10 @@
     clippy::wildcard_imports
 )]
 
+pub mod attributes;
+pub mod expression;
 pub mod node;
 pub mod palette;
 pub mod params;
+pub mod tree;
 pub mod types;

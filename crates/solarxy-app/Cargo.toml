@@ -20,6 +20,7 @@ solarxy-host = { path = "../solarxy-host" }
 # use for. The engine and the renderer still never see each other: they
 # meet at solarxy_core::scene::SceneDelta and nowhere else.
 solarxy-graph = { path = "../solarxy-graph" }
+solarxy-studio = { path = "../solarxy-studio" }
 # Reached directly for the scene file's view sidecar, which solarxy-graph
 # returns but does not re-export.
 solarxy-scenefile = { path = "../solarxy-scenefile" }
