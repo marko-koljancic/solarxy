@@ -140,7 +140,10 @@ impl ApplicationHandler<State> for App {
                 mods.control_key()
             };
             let wants_text = state.gui.wants_keyboard_input();
-            if let Some(key) = shell_key(code, cmd_or_ctrl, mods.shift_key(), wants_text) {
+            let over_canvas = state.gui.pointer_over_canvas();
+            if let Some(key) =
+                shell_key(code, cmd_or_ctrl, mods.shift_key(), wants_text, over_canvas)
+            {
                 match key {
                     ShellKey::ToggleSidebar => {
                         state.gui.toggle_tab(crate::gui::SolarxyTab::Sidebar);

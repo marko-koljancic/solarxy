@@ -43,6 +43,9 @@ pub struct EguiRenderer {
     still_modal: StillRenderModal,
     node_tree: NodeTreeState,
     canvas: super::panels::nodes::CanvasState,
+    /// The node canvas's rect as the last frame drew it, so a key claim
+    /// made before the interface pass can ask where the pointer is.
+    pub(super) canvas_rect: Option<egui::Rect>,
     /// Which graph the user is looking at. Shared by the Node Tree and the
     /// canvas, because a dive is one fact about the session: two copies of
     /// it would let the two panels disagree about where the user is, and a
@@ -113,6 +116,7 @@ impl EguiRenderer {
             still_modal: StillRenderModal::default(),
             node_tree: NodeTreeState::default(),
             canvas: super::panels::nodes::CanvasState::default(),
+            canvas_rect: None,
             graph_ctx: solarxy_graph::document::GraphContext::Root,
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             next_toast_id: 0,
@@ -288,6 +292,18 @@ impl EguiRenderer {
     #[must_use]
     pub fn nodes_tab_present(&self) -> bool {
         self.tab_present(SolarxyTab::Nodes)
+    }
+
+    /// Whether the pointer is over the node canvas, which is the one
+    /// thing a key claim decides by position rather than by focus.
+    ///
+    /// Read from the dock's own rect for the tab rather than mirrored,
+    /// so a panel dragged elsewhere keeps its keys with it.
+    #[must_use]
+    pub fn pointer_over_canvas(&self) -> bool {
+        self.canvas_rect
+            .zip(self.ctx.pointer_latest_pos())
+            .is_some_and(|(rect, at)| rect.contains(at))
     }
 
     /// Return every graph surface to the root context, unfolded and
@@ -498,6 +514,7 @@ impl EguiRenderer {
             theme: self.theme,
         };
         let mut viewport_rect_logical: Option<egui::Rect> = None;
+        let mut canvas_rect_seen: Option<egui::Rect> = None;
         let mut dismissed_toast_id: Option<u64> = None;
 
         // Cloned so the closure below can borrow the renderer mutably: the
@@ -562,6 +579,7 @@ impl EguiRenderer {
                 intents: &mut *intents,
                 toolbars: &chrome.toolbars,
                 viewport_rect_out: &mut viewport_rect_logical,
+                canvas_rect_out: &mut canvas_rect_seen,
                 theme: self.theme,
             };
             DockArea::new(&mut self.dock_state)
@@ -781,6 +799,9 @@ impl EguiRenderer {
             }
         });
 
+        // Cleared as well as set, so a closed or undocked canvas stops
+        // claiming the key it took while it was on screen.
+        self.canvas_rect = canvas_rect_seen;
         if let Some(rect) = viewport_rect_logical {
             self.last_viewport_rect = Some(CachedViewportRect {
                 rect,

@@ -33,6 +33,7 @@ mod glyphs;
 mod layout;
 mod list;
 mod note;
+mod palette;
 mod pins;
 mod radial;
 mod seed;
@@ -71,6 +72,10 @@ pub(crate) enum CanvasAction {
     SetSelection(GraphContext, Vec<NodeId>),
     /// Remove the selection, in one command and therefore one undo step.
     RemoveNodes(GraphContext, Vec<NodeId>),
+    /// Add a node type at a position in graph space. Deliberately does
+    /// not select what it added and does not wire it to anything: the
+    /// browser does neither, and selection is its own command.
+    AddNode(GraphContext, String, [f32; 2]),
     /// A canvas reading preference the toolbar toggled.
     ToggleChrome(chrome::Toggle),
     /// One or more parameters written together. More than one travels in
@@ -135,6 +140,12 @@ pub(in crate::gui) fn draw_nodes_content(
     draw_breadcrumb(ui, doc, registry, ctx, state, theme);
     let request = chrome::toolbar(ui, prefs, state.list_view, state.last_scale(), theme);
     apply_chrome_request(request, doc, registry, *ctx, state, intents);
+
+    // Above the list-view branch on purpose: the palette works in both
+    // presentations, and the pane it places itself inside is what is
+    // left after the toolbar and the breadcrumb have drawn.
+    let pane = ui.max_rect();
+    drive_palette(ui, doc, registry, *ctx, state, pane, intents, theme);
 
     // Rows rather than a graph: the same document, the same selection and
     // the same six operations, read as a list because finding one node
@@ -202,7 +213,7 @@ pub(in crate::gui) fn draw_nodes_content(
         ..
     } = canvas_viewer;
 
-    state.accept_frame(sockets, boxes);
+    state.accept_frame(sockets, boxes, to_screen);
     mark_coercions(ui, doc, registry, *ctx, state, theme);
     if prefs.minimap
         && let Ok(graph) = doc.graph(*ctx)
@@ -316,6 +327,45 @@ fn resolve_rewiring(
         remove,
         add: pending.connect,
     }));
+}
+
+/// Open, draw and answer the palette.
+///
+/// The add lands at the panel's own top-left rather than at the pointer,
+/// because the placement rule has already clamped the panel inside the
+/// pane and near an edge the two are different points. Matching the
+/// pointer instead would put a node somewhere the browser would not.
+#[allow(clippy::too_many_arguments)]
+fn drive_palette(
+    ui: &egui::Ui,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: GraphContext,
+    state: &mut CanvasState,
+    pane: egui::Rect,
+    intents: &mut Intents,
+    theme: Theme,
+) {
+    let over = ui.rect_contains_pointer(ui.max_rect());
+    if over
+        && !state.palette.open
+        && ui
+            .ctx()
+            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+    {
+        let at = palette::placement(ui.input(|i| i.pointer.latest_pos()), pane);
+        state.palette.open(at);
+    }
+    let Ok(kind) = doc.graph(ctx).map(|g| g.kind) else {
+        state.palette.close();
+        return;
+    };
+    if let Some(palette::PaletteAction::Add(type_id)) =
+        palette::draw(ui, &mut state.palette, registry, kind, theme)
+    {
+        let at = state.to_graph(state.palette.at);
+        intents.panel(PanelIntent::Canvas(CanvasAction::AddNode(ctx, type_id, at)));
+    }
 }
 
 /// Apply whatever the toolbar asked for.

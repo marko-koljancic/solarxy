@@ -221,6 +221,16 @@ pub(crate) struct CanvasState {
     dwell: Option<(NodeId, f64)>,
     /// The ring that is open, if one is.
     radial: Option<super::radial::Radial>,
+    /// The palette, when it is open.
+    pub(super) palette: super::palette::PaletteState,
+    /// The canvas transform as the last frame left it.
+    ///
+    /// **Stored rather than used and dropped**, because the palette
+    /// places itself in screen pixels and adds a node in graph units, so
+    /// something has to invert the transform after the frame that
+    /// captured it. Without this every added node lands at the graph
+    /// origin.
+    to_screen: egui::emath::TSTransform,
     /// The node being renamed inline, and the text so far.
     pub(super) rename: Option<(NodeId, String)>,
     /// The node whose info card is open.
@@ -280,6 +290,8 @@ impl Default for CanvasState {
             radial: None,
             rename: None,
             info: None,
+            palette: super::palette::PaletteState::default(),
+            to_screen: egui::emath::TSTransform::IDENTITY,
             list_view: false,
             note_edit: None,
             scale: 1.0,
@@ -308,6 +320,7 @@ impl CanvasState {
         self.rename = None;
         self.info = None;
         self.note_edit = None;
+        self.palette.close();
         self.boxes.clear();
     }
 
@@ -579,9 +592,18 @@ impl CanvasState {
         &mut self,
         sockets: HashMap<super::viewer::PinKey, egui::Pos2>,
         boxes: HashMap<egui_snarl::NodeId, egui::Rect>,
+        to_screen: egui::emath::TSTransform,
     ) {
         self.sockets = sockets;
         self.boxes = boxes;
+        self.to_screen = to_screen;
+    }
+
+    /// Put a screen point back into graph space, which is where a
+    /// document position lives.
+    pub(super) fn to_graph(&self, at: egui::Pos2) -> [f32; 2] {
+        let graph = self.to_screen.inverse() * at;
+        [graph.x, graph.y]
     }
 
     /// The boxes the previous frame recorded, for the sockets this one

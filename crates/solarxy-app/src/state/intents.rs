@@ -738,6 +738,13 @@ impl State {
             CanvasAction::SetParams(ctx, node, params) => {
                 self.set_params(ctx, node, params);
             }
+            CanvasAction::AddNode(ctx, node_type, position) => {
+                self.apply_node_command(solarxy_graph::Command::AddNode {
+                    ctx,
+                    node_type,
+                    position,
+                });
+            }
             CanvasAction::Refuse(message) => {
                 self.gui
                     .set_toast(&message, crate::gui::ToastSeverity::Error);

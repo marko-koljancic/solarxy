@@ -122,6 +122,9 @@ pub(super) struct SolarxyTabViewer<'a> {
     pub intents: &'a mut Intents,
     pub toolbars: &'a super::chrome::pane_toolbar::PaneToolbarData<'a>,
     pub viewport_rect_out: &'a mut Option<egui::Rect>,
+    /// Where the node canvas drew, recorded for the one key claim that
+    /// asks where the pointer is rather than what is focused.
+    pub canvas_rect_out: &'a mut Option<egui::Rect>,
     pub theme: Theme,
 }
 
@@ -211,6 +214,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 );
             }
             SolarxyTab::Nodes => {
+                *self.canvas_rect_out = Some(ui.max_rect());
                 super::panels::nodes::draw_nodes_content(
                     ui,
                     self.sources.canvas,

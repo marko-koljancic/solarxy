@@ -74,7 +74,7 @@ const SECTIONS: &[Section] = &[
             },
             Entry {
                 keys: "Tab",
-                action: "Toggle sidebar",
+                action: "Toggle sidebar (node palette over the canvas)",
             },
             Entry {
                 keys: "`",

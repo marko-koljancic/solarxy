@@ -76,14 +76,23 @@ pub(crate) enum ShellKey {
 /// on the platform. `wants_text` says a text field has focus, which keeps
 /// the bare keys typeable there while the function keys and the chords stay
 /// global.
+///
+/// `over_canvas` is the one place a claim is decided by where the pointer
+/// is rather than by what is focused, and it exists for one key. Tab is
+/// the sidebar's everywhere and the node palette's over the canvas, which
+/// is the arrangement the browser's own keymap describes even though its
+/// implementation does not honour it. Without this the window claims Tab
+/// first and the palette never opens; with it the sidebar keeps the key
+/// everywhere a user is not looking at a graph.
 pub(crate) fn shell_key(
     code: KeyCode,
     cmd_or_ctrl: bool,
     shift: bool,
     wants_text: bool,
+    over_canvas: bool,
 ) -> Option<ShellKey> {
     match code {
-        KeyCode::Tab if !wants_text => Some(ShellKey::ToggleSidebar),
+        KeyCode::Tab if !wants_text && !over_canvas => Some(ShellKey::ToggleSidebar),
         KeyCode::F10 => Some(ShellKey::ToggleMenuBar),
         KeyCode::F11 => Some(ShellKey::ToggleFullscreen),
         KeyCode::KeyO if cmd_or_ctrl && shift => Some(ShellKey::OpenHdri),
@@ -598,30 +607,66 @@ mod tests {
         ];
         for (code, cmd, shift, expected) in cases {
             assert_eq!(
-                shell_key(code, cmd, shift, false),
+                shell_key(code, cmd, shift, false, false),
                 expected,
                 "{code:?} cmd={cmd} shift={shift}"
             );
         }
     }
 
+    /// Tab belongs to the sidebar everywhere except over the node
+    /// canvas, where it belongs to the palette.
+    ///
+    /// The one claim decided by where the pointer is rather than by what
+    /// is focused. Without it the window takes Tab before egui sees the
+    /// press and the palette never opens; with it the sidebar keeps the
+    /// key everywhere a user is not looking at a graph.
+    #[test]
+    fn tab_is_the_sidebars_until_the_pointer_is_over_the_canvas() {
+        assert_eq!(
+            shell_key(KeyCode::Tab, false, false, false, false),
+            Some(ShellKey::ToggleSidebar)
+        );
+        assert_eq!(
+            shell_key(KeyCode::Tab, false, false, false, true),
+            None,
+            "over the canvas the window must not claim it"
+        );
+        // And a focused field still keeps it, wherever the pointer is.
+        assert_eq!(shell_key(KeyCode::Tab, false, false, true, false), None);
+        assert_eq!(shell_key(KeyCode::Tab, false, false, true, true), None);
+
+        // Nothing else changes with the pointer.
+        assert_eq!(
+            shell_key(KeyCode::F10, false, false, false, true),
+            Some(ShellKey::ToggleMenuBar)
+        );
+        assert_eq!(
+            shell_key(KeyCode::Backquote, false, false, false, true),
+            Some(ShellKey::ToggleConsole)
+        );
+    }
+
     /// A focused text field keeps the keys it could be typing into, and the
     /// function keys and chords stay global.
     #[test]
     fn a_focused_text_field_keeps_its_typeable_keys() {
-        assert_eq!(shell_key(KeyCode::Tab, false, false, true), None);
-        assert_eq!(shell_key(KeyCode::Backquote, false, false, true), None);
-        assert_eq!(shell_key(KeyCode::Digit1, true, false, true), None);
+        assert_eq!(shell_key(KeyCode::Tab, false, false, true, false), None);
         assert_eq!(
-            shell_key(KeyCode::F10, false, false, true),
+            shell_key(KeyCode::Backquote, false, false, true, false),
+            None
+        );
+        assert_eq!(shell_key(KeyCode::Digit1, true, false, true, false), None);
+        assert_eq!(
+            shell_key(KeyCode::F10, false, false, true, false),
             Some(ShellKey::ToggleMenuBar)
         );
         assert_eq!(
-            shell_key(KeyCode::F11, false, false, true),
+            shell_key(KeyCode::F11, false, false, true, false),
             Some(ShellKey::ToggleFullscreen)
         );
         assert_eq!(
-            shell_key(KeyCode::KeyO, true, false, true),
+            shell_key(KeyCode::KeyO, true, false, true, false),
             Some(ShellKey::OpenModel)
         );
     }
