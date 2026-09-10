@@ -294,3 +294,69 @@ fn node_docs_are_more_than_a_restated_title() {
         thin.join("\n  ")
     );
 }
+
+/// The expression affordance rides the snapshot, and rides it correctly.
+///
+/// This replaces `expression_types_match_the_frontend`, which held a
+/// browser array of seven type names against the arms of
+/// `ParamType::accepts_expression`. That guard existed because there were
+/// two implementations; the flag is derived on the snapshot now, so what
+/// is left to catch is the field being wired to the wrong expression,
+/// which nothing else would notice: `true` in place of the call compiles,
+/// serializes, and offers the affordance on every text field in the
+/// application.
+///
+/// Read off the real registry rather than a fixture, and asserted in both
+/// directions, because a one-sided check passes on a constant.
+#[test]
+fn the_expression_affordance_is_derived_from_the_parameter_type() {
+    use solarxy_graph::registry::param_spec::ParamType;
+
+    let snap = snapshot();
+    let mut accepting = 0usize;
+    let mut refusing = 0usize;
+    for node in &snap.nodes {
+        for param in &node.params {
+            let expected = matches!(
+                param.param_type.as_str(),
+                "float" | "int" | "bool" | "vec2" | "vec3" | "vec4" | "color"
+            );
+            assert_eq!(
+                param.accepts_expression, expected,
+                "{}.{} is a {} and the snapshot says acceptsExpression is {}",
+                node.type_id, param.key, param.param_type, param.accepts_expression
+            );
+            if param.accepts_expression {
+                accepting += 1;
+            } else {
+                refusing += 1;
+            }
+        }
+    }
+    assert!(
+        accepting > 0 && refusing > 0,
+        "the flag is constant across {} parameters, so it is measuring nothing",
+        accepting + refusing
+    );
+
+    // The literal list above is the second opinion, so it has to be held
+    // to the engine's own answer rather than drifting beside it.
+    for (name, ty) in [
+        ("float", ParamType::Float),
+        ("int", ParamType::Int),
+        ("bool", ParamType::Bool),
+        ("vec2", ParamType::Vec2),
+        ("vec3", ParamType::Vec3),
+        ("vec4", ParamType::Vec4),
+        ("color", ParamType::Color),
+        ("text", ParamType::Text),
+        ("snippet", ParamType::Snippet),
+        ("action", ParamType::Action),
+    ] {
+        let expected = matches!(
+            name,
+            "float" | "int" | "bool" | "vec2" | "vec3" | "vec4" | "color"
+        );
+        assert_eq!(ty.accepts_expression(), expected, "{name}");
+    }
+}

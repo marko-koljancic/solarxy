@@ -192,33 +192,25 @@ pub fn node_info_line(
     Some(format!("{} {}", pick.label.to_lowercase(), fmt_number(v)))
 }
 
-/// Whether a node type declares the root visibility parameter.
+/// Whether a node type declares the root visibility parameter, and so
+/// whether the affordance exists for it.
 ///
-/// Registry-driven rather than a list of type ids: a node type that
-/// declares `visible` gets the affordance, and one that does not gets none
-/// by construction. A note gets no eye without anyone saying so, and a
-/// root-placeable type added later gets one for free.
+/// Forwarded to [`solarxy_graph::registry::visibility`] rather than
+/// restated. The mirror derives the same field for every node it sends,
+/// and this crate sits above the engine, so a copy here would be the
+/// second implementation of a rule a reader compares across the shells.
 #[must_use]
 pub fn declares_visibility(desc: &NodeTypeDescriptor) -> bool {
-    desc.params.iter().any(|p| p.key == "visible")
+    solarxy_graph::registry::visibility::declares_node_visibility(desc)
 }
 
-/// Whether a node is currently visible.
+/// Whether a node is currently shown.
 ///
-/// Anything but an explicit literal `false` reads as visible, an
-/// expression included. Parameters are override-only, so a freshly added
-/// node carries no entry at all and has to default to shown; and a node
-/// whose visibility is driven by an expression the reserve refuses to
-/// evaluate is better shown than silently hidden.
-///
-/// Root visibility is a different thing from the display flag a network
-/// carries: separate storage, separate command, separate affordance.
+/// Forwarded for the same reason as [`declares_visibility`]: the mirror
+/// already answers this for the browser, and the desktop asks it here.
 #[must_use]
 pub fn is_visible(params: &BTreeMap<String, ParamSource>) -> bool {
-    !matches!(
-        params.get("visible"),
-        Some(ParamSource::Literal(ParamValue::Bool(false)))
-    )
+    solarxy_graph::registry::visibility::node_visible(params)
 }
 
 /// A duration in microseconds, at a scale a human reads.
@@ -315,14 +307,20 @@ pub fn format_bounds(bounds: Option<[f32; 6]>) -> Option<String> {
 }
 
 /// One port and the nodes on the other side of it, in edge order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Serialize` because the browser reads this across the WebAssembly
+/// boundary, on the same terms as [`crate::tree::TreeRow`]: there is no
+/// `Deserialize`, because nothing sends one back.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PortNeighbours {
     pub port: String,
     pub nodes: Vec<String>,
 }
 
 /// Who is wired to a node, by name.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionSummary {
     /// Each input port and the node names feeding it.
     pub inputs: Vec<PortNeighbours>,

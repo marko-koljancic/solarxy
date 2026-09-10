@@ -1,5 +1,6 @@
 //! The expression lane: which parameters accept an expression, what text a
-//! freshly opened field starts from, and how a resolved value reads.
+//! freshly opened field starts from, how a resolved value reads, and where
+//! a failed one went wrong.
 //!
 //! Two things about the lane are deliberately not here. **Which parameter
 //! types accept an expression** is a fact about a parameter type and lives
@@ -118,6 +119,89 @@ fn trim(v: f64) -> String {
 #[must_use]
 pub fn should_commit(draft: &str, last_sent: &str) -> bool {
     draft != last_sent
+}
+
+/// Where an engine error points, when its message names a place.
+///
+/// Both halves are used by an editor that draws one: the line tints the
+/// row, the column underlines the token.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorPosition {
+    pub line: usize,
+    pub column: usize,
+    /// The message as it arrived, so a caller that has the position does
+    /// not also have to carry the text it came from.
+    pub message: String,
+}
+
+/// Reads a cook error back into a position.
+///
+/// **This function should not have to exist, and the shape of its
+/// replacement is already known.** [`solarxy_graph::expr::ExprError`]
+/// carries the offending byte span, and `line_col` turns it into exactly
+/// the pair returned here. What loses it is `CookStatus::Error`, which
+/// holds a formatted `String` and nothing else, so by the time a shell
+/// sees a failure the position survives only as text inside a sentence.
+/// Whoever widens that variant to carry the position deletes this
+/// function and its tests rather than hunting for a decoder in one of the
+/// shells, which is where this rule lived until 0.10.0.
+///
+/// Until then this is the only place the `line N, column M` shape is
+/// decoded, so if the engine ever changes how it formats one, exactly one
+/// thing breaks.
+///
+/// Written as a scan rather than a pattern match because this crate takes
+/// three dependencies and a regular-expression engine is not going to be
+/// the fourth for two integers.
+#[must_use]
+pub fn error_position(message: &str) -> Option<ErrorPosition> {
+    let line = number_after(message, "line")?;
+    if line == 0 {
+        return None;
+    }
+    let column = number_after(message, "column")
+        .filter(|c| *c > 0)
+        .unwrap_or(1);
+    Some(ErrorPosition {
+        line,
+        column,
+        message: message.to_string(),
+    })
+}
+
+/// The first `<word> <digits>` in `text`, with `word` starting a word.
+///
+/// The word boundary is what stops `underline 3` answering for `line`, and
+/// the search continues past a boundary-matching word that is not followed
+/// by a number, so `line breaks, line 4` answers 4 rather than nothing.
+fn number_after(text: &str, word: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut from = 0;
+    while let Some(hit) = text[from..].find(word) {
+        let at = from + hit;
+        from = at + 1;
+        if at > 0 && is_word(bytes[at - 1]) {
+            continue;
+        }
+        let after = at + word.len();
+        if bytes.get(after) != Some(&b' ') {
+            continue;
+        }
+        let digits: String = text[after + 1..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if digits.is_empty() {
+            continue;
+        }
+        // A number too large for the address space is not a position.
+        if let Ok(n) = digits.parse::<usize>() {
+            return Some(n);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -268,5 +352,92 @@ mod tests {
         assert!(should_commit("2.5", "2"));
         assert!(!should_commit("2", "2"));
         assert!(should_commit("", "2"));
+    }
+    #[test]
+    fn reads_both_halves_of_the_engines_format() {
+        // The exact shape `ExprError::line_col` produces.
+        let m = "line 3, column 12: unknown function `noize`";
+        assert_eq!(
+            error_position(m),
+            Some(ErrorPosition {
+                line: 3,
+                column: 12,
+                message: m.to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn falls_back_to_column_one_when_only_a_line_is_named() {
+        // Not every engine error goes through the expression formatter;
+        // those still tint their line rather than being dropped.
+        let p = error_position("line 7: something went wrong").expect("a position");
+        assert_eq!((p.line, p.column), (7, 1));
+    }
+
+    #[test]
+    fn a_message_with_no_position_has_none() {
+        assert_eq!(error_position("this program assigns nothing"), None);
+        assert_eq!(error_position(""), None);
+    }
+
+    #[test]
+    fn refuses_a_zero_line_rather_than_marking_one() {
+        // Lines are 1-based; a zero would index before the document.
+        assert_eq!(error_position("line 0, column 4: x"), None);
+    }
+
+    #[test]
+    fn refuses_a_zero_column_rather_than_trusting_it() {
+        assert_eq!(
+            error_position("line 2, column 0: x").map(|p| p.column),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn keeps_the_whole_message_rather_than_the_tail() {
+        // The message is what the hover shows, so truncating it to the
+        // part after the colon would lose the position the user can read.
+        let m = "line 1, column 5: `@Cd` cannot be assigned a float";
+        assert_eq!(error_position(m).map(|p| p.message), Some(m.to_string()));
+    }
+
+    #[test]
+    fn a_word_ending_in_line_is_not_a_line() {
+        // The browser's regular expression anchored on a word boundary and
+        // this scan has to as well, or a message mentioning an underline
+        // or a baseline names a row it never meant to.
+        assert_eq!(error_position("underline 3 of the guide"), None);
+        assert_eq!(error_position("baseline 2 is wrong"), None);
+    }
+
+    #[test]
+    fn keeps_looking_past_a_line_that_names_no_number() {
+        // A boundary-matching word followed by prose is not a position, and
+        // stopping there would drop the real one further along.
+        let p = error_position("line breaks are fine, line 4: x").expect("a position");
+        assert_eq!(p.line, 4);
+    }
+
+    #[test]
+    fn a_number_no_address_space_could_hold_is_not_a_position() {
+        // The digits are read from a message, not from the engine's own
+        // integer, so nothing bounds them but this.
+        assert_eq!(error_position("line 999999999999999999999999: x"), None);
+    }
+
+    #[test]
+    fn the_position_the_engine_already_holds_agrees_with_the_decoded_one() {
+        // The whole reason this decoder is temporary: the engine has the
+        // pair structurally and formats it away. Pinning them together
+        // here means the day the formatting changes, this fails rather
+        // than the underline quietly landing in the wrong place.
+        let src = "a;\nbb;\nccc";
+        let err = solarxy_graph::expr::ExprError::new("x", 7..8);
+        let (line, col) = err.line_col(src);
+        let formatted = format!("line {line}, column {col}: {err}");
+        let decoded = error_position(&formatted).expect("a position");
+        assert_eq!((decoded.line, decoded.column), (line, col));
     }
 }

@@ -57,13 +57,10 @@ impl NodeMirror {
             position: node.position,
             bypassed: node.bypassed,
             label: crate::naming::node_name(node, registry),
-            visible: !matches!(
-                node.params.get("visible"),
-                Some(ParamSource::Literal(crate::params::ParamValue::Bool(false)))
-            ),
+            visible: crate::registry::visibility::node_visible(&node.params),
             declares_visibility: registry
                 .get(&node.type_id)
-                .is_some_and(|d| d.params.iter().any(|p| p.key == "visible")),
+                .is_some_and(crate::registry::visibility::declares_node_visibility),
         }
     }
 }
@@ -309,6 +306,15 @@ pub struct ParamSnapshot {
     /// unchanged.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub show_if: Vec<ShowIfSnapshot>,
+    /// Whether this parameter can be driven by an expression, and so
+    /// whether the panel offers the `=` affordance on its row.
+    ///
+    /// Derived from the parameter type rather than restated: the browser
+    /// held its own list of seven type names, pinned to the engine's
+    /// answer by a drift test, which is two implementations plus a guard
+    /// where one fact would do. It rides the snapshot because the panel
+    /// reads the snapshot once at boot and asks this per row.
+    pub accepts_expression: bool,
     pub doc: String,
 }
 
@@ -426,6 +432,7 @@ impl From<&ParamSpec> for ParamSnapshot {
             show_if: p.show_if.iter().map(ShowIfSnapshot::from).collect(),
             step: p.step,
             unit: p.unit.into(),
+            accepts_expression: p.ty.accepts_expression(),
             doc: p.doc.clone(),
         }
     }

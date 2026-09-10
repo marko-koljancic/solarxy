@@ -1,5 +1,12 @@
-//! Conditional parameter visibility: the one evaluator for a spec's
-//! `show_if` clauses.
+//! Visibility: whether a parameter row is shown, and whether a node is.
+//!
+//! Two questions that share a word and nothing else. A parameter's
+//! visibility is the evaluator for a spec's `show_if` clauses; a node's is
+//! whether its `visible` param hides it in the viewport. They sit together
+//! because both read a declaration beside the stored parameters and answer
+//! for a surface without being one, and because a reader looking for
+//! either looks here first. The names keep them apart: `param_visible`
+//! against `node_visible`.
 //!
 //! This is a fact about a node type rather than about a surface, which is
 //! why it lives on the registry resolution path beside the declaration it
@@ -18,6 +25,7 @@
 use std::collections::BTreeMap;
 
 use crate::params::{ParamSource, ParamValue};
+use crate::registry::NodeTypeDescriptor;
 use crate::registry::param_spec::{ParamSpec, Pred};
 
 /// The value `key` currently resolves to: the stored literal, else the
@@ -101,6 +109,36 @@ pub fn visible_param_keys(
         .filter(|spec| param_visible(spec, specs, params))
         .map(|spec| spec.key.clone())
         .collect()
+}
+
+/// Whether a node type declares the root visibility parameter, and so
+/// whether the affordance exists for it.
+///
+/// Registry-driven rather than a list of type ids: a node type that
+/// declares `visible` gets the affordance, and one that does not gets none
+/// by construction. A note gets no eye without anyone saying so, and a
+/// root-placeable type added later gets one for free.
+#[must_use]
+pub fn declares_node_visibility(desc: &NodeTypeDescriptor) -> bool {
+    desc.params.iter().any(|p| p.key == "visible")
+}
+
+/// Whether a node is currently shown.
+///
+/// Anything but an explicit literal `false` reads as visible, an
+/// expression included. Parameters are override-only, so a freshly added
+/// node carries no entry at all and has to default to shown; and a node
+/// whose visibility is driven by an expression the reserve refuses to
+/// evaluate is better shown than silently hidden.
+///
+/// Root visibility is a different thing from the display flag a network
+/// carries: separate storage, separate command, separate affordance.
+#[must_use]
+pub fn node_visible(params: &BTreeMap<String, ParamSource>) -> bool {
+    !matches!(
+        params.get("visible"),
+        Some(ParamSource::Literal(ParamValue::Bool(false)))
+    )
 }
 
 #[cfg(test)]
@@ -364,5 +402,52 @@ mod tests {
                 desc.type_id
             );
         }
+    }
+    #[test]
+    fn only_an_explicit_false_hides_a_node() {
+        // Parameters are override-only, so a fresh node carries no entry
+        // and must read as shown. An expression reads as shown too: the
+        // reserve refuses to evaluate it, and hiding on an unevaluated
+        // expression would make nodes disappear at random.
+        let stored = |src: ParamSource| BTreeMap::from([("visible".to_string(), src)]);
+        assert!(node_visible(&BTreeMap::new()));
+        assert!(node_visible(&stored(ParamSource::Literal(
+            ParamValue::Bool(true)
+        ))));
+        assert!(!node_visible(&stored(ParamSource::Literal(
+            ParamValue::Bool(false)
+        ))));
+        assert!(node_visible(&stored(ParamSource::Expression {
+            expr: "0 > 1".to_string()
+        })));
+    }
+
+    #[test]
+    fn exactly_the_types_that_put_something_in_the_viewport_offer_the_eye() {
+        // Named rather than derived, so an eighth type gaining the
+        // affordance is a deliberate edit here. The rule is that the
+        // affordance follows what renders: the lights and the geometry
+        // network. A camera, a note, a shading network and a render node
+        // are all placeable at the root and none of them draws, so none
+        // of them gets an eye.
+        let registry = crate::nodes::builtin_registry().expect("builtin registry");
+        let mut offering: Vec<&str> = registry
+            .descriptors()
+            .filter(|d| declares_node_visibility(d))
+            .map(|d| d.type_id)
+            .collect();
+        offering.sort_unstable();
+        assert_eq!(
+            offering,
+            [
+                "ambient_light",
+                "directional_light",
+                "hemisphere_light",
+                "point_light",
+                "rect_area_light",
+                "sopnet",
+                "spot_light",
+            ]
+        );
     }
 }
