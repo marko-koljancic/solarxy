@@ -53,7 +53,7 @@ function desc(
 }
 
 function node(params: NodeMirror["params"]): NodeMirror {
-  return { id: 1, typeId: "t", typeVersion: 1, params, position: [0, 0], bypassed: false };
+  return { id: 1, typeId: "t", typeVersion: 1, params, position: [0, 0], bypassed: false, label: "n", visible: true, declaresVisibility: false };
 }
 
 describe("nodeInfoLine", () => {

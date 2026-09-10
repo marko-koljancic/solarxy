@@ -15,8 +15,6 @@ import { dispatch } from "../engine/session";
 import type { SnippetLanguage } from "./inputs/CodeEditor";
 import { wrangleCompletions } from "./inputs/wrangleComplete";
 import { ctxKey, type GraphContext, type NodeMirror } from "../engine/types";
-import { nodeLabel } from "../flow/nodeLabel";
-import { descriptorFor } from "../registry/datatypes";
 import { useMirror } from "../store/mirror";
 import { usePrefs } from "../store/prefs";
 import { toggleMaximize } from "../dock/api";
@@ -77,7 +75,6 @@ function collectSnippets(contexts: Record<string, { nodes: NodeMirror[] }>): Sni
 
 export function TextPane() {
   const contexts = useMirror((s) => s.contexts);
-  const registry = useMirror((s) => s.registry);
   const current = useMirror((s) => s.current);
   const editorPrefs = usePrefs((s) => s.prefs.editor);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -168,7 +165,7 @@ export function TextPane() {
                 onClick={() => setSelectedId(s.node.id)}
               >
                 <span className="text-pane-name">
-                  {nodeLabel(s.node, descriptorFor(registry, s.node.typeId))}
+                  {s.node.label}
                 </span>
                 {/* Which network it lives in, because a snippet in a
                     material network is easy to lose track of otherwise. */}

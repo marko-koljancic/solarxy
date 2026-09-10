@@ -9,7 +9,6 @@ import React from "react";
 import { ctxKey, type GraphContext, type NodeTypeSnapshot } from "../engine/types";
 import { FlowListView } from "../flow/FlowListView";
 import { NodeCanvas } from "../flow/NodeCanvas";
-import { nodeLabel } from "../flow/nodeLabel";
 import { IconGraphView, IconListView } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
 import { useMirror } from "../store/mirror";
@@ -43,7 +42,7 @@ function Breadcrumb() {
       const owner = g.nodes.find((n) => n.id === ownerId);
       if (owner) {
         ownerDesc = descriptorFor(registry, owner.typeId);
-        ownerLabel = nodeLabel(owner, ownerDesc);
+        ownerLabel = owner.label;
         holder = key === "root" ? "root" : { subflow: Number(key.slice(4)) };
         break;
       }

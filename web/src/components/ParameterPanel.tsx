@@ -39,7 +39,6 @@ import {
   paramExpression,
   seedExpression,
 } from "./inputs/expressionLane";
-import { nodeLabel } from "../flow/nodeLabel";
 import { nodePathOf } from "../flow/nodeActions";
 import {
   paramSections,
@@ -479,7 +478,7 @@ function NodePathField({ ctx, node, spec, label }: FieldProps & { label: ReactNo
           ...(missing ? [{ value: String(value), label: `Missing node ${value}` }] : []),
           ...candidates.map((n) => ({
             value: String(n.id),
-            label: nodeLabel(n, descriptorFor(registry, n.typeId)),
+            label: n.label,
           })),
         ]}
         onChange={(v) => commit(v === "" ? null : Number(v))}
@@ -650,7 +649,7 @@ export function ParameterPanel({
   return (
     <div className="param-panel">
       <div className="param-header">
-        <span className="param-title">{nodeLabel(node, desc)}</span>
+        <span className="param-title">{node.label}</span>
         {pinnedId !== null && (
           // The panel must never silently lie about what it is editing: a
           // pinned surface looks identical to an unpinned one until you

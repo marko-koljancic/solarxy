@@ -8,7 +8,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getClient } from "../engine/session";
 import { contextKind, descriptorFor } from "../registry/datatypes";
-import { nodeLabel } from "../flow/nodeLabel";
 import { selectGraph, useMirror } from "../store/mirror";
 
 export function TextureViewer() {
@@ -34,7 +33,7 @@ export function TextureViewer() {
   }, [current, registry, rootNodes]);
 
   const ownerNode = rootNodes.find((n) => n.id === owner);
-  const title = ownerNode ? nodeLabel(ownerNode, descriptorFor(registry, ownerNode.typeId)) : null;
+  const title = ownerNode ? ownerNode.label : null;
 
   useEffect(() => {
     const canvas = canvasRef.current;

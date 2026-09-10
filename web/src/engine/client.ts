@@ -33,6 +33,7 @@ import type {
   PaneRectDto,
   ParamSource,
   PickDetail,
+  AttributeText,
   NodePresentation,
   PresentationTables,
   RegistrySnapshot,
@@ -293,6 +294,21 @@ export class SolarxyClient {
    * replaced, since that recomputed on every render. */
   nodePresentation(ctx: GraphContext, node: NodeId): NodePresentation | null {
     return this.app.node_presentation(ctx, node) as NodePresentation | null;
+  }
+
+  /** One window of a node's attribute values, formatted by the engine.
+   *
+   * The headings come with the page, so the column count and the heading
+   * count cannot disagree. */
+  attributeText(
+    node: NodeId,
+    domain: "point" | "primitive",
+    offset: number,
+    limit: number,
+  ): AttributeText | undefined {
+    return (this.app.attribute_text(node, domain, offset, limit) ?? undefined) as
+      | AttributeText
+      | undefined;
   }
 
   /** The whole document as one outline, with the search folded in. An

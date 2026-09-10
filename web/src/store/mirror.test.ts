@@ -7,7 +7,7 @@ function emptyGraph(): GraphMirror {
 }
 
 function node(id: number, typeId = "box"): GraphMirror["nodes"][number] {
-  return { id, typeId, typeVersion: 1, params: {}, position: [0, 0], bypassed: false };
+  return { id, typeId, typeVersion: 1, params: {}, position: [0, 0], bypassed: false, label: "n", visible: true, declaresVisibility: false };
 }
 
 beforeEach(() => {

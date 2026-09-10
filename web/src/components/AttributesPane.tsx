@@ -9,8 +9,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getClient } from "../engine/session";
 import type { AttrDomain, AttributePage, AttributeSummary } from "../engine/types";
-import { nodeLabel } from "../flow/nodeLabel";
-import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { fmtCell, headerCells, pageWindow, watchedNode } from "./attributesTable";
 
@@ -19,7 +17,6 @@ const PAGE_SIZE = 128;
 const PAGE_CACHE_CAP = 16;
 
 export function AttributesPane() {
-  const registry = useMirror((s) => s.registry);
   const ctx = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const node = watchedNode(graph.selection, graph.activeOutput);
@@ -99,7 +96,7 @@ export function AttributesPane() {
   }
 
   const label = nodeMirror
-    ? nodeLabel(nodeMirror, descriptorFor(registry, nodeMirror.typeId))
+    ? nodeMirror.label
     : `node ${node}`;
   const emptyDomain =
     total === 0

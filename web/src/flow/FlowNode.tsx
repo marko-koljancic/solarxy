@@ -30,9 +30,7 @@ import { useRadial } from "../store/radial";
 import { useUi } from "../store/ui";
 import { IconBypass, IconDisplay } from "../icons";
 import { nodeInfoLine } from "./infoLine";
-import { nodeLabel } from "./nodeLabel";
 import { glyphPath, NODE_BOX, nodeRole, ROLE_BODIES, type RoleBody } from "./nodeVisual";
-import { hasVisibleParam, nodeVisible } from "./visibility";
 
 /** Hover dwell before the radial opens (drag-safe dead time). */
 const RADIAL_DELAY_MS = 400;
@@ -140,7 +138,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const validation = cook?.validation;
 
   const desc = descriptorFor(registry, node.typeId);
-  const title = nodeLabel(node, desc);
+  const title = node.label;
   const role = nodeRole(desc);
   const glyph = glyphPath(desc);
   const shapedBody = ROLE_BODIES[role];
@@ -193,8 +191,8 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const bypassable = desc?.bypass.mode !== "notBypassable";
   const showBypassWing = hasWings && bypassable;
   const showDisplayWing = hasWings && ctx !== "root";
-  const showVisibilityWing = hasWings && ctx === "root" && hasVisibleParam(desc);
-  const visible = nodeVisible(node);
+  const showVisibilityWing = hasWings && ctx === "root" && node.declaresVisibility;
+  const visible = node.visible;
   // A hidden root object reads from the canvas as a slight dim plus the
   // wing's hollow dot; a visible one carries no at-rest visibility chrome.
   const objHidden = showVisibilityWing && !visible;

@@ -13,8 +13,6 @@ import {
   writeAutosave,
 } from "../persistence/opfs";
 import { clearParkedExpressions } from "../components/inputs/expressionLane";
-import { nodeLabel } from "../flow/nodeLabel";
-import { descriptorFor } from "../registry/datatypes";
 import { syncCanvasSize } from "./canvas";
 import { useMirror } from "../store/mirror";
 import { usePrefs, type DisplayPrefs } from "../store/prefs";
@@ -643,11 +641,10 @@ function toastShadowHandoff(cmd: Command, batch: EventBatch): void {
   );
   if (released.length === 0) return;
   const m = useMirror.getState();
-  const registry = m.registry;
   const nameOf = (id: number) => {
     const node = m.contexts["root"]?.nodes.find((n) => n.id === id);
     if (!node) return `light ${id}`;
-    return nodeLabel(node, registry ? descriptorFor(registry, node.typeId) : undefined);
+    return node.label;
   };
   const granted = nameOf(cmd.node);
   const names = released

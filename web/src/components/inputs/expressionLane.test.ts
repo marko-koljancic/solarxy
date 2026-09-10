@@ -39,7 +39,7 @@ function node(params: NodeMirror["params"]): NodeMirror {
     typeVersion: 1,
     params,
     position: [0, 0],
-    bypassed: false,
+    bypassed: false, label: "n", visible: true, declaresVisibility: false,
   };
 }
 

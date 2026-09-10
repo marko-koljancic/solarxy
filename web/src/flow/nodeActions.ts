@@ -5,13 +5,10 @@
 
 import { dispatch } from "../engine/session";
 import type { GraphContext, NodeMirror, NodeTypeSnapshot } from "../engine/types";
-import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial } from "../store/radial";
 import { useUi } from "../store/ui";
-import { nodeLabel } from "./nodeLabel";
 import { nodeRole } from "./nodeVisual";
-import { nodeVisible } from "./visibility";
 
 /** Start the inline rename (the list view and canvas both listen for it). */
 export function requestRename(nodeId: number): void {
@@ -25,7 +22,7 @@ export function setDisplayFlag(ctx: GraphContext, nodeId: number): void {
 }
 
 /** Root context: the additive per-node `visible` param. Callers gate on
- * `hasVisibleParam(desc)`; dispatching without one is a no-op warning in
+ * the node's `declaresVisibility`; dispatching without one is a no-op warning in
  * the engine, not a crash. */
 export function toggleVisibility(ctx: GraphContext, node: NodeMirror): void {
   dispatch({
@@ -33,7 +30,7 @@ export function toggleVisibility(ctx: GraphContext, node: NodeMirror): void {
     ctx,
     node: node.id,
     key: "visible",
-    value: { kind: "literal", type: "bool", value: !nodeVisible(node) },
+    value: { kind: "literal", type: "bool", value: !node.visible },
   });
 }
 
@@ -59,7 +56,7 @@ export function removeNode(ctx: GraphContext, nodeId: number): void {
  * everywhere (the `name` param when renamed, else the type name). */
 export function nodePathOf(ctx: GraphContext, node: NodeMirror): string {
   const s = useMirror.getState();
-  const seg = (n: NodeMirror) => nodeLabel(n, descriptorFor(s.registry, n.typeId));
+  const seg = (n: NodeMirror) => n.label;
   if (ctx === "root") return `/${seg(node)}`;
   const container = selectGraph(s, "root").nodes.find((n) => n.id === ctx.subflow);
   return container ? `/${seg(container)}/${seg(node)}` : `/${seg(node)}`;

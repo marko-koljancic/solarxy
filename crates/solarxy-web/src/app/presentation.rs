@@ -19,6 +19,7 @@
 use super::*;
 
 use solarxy_graph::registry::coerce::DataType;
+use solarxy_studio::attributes;
 use solarxy_studio::node;
 use solarxy_studio::params;
 use solarxy_studio::tree;
@@ -56,6 +57,26 @@ struct PresentationTables {
     categories: BTreeMap<String, CategoryStyle>,
 }
 
+/// One window of an attribute table, already presented.
+///
+/// The engine yields numbers and this yields text, because the rule that
+/// turns one into the other is called per visible cell while a table
+/// scrolls, hundreds of times a frame. Crossing per cell is out of the
+/// question, so the formatting happens once where the page is assembled.
+/// The engine's own page keeps its numbers: a later reader that wants the
+/// value rather than the text asks the engine, and nothing here narrows
+/// what it can answer.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttributeText {
+    total: u64,
+    offset: u32,
+    /// One heading per column component: a scalar lane keeps its name, a
+    /// vector lane fans out.
+    headers: Vec<String>,
+    rows: Vec<Vec<String>>,
+}
+
 /// The scene outline, and what a query matched in it.
 ///
 /// This shape exists so that the boundary *declares* the two shared types
@@ -68,22 +89,24 @@ struct PresentationTables {
 struct SceneOutline {
     rows: Vec<tree::TreeRow>,
     search: Option<tree::TreeSearch>,
+    /// The keys of every row that has children: the collapse-all set.
+    /// Carried with the fold rather than asked for separately, because it
+    /// is one walk of the same tree.
+    branches: Vec<String>,
 }
 
-/// Everything derived from one node's own parameters.
+/// The presentation a node needs that its mirror does not already carry.
+///
+/// A node's name, whether it is visible and whether its type offers the
+/// affordance all ride the mirror instead, because they are wanted almost
+/// everywhere and a query for each would be a crossing per reader. What is
+/// left here is what only a panel asks for.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NodePresentation {
-    /// The name the node answers to, which is what expressions address it
-    /// by.
-    label: String,
     /// The muted line under the label, or nothing when the node has no
     /// parameter worth summarising.
     info_line: Option<String>,
-    /// Whether the type declares the root visibility parameter at all.
-    declares_visibility: bool,
-    /// Whether it is currently visible.
-    visible: bool,
     /// The parameter keys currently passing their conditions, in
     /// declaration order.
     visible_params: Vec<String>,
@@ -165,12 +188,43 @@ impl SolarxyApp {
         });
 
         to_js(&NodePresentation {
-            label: solarxy_graph::naming::node_name(data, registry),
             info_line: node::node_info_line(desc, &data.params, Some(&lookup)),
-            declares_visibility: node::declares_visibility(desc),
-            visible: node::is_visible(&data.params),
             visible_params,
             tabs,
+        })
+    }
+
+    /// One window of a node's attribute values, formatted.
+    ///
+    /// The headings come with the page rather than being derived beside
+    /// it, so the column count and the heading count cannot disagree.
+    pub fn attribute_text(
+        &self,
+        node: f64,
+        domain: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<JsValue, JsError> {
+        // The same two-word vocabulary the numeric page takes, rather than
+        // a serde round trip for one enum with two members.
+        let domain = match domain.as_str() {
+            "primitive" => solarxy_kernel::AttributeDomain::Primitive,
+            _ => solarxy_kernel::AttributeDomain::Point,
+        };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let id = NodeId(node as u64);
+        let Some(page) = self.engine.attribute_page(id, domain, offset, limit) else {
+            return Ok(JsValue::NULL);
+        };
+        to_js(&AttributeText {
+            total: page.total,
+            offset: page.offset,
+            headers: attributes::header_cells(&page.columns),
+            rows: page
+                .rows
+                .iter()
+                .map(|row| row.iter().map(|v| attributes::cell_text(*v)).collect())
+                .collect(),
         })
     }
 
@@ -191,6 +245,11 @@ impl SolarxyApp {
         } else {
             Some(tree::search_tree(&rows, query))
         };
-        to_js(&SceneOutline { rows, search })
+        let branches = tree::branch_keys(&rows);
+        to_js(&SceneOutline {
+            rows,
+            search,
+            branches,
+        })
     }
 }

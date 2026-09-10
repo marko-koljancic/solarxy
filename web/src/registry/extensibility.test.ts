@@ -93,7 +93,7 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     };
     const snap: RegistrySnapshot = { nodes: [PROBE, container], coercions: SNAP.coercions };
     const ownerNodes = [
-      { id: 7, typeId: "copnet_probe", typeVersion: 1, params: {}, position: [0, 0] as [number, number], bypassed: false, portOrder: {} },
+      { id: 7, typeId: "copnet_probe", typeVersion: 1, params: {}, position: [0, 0] as [number, number], bypassed: false, label: "n", visible: true, declaresVisibility: false, portOrder: {} },
     ];
     expect(contextKind(snap, { subflow: 7 }, ownerNodes)).toBe("cop");
     // An unknown owner falls back to geo (the only pre-context child kind).

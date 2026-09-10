@@ -1426,7 +1426,7 @@ impl Engine {
         if let Some(child_kind) = desc.opens {
             self.doc.create_subflow(id, child_kind);
         }
-        let mirror = snapshot::NodeMirror::from_public(&node);
+        let mirror = snapshot::NodeMirror::from_public(&node, &self.registry);
         let graph = self.doc.graph_mut(ctx)?;
         // First subflow node claims the display flag.
         let claim_display = matches!(ctx, GraphContext::Subflow(_))
@@ -2574,7 +2574,7 @@ impl Engine {
                 .graph(ctx)
                 .ok()
                 .and_then(|g| g.node(id))
-                .map(snapshot::NodeMirror::from_public)
+                .map(|n| snapshot::NodeMirror::from_public(n, &self.registry))
             {
                 events.push(EngineEvent::NodeAdded { ctx, node: mirror });
             }
@@ -3706,7 +3706,7 @@ impl Engine {
     /// The full UI mirror (recovery after desync / structural undo).
     #[must_use]
     pub fn snapshot(&self) -> DocumentSnapshot {
-        DocumentSnapshot::capture(&self.doc, &self.review_stale)
+        DocumentSnapshot::capture(&self.doc, &self.review_stale, &self.registry)
     }
 
     /// The static registry snapshot (fetched once at startup; drives the

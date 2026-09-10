@@ -22,7 +22,6 @@ import { useStore } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IconBypass, IconDisplay, IconDive, IconRename, IconTrash, IconVisibility } from "../icons";
-import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial, type RadialTarget } from "../store/radial";
 import {
@@ -34,7 +33,6 @@ import {
   toggleVisibility,
 } from "./nodeActions";
 import { radialAnchor, type RadialAnchor } from "./radialAnchor";
-import { hasVisibleParam, nodeVisible } from "./visibility";
 
 /** Band width. */
 const RING_WIDTH = 38;
@@ -118,7 +116,6 @@ export function RadialMenu() {
   const target = useRadial((s) => s.target);
   const closeRadial = useRadial((s) => s.closeRadial);
   const openInfo = useRadial((s) => s.openInfo);
-  const registry = useMirror((s) => s.registry);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const anchor = useLiveAnchor(target);
   // Which wedge the pointer is over. React-side because the SVG path and
@@ -167,7 +164,6 @@ export function RadialMenu() {
   // opened.
   const node = graph.nodes.find((n) => n.id === t.nodeId);
   if (!node) return null;
-  const desc = descriptorFor(registry, node.typeId);
   const isDisplay = graph.activeOutput === node.id;
 
   const r0 = innerRadius(anchor.radius);
@@ -179,7 +175,7 @@ export function RadialMenu() {
   // display flag (a radio selecting the container's output); at root it
   // toggles the node's `visible` param (additive per-node visibility),
   // gated on the descriptor declaring one (note gets a disabled wedge).
-  const rootEye = t.ctx === "root" && hasVisibleParam(desc);
+  const rootEye = t.ctx === "root" && node.declaresVisibility;
   const neSegment: Segment =
     t.ctx !== "root"
       ? {
@@ -199,8 +195,8 @@ export function RadialMenu() {
           angle: 60,
           span: 60,
           icon: <IconVisibility size={13} />,
-          title: rootEye ? (nodeVisible(node) ? "Hide (stays cooked)" : "Show") : "No visibility toggle",
-          active: rootEye && nodeVisible(node),
+          title: rootEye ? (node.visible ? "Hide (stays cooked)" : "Show") : "No visibility toggle",
+          active: rootEye && node.visible,
           disabled: !rootEye,
           onPick: (tt) => {
             if (rootEye) toggleVisibility(tt.ctx, node);

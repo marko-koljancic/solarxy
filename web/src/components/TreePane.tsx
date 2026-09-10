@@ -1,12 +1,15 @@
 // The Tree panel: a searchable outline of the whole scene, every context
 // from the root down, with collapse/expand, double-click select-and-reveal
-// and container dive. A pure mirror consumer: the derivation lives in
-// treeModel.ts and rebuilds whenever the mirror replaces its objects, so
-// the tree tracks every document change (including cook-driven display
-// flag moves) with no subscription of its own.
+// and container dive.
+//
+// The derivation is the ENGINE'S. It used to be a fold over the mirror
+// here, and the desktop's Node Tree had reimplemented that fold line for
+// line; both now read one rule. The fold, the search and the collapse-all
+// set arrive together in a single call, memoized on the mirror's contexts
+// so it runs when the document moves rather than when this renders.
 
 import { useMemo, useState } from "react";
-import { dispatch } from "../engine/session";
+import { dispatch, getClient } from "../engine/session";
 import { ctxKey } from "../engine/types";
 import { diveIntoSubflow } from "../flow/nodeActions";
 import {
@@ -17,7 +20,8 @@ import {
 } from "../icons";
 import { useMirror } from "../store/mirror";
 import { NodeGlyph } from "./NodeGlyph";
-import { allBranchKeys, buildSceneTree, searchTree, type TreeRow } from "./treeModel";
+import type { TreeRow } from "../engine/types";
+import { descriptorFor } from "../registry/datatypes";
 
 /** The container-context tints, the exact tokens the canvas tints
  * container tiles with, so the tree's color language matches the graph. */
@@ -35,8 +39,25 @@ export function TreePane() {
   // tree opens expanded, and nodes created later arrive expanded too.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
-  const rows = useMemo(() => buildSceneTree(registry, contexts), [registry, contexts]);
-  const search = useMemo(() => searchTree(rows, query), [rows, query]);
+  // The engine folds the document and runs the search in one call. It is
+  // memoized on the mirror's contexts, so it runs when the document moves
+  // rather than when this component renders.
+  const outline = useMemo(
+    () => getClient().sceneOutline(query),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `contexts` is
+    // the mirror's identity for "the document changed"; the fold reads the
+    // engine, not this object.
+    [contexts, query],
+  );
+  const rows = outline.rows;
+  // The engine answers with arrays; the render wants membership tests.
+  const search = useMemo(
+    () => ({
+      matches: new Set(outline.search?.matches ?? []),
+      expand: new Set(outline.search?.expand ?? []),
+    }),
+    [outline],
+  );
   const searching = query.trim().length > 0;
 
   const toggle = (key: string) =>
@@ -48,11 +69,11 @@ export function TreePane() {
     });
 
   const select = (row: TreeRow) =>
-    dispatch({ type: "setSelection", ctx: row.ctx, ids: [row.node.id] });
+    dispatch({ type: "setSelection", ctx: row.ctx, ids: [row.node] });
 
   const open = (row: TreeRow) => {
     if (row.opens !== null) {
-      diveIntoSubflow(row.node.id);
+      diveIntoSubflow(row.node);
       return;
     }
     // Select-and-reveal: current first, so the canvas mounts the right
@@ -68,7 +89,7 @@ export function TreePane() {
     if (searching && !search.matches.has(row.key) && !search.expand.has(row.key)) return null;
     const isOpen = searching ? search.expand.has(row.key) : !collapsed.has(row.key);
     const selected =
-      contexts[ctxKey(row.ctx)]?.selection.includes(row.node.id) ?? false;
+      contexts[ctxKey(row.ctx)]?.selection.includes(row.node) ?? false;
     const tint = row.opens !== null ? CONTAINER_TINT[row.opens] : undefined;
     return (
       <li key={row.key}>
@@ -98,7 +119,7 @@ export function TreePane() {
           ) : (
             <span className="tree-chevron spacer" aria-hidden />
           )}
-          <NodeGlyph desc={row.desc} size={13} />
+          <NodeGlyph desc={descriptorFor(registry, row.typeId)} size={13} />
           <span className="tree-label">{row.label}</span>
           <span className="tree-type">{row.typeId}</span>
           {row.isDisplay && <span className="tree-display-dot" title="display flag" />}
@@ -142,7 +163,7 @@ export function TreePane() {
           className="tree-fold-btn"
           title="Collapse all"
           aria-label="Collapse all"
-          onClick={() => setCollapsed(allBranchKeys(rows))}
+          onClick={() => setCollapsed(new Set(outline.branches))}
         >
           <IconChevronsUp size={12} />
         </button>

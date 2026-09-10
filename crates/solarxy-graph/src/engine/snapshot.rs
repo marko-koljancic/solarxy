@@ -26,12 +26,29 @@ pub struct NodeMirror {
     pub params: BTreeMap<String, ParamSource>,
     pub position: [f32; 2],
     pub bypassed: bool,
+    /// The name the node answers to: its `name` parameter when it has a
+    /// non-empty literal one, else its type's display name.
+    ///
+    /// Derived rather than stored, and derived **here** rather than by
+    /// each reader, because expressions address nodes by this name. A
+    /// reader resolving it differently from the engine would show a path
+    /// that does not resolve, which is the failure this field exists to
+    /// make impossible.
+    pub label: String,
+    /// Whether the node is shown. Anything but an explicit literal `false`
+    /// reads as visible, an expression included: parameters are
+    /// override-only, so a fresh node carries no entry at all.
+    pub visible: bool,
+    /// Whether the node's type declares the root visibility parameter, and
+    /// so whether the affordance exists for it. Registry-driven, so a type
+    /// added later gets the affordance without anyone listing it.
+    pub declares_visibility: bool,
 }
 
 impl NodeMirror {
     /// Mirrors one node's UI-visible state (no geometry).
     #[must_use]
-    pub fn from_public(node: &crate::document::NodeData) -> Self {
+    pub fn from_public(node: &crate::document::NodeData, registry: &Registry) -> Self {
         Self {
             id: node.id,
             type_id: node.type_id.clone(),
@@ -39,6 +56,14 @@ impl NodeMirror {
             params: node.params.clone(),
             position: node.position,
             bypassed: node.bypassed,
+            label: crate::naming::node_name(node, registry),
+            visible: !matches!(
+                node.params.get("visible"),
+                Some(ParamSource::Literal(crate::params::ParamValue::Bool(false)))
+            ),
+            declares_visibility: registry
+                .get(&node.type_id)
+                .is_some_and(|d| d.params.iter().any(|p| p.key == "visible")),
         }
     }
 }
@@ -85,10 +110,13 @@ pub struct GraphMirror {
 }
 
 impl GraphMirror {
-    fn from_graph(graph: &Graph) -> Self {
+    fn from_graph(graph: &Graph, registry: &Registry) -> Self {
         Self {
             kind: graph.kind,
-            nodes: graph.nodes().map(NodeMirror::from_public).collect(),
+            nodes: graph
+                .nodes()
+                .map(|n| NodeMirror::from_public(n, registry))
+                .collect(),
             edges: graph.edges().map(EdgeMirror::from).collect(),
             active_output: graph.active_output,
             selection: graph.selection.clone(),
@@ -118,15 +146,21 @@ pub struct DocumentSnapshot {
 
 impl DocumentSnapshot {
     #[must_use]
-    pub fn capture(doc: &Document, stale: &BTreeMap<crate::review::AnnotationId, bool>) -> Self {
-        let root =
-            GraphMirror::from_graph(doc.graph(GraphContext::Root).expect("root always exists"));
+    pub fn capture(
+        doc: &Document,
+        stale: &BTreeMap<crate::review::AnnotationId, bool>,
+        registry: &Registry,
+    ) -> Self {
+        let root = GraphMirror::from_graph(
+            doc.graph(GraphContext::Root).expect("root always exists"),
+            registry,
+        );
         let subflows = doc
             .subflow_owners()
             .filter_map(|owner| {
                 doc.graph(GraphContext::Subflow(owner))
                     .ok()
-                    .map(|g| (owner.0.to_string(), GraphMirror::from_graph(g)))
+                    .map(|g| (owner.0.to_string(), GraphMirror::from_graph(g, registry)))
             })
             .collect();
         let annotations = doc

@@ -58,6 +58,20 @@ export interface NodeMirror {
   params: Record<string, ParamSource>;
   position: [number, number];
   bypassed: boolean;
+  /** The name the node answers to: its `name` param when it has a
+   * non-empty literal one, else its type's display name.
+   *
+   * Derived by the ENGINE rather than here, because expressions address
+   * nodes by this name. Resolving it differently from the engine would
+   * show a path that does not resolve. */
+  label: string;
+  /** Whether the node is shown. Anything but an explicit literal `false`
+   * reads as visible, an expression included: params are override-only, so
+   * a fresh node carries no entry at all. */
+  visible: boolean;
+  /** Whether the node's type declares the root visibility param, and so
+   * whether the affordance exists for it. */
+  declaresVisibility: boolean;
 }
 
 export interface EdgeMirror {
@@ -588,12 +602,30 @@ export interface TreeRow {
   depth: number;
 }
 
+/** One window of an attribute table, already formatted.
+ *
+ * The engine yields numbers and this yields text, because the rule turning
+ * one into the other runs per visible cell while the table scrolls, which
+ * is far too often to cross the boundary for. The engine's own page keeps
+ * its numbers for any later reader that wants the value. */
+export interface AttributeText {
+  total: number;
+  offset: number;
+  /** One heading per column component: a scalar lane keeps its name, a
+   * vector lane fans out. */
+  headers: string[];
+  rows: string[][];
+}
+
 /** The scene outline, and what a query matched in it. One call rather
  * than two: the pane wants both together, and a separate search would
  * refold the same document. `search` is null for an empty query. */
 export interface SceneOutline {
   rows: TreeRow[];
   search: TreeSearch | null;
+  /** The keys of every row that has children: the collapse-all set.
+   * Carried with the fold, because it is one walk of the same tree. */
+  branches: string[];
 }
 
 /** What a tree search turns up: the rows that matched, and the ancestors
@@ -607,16 +639,9 @@ export interface TreeSearch {
  * node in a single crossing. Memoize on the mirrored node: a call per rule
  * would be seven crossings per node per render. */
 export interface NodePresentation {
-  /** The name the node answers to, which is what expressions address it
-   * by. */
-  label: string;
   /** The muted line under the label, or null when the node has no
    * parameter worth summarising. */
   infoLine: string | null;
-  /** Whether the type declares the root visibility parameter at all. */
-  declaresVisibility: boolean;
-  /** Whether it is currently visible. */
-  visible: boolean;
   /** The parameter keys currently passing their conditions, in declaration
    * order. */
   visibleParams: string[];

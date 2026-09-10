@@ -8,7 +8,6 @@
 import { useEffect, useRef, useState } from "react";
 import { dispatch, getClient } from "../engine/session";
 import { ctxKey, type NodeReport, type PortSnapshot } from "../engine/types";
-import { nodeLabel } from "../flow/nodeLabel";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import {
@@ -151,7 +150,7 @@ export function NodeInfoModal() {
   const bounds = formatBounds(nodeReport?.bounds ?? null);
   const connections = graph
     ? connectionSummary(graph, node, (n) =>
-        nodeLabel(n, registry ? descriptorFor(registry, n.typeId) : undefined),
+        n.label,
       )
     : null;
 

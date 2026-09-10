@@ -25,8 +25,6 @@ import {
   setDisplayFlag,
   toggleBypass,
 } from "./nodeActions";
-import { nodeLabel } from "./nodeLabel";
-import { hasVisibleParam, nodeVisible } from "./visibility";
 
 export function FlowListView() {
   const registry = useMirror((s) => s.registry);
@@ -91,7 +89,7 @@ export function FlowListView() {
                   <NodeGlyph desc={desc} size={13} />
                   {renamingId === n.id ? (
                     <InlineEdit
-                      value={nodeLabel(n, desc)}
+                      value={n.label}
                       placeholder={desc?.displayName ?? n.typeId}
                       onCommit={(next) =>
                         dispatch({
@@ -105,7 +103,7 @@ export function FlowListView() {
                       onClose={() => setRenamingId(null)}
                     />
                   ) : (
-                    nodeLabel(n, desc)
+                    n.label
                   )}
                 </td>
                 <td className="flow-list-type">{n.typeId}</td>
@@ -115,10 +113,10 @@ export function FlowListView() {
                   {n.bypassed ? " bypassed" : ""}
                 </td>
                 <td className="flow-list-actions-cell">
-                  {ctx === "root" && hasVisibleParam(desc) && (
+                  {ctx === "root" && n.declaresVisibility && (
                     <button
-                      className={`visibility-eye list${nodeVisible(n) ? "" : " off"}`}
-                      title={nodeVisible(n) ? "Hide (stays cooked)" : "Show"}
+                      className={`visibility-eye list${n.visible ? "" : " off"}`}
+                      title={n.visible ? "Hide (stays cooked)" : "Show"}
                       onClick={(e) => {
                         e.stopPropagation();
                         dispatch({
@@ -126,7 +124,7 @@ export function FlowListView() {
                           ctx,
                           node: n.id,
                           key: "visible",
-                          value: { kind: "literal", type: "bool", value: !nodeVisible(n) },
+                          value: { kind: "literal", type: "bool", value: !n.visible },
                         });
                       }}
                     >
