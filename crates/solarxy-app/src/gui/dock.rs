@@ -1,9 +1,9 @@
 //! `egui_dock` integration — the unified panel + viewport docking layer.
 //!
-//! All eight user-facing panels (Sidebar, Review Panel, Console, Material
-//! Inspector, Properties, Outliner, Node Tree, Nodes) plus the 3D Viewport
-//! live as tabs inside a single [`egui_dock::DockState`], nine variants in
-//! all.
+//! All nine user-facing panels (Sidebar, Review Panel, Console, Material
+//! Inspector, Properties, Parameters, Outliner, Node Tree, Nodes) plus the
+//! 3D Viewport live as tabs inside a single [`egui_dock::DockState`], ten
+//! variants in all.
 //! Users drag tab titles between leaves to dock left/right/bottom/top; drag
 //! outside the dock area to tear out into a floating window. The Viewport tab is **closeable but
 //! non-floatable and transparent** — `egui_dock` never paints over the
@@ -32,7 +32,7 @@ use super::intent::Intents;
 use super::pass::{OpenFile, PanelSources, PanelState};
 use super::theme::Theme;
 
-/// The nine tab variants in the Solarxy dock. The `Viewport` variant is
+/// The ten tab variants in the Solarxy dock. The `Viewport` variant is
 /// special-cased throughout: it never floats and never paints a background
 /// (so the wgpu surface shows through). It *can* be closed — the Window
 /// menu restores it via [`toggle_tab`].
@@ -55,6 +55,7 @@ pub(crate) enum SolarxyTab {
     Outliner,
     NodeTree,
     Nodes,
+    Parameters,
 }
 
 impl SolarxyTab {
@@ -70,6 +71,7 @@ impl SolarxyTab {
             Self::Outliner => "outliner",
             Self::NodeTree => "node-tree",
             Self::Nodes => "nodes",
+            Self::Parameters => "parameters",
         }
     }
 }
@@ -93,7 +95,11 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
         vec![SolarxyTab::Outliner, SolarxyTab::NodeTree],
     );
     let [_outliner, _sidebar] = surface.split_below(left, 0.5, vec![SolarxyTab::Sidebar]);
-    let [center, right] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::Properties]);
+    let [center, right] = surface.split_right(
+        center_etc,
+        0.78,
+        vec![SolarxyTab::Parameters, SolarxyTab::Properties],
+    );
     let [_props, _review] = surface.split_below(right, 0.5, vec![SolarxyTab::ReviewPanel]);
     let [_main, _bottom] = surface.split_below(
         center,
@@ -142,6 +148,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Outliner => "Outliner".into(),
             SolarxyTab::NodeTree => "Node Tree".into(),
             SolarxyTab::Nodes => "Nodes".into(),
+            SolarxyTab::Parameters => "Parameters".into(),
         }
     }
 
@@ -209,6 +216,15 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.sources.node_tree,
                     self.panels.node_tree,
                     self.panels.graph_ctx,
+                    self.intents,
+                    self.theme,
+                );
+            }
+            SolarxyTab::Parameters => {
+                super::panels::params::draw_params_content(
+                    ui,
+                    self.sources.params,
+                    self.panels.params,
                     self.intents,
                     self.theme,
                 );
@@ -318,6 +334,7 @@ mod tests {
             SolarxyTab::MaterialInspector,
             SolarxyTab::NodeTree,
             SolarxyTab::Nodes,
+            SolarxyTab::Parameters,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }
@@ -343,7 +360,7 @@ mod tests {
     /// silently when deserialization fails. So `is_ok()` alone cannot tell
     /// a real restore from a fallback wearing its clothes; the three tabs
     /// this fixture actually carries can, because the default layout
-    /// carries nine. What a user would lose if this broke is their whole
+    /// carries ten. What a user would lose if this broke is their whole
     /// arrangement, with no error to explain where it went.
     #[test]
     fn layout_saved_before_the_node_tree_still_restores() {

@@ -202,7 +202,9 @@ step any more.
     so they can be compared character for character against the browser's copy, and `vector` the
     path-subset flattener both of those draw through) and `review/` (panel, overlay, popup, and the
     `visuals` the first two share, because marker colour and panel chip colour are the
-    reader's first correlation cue).
+    reader's first correlation cue), plus `params/` (the parameter panel: `frame` the target
+    resolution, the header, the tab strip and the sections, all of them read from
+    `solarxy_studio::params` and the registry's own visibility evaluator).
   - `chrome/` - the shell's own furniture, which is everything that draws outside a dock tab or
     on top of one: `menu`, `status_bar`, `pane_toolbar`, `overlays`, `divider`,
     `viewport_context_menu`.
@@ -333,7 +335,7 @@ Types used on **both** sides of the CPU/GPU boundary live in `solarxy-core` so b
 The app re-exports the few renderer items it reaches for (`CompositeLook`, `Renderer`, `BackgroundModeExt`) in `pub(super) use` lines in `solarxy_app::state::mod.rs`; grep those when you need to know what the app is allowed to touch.
 
 ### Dock layout persistence
-All eight panels (Sidebar / Review Panel / Console / Material Inspector / Properties / Outliner / Node Tree / Nodes) plus the Viewport, nine `SolarxyTab` variants, live as tabs in a single `egui_dock::DockState<SolarxyTab>` owned by `EguiRenderer`. `solarxy_core::preferences::DockPrefs` holds two `Option<String>` JSON blobs that serialize that state via `egui_dock`'s `serde` feature (workspace dep `egui_dock = "0.18"` with `features = ["serde"]`):
+All nine panels (Sidebar / Review Panel / Console / Material Inspector / Properties / Parameters / Outliner / Node Tree / Nodes) plus the Viewport, ten `SolarxyTab` variants, live as tabs in a single `egui_dock::DockState<SolarxyTab>` owned by `EguiRenderer`. `solarxy_core::preferences::DockPrefs` holds two `Option<String>` JSON blobs that serialize that state via `egui_dock`'s `serde` feature (workspace dep `egui_dock = "0.18"` with `features = ["serde"]`):
 
 - `last_layout_json` — auto-saved on app quit (`State::flush_dock_layout_on_exit` in `state/persist.rs`, called from `ApplicationHandler::exiting` in `app.rs`). Restored on startup in `state/init.rs` so the window comes back exactly how you left it. Write is short-circuited if the JSON hasn't changed.
 - `saved_layout_json` — only ever written by `Window → Save Layout`; never overwritten automatically. `Window → Restore Saved Layout` reads it back; the menu entry stays disabled when it's `None` (driven by `EguiRenderer::has_saved_layout`, mirrored from `Preferences.dock.saved_layout_json.is_some()` at startup).

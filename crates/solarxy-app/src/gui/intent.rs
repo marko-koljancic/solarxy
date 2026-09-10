@@ -260,6 +260,13 @@ pub(crate) enum PanelIntent {
     NodeTree(NodeTreeAction),
     /// The node canvas.
     Canvas(CanvasAction),
+    /// The parameter panel's tab reset: every key in a group, hidden
+    /// rows included, in one command and therefore one undo step.
+    ResetParams(
+        solarxy_graph::document::GraphContext,
+        solarxy_graph::document::NodeId,
+        Vec<String>,
+    ),
 }
 
 impl Intent {
@@ -315,7 +322,9 @@ impl Intent {
             // The two graph surfaces share a key: they raise the same
             // kind of change to the same document, and only one of them
             // can be under the pointer in a frame.
-            Self::Panel(PanelIntent::NodeTree(_) | PanelIntent::Canvas(_)) => 14,
+            Self::Panel(
+                PanelIntent::NodeTree(_) | PanelIntent::Canvas(_) | PanelIntent::ResetParams(..),
+            ) => 14,
             Self::Cook(_) => 15,
             Self::Panel(PanelIntent::InvokeAction { .. }) => 16,
         }

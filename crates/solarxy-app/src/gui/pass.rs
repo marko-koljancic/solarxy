@@ -19,6 +19,7 @@ use crate::state::hdri_info::HdriInfo;
 use super::chrome::divider::DividerInfo;
 use super::panels::node_tree::{NodeTreeSource, NodeTreeState};
 use super::panels::nodes::{CanvasSource, CanvasState};
+use super::panels::params::{ParamPanelSource, ParamPanelState};
 use super::panels::outliner::OutlinerSource;
 use super::chrome::overlays::HudInfo;
 use super::panels::properties::{ModelInfo, ValidationView};
@@ -67,6 +68,9 @@ pub(crate) struct PanelSources<'a> {
     /// canvas tab is mounted. `Empty` for a closed tab, so a canvas nobody
     /// is looking at costs nothing.
     pub canvas: CanvasSource<'a>,
+    /// The node the parameter panel edits, and what its last cook said,
+    /// when that tab is mounted.
+    pub params: ParamPanelSource<'a>,
     /// The node selected in the graph and the actions it declares, for
     /// the Properties panel's Actions section.
     pub actions: super::panels::properties::NodeActionsView<'a>,
@@ -90,6 +94,7 @@ pub(crate) struct PanelState<'a> {
     pub console: &'a mut ConsoleState,
     pub node_tree: &'a mut NodeTreeState,
     pub canvas: &'a mut CanvasState,
+    pub params: &'a mut ParamPanelState,
     /// **Shared, and deliberately so.** Which graph the user is looking
     /// at is one fact, not one per panel: a dive made on the canvas has to
     /// be where the tree is too, and a dropped model has to land where the

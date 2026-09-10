@@ -43,6 +43,7 @@ pub struct EguiRenderer {
     still_modal: StillRenderModal,
     node_tree: NodeTreeState,
     canvas: super::panels::nodes::CanvasState,
+    params: super::panels::params::ParamPanelState,
     /// The node canvas's rect as the last frame drew it, so a key claim
     /// made before the interface pass can ask where the pointer is.
     pub(super) canvas_rect: Option<egui::Rect>,
@@ -116,6 +117,7 @@ impl EguiRenderer {
             still_modal: StillRenderModal::default(),
             node_tree: NodeTreeState::default(),
             canvas: super::panels::nodes::CanvasState::default(),
+            params: super::panels::params::ParamPanelState::default(),
             canvas_rect: None,
             graph_ctx: solarxy_graph::document::GraphContext::Root,
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
@@ -294,6 +296,19 @@ impl EguiRenderer {
         self.tab_present(SolarxyTab::Nodes)
     }
 
+    /// `true` iff the parameter panel is mounted, so the state layer can
+    /// skip gathering what it would draw.
+    #[must_use]
+    pub fn params_tab_present(&self) -> bool {
+        self.tab_present(SolarxyTab::Parameters)
+    }
+
+    /// The node the parameter panel is pinned to, if any.
+    #[must_use]
+    pub fn params_pin(&self) -> Option<solarxy_graph::document::NodeId> {
+        self.params.pinned()
+    }
+
     /// Whether the pointer is over the node canvas, which is the one
     /// thing a key claim decides by position rather than by focus.
     ///
@@ -313,6 +328,10 @@ impl EguiRenderer {
         self.graph_ctx = solarxy_graph::document::GraphContext::Root;
         self.node_tree.reset();
         self.canvas.reset();
+        // The pin especially: node ids are minted per document, so one
+        // carried across an open would point at whatever holds that id in
+        // the incoming scene.
+        self.params.reset();
     }
 
     /// The graph the user is looking at: where a selection made in either
@@ -571,6 +590,7 @@ impl EguiRenderer {
                     console: &mut self.console,
                     node_tree: &mut self.node_tree,
                     canvas: &mut self.canvas,
+                    params: &mut self.params,
                     graph_ctx: &mut self.graph_ctx,
                 },
                 review,

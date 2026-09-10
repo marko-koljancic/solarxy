@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, ResolvedBackground};
-use solarxy_graph::document::NodeId;
+use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_host::EncodedPane;
 use solarxy_renderer::backend::{FrameCtx, PaneContent, RenderBackend, UvSource};
 use solarxy_renderer::camera::Camera;
@@ -506,6 +506,24 @@ impl State {
             }),
             _ => None,
         };
+        // The parameter panel's subject and what its last cook said.
+        // Gathered here for the same reason the canvas's cook facts are:
+        // the answers come from three places on the engine and a panel
+        // sees none of them.
+        // The gui reads are taken as values first, so the source below
+        // borrows the engine alone: a method on `&self` would hold all of
+        // it for as long as the source lives, and the interface pass
+        // needs the renderer mutably.
+        let params_scene = params_source(
+            self.engine.as_deref(),
+            self.gui.params_tab_present(),
+            self.gui.graph_ctx(),
+            self.gui.params_pin(),
+        );
+        let params_source = params_scene.as_ref().map_or(
+            crate::gui::ParamPanelSource::Empty,
+            crate::gui::ParamPanelSource::Scene,
+        );
         let canvas_source = canvas_scene.as_ref().map_or(
             crate::gui::CanvasSource::Empty,
             crate::gui::CanvasSource::Scene,
@@ -614,6 +632,7 @@ impl State {
                 outliner: outliner_source,
                 node_tree: node_tree_source,
                 canvas: canvas_source,
+                params: params_source,
                 actions: actions_source,
                 recent_files: &recent_files,
             },
@@ -796,6 +815,50 @@ fn selected_node(
             let id = doc.graph(ctx).ok()?.selection.last().copied()?;
             Some((ctx, id))
         })
+}
+
+/// What the parameter panel edits, and what its last cook said.
+///
+/// A free function rather than a method, because the source borrows the
+/// document and a method on `&self` would hold the whole shell for as
+/// long as the source lives, which is until after the interface pass has
+/// taken the renderer mutably.
+///
+/// The subject is resolved here rather than in the panel because the
+/// statistics and the validation report are engine reads and have to be
+/// taken for the node the panel will actually draw. The pin belongs to
+/// the panel, so it is passed in.
+fn params_source(
+    engine: Option<&solarxy_graph::Engine>,
+    tab_present: bool,
+    ctx: GraphContext,
+    pin: Option<NodeId>,
+) -> Option<crate::gui::ParamScene<'_>> {
+    let engine = engine.filter(|_| tab_present)?;
+    let subject = pin.or_else(|| {
+        engine
+            .document()
+            .graph(ctx)
+            .ok()
+            .and_then(|g| g.selection.first().copied())
+    });
+    let validation = subject.and_then(|node| engine.validation(node));
+    Some(crate::gui::ParamScene {
+        doc: engine.document(),
+        registry: engine.registry(),
+        ctx,
+        stats: subject.and_then(|node| engine.node_stats(node)),
+        // Presence, not cleanliness: a clean validate cook still stores a
+        // report, and the tab that says so is the point of it.
+        has_report: validation.is_some(),
+        #[allow(clippy::cast_possible_truncation)]
+        counts: validation.map_or((0, 0), |v| {
+            (
+                v.report.error_count() as u32,
+                v.report.warning_count() as u32,
+            )
+        }),
+    })
 }
 
 #[cfg(test)]

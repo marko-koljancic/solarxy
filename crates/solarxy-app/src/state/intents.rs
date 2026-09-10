@@ -134,6 +134,13 @@ impl State {
                 Intent::Panel(PanelIntent::Canvas(action)) => {
                     self.handle_canvas_action(action);
                 }
+                Intent::Panel(PanelIntent::ResetParams(ctx, node, keys)) => {
+                    self.apply_node_command(solarxy_graph::Command::ResetParams {
+                        ctx,
+                        node,
+                        keys: Some(keys),
+                    });
+                }
                 Intent::Panel(PanelIntent::InvokeAction { ctx, node, key }) => {
                     self.invoke_action(ctx, node, &key);
                 }

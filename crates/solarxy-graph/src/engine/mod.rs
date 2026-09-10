@@ -3381,6 +3381,27 @@ impl Engine {
         })
     }
 
+    /// What a node's last successful cook produced: its counts, its
+    /// duration, its bounds, and its image size when its default output
+    /// is an image.
+    ///
+    /// A pull query rather than a mirror of the `NodeStats` event, for a
+    /// host that has no event mirror to keep. The browser accumulates the
+    /// event because it holds one already; the desktop reads the engine
+    /// directly and would otherwise have to build a mirror for one panel.
+    ///
+    /// **`None` and zeroed are different answers.** A node that has never
+    /// cooked successfully has no entry at all, and a panel should say
+    /// nothing rather than claim zero; a cooked node with neither a
+    /// geometry nor an image default output has an entry whose counts are
+    /// zero, and that is a fact worth printing. Deriving the same answer
+    /// from [`Engine::geometry_output`] collapses the two, because it is
+    /// `None` for a perfectly well cooked camera.
+    #[must_use]
+    pub fn node_stats(&self, node: NodeId) -> Option<crate::cook::state::NodeCookStats> {
+        self.cook.stats(node).copied()
+    }
+
     /// The keys of a node's currently visible parameters, in declaration
     /// order, or `None` when the node or its type is gone.
     ///
