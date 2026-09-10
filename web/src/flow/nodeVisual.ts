@@ -1,8 +1,12 @@
-// The registry-driven node visual vocabulary: per-type glyphs and role
-// silhouettes, resolved from the snapshot's `glyph` and `role` hints with
-// a category fallback, so a node added in Rust renders with its declared
-// identity and a node the frontend has never seen still renders sensibly
-// (the zero-frontend-change contract). Glyph art is transplanted verbatim
+// The node's ART, and the two lookups that pick a piece of it.
+//
+// What is drawn is here; WHICH family to fall back to is not. The two
+// category tables that used to sit in this file, glyph and silhouette,
+// restated rules the engine holds and now arrive on the presentation
+// tables, so a node added in Rust renders with its declared identity and a
+// node this build has never seen still renders sensibly (the
+// zero-frontend-change contract) without the browser holding a second
+// opinion about what its family is. Glyph art is transplanted verbatim
 // from the design source (solarxy/design/web/solarxy-web.pen, the
 // Evo/Glyph set); every glyph is a 16x16 stroke path (round caps and
 // joins, 1.5 width), inked directly on the body. Every role occupies the
@@ -13,7 +17,7 @@
 // the three subflow silhouettes below carry shaped outlines, authored in
 // box coordinates through the corner-rounding helper.
 
-import type { NodeRole, NodeTypeSnapshot } from "../engine/types";
+import type { NodeRole, NodeTypeSnapshot, PresentationTables } from "../engine/types";
 
 /** Glyph key -> 16x16 stroke path. Keys follow the Rust convention: the
  * type id, with lights dropping their `_light` suffix. The four model
@@ -143,55 +147,28 @@ export const GLYPH_PATHS: Record<string, string> = {
     "M2.5 5.5h2.8l1.2-1.8h3l1.2 1.8h2.8v7h-11z M10.2 9a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 1 1 4.4 0",
 };
 
-/** Category -> the glyph shown when a node's declared key has no art (a
- * future Rust node with a novel glyph key degrades to its family icon). */
-const CATEGORY_GLYPH: Record<NodeTypeSnapshot["category"], string> = {
-  container: "sopnet",
-  generators: "box",
-  attribute: "attribute_create",
-  transform: "transform",
-  copy: "copy_to_points",
-  topology: "subdivide",
-  shaders: "material",
-  import: "import_obj",
-  export: "geo_export",
-  lights: "point",
-  cameras: "camera",
-  utility: "null",
-  cop_generate: "checker",
-  cop_adjust: "levels",
-  cop_composite: "mix",
-};
-
-/** Category -> the silhouette used when a node declares no role (older
- * snapshots, fabricated test nodes). */
-const CATEGORY_ROLE: Record<NodeTypeSnapshot["category"], NodeRole> = {
-  container: "container",
-  generators: "standard",
-  attribute: "standard",
-  transform: "standard",
-  copy: "standard",
-  topology: "standard",
-  shaders: "standard",
-  import: "standard",
-  export: "terminal",
-  lights: "light",
-  cameras: "camera",
-  utility: "standard",
-  cop_generate: "imageSource",
-  cop_adjust: "standard",
-  cop_composite: "standard",
-};
-
-/** The 16x16 glyph path for a node type: declared key first, category art
- * as the fallback. Always returns drawable art. */
-export function glyphPath(desc: NodeTypeSnapshot | undefined): string {
+/** The 16x16 glyph path for a node type: declared key first, then the
+ * family fallback the presentation tables name, so a node added in Rust
+ * with a glyph key this build has never heard of still draws as its
+ * family rather than as a broken icon.
+ *
+ * WHICH ART EXISTS is this shell's question, which is why `GLYPH_PATHS`
+ * stays here while the fallback rule does not: the desktop draws the same
+ * families from its own art with the same table. */
+export function glyphPath(
+  desc: NodeTypeSnapshot | undefined,
+  tables: PresentationTables | null,
+): string {
   if (!desc) return GLYPH_PATHS.null;
-  return GLYPH_PATHS[desc.glyph] ?? GLYPH_PATHS[CATEGORY_GLYPH[desc.category]];
+  const fallback = tables?.categories[desc.category]?.glyph;
+  return GLYPH_PATHS[desc.glyph] ?? (fallback ? GLYPH_PATHS[fallback] : GLYPH_PATHS.null);
 }
 
 /** Role values this frontend has silhouettes for; a NEWER Rust enum
- * variant arrives as an unknown string and falls back by category. */
+ * variant arrives as an unknown string and falls back by category.
+ *
+ * The set is this shell's, for the same reason as the art above: it says
+ * which silhouettes are drawn here, not which roles exist. */
 const KNOWN_ROLES: ReadonlySet<string> = new Set([
   "standard",
   "container",
@@ -206,10 +183,15 @@ const KNOWN_ROLES: ReadonlySet<string> = new Set([
   "note",
 ]);
 
-/** The silhouette family for a node type, with the category fallback. */
-export function nodeRole(desc: NodeTypeSnapshot | undefined): NodeRole {
+/** The silhouette family for a node type, with the shared category
+ * fallback. */
+export function nodeRole(
+  desc: NodeTypeSnapshot | undefined,
+  tables: PresentationTables | null,
+): NodeRole {
   if (!desc) return "standard";
-  return KNOWN_ROLES.has(desc.role) ? desc.role : CATEGORY_ROLE[desc.category];
+  if (KNOWN_ROLES.has(desc.role)) return desc.role;
+  return tables?.categories[desc.category]?.role ?? "standard";
 }
 
 /** A polygon vertex with its corner radius: [x, y, r]. */

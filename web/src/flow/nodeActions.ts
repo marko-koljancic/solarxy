@@ -8,7 +8,6 @@ import type { GraphContext, NodeMirror, NodeTypeSnapshot } from "../engine/types
 import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial } from "../store/radial";
 import { useUi } from "../store/ui";
-import { nodeRole } from "./nodeVisual";
 
 /** Start the inline rename (the list view and canvas both listen for it). */
 export function requestRename(nodeId: number): void {
@@ -62,9 +61,15 @@ export function nodePathOf(ctx: GraphContext, node: NodeMirror): string {
   return container ? `/${seg(container)}/${seg(node)}` : `/${seg(node)}`;
 }
 
-/** The same gates the canvas node uses when opening the radial. */
+/** The same gates the canvas node uses when opening the radial.
+ *
+ * Asks what the node OPENS rather than what silhouette it wears. The two
+ * agree today and the question is a semantic one: diving in needs a
+ * network to dive into, and a type that declares none has nothing to
+ * show whatever it is drawn as. Reading the silhouette for this was the
+ * last place a presentation answer stood in for an engine one. */
 export function isContainerType(desc: NodeTypeSnapshot | undefined): boolean {
-  return nodeRole(desc) === "container";
+  return desc?.opens != null;
 }
 
 export function isBypassable(desc: NodeTypeSnapshot | undefined): boolean {

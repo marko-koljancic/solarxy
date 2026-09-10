@@ -32,12 +32,10 @@ import type {
 import { descriptorFor } from "../registry/datatypes";
 import { ExpressionField } from "./inputs/ExpressionField";
 import {
-  acceptsExpression,
   discardParkedExpression,
   parkExpression,
   parkedExpression,
   paramExpression,
-  seedExpression,
 } from "./inputs/expressionLane";
 import { nodePathOf } from "../flow/nodeActions";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
@@ -81,7 +79,7 @@ interface FieldProps {
 
 function Field({ ctx, node, spec }: FieldProps) {
   const expr = paramExpression(node, spec);
-  const canExpress = acceptsExpression(spec.paramType);
+  const canExpress = spec.acceptsExpression;
   // The mirror's revision changes on every applied command, which is
   // exactly when an expression's value can have moved (something it reads
   // was edited, renamed, or undone).
@@ -218,7 +216,7 @@ function LiteralField({
                   kind: "expression",
                   expr:
                     parkedExpression(ctx, node.id, spec.key) ??
-                    seedExpression(value),
+                    getClient().seedExpression(ctx, node.id, spec.key),
                 },
               })
             }

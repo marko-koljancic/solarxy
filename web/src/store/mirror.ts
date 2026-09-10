@@ -20,6 +20,7 @@ import {
   type EventBatch,
   type GraphContext,
   type GraphMirror,
+  type PresentationTables,
   type RegistrySnapshot,
   type ValidationIssue,
 } from "../engine/types";
@@ -47,6 +48,14 @@ export interface ValidationReportData {
 
 interface MirrorState {
   registry: RegistrySnapshot | null;
+  /** The presentation rules that read only a node TYPE: wire colour
+   * tokens, handle shapes, category order, and the glyph and silhouette
+   * fallbacks.
+   *
+   * Beside the registry rather than behind a call of its own, because it
+   * is read at the same moment, for the same duration, by the same
+   * readers: neither moves while a document is open. */
+  presentation: PresentationTables | null;
   revision: number;
   /** Per-context graphs, keyed by `ctxKey`. */
   contexts: Record<string, GraphMirror>;
@@ -69,7 +78,7 @@ interface MirrorState {
    * beforeunload guard). Autosave does not clear it. */
   dirty: boolean;
 
-  setRegistry: (reg: RegistrySnapshot) => void;
+  setRegistry: (reg: RegistrySnapshot, presentation: PresentationTables) => void;
   setCurrent: (ctx: GraphContext) => void;
   setStale: (ids: number[]) => void;
   setDirty: (dirty: boolean) => void;
@@ -227,6 +236,7 @@ function applyEvent(
 export const useMirror = create<MirrorState>()(
   immer((set) => ({
     registry: null,
+    presentation: null,
     revision: 0,
     contexts: { root: emptyGraph() },
     cook: {},
@@ -239,9 +249,10 @@ export const useMirror = create<MirrorState>()(
     stale: [],
     dirty: false,
 
-    setRegistry: (reg) =>
+    setRegistry: (reg, presentation) =>
       set((s) => {
         s.registry = reg;
+        s.presentation = presentation;
       }),
 
     setDirty: (dirty) =>

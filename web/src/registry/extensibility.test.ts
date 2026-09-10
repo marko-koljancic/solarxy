@@ -4,17 +4,22 @@
 // it appears in the context-filtered palette, its ports color/coerce, and
 // every one of its params maps to a widget. No per-node code exists anywhere.
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { DataType, NodeTypeSnapshot, RegistrySnapshot } from "../engine/types";
+import type {
+  NodeTypeSnapshot,
+  PresentationTables,
+  RegistrySnapshot,
+} from "../engine/types";
 import { GLYPH_PATHS, glyphPath, nodeRole } from "../flow/nodeVisual";
 import {
-  DATA_TYPE_COLOR,
   coercionKind,
+  compareCategories,
   connectionLegal,
-  dataTypeShape,
   descriptorFor,
   isSupportedParamType,
   portDataType,
+  SUPPORTED_PARAM_TYPES,
 } from "./datatypes";
 
 /** A node the frontend has no knowledge of, using diverse existing types. */
@@ -34,14 +39,14 @@ const PROBE: NodeTypeSnapshot = {
     { key: "geometry", label: "Geometry", dataType: "geometry", variadic: false, required: false, min: 0, isDefault: true, doc: "" },
   ],
   params: [
-    { key: "size", label: "Size", group: "geometry", paramType: "float", enumVariants: [], accept: [], default: 1, hard: [0.01, 100], soft: [0.1, 10], step: 0.1, unit: "meters", doc: "" },
-    { key: "segments", label: "Segments", group: "geometry", paramType: "int", enumVariants: [], accept: [], default: 3, hard: [1, 64], soft: null, step: 1, unit: "none", doc: "" },
-    { key: "capped", label: "Capped", group: "geometry", paramType: "bool", enumVariants: [], accept: [], default: true, hard: null, soft: null, step: null, unit: "none", doc: "" },
-    { key: "mode", label: "Mode", group: "shape", paramType: "enum", enumVariants: [["a", "Alpha"], ["b", "Beta"]], accept: [], default: "a", hard: null, soft: null, step: null, unit: "none", doc: "" },
-    { key: "offset", label: "Offset", group: "shape", paramType: "vec3", enumVariants: [], accept: [], default: [0, 0, 0], hard: null, soft: null, step: 0.01, unit: "none", doc: "" },
-    { key: "tint", label: "Tint", group: "shape", paramType: "color", enumVariants: [], accept: [], default: [1, 1, 1, 1], hard: null, soft: null, step: null, unit: "none", drivenByPort: "detail_map", doc: "" },
-    { key: "material", label: "Material", group: "shape", paramType: "nodePath", nodePath: { kind: "opens", opens: "mat" }, enumVariants: [], accept: [], default: null, hard: null, soft: null, step: null, unit: "none", doc: "" },
-    { key: "lane", label: "Lane", group: "shape", paramType: "attributeName", enumVariants: [], accept: [], default: "color", hard: null, soft: null, step: null, unit: "none", doc: "" },
+    { key: "size", label: "Size", group: "geometry", paramType: "float", enumVariants: [], accept: [], default: 1, hard: [0.01, 100], soft: [0.1, 10], step: 0.1, unit: "meters", acceptsExpression: true, doc: "" },
+    { key: "segments", label: "Segments", group: "geometry", paramType: "int", enumVariants: [], accept: [], default: 3, hard: [1, 64], soft: null, step: 1, unit: "none", acceptsExpression: true, doc: "" },
+    { key: "capped", label: "Capped", group: "geometry", paramType: "bool", enumVariants: [], accept: [], default: true, hard: null, soft: null, step: null, unit: "none", acceptsExpression: true, doc: "" },
+    { key: "mode", label: "Mode", group: "shape", paramType: "enum", enumVariants: [["a", "Alpha"], ["b", "Beta"]], accept: [], default: "a", hard: null, soft: null, step: null, unit: "none", acceptsExpression: false, doc: "" },
+    { key: "offset", label: "Offset", group: "shape", paramType: "vec3", enumVariants: [], accept: [], default: [0, 0, 0], hard: null, soft: null, step: 0.01, unit: "none", acceptsExpression: true, doc: "" },
+    { key: "tint", label: "Tint", group: "shape", paramType: "color", enumVariants: [], accept: [], default: [1, 1, 1, 1], hard: null, soft: null, step: null, unit: "none", drivenByPort: "detail_map", acceptsExpression: true, doc: "" },
+    { key: "material", label: "Material", group: "shape", paramType: "nodePath", nodePath: { kind: "opens", opens: "mat" }, enumVariants: [], accept: [], default: null, hard: null, soft: null, step: null, unit: "none", acceptsExpression: false, doc: "" },
+    { key: "lane", label: "Lane", group: "shape", paramType: "attributeName", enumVariants: [], accept: [], default: "color", hard: null, soft: null, step: null, unit: "none", acceptsExpression: false, doc: "" },
   ],
   bypass: { mode: "mute" },
   doc: "A fabricated node the frontend has never seen.",
@@ -64,6 +69,27 @@ const SNAP: RegistrySnapshot = {
   ],
 };
 
+/** A stand-in for the presentation tables the engine serves at boot.
+ *
+ * Its CONTENT proves nothing and is not asserted: which hue, which shape
+ * and which family a category falls back to are pinned in
+ * `solarxy-studio` against the real thirteen data types and the real
+ * fifteen categories. What this fixture is for is the plumbing -- that
+ * the browser reads these answers instead of holding a second copy -- so
+ * it carries the shape of the real thing and only the few entries the
+ * cases below reach for. */
+const TABLES: PresentationTables = {
+  dataTypes: {
+    geometry: { token: "wire-geometry", shape: "round" },
+    image: { token: "wire-image", shape: "hexagon" },
+  },
+  categories: {
+    container: { order: 0, glyph: "sopnet", role: "container" },
+    generators: { order: 1, glyph: "box", role: "standard" },
+    lights: { order: 9, glyph: "point", role: "light" },
+  },
+} as unknown as PresentationTables;
+
 describe("extensibility: a novel node renders from the snapshot alone", () => {
   it("is discoverable and context-filtered like any node", () => {
     expect(descriptorFor(SNAP, "probe")?.displayName).toBe("Probe");
@@ -85,66 +111,47 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
   it("has typed handles the frontend can color + validate", () => {
     const out = portDataType(SNAP, "probe", "geometry", "output");
     expect(out).toBe("geometry");
-    // By VALUE, not merely defined: a hue that resolved to undefined would
-    // have satisfied the old assertion and drawn nothing.
-    expect(DATA_TYPE_COLOR[out!]).toBe("#5aa0ff");
     // Probe -> Probe geometry is a legal (same) connection.
     expect(connectionLegal(SNAP, "probe", "geometry", "probe", "geometry").legal).toBe(true);
     // The matrix still classifies lossy/lossless for the frontend rings.
     expect(coercionKind(SNAP, "float", "int")).toBe("lossy");
     expect(coercionKind(SNAP, "int", "float")).toBe("lossless");
-  });
-
-  // The encoding's promise is that hue says family and shape separates the
-  // family, so no two data types are drawn identically. It did not hold:
-  // vec2, vec3 and vec4 were all round and all one hue, while converting
-  // to each other in no direction at all, so three identical handles
-  // refused to connect.
-  //
-  // The half that reads the coercion matrix lives in `solarxy-studio`,
-  // where the real matrix is. Asserting it here against this file's
-  // four-entry fixture would prove nothing, which is how the first draft
-  // of this test passed while checking almost nothing. What this owns is
-  // the presentation tables, which are real here.
-  it("never draws two data types identically", () => {
-    const types = Object.keys(DATA_TYPE_COLOR) as DataType[];
-    const seen = new Map<string, DataType>();
-    for (const dt of types) {
-      const key = `${DATA_TYPE_COLOR[dt]}/${dataTypeShape(dt)}`;
-      const clash = seen.get(key);
-      expect(clash, `${dt} and ${clash} are drawn identically`).toBeUndefined();
-      seen.set(key, dt);
-    }
-  });
-
-  it("counts vector components in the handle shape", () => {
-    expect(dataTypeShape("vec2")).toBe("bar");
-    expect(dataTypeShape("vec3")).toBe("triangle");
-    expect(dataTypeShape("vec4")).toBe("square");
-    // A colour is an RGBA four-vector, so it carries the four-component
-    // shape too; the hue is what separates the two, and they convert both
-    // ways without loss (asserted against the real matrix in Rust).
-    expect(dataTypeShape("color")).toBe("square");
-    expect(DATA_TYPE_COLOR.vec4).not.toBe(DATA_TYPE_COLOR.color);
-  });
-
-  it("speaks the Image vocabulary", () => {
-    const map = portDataType(SNAP, "probe", "detail_map", "input");
-    expect(map).toBe("image");
-    // Distinct hue and the resource (hexagon) shape.
-    expect(DATA_TYPE_COLOR[map!]).toBeDefined();
-    expect(dataTypeShape(map!)).toBe("hexagon");
-    // Material is a ring, not the hexagon it used to share: the two
-    // convert in neither direction, so one mark for both told a reader
-    // going by shape that they were interchangeable.
-    expect(dataTypeShape("material")).toBe("ring");
     // Image wires only into Image; nothing coerces across.
     expect(coercionKind(SNAP, "image", "image")).toBe("same");
     expect(coercionKind(SNAP, "image", "geometry")).toBeNull();
     expect(coercionKind(SNAP, "float", "image")).toBeNull();
-    // The map-overrides-factor link is plain snapshot data: the panel's
-    // dim predicate needs only the param's drivenByPort and the node's
-    // edges, never per-node code.
+  });
+
+  // How a data type is DRAWN is no longer decided here, so it is no longer
+  // asserted here. That hue says family and shape separates the family,
+  // that no two types are drawn identically, and that the vectors count
+  // their components are all pinned in `solarxy-studio` against the real
+  // thirteen types and the real coercion matrix. This file's fixture
+  // carries four matrix cells, and a distinctness claim read off four
+  // fabricated cells would pass while checking almost nothing -- which is
+  // exactly what the first draft of this test did.
+  //
+  // What is left here is that the browser READS those answers.
+  it("draws a port from the tables rather than from a copy", () => {
+    const map = portDataType(SNAP, "probe", "detail_map", "input");
+    expect(map).toBe("image");
+    expect(TABLES.dataTypes[map!].shape).toBe("hexagon");
+    // A token, never a value: a shell that authored its own hue would put
+    // a literal here and nothing would hold it to the palette.
+    expect(TABLES.dataTypes[map!].token).toMatch(/^wire-/);
+  });
+
+  it("orders categories by the engine's order, and degrades past its end", () => {
+    expect(compareCategories(TABLES, "container", "generators")).toBeLessThan(0);
+    expect(compareCategories(TABLES, "lights", "container")).toBeGreaterThan(0);
+    // A category this build has not heard of sorts after the known ones.
+    expect(compareCategories(TABLES, "hologram", "container")).toBeGreaterThan(0);
+    expect(compareCategories(TABLES, "hologram", "phantom")).toBeLessThan(0);
+  });
+
+  it("the map-overrides-factor link is plain snapshot data", () => {
+    // The panel's dim predicate needs only the param's drivenByPort and
+    // the node's edges, never per-node code.
     const probe = descriptorFor(SNAP, "probe")!;
     const tint = probe.params.find((p) => p.key === "tint")!;
     expect(tint.drivenByPort).toBe("detail_map");
@@ -166,15 +173,48 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     // "probe" is a glyph key with no frontend art: the category fallback
     // (generators -> box) must produce a real path, never a broken icon.
     expect(GLYPH_PATHS[probe.glyph]).toBeUndefined();
-    expect(glyphPath(probe)).toBe(GLYPH_PATHS.box);
+    expect(glyphPath(probe, TABLES)).toBe(GLYPH_PATHS.box);
     // A declared, known role resolves as-is.
-    expect(nodeRole(probe)).toBe("standard");
+    expect(nodeRole(probe, TABLES)).toBe("standard");
     // A role variant NEWER than this frontend (arrives as an unknown
     // string over the boundary) falls back by category, not by crash.
     const future = { ...probe, role: "hologram" as never };
-    expect(nodeRole(future)).toBe("standard");
+    expect(nodeRole(future, TABLES)).toBe("standard");
     // And a declared glyph WITH art wins over the fallback.
     const merged = { ...probe, glyph: "merge" };
-    expect(glyphPath(merged)).toBe(GLYPH_PATHS.merge);
+    expect(glyphPath(merged, TABLES)).toBe(GLYPH_PATHS.merge);
+  });
+});
+
+describe("the widget list is this shell's, and it is not stale", () => {
+  // `SUPPORTED_PARAM_TYPES` says which param types this panel draws. The
+  // engine has no opinion about that, so it stays here -- but it is a
+  // claim about a switch statement thirty lines away, and until 0.10.0
+  // nothing held the two together. It had drifted by three entries: the
+  // panel had been rendering `action`, `assetRef` and `multilineText` for
+  // releases while this list said it could not, and the only reader was
+  // the fabricated probe above, whose params all happened to be listed.
+  //
+  // Read off the real registry, which is the file the panel is driven by.
+  const registry = JSON.parse(
+    readFileSync(new URL("../../../schemas/registry.json", import.meta.url), "utf8"),
+  ) as RegistrySnapshot;
+
+  it("covers every param type any registered node declares", () => {
+    const declared = new Set(registry.nodes.flatMap((n) => n.params.map((p) => p.paramType)));
+    expect(declared.size).toBeGreaterThan(10);
+    for (const t of [...declared].sort()) {
+      expect(isSupportedParamType(t), `no widget for param type ${t}`).toBe(true);
+    }
+  });
+
+  it("claims no widget it has no reason to draw", () => {
+    // The other direction, so the list cannot be padded into passing: a
+    // type nothing declares is either dead or a widget waiting for a node
+    // that never came.
+    const declared = new Set(registry.nodes.flatMap((n) => n.params.map((p) => p.paramType)));
+    for (const t of SUPPORTED_PARAM_TYPES) {
+      expect(declared.has(t), `${t} is listed but no node declares it`).toBe(true);
+    }
   });
 });

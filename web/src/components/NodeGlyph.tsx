@@ -5,6 +5,7 @@
 
 import type { NodeTypeSnapshot } from "../engine/types";
 import { glyphPath } from "../flow/nodeVisual";
+import { useMirror } from "../store/mirror";
 
 export function NodeGlyph({
   desc,
@@ -13,6 +14,7 @@ export function NodeGlyph({
   desc: NodeTypeSnapshot | undefined;
   size?: number;
 }) {
+  const tables = useMirror((s) => s.presentation);
   return (
     <svg
       viewBox="0 0 16 16"
@@ -21,7 +23,7 @@ export function NodeGlyph({
       height={size}
       aria-hidden
     >
-      <path d={glyphPath(desc)} />
+      <path d={glyphPath(desc, tables)} />
     </svg>
   );
 }

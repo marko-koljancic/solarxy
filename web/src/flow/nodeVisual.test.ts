@@ -2,12 +2,14 @@
 // geometric contract (every role occupies NODE_BOX; risers ride above it,
 // never inside; sized-down bodies stay inside it), the left-right
 // symmetry commitment for every shaped role body, the stylesheet's
-// agreement with the geometry tables, and the category fallback totality
-// (every taxonomy id must resolve to real art).
+// agreement with the geometry tables, and the plumbing that takes the
+// family fallback from the presentation tables rather than deciding it
+// here (the taxonomy itself is asserted in Rust, against the real
+// registry).
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { NodeRole, NodeTypeSnapshot } from "../engine/types";
+import type { NodeRole, NodeTypeSnapshot, PresentationTables } from "../engine/types";
 import {
   GLYPH_PATHS,
   NODE_BOX,
@@ -57,26 +59,26 @@ describe("roundedPolygonPath", () => {
   });
 });
 
-describe("category fallback totality (the 15-category taxonomy)", () => {
-  const CATEGORIES: NodeTypeSnapshot["category"][] = [
-    "container",
-    "generators",
-    "attribute",
-    "transform",
-    "copy",
-    "topology",
-    "shaders",
-    "import",
-    "export",
-    "lights",
-    "cameras",
-    "utility",
-    "cop_generate",
-    "cop_adjust",
-    "cop_composite",
-  ];
+describe("the family fallback, which the tables name and this file draws", () => {
+  // The TAXONOMY is not restated here any more. Which family a category
+  // falls back to, and that every one of them names art the catalog
+  // declares, are asserted in `solarxy-studio` against the real registry
+  // (`every_category_falls_back_to_a_glyph_the_catalog_declares` and its
+  // role twin), plus `tokens_drift.rs` for the art itself. A copy of the
+  // fifteen ids here would be the second opinion this release removed.
+  //
+  // What is left to test is the plumbing: that this file draws whatever
+  // the tables name rather than deciding for itself, and that it still
+  // draws something during the frames before the tables arrive.
+  const tables = {
+    dataTypes: {},
+    categories: {
+      generators: { order: 1, glyph: "box", role: "standard" },
+      lights: { order: 9, glyph: "point", role: "light" },
+    },
+  } as unknown as PresentationTables;
 
-  const probe = (category: NodeTypeSnapshot["category"]): NodeTypeSnapshot =>
+  const probe = (category: string): NodeTypeSnapshot =>
     ({
       typeId: "probe",
       category,
@@ -84,18 +86,29 @@ describe("category fallback totality (the 15-category taxonomy)", () => {
       role: "hologram",
     }) as unknown as NodeTypeSnapshot;
 
-  it("every category id resolves drawable glyph art for an unknown glyph key", () => {
-    for (const cat of CATEGORIES) {
-      const d = glyphPath(probe(cat));
-      expect(d, cat).toBeTypeOf("string");
-      expect(Object.values(GLYPH_PATHS), cat).toContain(d);
-    }
+  it("falls back to the art the tables name, not to art of its own", () => {
+    expect(glyphPath(probe("generators"), tables)).toBe(GLYPH_PATHS.box);
+    expect(glyphPath(probe("lights"), tables)).toBe(GLYPH_PATHS.point);
   });
 
-  it("every category id resolves a silhouette role for an unknown role", () => {
-    for (const cat of CATEGORIES) {
-      expect(nodeRole(probe(cat)), cat).toBeTypeOf("string");
-    }
+  it("takes the silhouette the tables name for a role it cannot draw", () => {
+    expect(nodeRole(probe("generators"), tables)).toBe("standard");
+    expect(nodeRole(probe("lights"), tables)).toBe("light");
+  });
+
+  it("still draws before the tables arrive, and after an unheard-of category", () => {
+    // Null tables are the frames between mount and boot; an unknown
+    // category is an engine newer than this build. Neither may produce a
+    // broken icon or a crash.
+    expect(Object.values(GLYPH_PATHS)).toContain(glyphPath(probe("generators"), null));
+    expect(Object.values(GLYPH_PATHS)).toContain(glyphPath(probe("no_such_family"), tables));
+    expect(nodeRole(probe("generators"), null)).toBe("standard");
+    expect(nodeRole(probe("no_such_family"), tables)).toBe("standard");
+  });
+
+  it("prefers a declared glyph that has art over any fallback", () => {
+    const merged = { ...probe("generators"), glyph: "merge" } as NodeTypeSnapshot;
+    expect(glyphPath(merged, tables)).toBe(GLYPH_PATHS.merge);
   });
 });
 

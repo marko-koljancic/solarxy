@@ -22,9 +22,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, useStore, type NodeProps } from "@xyflow/react";
 import { InlineEdit } from "../components/InlineEdit";
 import { Popover, renderDoc } from "../components/Popover";
-import { descriptorFor, DATA_TYPE_COLOR, dataTypeShape } from "../registry/datatypes";
+import { descriptorFor } from "../registry/datatypes";
 import { dispatch, getClient } from "../engine/session";
-import type { NodeMirror, PortSnapshot } from "../engine/types";
+import type { DataTypeStyle, NodeMirror, PortSnapshot } from "../engine/types";
 import { useMirror } from "../store/mirror";
 import { useRadial } from "../store/radial";
 import { useUi } from "../store/ui";
@@ -48,11 +48,25 @@ function handleLeft(index: number, count: number): string {
 /** Handles float clear of the layout box: 11px dot, ~3px air gap off the
  * box edge. One axis for every silhouette, so the wire endpoints are the
  * same whatever the body inside the box looks like. */
-function handleStyle(color: string, shape: string, side: "in" | "out"): React.CSSProperties {
+/** The two encoding channels on a port handle, drawn.
+ *
+ * Both come from the engine: the colour as a palette TOKEN rather than a
+ * value, so neither shell authors a wire hue, and the shape as a family
+ * name. What is here is the drawing -- the clip paths, the border, the
+ * composed transform -- which is the half a toolkit decides.
+ *
+ * A missing style means the tables have not arrived yet, which happens for
+ * the frames between mount and boot; a plain round handle in the neutral
+ * wire colour is the right thing to draw for one frame. */
+function handleStyle(
+  style: DataTypeStyle | undefined,
+  side: "in" | "out",
+): React.CSSProperties {
+  const shape = style?.shape ?? "round";
   const base: React.CSSProperties = {
     width: 11,
     height: 11,
-    background: color,
+    background: `var(--${style?.token ?? "wire-text"})`,
     border: "2px solid var(--handle-border)",
   };
   if (side === "in") base.top = -14;
@@ -84,7 +98,12 @@ function handleStyle(color: string, shape: string, side: "in" | "out"): React.CS
     };
   if (shape === "ring")
     // A hollow circle: the type colour is the ring, not the fill.
-    return { ...base, background: "var(--handle-border)", border: `3px solid ${color}`, borderRadius: "50%" };
+    return {
+      ...base,
+      background: "var(--handle-border)",
+      border: `3px solid ${base.background as string}`,
+      borderRadius: "50%",
+    };
   if (shape === "hexagon")
     return {
       ...base,
@@ -122,6 +141,7 @@ function ShapedBody({ body }: { body: RoleBody }) {
 export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData }) {
   const node = data.node;
   const registry = useMirror((s) => s.registry);
+  const tables = useMirror((s) => s.presentation);
   const cook = useMirror((s) => s.cook[node.id]);
   const cookMode = useMirror((s) => s.cookMode);
   const inStale = useMirror((s) => s.stale.includes(node.id));
@@ -138,8 +158,8 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
 
   const desc = descriptorFor(registry, node.typeId);
   const title = node.label;
-  const role = nodeRole(desc);
-  const glyph = glyphPath(desc);
+  const role = nodeRole(desc, tables);
+  const glyph = glyphPath(desc, tables);
   const shapedBody = ROLE_BODIES[role];
 
   // Inline rename: opened by double-clicking the label (the node
@@ -284,7 +304,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
             position={Position.Top}
             id={p.key}
             style={{
-              ...handleStyle(DATA_TYPE_COLOR[p.dataType], dataTypeShape(p.dataType), "in"),
+              ...handleStyle(tables?.dataTypes[p.dataType], "in"),
               left: handleLeft(i, inputs.length),
             }}
             isConnectable
@@ -438,7 +458,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
             position={Position.Bottom}
             id={p.key}
             style={{
-              ...handleStyle(DATA_TYPE_COLOR[p.dataType], dataTypeShape(p.dataType), "out"),
+              ...handleStyle(tables?.dataTypes[p.dataType], "out"),
               left: handleLeft(i, outputs.length),
             }}
             isConnectable

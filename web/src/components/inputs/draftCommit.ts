@@ -23,15 +23,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** Whether a draft is a real edit rather than a repeat of the last one.
- *
- * Kept as a separate pure function, not folded into the hook, because it is
- * the only part of this contract that can be tested without a DOM: the web
- * project has no React-rendering test tooling by design. */
-export function shouldCommit(draft: string, lastSent: string): boolean {
-  return draft !== lastSent;
-}
-
 export interface DraftCommit {
   /** The in-flight text. Bind straight to the input's `value`. */
   draft: string;
@@ -74,7 +65,17 @@ export function useDraftCommit(
   }, [value]);
 
   const commit = useCallback(() => {
-    if (!shouldCommit(draft, sent.current)) return;
+    // The one rule behind the draft-and-commit contract: send once, on
+    // blur or the commit key, and only when the draft actually differs
+    // from what was last sent. Without the comparison a field focused and
+    // left alone writes a param and fills the undo stack with a step that
+    // changed nothing.
+    //
+    // Inline rather than imported: the rule is
+    // `solarxy_studio::expression::should_commit`, which the desktop
+    // reads, and crossing the WebAssembly boundary to compare two strings
+    // the caller is already holding is not a trade worth making.
+    if (draft === sent.current) return;
     sent.current = draft;
     onCommit(draft);
   }, [draft, onCommit]);

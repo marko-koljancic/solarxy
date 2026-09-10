@@ -12,19 +12,25 @@ const desc = (over: Partial<NodeTypeSnapshot>): NodeTypeSnapshot =>
     category: "generators",
     glyph: "box",
     role: "standard",
+    opens: null,
     bypass: { mode: "mute" },
     ...over,
   }) as unknown as NodeTypeSnapshot;
 
 describe("isContainerType", () => {
-  it("follows the role, matching the canvas radial's gate", () => {
-    expect(isContainerType(desc({ role: "container" }))).toBe(true);
-    expect(isContainerType(desc({ role: "standard" }))).toBe(false);
+  // It followed the SILHOUETTE until 0.10.0, with a category fallback for
+  // a role this build could not draw. Diving in needs a network to dive
+  // into, which is what the type declares, so the gate asks that instead:
+  // a presentation answer no longer stands in for an engine one, and a
+  // node drawn as a container that opens nothing can no longer be entered.
+  it("follows what the type opens", () => {
+    expect(isContainerType(desc({ opens: "sop" }))).toBe(true);
+    expect(isContainerType(desc({ opens: null }))).toBe(false);
   });
 
-  it("falls back by category for an unknown role", () => {
-    expect(isContainerType(desc({ role: "hologram" as never, category: "container" }))).toBe(true);
-    expect(isContainerType(desc({ role: "hologram" as never }))).toBe(false);
+  it("ignores the silhouette, which says nothing about diving in", () => {
+    expect(isContainerType(desc({ role: "container", opens: null }))).toBe(false);
+    expect(isContainerType(desc({ role: "hologram" as never, opens: "mat" }))).toBe(true);
   });
 
   it("treats a missing descriptor as not a container", () => {

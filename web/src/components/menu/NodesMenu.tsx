@@ -14,6 +14,7 @@ import { MenuItem, type MenuEntry } from "./MenuItem";
 
 export function NodesMenu() {
   const registry = useMirror((s) => s.registry);
+  const tables = useMirror((s) => s.presentation);
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
 
@@ -39,10 +40,10 @@ export function NodesMenu() {
       onClick: () => useUi.getState().setPaletteOpen(true),
     },
     { divider: true },
-    // The snapshot lists nodes alphabetically by type id; the curated
-    // CATEGORY_ORDER decides submenu order.
+    // The snapshot lists nodes alphabetically by type id; the engine's
+    // category order decides submenu order.
     ...[...byCat.entries()]
-      .sort(([a], [b]) => compareCategories(a, b))
+      .sort(([a], [b]) => compareCategories(tables, a, b))
       .map(([cat, list]) => ({
       label: catLabels.get(cat) ?? cat,
       submenu: list.map((t) => ({

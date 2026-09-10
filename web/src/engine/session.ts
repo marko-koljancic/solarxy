@@ -418,7 +418,7 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
     // so the flag must never be visible with the capture still pending.
     pendingRecovery = await readLatestAutosave();
     client = c;
-    useMirror.getState().setRegistry(c.registrySnapshot());
+    useMirror.getState().setRegistry(c.registrySnapshot(), c.presentationTables());
     useViewState.getState().setView(c.viewState());
     // Constants on the Rust side, so once at boot is the whole read; the
     // pane display menu offers the traced mode from this.

@@ -7,15 +7,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { dispatch, getClient } from "../engine/session";
-import { ctxKey, type NodeReport, type PortSnapshot } from "../engine/types";
+import { ctxKey, type NodeReportText, type PortSnapshot } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
-import { selectGraph, useMirror } from "../store/mirror";
-import {
-  connectionSummary,
-  formatBounds,
-  formatDuration,
-  formatTimestamp,
-} from "./nodeReport";
+import { useMirror } from "../store/mirror";
+import { formatTimestamp } from "./nodeReport";
 import { useRadial } from "../store/radial";
 import { renderDoc } from "./Popover";
 
@@ -29,7 +24,6 @@ export function NodeInfoModal() {
   const cook = useMirror((s) => (info ? s.cook[info.nodeId] : undefined));
   const report = useMirror((s) => (info ? s.reports[info.nodeId] : undefined));
   const stale = useMirror((s) => (info ? s.stale.includes(info.nodeId) : false));
-  const graph = useMirror((s) => (info ? selectGraph(s, info.ctx) : undefined));
 
   // Cook warnings are a pull query (they ride no event); refetched when
   // the card retargets or the node's cook status changes.
@@ -38,22 +32,23 @@ export function NodeInfoModal() {
     setWarnings(info ? getClient().cookWarnings(info.nodeId) : []);
   }, [info, cook?.status]);
 
-  // Bounds, cook accounting and timestamps are the same shape of pull
-  // query, and for the same reason: as events they would be one message
-  // per node per frame during playback. Refetched on the same triggers,
-  // plus the document revision so an edit elsewhere updates "modified".
+  // Bounds, cook accounting, timestamps and the wiring are one pull
+  // query, already read as text, and a pull rather than events for the
+  // usual reason: as events they would be one message per node per frame
+  // during playback. Refetched on the same triggers, plus the document
+  // revision so an edit elsewhere updates "modified".
+  //
+  // The clock is read INSIDE the fetch and passed in, for two reasons.
+  // The shared derivation takes none, since it compiles for a page; and a
+  // `Date.now()` in the render body would make "5 minutes ago" depend on
+  // when React last chose to re-run, which is not a thing the user can
+  // reason about. The phrase and the date beside it now come back from
+  // one call, so they cannot describe different moments.
   const revision = useMirror((s) => s.revision);
-  const [nodeReport, setNodeReport] = useState<NodeReport | null>(null);
+  const [nodeReport, setNodeReport] = useState<NodeReportText | null>(null);
   useEffect(() => {
-    setNodeReport(info ? getClient().nodeReport(info.ctx, info.nodeId) : null);
+    setNodeReport(info ? getClient().nodeReportText(info.ctx, info.nodeId, Date.now()) : null);
   }, [info, cook?.status, revision]);
-  // Captured per fetch rather than read at render: a `Date.now()` in the
-  // render body makes "5 minutes ago" depend on when React last chose to
-  // re-run, which is not a thing the user can reason about.
-  const [asOf, setAsOf] = useState(() => Date.now());
-  useEffect(() => {
-    setAsOf(Date.now());
-  }, [info, revision]);
 
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -147,12 +142,8 @@ export function NodeInfoModal() {
     dispatch({ type: "setSelection", ctx: info.ctx, ids: [info.nodeId] });
   };
 
-  const bounds = formatBounds(nodeReport?.bounds ?? null);
-  const connections = graph
-    ? connectionSummary(graph, node, (n) =>
-        n.label,
-      )
-    : null;
+  const bounds = nodeReport?.bounds ?? null;
+  const connections = nodeReport?.connections ?? null;
 
   const statusText =
     status?.state === "ok"
@@ -224,12 +215,10 @@ export function NodeInfoModal() {
           <div className="node-info-row">
             <span className="node-info-key">Cooks</span>
             <span>
-              {nodeReport.cookCount} this session, {formatDuration(nodeReport.totalCookUs)} total
-              {nodeReport.cookCount > 1 && (
-                <> · {formatDuration(nodeReport.totalCookUs / nodeReport.cookCount)} average</>
-              )}
+              {nodeReport.cookCount} this session, {nodeReport.totalCook} total
+              {nodeReport.averageCook && <> · {nodeReport.averageCook} average</>}
               {" · "}
-              {formatDuration(nodeReport.lastCookUs)} last
+              {nodeReport.lastCook} last
             </span>
           </div>
         )}
@@ -239,12 +228,12 @@ export function NodeInfoModal() {
             <span className="node-info-wires">
               {connections.inputs.map((i) => (
                 <span key={`in-${i.port}`}>
-                  {i.port} &lt;- {i.from.join(", ")}
+                  {i.port} &lt;- {i.nodes.join(", ")}
                 </span>
               ))}
               {connections.outputs.map((o) => (
                 <span key={`out-${o.port}`}>
-                  {o.port} -&gt; {o.to.join(", ")}
+                  {o.port} -&gt; {o.nodes.join(", ")}
                 </span>
               ))}
             </span>
@@ -253,14 +242,14 @@ export function NodeInfoModal() {
         {nodeReport && (
           <div className="node-info-row">
             <span className="node-info-key">Created</span>
-            <span>{formatTimestamp(nodeReport.createdMs, asOf)}</span>
+            <span>{formatTimestamp(nodeReport.created.ms, nodeReport.created.relative)}</span>
           </div>
         )}
         {nodeReport && (
           <div className="node-info-row">
             <span className="node-info-key">Modified</span>
             <span title="Parameter, connection and bypass changes. Moving a node on the canvas does not count.">
-              {formatTimestamp(nodeReport.modifiedMs, asOf)}
+              {formatTimestamp(nodeReport.modified.ms, nodeReport.modified.relative)}
             </span>
           </div>
         )}

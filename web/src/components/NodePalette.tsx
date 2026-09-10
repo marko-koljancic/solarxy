@@ -31,6 +31,7 @@ function matches(node: NodeTypeSnapshot, q: string): boolean {
 
 export function NodePalette() {
   const registry = useMirror((s) => s.registry);
+  const tables = useMirror((s) => s.presentation);
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
   // Open state lives in the ui store: the Add menu's
@@ -91,15 +92,15 @@ export function NodePalette() {
 
   // Id/label pairs: filtering stays keyed by the stable snake_case id, the
   // buttons render the Title Case label from the snapshot. The snapshot
-  // lists nodes alphabetically by type id, so the curated CATEGORY_ORDER
-  // decides presentation; plain alphabetical would scatter related
+  // lists nodes alphabetically by type id, so the engine's category
+  // order decides presentation; plain alphabetical would scatter related
   // categories.
   const categories = useMemo(() => {
     const labels = new Map(contextNodes.map((n) => [n.category, n.categoryLabel]));
     return [
       { id: ALL_CATEGORY, label: ALL_CATEGORY },
       ...[...labels.entries()]
-        .sort(([a], [b]) => compareCategories(a, b))
+        .sort(([a], [b]) => compareCategories(tables, a, b))
         .map(([id, label]) => ({ id, label })),
     ];
   }, [contextNodes]);

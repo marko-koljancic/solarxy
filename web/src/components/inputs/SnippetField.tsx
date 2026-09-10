@@ -26,7 +26,6 @@ import type { AttrLane, NodeMirror } from "../../engine/types";
 import { usePrefs } from "../../store/prefs";
 import { upstreamSource } from "./AttributeNameField";
 import { wrangleCompletions } from "./wrangleComplete";
-import { errorPosition } from "./snippetError";
 import { SnippetEditorModal } from "./SnippetEditorModal";
 
 const CodeEditor = lazy(() => import("./CodeEditor"));
@@ -69,7 +68,13 @@ export function SnippetField({ value, ariaLabel, error, path, node, onCommit }: 
   // reports its dirty state and the mark hides until the two agree again.
   const [dirty, setDirty] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const badAt = dirty ? null : errorPosition(error);
+  // Decoded by the engine, which is the only thing that knows how it
+  // formats a position; memoized on the message so a re-render of a field
+  // with a standing error does not cross the boundary again.
+  const badAt = useMemo(
+    () => (dirty || !error ? null : getClient().snippetErrorPosition(error)),
+    [dirty, error],
+  );
 
   return (
     <div className={`snippet-field${badAt ? " has-error" : ""}`}>

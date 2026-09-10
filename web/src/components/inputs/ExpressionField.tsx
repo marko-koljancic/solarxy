@@ -19,7 +19,6 @@ import { useEffect, useRef, useState } from "react";
 import { dispatch, getClient } from "../../engine/session";
 import type { GraphContext, NodeId } from "../../engine/types";
 import { useDraftCommit } from "./draftCommit";
-import { formatResolved } from "./expressionLane";
 
 interface Props {
   ctx: GraphContext;
@@ -59,12 +58,10 @@ export function ExpressionField({
 
   useEffect(() => {
     try {
+      // Both halves of the readout are formatted where the value is: the
+      // rounding rule is one implementation now rather than one per shell.
       const r = getClient().resolvedParam(ctx, node, paramKey);
-      setReadout(
-        r.ok
-          ? { text: formatResolved(r.value), error: false }
-          : { text: r.error, error: true },
-      );
+      setReadout({ text: r.text, error: !r.ok });
     } catch (e) {
       setReadout({ text: e instanceof Error ? e.message : String(e), error: true });
     }
