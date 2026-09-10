@@ -110,9 +110,40 @@ struct NodePresentation {
     /// The parameter keys currently passing their conditions, in
     /// declaration order.
     visible_params: Vec<String>,
-    /// The tabs the parameter panel should show, emptied groups already
-    /// dropped.
-    tabs: Vec<String>,
+    /// The tabs to show, emptied groups already dropped and the validation
+    /// tab appended when there is a report.
+    tabs: Vec<ParamTab>,
+    /// Which tab is showing: the stored one while the node still offers
+    /// it, else the first. The fallback is what keeps a sensible tab when
+    /// the selection moves to a different node type.
+    active_tab: Option<String>,
+    /// The active tab's parameters, split into subgroup runs.
+    sections: Vec<ParamSection>,
+    /// Every parameter key in the active tab, visible or not.
+    ///
+    /// The whole group is here because that is what a tab reset writes: a
+    /// hidden variant row still holds its stored value, and skipping it
+    /// would leave it stale to surprise someone later.
+    active_tab_keys: Vec<String>,
+}
+
+/// One tab, with the label the strip prints.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ParamTab {
+    key: String,
+    label: String,
+    /// The validation report's tab, which is a sentinel rather than a
+    /// group any node declares.
+    is_validation: bool,
+}
+
+/// One run of parameters under an optional subgroup heading.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ParamSection {
+    subgroup: Option<String>,
+    param_keys: Vec<String>,
 }
 
 #[wasm_bindgen]
@@ -163,7 +194,13 @@ impl SolarxyApp {
     ///
     /// A call per rule would be seven crossings per node per render, and a
     /// call per parameter would be one per row of the parameter panel.
-    pub fn node_presentation(&self, ctx: JsValue, node: f64) -> Result<JsValue, JsError> {
+    pub fn node_presentation(
+        &self,
+        ctx: JsValue,
+        node: f64,
+        has_report: bool,
+        stored_tab: &str,
+    ) -> Result<JsValue, JsError> {
         let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
             .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -183,14 +220,49 @@ impl SolarxyApp {
         let lookup = |hash: &str| manifest.get(hash).cloned();
         let visible_params =
             solarxy_graph::registry::visibility::visible_param_keys(&desc.params, &data.params);
-        let tabs = params::param_tabs(&desc.params, false, |spec| {
+        let tab_keys = params::param_tabs(&desc.params, has_report, |spec| {
             visible_params.contains(&spec.key)
         });
+        let active = params::resolve_active_tab(&tab_keys, stored_tab);
+        let active_params: Vec<solarxy_graph::registry::param_spec::ParamSpec> = active
+            .map(|tab| {
+                desc.params
+                    .iter()
+                    .filter(|p| p.group == tab && visible_params.contains(&p.key))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let sections = params::param_sections(&active_params)
+            .into_iter()
+            .map(|section| ParamSection {
+                subgroup: section.subgroup.map(str::to_string),
+                param_keys: section.params.iter().map(|p| p.key.clone()).collect(),
+            })
+            .collect();
+        let active_tab_keys = active
+            .map(|tab| {
+                params::group_keys(&desc.params, tab)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
 
         to_js(&NodePresentation {
             info_line: node::node_info_line(desc, &data.params, Some(&lookup)),
             visible_params,
-            tabs,
+            tabs: tab_keys
+                .iter()
+                .map(|key| ParamTab {
+                    key: key.clone(),
+                    label: params::tab_label(key),
+                    is_validation: key == params::VALIDATION_TAB,
+                })
+                .collect(),
+            active_tab: active.map(str::to_string),
+            sections,
+            active_tab_keys,
         })
     }
 

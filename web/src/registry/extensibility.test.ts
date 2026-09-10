@@ -11,7 +11,6 @@ import {
   DATA_TYPE_COLOR,
   coercionKind,
   connectionLegal,
-  contextKind,
   dataTypeShape,
   descriptorFor,
   isSupportedParamType,
@@ -78,27 +77,10 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     expect(SNAP.nodes.filter((n) => n.contexts.includes("obj"))).toHaveLength(0);
   });
 
-  it("derives a canvas's kind from its owner's descriptor, not its type id", () => {
-    // The root canvas is always obj.
-    expect(contextKind(SNAP, "root", [])).toBe("obj");
-    // A container the frontend has never seen: its child canvas's kind is
-    // whatever the descriptor opens.
-    const container: NodeTypeSnapshot = {
-      ...PROBE,
-      typeId: "copnet_probe",
-      contexts: ["obj"],
-      opens: "cop",
-      inputs: [],
-      outputs: [],
-    };
-    const snap: RegistrySnapshot = { nodes: [PROBE, container], coercions: SNAP.coercions };
-    const ownerNodes = [
-      { id: 7, typeId: "copnet_probe", typeVersion: 1, params: {}, position: [0, 0] as [number, number], bypassed: false, label: "n", visible: true, declaresVisibility: false, portOrder: {} },
-    ];
-    expect(contextKind(snap, { subflow: 7 }, ownerNodes)).toBe("cop");
-    // An unknown owner falls back to geo (the only pre-context child kind).
-    expect(contextKind(snap, { subflow: 99 }, ownerNodes)).toBe("sop");
-  });
+  // A canvas's kind used to be derived here, by looking up the owning
+  // container's descriptor and guessing when the owner was unknown. The
+  // engine stamps a network with its kind when the container creates it,
+  // and the mirror carries it, so there is no derivation left to test.
 
   it("has typed handles the frontend can color + validate", () => {
     const out = portDataType(SNAP, "probe", "geometry", "output");

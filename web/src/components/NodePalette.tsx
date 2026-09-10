@@ -12,7 +12,7 @@ import { dispatch } from "../engine/session";
 import type { NodeTypeSnapshot } from "../engine/types";
 import { screenToFlow } from "../flow/flowProjection";
 import { MARGIN_PX, palettePlacement, type Point } from "../flow/palettePlacement";
-import { compareCategories, contextKind } from "../registry/datatypes";
+import { compareCategories } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
 
@@ -82,8 +82,8 @@ export function NodePalette() {
     }
   }, [open]);
 
-  const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
-  const kind = contextKind(registry, current, rootNodes);
+  // The engine stamps each network with its kind; the mirror carries it.
+  const kind = useMirror((s) => selectGraph(s, s.current).kind);
   const contextNodes = useMemo(
     () => (registry?.nodes ?? []).filter((n) => n.contexts.includes(kind)),
     [registry, kind],

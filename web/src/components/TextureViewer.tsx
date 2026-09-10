@@ -7,13 +7,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getClient } from "../engine/session";
-import { contextKind, descriptorFor } from "../registry/datatypes";
+import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 
 export function TextureViewer() {
   const current = useMirror((s) => s.current);
-  const registry = useMirror((s) => s.registry);
+  const currentKind = useMirror((s) => selectGraph(s, s.current).kind);
   const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
+  const registry = useMirror((s) => s.registry);
   // The cook record's identity changes on every applied cook batch, which
   // is exactly the refetch signal (over-fetching on unrelated cooks is
   // cheap next to a texture decode and keeps this a pure mirror consumer).
@@ -24,7 +25,7 @@ export function TextureViewer() {
   // The network to preview: the open canvas when it IS an image network,
   // else the first COP container at root.
   const owner = useMemo(() => {
-    if (current !== "root" && contextKind(registry, current, rootNodes) === "cop") {
+    if (current !== "root" && currentKind === "cop") {
       return current.subflow;
     }
     return (

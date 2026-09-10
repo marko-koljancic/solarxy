@@ -6,7 +6,7 @@
 
 import { dispatch } from "../../engine/session";
 import type { NodeTypeSnapshot } from "../../engine/types";
-import { compareCategories, contextKind } from "../../registry/datatypes";
+import { compareCategories } from "../../registry/datatypes";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { useUi } from "../../store/ui";
 import { NodeGlyph } from "../NodeGlyph";
@@ -16,9 +16,8 @@ export function NodesMenu() {
   const registry = useMirror((s) => s.registry);
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
-  const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
 
-  const kind = contextKind(registry, current, rootNodes);
+  const kind = useMirror((s) => selectGraph(s, s.current).kind);
   const byCat = new Map<string, NodeTypeSnapshot[]>();
   const catLabels = new Map<string, string>();
   for (const n of registry?.nodes ?? []) {

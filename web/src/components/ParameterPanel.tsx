@@ -40,14 +40,6 @@ import {
   seedExpression,
 } from "./inputs/expressionLane";
 import { nodePathOf } from "../flow/nodeActions";
-import {
-  paramSections,
-  paramTabs,
-  paramVisible,
-  resolveActiveTab,
-  tabLabel,
-  VALIDATION_TAB,
-} from "./paramVisibility";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
 import { AttributeNameField } from "./inputs/AttributeNameField";
 import { TextField } from "./inputs/TextField";
@@ -639,12 +631,20 @@ export function ParameterPanel({
     g.push(p);
     groups.set(p.group, g);
   }
-  // Tabs (Minimystix underline pattern, D1): general first, the
-  // rest in declaration order, plus a Validation tab when a report exists.
+  // The tab strip, which tab is showing, that tab's subgroup runs and
+  // which parameters currently pass their conditions all come from the
+  // engine in one call. It is memoized on the node, whether a report
+  // exists and the stored tab, so it runs when one of those moves rather
+  // than on every render; before the rules moved, the visibility predicate
+  // alone ran once per parameter per render.
   const report = reports[node.id];
-  const isVisible = (p: ParamSnapshot) => paramVisible(p, desc?.params ?? [], node.params);
-  const tabs = paramTabs(desc?.params ?? [], Boolean(report), isVisible);
-  const active = resolveActiveTab(tabs, tab);
+  const pres = useMemo(
+    () => getClient().nodePresentation(current, node.id, Boolean(report), tab),
+    [current, node, report, tab],
+  );
+  const tabs = pres?.tabs ?? [];
+  const active = pres?.activeTab ?? null;
+  const byKey = new Map((desc?.params ?? []).map((p) => [p.key, p]));
 
   return (
     <div className="param-panel">
@@ -676,14 +676,14 @@ export function ParameterPanel({
         <div className="param-tabs" role="tablist">
           {tabs.map((t) => (
             <button
-              key={t}
+              key={t.key}
               role="tab"
-              aria-selected={t === active}
-              className={`param-tab${t === active ? " active" : ""}${t === VALIDATION_TAB && report && report.errors > 0 ? " has-errors" : ""}`}
-              onClick={() => setTab(t)}
+              aria-selected={t.key === active}
+              className={`param-tab${t.key === active ? " active" : ""}${t.isValidation && report && report.errors > 0 ? " has-errors" : ""}`}
+              onClick={() => setTab(t.key)}
             >
-              {tabLabel(t)}
-              {t === VALIDATION_TAB && report && report.issues.length > 0 && (
+              {t.label}
+              {t.isValidation && report && report.issues.length > 0 && (
                 <span className="param-tab-count">{report.errors + report.warnings}</span>
               )}
             </button>
@@ -691,14 +691,14 @@ export function ParameterPanel({
         </div>
       )}
       <div className="param-body">
-        {active !== undefined && active !== VALIDATION_TAB && (
+        {active !== null && !tabs.find((t) => t.key === active)?.isValidation && (
           <div className="param-tab-body" role="tabpanel">
-            {paramSections((groups.get(active) ?? []).filter(isVisible)).map((section, i) => (
+            {(pres?.sections ?? []).map((section, i) => (
               <div key={section.subgroup ?? `_${i}`} className="param-section">
-                {section.subgroup !== undefined && (
+                {section.subgroup !== null && (
                   <div className="param-subgroup">{section.subgroup}</div>
                 )}
-                {section.params.map((p) => {
+                {section.paramKeys.flatMap((key) => byKey.get(key) ?? []).map((p) => {
                   // Registry-driven map-overrides-factor indicator: a param
                   // declaring drivenByPort dims while that input port is
                   // connected (the map fully drives the channel; the factor
@@ -720,7 +720,7 @@ export function ParameterPanel({
             ))}
           </div>
         )}
-        {active === VALIDATION_TAB && report && (
+        {tabs.find((t) => t.key === active)?.isValidation && report && (
           <ValidationSection ctx={current} sourceNode={node.id} report={report} />
         )}
         {tabs.length === 0 && <div className="param-empty">No parameters.</div>}

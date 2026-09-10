@@ -5,10 +5,7 @@
 
 import type {
   CoercionKind,
-  ContextKind,
   DataType,
-  GraphContext,
-  NodeMirror,
   NodeTypeSnapshot,
   RegistrySnapshot,
 } from "../engine/types";
@@ -77,23 +74,6 @@ export function descriptorFor(
   typeId: string,
 ): NodeTypeSnapshot | undefined {
   return reg?.nodes.find((n) => n.typeId === typeId);
-}
-
-/** The network kind of a canvas: the root is "obj"; a child canvas is
- * whatever its owning container's descriptor `opens` ("sop" when the
- * owner or its descriptor is unknown, the only pre-context child kind).
- * `ownerNodes` is the graph holding the owning container (the root graph
- * while containers are root-only; the N-level breadcrumb generalizes the
- * lookup). */
-export function contextKind(
-  reg: RegistrySnapshot | null,
-  current: GraphContext,
-  ownerNodes: NodeMirror[],
-): ContextKind {
-  if (current === "root") return "obj";
-  const owner = ownerNodes.find((n) => n.id === current.subflow);
-  if (!owner) return "sop";
-  return descriptorFor(reg, owner.typeId)?.opens ?? "sop";
 }
 
 /** A port's DataType, resolved from the descriptor (null if unknown). */

@@ -18,18 +18,17 @@
 // handles (color by DataType family plus the shape channel), cook /
 // stale / error / validation feedback, and bypass hatching.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, useStore, type NodeProps } from "@xyflow/react";
 import { InlineEdit } from "../components/InlineEdit";
 import { Popover, renderDoc } from "../components/Popover";
 import { descriptorFor, DATA_TYPE_COLOR, dataTypeShape } from "../registry/datatypes";
-import { assetDisplayName, dispatch } from "../engine/session";
+import { dispatch, getClient } from "../engine/session";
 import type { NodeMirror, PortSnapshot } from "../engine/types";
 import { useMirror } from "../store/mirror";
 import { useRadial } from "../store/radial";
 import { useUi } from "../store/ui";
 import { IconBypass, IconDisplay } from "../icons";
-import { nodeInfoLine } from "./infoLine";
 import { glyphPath, NODE_BOX, nodeRole, ROLE_BODIES, type RoleBody } from "./nodeVisual";
 
 /** Hover dwell before the radial opens (drag-safe dead time). */
@@ -214,7 +213,13 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
         ? `${status.ms.toFixed(1)} ms`
         : "";
 
-  const infoLine = nodeInfoLine(desc, node, assetDisplayName);
+  // The engine derives the summary. Memoized on the node it mirrors, so
+  // it runs when the node changes rather than on every render; before the
+  // rule moved, this and six others recomputed every time.
+  const infoLine = useMemo(
+    () => getClient().nodePresentation(ctx, node.id)?.infoLine ?? null,
+    [ctx, node],
+  );
   const description = authoredDescription(node);
   // The grey type label disambiguates a renamed node (an un-renamed node's
   // title IS the type name); LOD-gated at zoom 0.7.

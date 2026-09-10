@@ -9,6 +9,7 @@ import {
   type IDockviewPanelProps,
 } from "dockview-react";
 import { useEffect, useRef, useState } from "react";
+import type { ContextKind } from "../engine/types";
 import { toggleMaximize } from "./api";
 import { clearHoveredPanel, setHoveredPanel } from "./hover";
 import { IconMaximize, IconRestore } from "../icons";
@@ -23,7 +24,6 @@ import { ReviewPanel } from "../components/review/ReviewPanel";
 import { TextureViewer } from "../components/TextureViewer";
 import { TreePane } from "../components/TreePane";
 import { TextPane } from "../components/TextPane";
-import { contextKind } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
 
@@ -230,7 +230,7 @@ function PaneColorPicker({
 /** The automatic per-context-kind tint: the Nodes tab
  * reflects which network kind its canvas shows, and the Texture viewer
  * carries the image family's pink. A manual right-click tint wins. */
-function autoPaneColor(id: string, kind: ReturnType<typeof contextKind>): string | undefined {
+function autoPaneColor(id: string, kind: ContextKind): string | undefined {
   if (id === "texture") return "#f2c9d6";
   if (id !== "nodes") return undefined;
   if (kind === "cop") return "#f2c9d6";
@@ -247,10 +247,8 @@ function ColoredTabInner({
 }) {
   const id = props.api.id;
   const manual = useUi((s) => s.paneColors[id]);
-  const current = useMirror((s) => s.current);
-  const registry = useMirror((s) => s.registry);
-  const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
-  const color = manual ?? autoPaneColor(id, contextKind(registry, current, rootNodes));
+  const kind = useMirror((s) => selectGraph(s, s.current).kind);
+  const color = manual ?? autoPaneColor(id, kind);
   const [picker, setPicker] = useState<{ x: number; y: number } | null>(null);
   return (
     <div

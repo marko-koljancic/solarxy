@@ -645,9 +645,32 @@ export interface NodePresentation {
   /** The parameter keys currently passing their conditions, in declaration
    * order. */
   visibleParams: string[];
-  /** The tabs the parameter panel should show, emptied groups already
-   * dropped. */
-  tabs: string[];
+  /** The tabs to show, emptied groups already dropped and the validation
+   * tab appended when there is a report. */
+  tabs: ParamTab[];
+  /** Which tab is showing: the stored one while the node still offers it,
+   * else the first. */
+  activeTab: string | null;
+  /** The active tab's params, split into subgroup runs. */
+  sections: ParamSection[];
+  /** Every param key in the active tab, visible or not: what a tab reset
+   * writes, since a hidden variant row still holds its stored value. */
+  activeTabKeys: string[];
+}
+
+/** One tab, with the label the strip prints. */
+export interface ParamTab {
+  key: string;
+  label: string;
+  /** The validation report's tab, a sentinel rather than a declared
+   * group. */
+  isValidation: boolean;
+}
+
+/** One run of params under an optional subgroup heading. */
+export interface ParamSection {
+  subgroup: string | null;
+  paramKeys: string[];
 }
 
 /** The per-import finishing options (camelCase; mirrors Rust ImportOptions).

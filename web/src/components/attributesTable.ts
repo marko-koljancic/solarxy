@@ -1,8 +1,25 @@
-// Pure helpers behind the Attributes pane: watched-node resolution, the
-// virtualization window math, and cell formatting. Split from the
-// component so the logic is unit-testable without a DOM.
-
-import type { AttrColumn } from "../engine/types";
+// What is left of the Attributes pane's helpers after the shared rules
+// moved into `solarxy-studio`.
+//
+// The CELL and HEADER formatting are gone: the engine formats a page where
+// the values are, because the cell rule runs per visible cell while the
+// table scrolls, which is far too often to ask across the boundary one at
+// a time.
+//
+// Two stay, and for different reasons.
+//
+// `pageWindow` is virtualization: which rows to materialize from a scroll
+// offset and a viewport height. That is a fact about a scrolling
+// container, not about a document, and the two shells scroll with
+// different machinery.
+//
+// `watchedNode` is the one rule this release did NOT single-source, and
+// the reason is stated rather than hidden. It exists in Rust too, as
+// `solarxy_studio::attributes::watched_node`, which the desktop pane will
+// read. Crossing the WebAssembly boundary to compute `selection[0] ??
+// activeOutput` from two values the caller already holds is not a trade
+// worth making, and the rule is one line whose behaviour is pinned on
+// both sides. If it ever grows, it moves.
 
 /** The node the pane watches: the first selected node, else the
  * display-flag node, else nothing. */
@@ -29,23 +46,4 @@ export function pageWindow(
   const pages: number[] = [];
   for (let p = Math.floor(first / pageSize); p * pageSize < last; p += 1) pages.push(p);
   return { first, last, pages };
-}
-
-/** Fixed-decimal cell text: 4 places, `-0` normalized, missing lanes a
- * plain hyphen. */
-export function fmtCell(v: number | null): string {
-  if (v === null || Number.isNaN(v)) return "-";
-  const fixed = v.toFixed(4);
-  return fixed === "-0.0000" ? "0.0000" : fixed;
-}
-
-/** Flat header cells for a column set: single-component columns keep the
- * lane name, vector lanes fan out as `.x .y .z .w`. */
-export function headerCells(columns: AttrColumn[]): string[] {
-  const suffix = ["x", "y", "z", "w"];
-  return columns.flatMap((c) =>
-    c.components === 1
-      ? [c.key]
-      : Array.from({ length: c.components }, (_, i) => `${c.key}.${suffix[i]}`),
-  );
 }

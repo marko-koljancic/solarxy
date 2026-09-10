@@ -10,12 +10,11 @@ import { useEffect, useState } from "react";
 import { InlineEdit } from "../components/InlineEdit";
 import { NodeGlyph } from "../components/NodeGlyph";
 import { dispatch } from "../engine/session";
-import { assetDisplayName } from "../engine/session";
+import { getClient } from "../engine/session";
 import { IconBypass, IconDive, IconRename, IconTrash } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
-import { nodeInfoLine } from "./infoLine";
 import {
   diveIntoSubflow,
   isBypassable,
@@ -61,6 +60,11 @@ export function FlowListView() {
         </thead>
         <tbody>
           {graph.nodes.map((n) => {
+            // One crossing per row, and the rows only exist while this view
+            // is open. The canvas memoizes the same query per node; a list
+            // is short enough not to need it.
+            const infoLineOf = (m: typeof n) =>
+              getClient().nodePresentation(ctx, m.id)?.infoLine ?? null;
             const desc = descriptorFor(registry, n.typeId);
             const selected = graph.selection.includes(n.id);
             const status = cook[n.id]?.status;
@@ -107,7 +111,7 @@ export function FlowListView() {
                   )}
                 </td>
                 <td className="flow-list-type">{n.typeId}</td>
-                <td className="flow-list-info">{nodeInfoLine(desc, n, assetDisplayName) ?? ""}</td>
+                <td className="flow-list-info">{infoLineOf(n) ?? ""}</td>
                 <td className={status?.state === "error" ? "flow-list-error" : undefined}>
                   {statusText}
                   {n.bypassed ? " bypassed" : ""}

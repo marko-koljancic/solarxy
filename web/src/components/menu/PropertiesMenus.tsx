@@ -6,19 +6,12 @@
 
 import { useRef } from "react";
 import { toggleMaximize } from "../../dock/api";
-import { dispatch } from "../../engine/session";
+import { dispatch, getClient } from "../../engine/session";
 import { nodePathOf, openNodeInfo, setDisplayFlag, toggleBypass } from "../../flow/nodeActions";
 import { descriptorFor } from "../../registry/datatypes";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { pushToast } from "../../store/toasts";
 import { useUi } from "../../store/ui";
-import {
-  groupKeys,
-  paramTabs,
-  resolveActiveTab,
-  tabLabel,
-  VALIDATION_TAB,
-} from "../paramVisibility";
 import { MenuItem, type MenuEntry } from "./MenuItem";
 
 export function PropertiesMenuBar() {
@@ -34,9 +27,15 @@ export function PropertiesMenuBar() {
   const node = graph.nodes.find((n) => n.id === graph.selection[0]);
   const desc = node ? descriptorFor(registry, node.typeId) : undefined;
   const params = desc?.params ?? [];
-  const tabs = node ? paramTabs(params, Boolean(reports[node.id])) : [];
-  const active = resolveActiveTab(tabs, storedTab);
-  const resettableTab = active !== undefined && active !== VALIDATION_TAB;
+  // The tab strip and which tab is showing are the engine's answer, the
+  // same one the panel itself renders, so the menu and the panel cannot
+  // disagree about what "the current tab" means.
+  const pres = node
+    ? getClient().nodePresentation(current, node.id, Boolean(reports[node.id]), storedTab)
+    : null;
+  const active = pres?.activeTab ?? null;
+  const activeTab = pres?.tabs.find((t) => t.key === active);
+  const resettableTab = activeTab !== undefined && !activeTab.isValidation;
 
   const nodeEntries: MenuEntry[] = [
     {
@@ -80,7 +79,7 @@ export function PropertiesMenuBar() {
       onClick: () => node && dispatch({ type: "resetParams", ctx: current, node: node.id }),
     },
     {
-      label: resettableTab && active ? `Reset ${tabLabel(active)} Tab` : "Reset Current Tab",
+      label: resettableTab && activeTab ? `Reset ${activeTab.label} Tab` : "Reset Current Tab",
       disabled: !node || !resettableTab,
       onClick: () => {
         if (!node || !active) return;
@@ -88,7 +87,7 @@ export function PropertiesMenuBar() {
           type: "resetParams",
           ctx: current,
           node: node.id,
-          keys: groupKeys(params, active),
+          keys: pres?.activeTabKeys ?? [],
         });
       },
     },

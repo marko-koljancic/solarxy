@@ -292,8 +292,18 @@ export class SolarxyClient {
    * crossings per node per render; memoized, it runs when the node
    * changes, which is strictly fewer calls than the same-heap version it
    * replaced, since that recomputed on every render. */
-  nodePresentation(ctx: GraphContext, node: NodeId): NodePresentation | null {
-    return this.app.node_presentation(ctx, node) as NodePresentation | null;
+  nodePresentation(
+    ctx: GraphContext,
+    node: NodeId,
+    hasReport = false,
+    storedTab = "",
+  ): NodePresentation | null {
+    return this.app.node_presentation(
+      ctx,
+      node,
+      hasReport,
+      storedTab,
+    ) as NodePresentation | null;
   }
 
   /** One window of a node's attribute values, formatted by the engine.

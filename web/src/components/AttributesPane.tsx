@@ -8,9 +8,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getClient } from "../engine/session";
-import type { AttrDomain, AttributePage, AttributeSummary } from "../engine/types";
+import type { AttrDomain, AttributeText, AttributeSummary } from "../engine/types";
 import { selectGraph, useMirror } from "../store/mirror";
-import { fmtCell, headerCells, pageWindow, watchedNode } from "./attributesTable";
+import { pageWindow, watchedNode } from "./attributesTable";
 
 const ROW_H = 22;
 const PAGE_SIZE = 128;
@@ -29,7 +29,7 @@ export function AttributesPane() {
   const [summary, setSummary] = useState<AttributeSummary | undefined>();
   const [, setFetchTick] = useState(0);
 
-  const pagesRef = useRef<Map<number, AttributePage>>(new Map());
+  const pagesRef = useRef<Map<number, AttributeText>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState({ top: 0, height: 300 });
 
@@ -52,7 +52,7 @@ export function AttributesPane() {
     let fetched = false;
     for (const p of window_.pages) {
       if (cache.has(p)) continue;
-      const page = getClient().attributeTable(node, domain, p * PAGE_SIZE, PAGE_SIZE);
+      const page = getClient().attributeText(node, domain, p * PAGE_SIZE, PAGE_SIZE);
       if (page) {
         cache.set(p, page);
         fetched = true;
@@ -76,11 +76,6 @@ export function AttributesPane() {
     return () => ro.disconnect();
   }, [node === null]);
 
-  const columns = useMemo(() => {
-    const first = pagesRef.current.get(window_.pages[0] ?? 0);
-    return first?.columns ?? [];
-  }, [window_.pages, summary, domain, cookStatus]);
-
   if (node === null) {
     return <div className="attr-pane-empty">No node selected and no display flag set.</div>;
   }
@@ -88,8 +83,14 @@ export function AttributesPane() {
     return <div className="attr-pane-empty">No cooked geometry on this node yet.</div>;
   }
 
-  const heads = headerCells(columns);
-  const rows: { index: number; cells: (number | null)[] | null }[] = [];
+  // The headings and the cell text come formatted, from where the values
+  // are: the cell rule runs per visible cell while this scrolls, which is
+  // far too often to ask across the boundary one at a time.
+  const heads = useMemo(
+    () => pagesRef.current.get(window_.pages[0] ?? 0)?.headers ?? [],
+    [window_.pages, summary, domain, cookStatus],
+  );
+  const rows: { index: number; cells: string[] | null }[] = [];
   for (let i = window_.first; i < window_.last; i += 1) {
     const page = pagesRef.current.get(Math.floor(i / PAGE_SIZE));
     rows.push({ index: i, cells: page?.rows[i - page.offset] ?? null });
@@ -158,7 +159,7 @@ export function AttributesPane() {
                 {r.cells
                   ? r.cells.map((v, i) => (
                       <span key={i} className="attr-cell">
-                        {fmtCell(v)}
+                        {v}
                       </span>
                     ))
                   : heads.map((h) => (

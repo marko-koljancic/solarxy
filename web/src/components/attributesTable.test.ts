@@ -1,8 +1,10 @@
-// The Attributes pane's pure logic: watched-node resolution, the
-// virtualization window and page math, and cell/header formatting.
+// What is left of the Attributes pane's helpers. The cell and header
+// formatting moved into `solarxy-studio` and is tested there; the engine
+// formats a page where the values are. These two stay for the reasons the
+// module header gives.
 
 import { describe, expect, it } from "vitest";
-import { fmtCell, headerCells, pageWindow, watchedNode } from "./attributesTable";
+import { pageWindow, watchedNode } from "./attributesTable";
 
 describe("watchedNode", () => {
   it("prefers the first selected node", () => {
@@ -43,28 +45,4 @@ describe("pageWindow", () => {
   });
 });
 
-describe("fmtCell", () => {
-  it("renders four fixed decimals with tabular alignment in mind", () => {
-    expect(fmtCell(1)).toBe("1.0000");
-    expect(fmtCell(-0.25)).toBe("-0.2500");
-  });
-  it("normalizes negative zero", () => {
-    expect(fmtCell(-0.000001)).toBe("0.0000");
-  });
-  it("renders missing lanes as a hyphen", () => {
-    expect(fmtCell(null)).toBe("-");
-    expect(fmtCell(Number.NaN)).toBe("-");
-  });
-});
 
-describe("headerCells", () => {
-  it("keeps scalar lanes flat and fans vectors out by component", () => {
-    expect(
-      headerCells([
-        { key: "P", ty: "vec3", components: 3 },
-        { key: "mask", ty: "float", components: 1 },
-        { key: "color", ty: "vec4", components: 4 },
-      ]),
-    ).toEqual(["P.x", "P.y", "P.z", "mask", "color.x", "color.y", "color.z", "color.w"]);
-  });
-});
