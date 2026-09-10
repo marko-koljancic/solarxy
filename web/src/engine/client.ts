@@ -34,7 +34,9 @@ import type {
   ParamSource,
   PickDetail,
   AttributeText,
+  ErrorPosition,
   NodePresentation,
+  NodeReportText,
   PresentationTables,
   RegistrySnapshot,
   SceneOutline,
@@ -325,6 +327,26 @@ export class SolarxyClient {
    * empty query leaves `search` null. */
   sceneOutline(query: string): SceneOutline {
     return this.app.scene_outline(query) as SceneOutline;
+  }
+
+  /** One node's report as the info card reads it, wiring included.
+   *
+   * `now` is passed rather than read, because the shared derivation takes
+   * no clock. Pass the same instant the card is stamped with, or the
+   * phrase and the date beside it describe different moments. */
+  nodeReportText(ctx: GraphContext, node: NodeId, now: number): NodeReportText | null {
+    return this.app.node_report_text(ctx, node, now) as NodeReportText | null;
+  }
+
+  /** The text an expression field opens on for this param, seeded from
+   * the value the engine holds. A gesture-time call. */
+  seedExpression(ctx: GraphContext, node: NodeId, key: string): string {
+    return this.app.seed_expression(ctx, node, key) as string;
+  }
+
+  /** Where a cook error points, when its message names a place. */
+  snippetErrorPosition(message: string): ErrorPosition | null {
+    return this.app.snippet_error_position(message) as ErrorPosition | null;
   }
 
   copyNodes(ctx: GraphContext, ids: NodeId[]): unknown {

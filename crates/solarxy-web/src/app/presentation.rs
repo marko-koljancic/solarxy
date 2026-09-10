@@ -20,6 +20,7 @@ use super::*;
 
 use solarxy_graph::registry::coerce::DataType;
 use solarxy_studio::attributes;
+use solarxy_studio::expression;
 use solarxy_studio::node;
 use solarxy_studio::params;
 use solarxy_studio::tree;
@@ -144,6 +145,51 @@ struct ParamTab {
 struct ParamSection {
     subgroup: Option<String>,
     param_keys: Vec<String>,
+}
+
+/// One timestamp as the info card prints it.
+///
+/// Split in half deliberately. The relative phrase is a rule and comes
+/// from the shared derivation; the absolute date needs a locale and a
+/// timezone, which is host knowledge rather than document knowledge, so
+/// the milliseconds cross and each shell renders that half itself. Taking
+/// an internationalization stack into the engine to print one line would
+/// be a large bill for a small answer.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TimestampText {
+    /// Unix milliseconds, or nothing on a document saved before the
+    /// engine kept them. Nothing must render as "unknown", never as an
+    /// epoch date.
+    ms: Option<f64>,
+    /// "5 minutes ago", or empty once the absolute date carries it alone.
+    relative: String,
+}
+
+/// A node's report, already read as text.
+///
+/// The formatted twin of [`queries::node_report`](super::queries), on the
+/// same terms as [`SolarxyApp::attribute_text`] against
+/// `attribute_table`: the engine's own query keeps its numbers and a
+/// later reader that wants one asks it. What this adds is the reading,
+/// which is a rule, and the wiring, which the browser used to derive from
+/// its mirror while the desktop had no answer at all.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NodeReportText {
+    /// Size then centre, or nothing when there is no finite box.
+    bounds: Option<String>,
+    /// Cooks this session. Zero hides the row.
+    cook_count: u64,
+    total_cook: String,
+    /// Absent for a single cook, because an average of one is the figure
+    /// beside it and says nothing.
+    average_cook: Option<String>,
+    last_cook: String,
+    created: TimestampText,
+    modified: TimestampText,
+    /// Who is wired to this node, by name, in edge order.
+    connections: node::ConnectionSummary,
 }
 
 #[wasm_bindgen]
@@ -323,5 +369,93 @@ impl SolarxyApp {
             search,
             branches,
         })
+    }
+
+    /// One node's report as its info card reads it, wiring included.
+    ///
+    /// `now_ms` is supplied rather than read, because this crate compiles
+    /// for a page and the shared derivation takes no clock. The caller
+    /// passes the same instant it stamps the card with, so the phrase and
+    /// the date beside it cannot describe different moments.
+    ///
+    /// One crossing for the whole card: the wiring used to be walked in
+    /// the frontend from its mirrored graph, which is the copy of an
+    /// engine question that this epic exists to remove.
+    pub fn node_report_text(
+        &self,
+        ctx: JsValue,
+        node: f64,
+        now_ms: f64,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let id = NodeId(node as u64);
+        let Some(report) = self.engine.node_report(ctx, id) else {
+            return Ok(JsValue::NULL);
+        };
+        let Ok(graph) = self.engine.document().graph(ctx) else {
+            return Ok(JsValue::NULL);
+        };
+
+        #[allow(clippy::cast_precision_loss)]
+        let total = report.total_cook_us as f64;
+        #[allow(clippy::cast_precision_loss)]
+        let last = report.last_cook_us as f64;
+        #[allow(clippy::cast_precision_loss)]
+        let count = report.cook_count as f64;
+        let stamp = |ms: Option<f64>| TimestampText {
+            ms,
+            relative: ms.map_or_else(String::new, |ms| node::relative_time(ms, now_ms)),
+        };
+
+        to_js(&NodeReportText {
+            bounds: node::format_bounds(report.bounds),
+            cook_count: report.cook_count,
+            total_cook: node::format_duration(total),
+            average_cook: (report.cook_count > 1).then(|| node::format_duration(total / count)),
+            last_cook: node::format_duration(last),
+            created: stamp(report.created_ms),
+            modified: stamp(report.modified_ms),
+            connections: node::connection_summary(graph, id, self.engine.registry()),
+        })
+    }
+
+    /// The text an expression field opens on for this parameter.
+    ///
+    /// Answered from the parameter's current value rather than from one
+    /// the caller passes, so the field seeds from what the engine holds.
+    /// A gesture-time call: it runs when someone reaches for the
+    /// affordance, once.
+    pub fn seed_expression(
+        &self,
+        ctx: JsValue,
+        node: f64,
+        key: String,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let id = NodeId(node as u64);
+        // A parameter that cannot be read still has to answer, because the
+        // caller asks before it checks; the seed rule's own fallback is a
+        // literal zero, which parses.
+        let seed = self
+            .engine
+            .resolved_param(ctx, id, &key)
+            .map_or_else(|_| "0".to_string(), |v| expression::seed_expression(&v));
+        to_js(&seed)
+    }
+
+    /// Where a cook error points, when its message names a place.
+    ///
+    /// Text in, position out: it reads no document, and is here rather
+    /// than as a free function because every export in this crate hangs
+    /// off the one class the page holds.
+    pub fn snippet_error_position(&self, message: &str) -> Result<JsValue, JsError> {
+        match expression::error_position(message) {
+            Some(pos) => to_js(&pos),
+            None => Ok(JsValue::NULL),
+        }
     }
 }

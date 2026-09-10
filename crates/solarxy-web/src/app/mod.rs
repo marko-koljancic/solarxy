@@ -1147,6 +1147,14 @@ struct ResolvedParamDto {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     value: Option<solarxy_graph::params::ParamValue>,
+    /// The value as the readout under the field prints it, or the error
+    /// message when there is no value.
+    ///
+    /// Rides the value rather than being asked for separately: the field
+    /// already makes this call and formatted the answer itself, so a
+    /// query of its own would be a second crossing for a rule that had to
+    /// stop existing twice anyway.
+    text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }

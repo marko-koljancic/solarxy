@@ -63,6 +63,7 @@ impl SolarxyApp {
             .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
         match self.engine.resolved_param(ctx, NodeId(node as u64), &key) {
             Ok(value) => to_js(&ResolvedParamDto {
+                text: solarxy_studio::expression::format_resolved(&value),
                 ok: true,
                 value: Some(value),
                 error: None,
@@ -70,6 +71,7 @@ impl SolarxyApp {
             Err(error) => to_js(&ResolvedParamDto {
                 ok: false,
                 value: None,
+                text: error.clone(),
                 error: Some(error),
             }),
         }

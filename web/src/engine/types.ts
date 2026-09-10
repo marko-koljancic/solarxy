@@ -44,10 +44,14 @@ export type ParamSource =
   | { kind: "expression"; expr: string };
 
 /** The parameter panel's per-row readout: the current value, or the
- * message explaining why an expression has none. */
+ * message explaining why an expression has none.
+ *
+ * `text` is the same thing already read: the value as the readout prints
+ * it, or the error when there is none. Formatted where the value is, so
+ * the rounding rule has one implementation rather than one per shell. */
 export type ResolvedParam =
-  | { ok: true; value: ParamValue }
-  | { ok: false; error: string };
+  | { ok: true; value: ParamValue; text: string }
+  | { ok: false; error: string; text: string };
 
 // --- Mirror types (Rust -> JS, serialize-only) ---
 
@@ -446,6 +450,13 @@ export interface ParamSnapshot {
   /** Conditional-visibility clauses (ANDed); absent means always visible.
    * Predicate values use the same plain encoding as `default`. */
   showIf?: ShowIfClause[];
+  /** Whether the panel offers the `=` affordance on this row.
+   *
+   * Derived by the ENGINE from the parameter type. This file used to hold
+   * a list of the seven type names that accept one, pinned to Rust by a
+   * drift test; the fact rides the snapshot now, so there is one answer
+   * and no guard holding two of them together. */
+  acceptsExpression: boolean;
   doc: string;
 }
 
@@ -671,6 +682,60 @@ export interface ParamTab {
 export interface ParamSection {
   subgroup: string | null;
   paramKeys: string[];
+}
+
+/** One port and the nodes on the other side of it, in edge order. */
+export interface PortNeighbours {
+  port: string;
+  nodes: string[];
+}
+
+/** Who is wired to a node, by name. The counts are of distinct
+ * neighbours rather than of edges, because two edges from one node into a
+ * variadic port is one relationship. */
+export interface ConnectionSummary {
+  inputs: PortNeighbours[];
+  outputs: PortNeighbours[];
+  upstream: number;
+  downstream: number;
+}
+
+/** One timestamp, split where the knowledge is. The relative phrase is a
+ * rule and comes from the engine; the absolute date needs a locale and a
+ * timezone, which only the host knows, so this carries the milliseconds
+ * and the shell renders that half. `ms` null means unknown and must
+ * render as such, never as an epoch date. */
+export interface TimestampText {
+  ms: number | null;
+  relative: string;
+}
+
+/** A node's report, already read as text: the formatted twin of
+ * `nodeReport`, on the same terms as `attributeText` against
+ * `attributeTable`. One crossing for the whole info card, wiring
+ * included. */
+export interface NodeReportText {
+  /** Size then centre, or null when there is no finite box. */
+  bounds: string | null;
+  /** Cooks this session. Zero hides the row. */
+  cookCount: number;
+  totalCook: string;
+  /** Null for a single cook: an average of one is the figure beside it. */
+  averageCook: string | null;
+  lastCook: string;
+  created: TimestampText;
+  modified: TimestampText;
+  connections: ConnectionSummary;
+}
+
+/** Where a cook error points, when its message names a place. Both halves
+ * are used: the line tints the row, the column underlines the token. */
+export interface ErrorPosition {
+  line: number;
+  column: number;
+  /** The message as it arrived, so a caller holding the position does not
+   * also have to carry the text it came from. */
+  message: string;
 }
 
 /** The per-import finishing options (camelCase; mirrors Rust ImportOptions).
