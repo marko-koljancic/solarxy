@@ -1,8 +1,9 @@
 //! `egui_dock` integration — the unified panel + viewport docking layer.
 //!
-//! All seven user-facing panels (Sidebar, Review Panel, Console, Material
-//! Inspector, Properties, Outliner, Node Tree) plus the 3D Viewport live as
-//! tabs inside a single [`egui_dock::DockState`], eight variants in all.
+//! All eight user-facing panels (Sidebar, Review Panel, Console, Material
+//! Inspector, Properties, Outliner, Node Tree, Nodes) plus the 3D Viewport
+//! live as tabs inside a single [`egui_dock::DockState`], nine variants in
+//! all.
 //! Users drag tab titles between leaves to dock left/right/bottom/top; drag
 //! outside the dock area to tear out into a floating window. The Viewport tab is **closeable but
 //! non-floatable and transparent** — `egui_dock` never paints over the
@@ -31,7 +32,7 @@ use super::intent::Intents;
 use super::pass::{OpenFile, PanelSources, PanelState};
 use super::theme::Theme;
 
-/// The eight tab variants in the Solarxy dock. The `Viewport` variant is
+/// The nine tab variants in the Solarxy dock. The `Viewport` variant is
 /// special-cased throughout: it never floats and never paints a background
 /// (so the wgpu surface shows through). It *can* be closed — the Window
 /// menu restores it via [`toggle_tab`].
@@ -53,6 +54,7 @@ pub(crate) enum SolarxyTab {
     Properties,
     Outliner,
     NodeTree,
+    Nodes,
 }
 
 impl SolarxyTab {
@@ -67,14 +69,15 @@ impl SolarxyTab {
             Self::Properties => "properties",
             Self::Outliner => "outliner",
             Self::NodeTree => "node-tree",
+            Self::Nodes => "nodes",
         }
     }
 }
 
 /// Build the default dock layout: Viewport central, Outliner (tabbed with
 /// Node Tree) top-left with Sidebar below it, Properties top-right with
-/// `ReviewPanel` below it, Console and Material Inspector tabbed together
-/// along the bottom. Every panel ships in the default tree —
+/// `ReviewPanel` below it, and the node canvas tabbed with Console and
+/// Material Inspector along the bottom, active of the three. Every panel ships in the default tree —
 /// discoverability is the layout itself (no panel auto-opens on model
 /// load).
 ///
@@ -95,7 +98,11 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let [_main, _bottom] = surface.split_below(
         center,
         0.72,
-        vec![SolarxyTab::Console, SolarxyTab::MaterialInspector],
+        vec![
+            SolarxyTab::Nodes,
+            SolarxyTab::Console,
+            SolarxyTab::MaterialInspector,
+        ],
     );
 
     state
@@ -131,6 +138,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Properties => "Properties".into(),
             SolarxyTab::Outliner => "Outliner".into(),
             SolarxyTab::NodeTree => "Node Tree".into(),
+            SolarxyTab::Nodes => "Nodes".into(),
         }
     }
 
@@ -197,6 +205,17 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     ui,
                     self.sources.node_tree,
                     self.panels.node_tree,
+                    self.panels.graph_ctx,
+                    self.intents,
+                    self.theme,
+                );
+            }
+            SolarxyTab::Nodes => {
+                super::panels::nodes::draw_nodes_content(
+                    ui,
+                    self.sources.canvas,
+                    self.panels.canvas,
+                    self.panels.graph_ctx,
                     self.intents,
                     self.theme,
                 );
@@ -293,6 +312,7 @@ mod tests {
             SolarxyTab::Outliner,
             SolarxyTab::MaterialInspector,
             SolarxyTab::NodeTree,
+            SolarxyTab::Nodes,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }
@@ -318,7 +338,7 @@ mod tests {
     /// silently when deserialization fails. So `is_ok()` alone cannot tell
     /// a real restore from a fallback wearing its clothes; the three tabs
     /// this fixture actually carries can, because the default layout
-    /// carries eight. What a user would lose if this broke is their whole
+    /// carries nine. What a user would lose if this broke is their whole
     /// arrangement, with no error to explain where it went.
     #[test]
     fn layout_saved_before_the_node_tree_still_restores() {

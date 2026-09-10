@@ -18,6 +18,7 @@ use crate::state::hdri_info::HdriInfo;
 
 use super::chrome::divider::DividerInfo;
 use super::panels::node_tree::{NodeTreeSource, NodeTreeState};
+use super::panels::nodes::{CanvasSource, CanvasState};
 use super::panels::outliner::OutlinerSource;
 use super::chrome::overlays::HudInfo;
 use super::panels::properties::{ModelInfo, ValidationView};
@@ -62,7 +63,11 @@ pub(crate) struct PanelSources<'a> {
     /// The open document, when the Node Tree tab is mounted. The state layer
     /// passes `Empty` for a closed tab so the fold is skipped.
     pub node_tree: NodeTreeSource<'a>,
-    /// The node selected in the Node Tree and the actions it declares, for
+    /// The open document and the revision that produced it, when the
+    /// canvas tab is mounted. `Empty` for a closed tab, so a canvas nobody
+    /// is looking at costs nothing.
+    pub canvas: CanvasSource<'a>,
+    /// The node selected in the graph and the actions it declares, for
     /// the Properties panel's Actions section.
     pub actions: super::panels::properties::NodeActionsView<'a>,
     pub recent_files: &'a [String],
@@ -84,6 +89,13 @@ pub(super) struct OpenFile<'a> {
 pub(crate) struct PanelState<'a> {
     pub console: &'a mut ConsoleState,
     pub node_tree: &'a mut NodeTreeState,
+    pub canvas: &'a mut CanvasState,
+    /// **Shared, and deliberately so.** Which graph the user is looking
+    /// at is one fact, not one per panel: a dive made on the canvas has to
+    /// be where the tree is too, and a dropped model has to land where the
+    /// user believes they are. It sits here rather than on either panel
+    /// because both write it and neither owns it.
+    pub graph_ctx: &'a mut solarxy_graph::document::GraphContext,
 }
 
 /// What a capture frame asks the interface to do differently.

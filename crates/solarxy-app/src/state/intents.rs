@@ -15,9 +15,9 @@ use super::BackgroundModeExt;
 
 use super::State;
 use crate::gui::{
-    CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
-    LayoutIntent, LookThroughChange, NodeTreeAction, PaneChange, PanelIntent, PaneView, PostChange,
-    ReviewIntent, ToastSeverity,
+    CanvasAction, CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent,
+    Intent, Intents, LayoutIntent, LookThroughChange, NodeTreeAction, PaneChange, PanelIntent,
+    PaneView, PostChange, ReviewIntent, ToastSeverity,
 };
 
 impl State {
@@ -130,6 +130,9 @@ impl State {
                 }
                 Intent::Panel(PanelIntent::NodeTree(action)) => {
                     self.handle_node_tree_action(action);
+                }
+                Intent::Panel(PanelIntent::Canvas(action)) => {
+                    self.handle_canvas_action(action);
                 }
                 Intent::Panel(PanelIntent::InvokeAction { ctx, node, key }) => {
                     self.invoke_action(ctx, node, &key);
@@ -547,6 +550,24 @@ impl State {
             }
             GraphContext::Subflow(_) => None,
         };
+    }
+
+    /// Apply one canvas gesture.
+    ///
+    /// A move is one command carrying every node the gesture moved, which
+    /// is what makes the drag one undo step. It deliberately opens no
+    /// transaction: the command is already atomic, and a node's position
+    /// reaches no renderer, so there is no intermediate state worth
+    /// streaming.
+    pub(super) fn handle_canvas_action(&mut self, action: CanvasAction) {
+        match action {
+            CanvasAction::MoveNodes(ctx, moves) => {
+                if moves.is_empty() {
+                    return;
+                }
+                self.apply_node_command(solarxy_graph::Command::MoveNodes { ctx, moves });
+            }
+        }
     }
 }
 

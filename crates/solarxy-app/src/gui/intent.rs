@@ -47,6 +47,7 @@ use crate::state::view_state::{BoundsMode, ViewLayout};
 
 use super::dock::SolarxyTab;
 use super::panels::node_tree::NodeTreeAction;
+use super::panels::nodes::CanvasAction;
 use super::panels::outliner::OutlinerAction;
 use super::chrome::pane_toolbar::{LookThroughChange, PaneView};
 use super::chrome::viewport_context_menu::ViewportAction;
@@ -257,6 +258,8 @@ pub(crate) enum PanelIntent {
     Outliner(OutlinerAction),
     /// The Node Tree.
     NodeTree(NodeTreeAction),
+    /// The node canvas.
+    Canvas(CanvasAction),
 }
 
 impl Intent {
@@ -309,7 +312,10 @@ impl Intent {
             // action, and two of the menu's arms delegate to the Outliner's
             // own handler.
             Self::Viewport(_) | Self::Panel(PanelIntent::Outliner(_)) => 13,
-            Self::Panel(PanelIntent::NodeTree(_)) => 14,
+            // The two graph surfaces share a key: they raise the same
+            // kind of change to the same document, and only one of them
+            // can be under the pointer in a frame.
+            Self::Panel(PanelIntent::NodeTree(_) | PanelIntent::Canvas(_)) => 14,
             Self::Cook(_) => 15,
             Self::Panel(PanelIntent::InvokeAction { .. }) => 16,
         }
@@ -369,6 +375,10 @@ mod tests {
             GraphContext::Root,
             NodeId(1),
         )));
+        intents.panel(PanelIntent::Canvas(CanvasAction::MoveNodes(
+            GraphContext::Root,
+            vec![(NodeId(1), [1.0, 1.0])],
+        )));
         intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleObject(
             solarxy_core::scene::SceneObjectId(1),
         )));
@@ -388,9 +398,12 @@ mod tests {
         });
         intents.raise(Intent::Cook(CookIntent::CookNow));
 
+        // Two fourteens: the tree and the canvas are one category,
+        // because they raise the same kind of change to the same
+        // document.
         assert_eq!(
             keys(&mut intents),
-            vec![0, 1, 2, 3, 8, 10, 11, 12, 13, 14, 15]
+            vec![0, 1, 2, 3, 8, 10, 11, 12, 13, 14, 14, 15]
         );
     }
 

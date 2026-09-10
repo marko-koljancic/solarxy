@@ -42,6 +42,12 @@ pub struct EguiRenderer {
     screenshot_modal: ScreenshotModal,
     still_modal: StillRenderModal,
     node_tree: NodeTreeState,
+    canvas: super::panels::nodes::CanvasState,
+    /// Which graph the user is looking at. Shared by the Node Tree and the
+    /// canvas, because a dive is one fact about the session: two copies of
+    /// it would let the two panels disagree about where the user is, and a
+    /// dropped model would land wherever the stale one said.
+    graph_ctx: solarxy_graph::document::GraphContext,
     toasts: VecDeque<Toast>,
     next_toast_id: u64,
     loading_message: Option<String>,
@@ -106,6 +112,8 @@ impl EguiRenderer {
             screenshot_modal: ScreenshotModal::default(),
             still_modal: StillRenderModal::default(),
             node_tree: NodeTreeState::default(),
+            canvas: super::panels::nodes::CanvasState::default(),
+            graph_ctx: solarxy_graph::document::GraphContext::Root,
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             next_toast_id: 0,
             loading_message: None,
@@ -274,17 +282,27 @@ impl EguiRenderer {
         self.tab_present(SolarxyTab::NodeTree)
     }
 
-    /// Return the Node Tree to the root context with everything unfolded.
-    /// Called whenever the open document is replaced: both halves of that
-    /// panel's state address nodes the new document need not contain.
-    pub fn reset_node_tree(&mut self) {
-        self.node_tree.reset();
+    /// `true` iff the node canvas tab is currently mounted in the dock.
+    /// The state layer gates the canvas source on this, so a closed panel
+    /// costs nothing per frame.
+    #[must_use]
+    pub fn nodes_tab_present(&self) -> bool {
+        self.tab_present(SolarxyTab::Nodes)
     }
 
-    /// The context the Node Tree is showing: where its selection lives and
-    /// where a dropped model lands.
-    pub fn node_tree_ctx(&self) -> solarxy_graph::document::GraphContext {
-        self.node_tree.ctx()
+    /// Return every graph surface to the root context, unfolded and
+    /// unseeded. Called whenever the open document is replaced: all of it
+    /// addresses nodes the new document need not contain.
+    pub fn reset_graph_surfaces(&mut self) {
+        self.graph_ctx = solarxy_graph::document::GraphContext::Root;
+        self.node_tree.reset();
+        self.canvas.reset();
+    }
+
+    /// The graph the user is looking at: where a selection made in either
+    /// graph surface lives, and where a dropped model lands.
+    pub fn graph_ctx(&self) -> solarxy_graph::document::GraphContext {
+        self.graph_ctx
     }
 
     /// Apply a JSON-serialized dock layout. Returns `true` if the JSON
@@ -535,6 +553,8 @@ impl EguiRenderer {
                 panels: super::pass::PanelState {
                     console: &mut self.console,
                     node_tree: &mut self.node_tree,
+                    canvas: &mut self.canvas,
+                    graph_ctx: &mut self.graph_ctx,
                 },
                 review,
                 // Reborrowed rather than moved: the queue outlives the tab

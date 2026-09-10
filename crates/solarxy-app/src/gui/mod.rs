@@ -65,6 +65,7 @@ pub(crate) use intent::{
     LayoutIntent, PaneChange, PanelIntent, PostChange, ReviewIntent,
 };
 pub(crate) use panels::node_tree::{NodeTreeAction, NodeTreeSource};
+pub(crate) use panels::nodes::{CanvasAction, CanvasSource};
 pub(crate) use panels::outliner::{OutlinerAction, OutlinerSource};
 pub(crate) use chrome::pane_toolbar::{LookThroughChange, PaneToolbarData, PaneView};
 pub(crate) use panels::properties::{NodeActionsView, ValidationView};

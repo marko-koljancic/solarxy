@@ -679,6 +679,12 @@ const PANEL_ROWS: &[PanelRow] = &[
         needs_model: false,
     },
     PanelRow {
+        tab: SolarxyTab::Nodes,
+        label: "Nodes",
+        accel: Accel::None,
+        needs_model: false,
+    },
+    PanelRow {
         tab: SolarxyTab::Properties,
         label: "Properties",
         accel: Accel::None,

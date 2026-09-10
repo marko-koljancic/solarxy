@@ -1,12 +1,16 @@
 //! The Node Tree panel — a read-only outline of an open scene's graph.
 //!
-//! The desktop has no node canvas, so this is the only place a user can see
-//! what produced the geometry in the viewport: every context from the root
-//! down, with node names, type ids, the display flag and bypass state.
+//! It answers the question the canvas beside it does not: what the whole
+//! document contains, every context from the root down in one fold, with
+//! node names, type ids, the display flag and bypass state. The canvas
+//! shows one context at a time and shows it as a graph; this shows all of
+//! them at once and shows them as a list.
 //!
 //! **A viewer, not an editor.** No creation, no rewiring, no renaming and
-//! no parameter edits. The one thing it writes is the selection, and that
-//! travels as a [`Command::SetSelection`] like every other engine write.
+//! no parameter edits; that is the canvas's job. The one thing it writes
+//! is the selection, and that travels as a [`Command::SetSelection`] like
+//! every other engine write. Where the user has dived is written too, but
+//! that is session state shared with the canvas rather than the document.
 //!
 //! [`Command::SetSelection`]: solarxy_graph::Command::SetSelection
 //!
@@ -114,34 +118,22 @@ pub(crate) enum NodeTreeSource<'a> {
 /// fully expanded tree and a container that appears later arrives expanded
 /// too. A graph context holds a handful of nodes, unlike the Outliner's
 /// object rows, which is why this defaults the opposite way to that panel.
+#[derive(Default)]
 pub(crate) struct NodeTreeState {
-    /// The context the panel is showing. `Root` unless the user dived.
-    ctx: GraphContext,
     collapsed: HashSet<(GraphContext, NodeId)>,
 }
 
-impl Default for NodeTreeState {
-    fn default() -> Self {
-        Self {
-            ctx: GraphContext::Root,
-            collapsed: HashSet::new(),
-        }
-    }
-}
-
 impl NodeTreeState {
-    /// Return to the root and unfold everything. Called whenever the open
-    /// document is replaced, since both halves address nodes that the new
-    /// document need not contain.
+    /// Unfold everything. Called whenever the open document is replaced,
+    /// since every key held here addresses nodes the new document need not
+    /// contain.
+    ///
+    /// Where the user has dived is **not** here any more. It is one fact
+    /// about the session rather than one per panel, so this tree and the
+    /// canvas read and write the same value and a dive made in either is
+    /// where the other is looking.
     pub(crate) fn reset(&mut self) {
-        self.ctx = GraphContext::Root;
         self.collapsed.clear();
-    }
-
-    /// The context the panel is showing, which is where a selection made in
-    /// it lives and where a dropped model lands.
-    pub(crate) fn ctx(&self) -> GraphContext {
-        self.ctx
     }
 }
 
@@ -158,6 +150,7 @@ pub(in crate::gui) fn draw_node_tree_content(
     ui: &mut egui::Ui,
     source: NodeTreeSource<'_>,
     state: &mut NodeTreeState,
+    ctx: &mut GraphContext,
     intents: &mut Intents,
     theme: Theme,
 ) {
@@ -169,15 +162,16 @@ pub(in crate::gui) fn draw_node_tree_content(
     let rows = solarxy_studio::tree::scene_tree(doc, registry);
     // A dive that no longer resolves falls back to the root rather than
     // leaving the panel blank with no way out.
-    if find_subtree(&rows, state.ctx).is_none() {
+    if find_subtree(&rows, *ctx).is_none() {
+        *ctx = GraphContext::Root;
         state.reset();
     }
-    let Some((visible, crumbs)) = find_subtree(&rows, state.ctx) else {
+    let Some((visible, crumbs)) = find_subtree(&rows, *ctx) else {
         return;
     };
 
     if crumbs.len() > 1 {
-        draw_breadcrumb(ui, &crumbs, state, theme);
+        draw_breadcrumb(ui, &crumbs, ctx, theme);
     }
 
     if visible.is_empty() {
@@ -186,7 +180,7 @@ pub(in crate::gui) fn draw_node_tree_content(
     }
 
     let selection = doc
-        .graph(state.ctx)
+        .graph(*ctx)
         .ok()
         .map(|g| g.selection.as_slice())
         .unwrap_or_default();
@@ -194,7 +188,7 @@ pub(in crate::gui) fn draw_node_tree_content(
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add_space(2.0);
         for row in visible {
-            draw_row(ui, row, 0, selection, state, intents, theme);
+            draw_row(ui, row, 0, selection, state, ctx, intents, theme);
         }
         ui.add_space(8.0);
     });
@@ -202,7 +196,7 @@ pub(in crate::gui) fn draw_node_tree_content(
 
 /// The breadcrumb out of a dived context. Every crumb but the last is a
 /// jump target; the last one is where you already are.
-fn draw_breadcrumb(ui: &mut egui::Ui, crumbs: &[Crumb], state: &mut NodeTreeState, theme: Theme) {
+fn draw_breadcrumb(ui: &mut egui::Ui, crumbs: &[Crumb], ctx: &mut GraphContext, theme: Theme) {
     egui::Frame::new()
         .fill(theme.bg_elevated)
         .inner_margin(egui::Margin::symmetric(6, 4))
@@ -222,7 +216,7 @@ fn draw_breadcrumb(ui: &mut egui::Ui, crumbs: &[Crumb], state: &mut NodeTreeStat
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .clicked()
                     {
-                        state.ctx = crumb.ctx;
+                        *ctx = crumb.ctx;
                     }
                 }
             });
@@ -241,6 +235,7 @@ fn draw_row(
     depth: usize,
     selection: &[NodeId],
     state: &mut NodeTreeState,
+    ctx: &mut GraphContext,
     intents: &mut Intents,
     theme: Theme,
 ) {
@@ -288,7 +283,7 @@ fn draw_row(
             )));
         }
         if response.double_clicked() && row.opens.is_some() {
-            state.ctx = GraphContext::Subflow(row.node);
+            *ctx = GraphContext::Subflow(row.node);
         }
 
         if row.is_display {
@@ -319,7 +314,7 @@ fn draw_row(
 
     if row.opens.is_some() && expanded {
         for child in &row.children {
-            draw_row(ui, child, depth + 1, selection, state, intents, theme);
+            draw_row(ui, child, depth + 1, selection, state, ctx, intents, theme);
         }
     }
 }

@@ -475,6 +475,19 @@ impl State {
             },
             None => crate::gui::NodeTreeSource::Empty,
         };
+        // The canvas seeds from the revision rather than from a delta,
+        // because it draws things no delta carries: edges, positions and
+        // selection. `Empty` for a closed tab, so a canvas nobody is
+        // looking at costs nothing.
+        let canvas_source = match &self.engine {
+            _ if !self.gui.nodes_tab_present() => crate::gui::CanvasSource::Empty,
+            Some(engine) => crate::gui::CanvasSource::Scene {
+                doc: engine.document(),
+                registry: engine.registry(),
+                revision: engine.revision(),
+            },
+            None => crate::gui::CanvasSource::Empty,
+        };
 
         // The Actions section's subject: the node selected in the Node Tree's
         // context, read from the document each frame rather than mirrored,
@@ -482,7 +495,7 @@ impl State {
         let selected = self
             .engine
             .as_deref()
-            .and_then(|engine| selected_node(engine.document(), self.gui.node_tree_ctx()));
+            .and_then(|engine| selected_node(engine.document(), self.gui.graph_ctx()));
         let selected_name = match (&self.engine, selected) {
             (Some(engine), Some((ctx, id))) => engine
                 .document()
@@ -578,6 +591,7 @@ impl State {
                 validation,
                 outliner: outliner_source,
                 node_tree: node_tree_source,
+                canvas: canvas_source,
                 actions: actions_source,
                 recent_files: &recent_files,
             },

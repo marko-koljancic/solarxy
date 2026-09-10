@@ -87,7 +87,7 @@ impl State {
     /// The delta is left to the frame loop, unlike the visibility toggle
     /// below: these change what the cook produces rather than only a render
     /// flag, so there is nothing useful to push before the cook runs.
-    fn apply_node_command(&mut self, command: solarxy_graph::Command) {
+    pub(super) fn apply_node_command(&mut self, command: solarxy_graph::Command) {
         let Some(engine) = self.engine.as_mut() else {
             return;
         };

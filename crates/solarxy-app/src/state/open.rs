@@ -616,7 +616,7 @@ impl State {
         // Identity now; the counters and the merged report fill in as the
         // delta drains.
         self.engine_scene = Some(info);
-        self.gui.reset_node_tree();
+        self.gui.reset_graph_surfaces();
         self.selected_object = None;
 
         self.window.set_title(title);
@@ -703,7 +703,7 @@ impl State {
         self.environment.invalidate();
         self.reset_env_for_empty_scene();
         self.gui.clear_model_info();
-        self.gui.reset_node_tree();
+        self.gui.reset_graph_surfaces();
         self.selected_object = None;
         self.window.set_title("Solarxy");
         self.renderer.uv_overlap.overlap_pct = None;
