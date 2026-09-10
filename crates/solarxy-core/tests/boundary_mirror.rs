@@ -743,6 +743,11 @@ const SCAN_ROOTS: &[&str] = &[
     "crates/solarxy-web/src",
     "crates/solarxy-host/src",
     "crates/solarxy-renderer/src",
+    // The shared interface derivation. It arrived in 0.10.0 and returns
+    // types the browser reads across the boundary, so leaving it out would
+    // have let a rule's result ship with no mirror, which is the exact
+    // blind spot this file exists to close.
+    "crates/solarxy-studio/src",
 ];
 
 /// The two modules that *are* the boundary. Everything else is included only

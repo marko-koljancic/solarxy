@@ -33,7 +33,10 @@ import type {
   PaneRectDto,
   ParamSource,
   PickDetail,
+  NodePresentation,
+  PresentationTables,
   RegistrySnapshot,
+  SceneOutline,
   ResolvedParam,
   ScreenshotOpts,
   ScreenshotResult,
@@ -270,6 +273,32 @@ export class SolarxyClient {
 
   registrySnapshot(): RegistrySnapshot {
     return this.app.registry_snapshot() as RegistrySnapshot;
+  }
+
+  /** The presentation rules that read only a node TYPE: wire colour
+   * tokens, handle shapes, category order, and the glyph and silhouette
+   * fallbacks.
+   *
+   * Read once at boot beside the registry snapshot and cached, because the
+   * registry does not move while a document is open. */
+  presentationTables(): PresentationTables {
+    return this.app.presentation_tables() as PresentationTables;
+  }
+
+  /** Everything derived from one node's own params, in a single crossing.
+   *
+   * MEMOIZE THIS on the mirrored node. A call per rule would be seven
+   * crossings per node per render; memoized, it runs when the node
+   * changes, which is strictly fewer calls than the same-heap version it
+   * replaced, since that recomputed on every render. */
+  nodePresentation(ctx: GraphContext, node: NodeId): NodePresentation | null {
+    return this.app.node_presentation(ctx, node) as NodePresentation | null;
+  }
+
+  /** The whole document as one outline, with the search folded in. An
+   * empty query leaves `search` null. */
+  sceneOutline(query: string): SceneOutline {
+    return this.app.scene_outline(query) as SceneOutline;
   }
 
   copyNodes(ctx: GraphContext, ids: NodeId[]): unknown {

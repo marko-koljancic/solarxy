@@ -15,7 +15,11 @@ use solarxy_graph::registry::Registry;
 const MAX_DEPTH: usize = 64;
 
 /// One row of the outline.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Serialize` because the browser reads this across the WebAssembly
+/// boundary; there is no `Deserialize`, because nothing sends one back.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TreeRow {
     /// Stable across renames, so an expansion survives an edit.
     pub key: String,
@@ -120,7 +124,8 @@ fn walk_branches(row: &TreeRow, out: &mut Vec<String>) {
 
 /// What a search turns up: the rows that matched, and the ancestors that
 /// have to be forced open for every match to be reachable.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TreeSearch {
     pub matches: Vec<String>,
     pub expand: Vec<String>,

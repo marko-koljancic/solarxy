@@ -69,6 +69,11 @@ export interface EdgeMirror {
 }
 
 export interface GraphMirror {
+  /** Which network this is. The engine stamps a graph with its kind when
+   * its container creates it; this used to be reconstructed here from the
+   * owning container's descriptor, with a guess when the owner was
+   * unknown. */
+  kind: ContextKind;
   nodes: NodeMirror[];
   edges: EdgeMirror[];
   activeOutput: NodeId | null;
@@ -521,6 +526,103 @@ export interface CoercionEntry {
 export interface RegistrySnapshot {
   nodes: NodeTypeSnapshot[];
   coercions: CoercionEntry[];
+}
+
+/** The second encoding channel on a port handle. Colour says which family
+ * a value belongs to and shape separates the members of that family; among
+ * the vectors the shape counts components. */
+export type HandleShape =
+  | "round"
+  | "diamond"
+  | "bar"
+  | "triangle"
+  | "square"
+  | "hexagon"
+  | "ring";
+
+/** How one port data type presents itself. */
+export interface DataTypeStyle {
+  /** The palette token the wire colour comes from, without the leading
+   * `--`. A reference rather than a value, so neither shell can author a
+   * wire colour of its own. */
+  token: string;
+  shape: HandleShape;
+}
+
+/** How one node category presents a node that declares nothing more
+ * specific. */
+export interface CategoryStyle {
+  /** Position in the palette and menu order. */
+  order: number;
+  /** The glyph key to fall back on when a node's declared glyph has no
+   * art. Which art exists is this shell's own question. */
+  glyph: string;
+  role: NodeRole;
+}
+
+/** Everything derived from a node type alone: read once at boot beside the
+ * registry snapshot, because the registry does not move while a document
+ * is open. */
+export interface PresentationTables {
+  dataTypes: Record<DataType, DataTypeStyle>;
+  categories: Record<string, CategoryStyle>;
+}
+
+/** One row of the scene outline, folded by the engine. */
+export interface TreeRow {
+  /** Stable across renames, so an expansion survives an edit. */
+  key: string;
+  /** The context the node LIVES in, which is where a selection
+   * dispatches. Not the network it opens. */
+  ctx: GraphContext;
+  node: NodeId;
+  typeId: string;
+  label: string;
+  /** The child-network kind for a container; null means a leaf. */
+  opens: ContextKind | null;
+  /** Whether this node carries its own network's display flag. */
+  isDisplay: boolean;
+  /** Whether the node is bypassed, which the outline strikes through. */
+  bypassed: boolean;
+  children: TreeRow[];
+  depth: number;
+}
+
+/** The scene outline, and what a query matched in it. One call rather
+ * than two: the pane wants both together, and a separate search would
+ * refold the same document. `search` is null for an empty query. */
+export interface SceneOutline {
+  rows: TreeRow[];
+  search: TreeSearch | null;
+}
+
+/** What a tree search turns up: the rows that matched, and the ancestors
+ * that have to be forced open for every match to be reachable. */
+export interface TreeSearch {
+  matches: string[];
+  expand: string[];
+}
+
+/** Everything derived from one node's own parameters, answered for a whole
+ * node in a single crossing. Memoize on the mirrored node: a call per rule
+ * would be seven crossings per node per render. */
+export interface NodePresentation {
+  /** The name the node answers to, which is what expressions address it
+   * by. */
+  label: string;
+  /** The muted line under the label, or null when the node has no
+   * parameter worth summarising. */
+  infoLine: string | null;
+  /** Whether the type declares the root visibility parameter at all. */
+  declaresVisibility: boolean;
+  /** Whether it is currently visible. */
+  visible: boolean;
+  /** The parameter keys currently passing their conditions, in declaration
+   * order. */
+  visibleParams: string[];
+  /** The tabs the parameter panel should show, emptied groups already
+   * dropped. */
+  tabs: string[];
 }
 
 /** The per-import finishing options (camelCase; mirrors Rust ImportOptions).

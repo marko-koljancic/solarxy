@@ -4329,6 +4329,7 @@ dependencies = [
  "solarxy-kernel",
  "solarxy-renderer",
  "solarxy-scenefile",
+ "solarxy-studio",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",

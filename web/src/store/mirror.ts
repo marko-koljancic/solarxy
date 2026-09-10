@@ -80,7 +80,11 @@ interface MirrorState {
 }
 
 function emptyGraph(): GraphMirror {
-  return { nodes: [], edges: [], activeOutput: null, selection: [] };
+  // A placeholder for a context whose real mirror has not arrived; the
+  // first batch overwrites it. `sop` rather than `obj` because that is
+  // what the old derivation fell back to for an unknown context, so a
+  // frame rendered against the placeholder looks as it always did.
+  return { kind: "sop", nodes: [], edges: [], activeOutput: null, selection: [] };
 }
 
 /** Ensures a context exists in the map and returns it. */
@@ -298,6 +302,7 @@ export const useMirror = create<MirrorState>()(
 /** A stable empty graph, so `selectGraph` on an absent context returns the
  * same reference each call (no React re-render loops). */
 const EMPTY_GRAPH: GraphMirror = Object.freeze({
+  kind: "sop",
   nodes: [],
   edges: [],
   activeOutput: null,

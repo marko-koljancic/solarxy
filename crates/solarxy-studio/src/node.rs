@@ -192,6 +192,35 @@ pub fn node_info_line(
     Some(format!("{} {}", pick.label.to_lowercase(), fmt_number(v)))
 }
 
+/// Whether a node type declares the root visibility parameter.
+///
+/// Registry-driven rather than a list of type ids: a node type that
+/// declares `visible` gets the affordance, and one that does not gets none
+/// by construction. A note gets no eye without anyone saying so, and a
+/// root-placeable type added later gets one for free.
+#[must_use]
+pub fn declares_visibility(desc: &NodeTypeDescriptor) -> bool {
+    desc.params.iter().any(|p| p.key == "visible")
+}
+
+/// Whether a node is currently visible.
+///
+/// Anything but an explicit literal `false` reads as visible, an
+/// expression included. Parameters are override-only, so a freshly added
+/// node carries no entry at all and has to default to shown; and a node
+/// whose visibility is driven by an expression the reserve refuses to
+/// evaluate is better shown than silently hidden.
+///
+/// Root visibility is a different thing from the display flag a network
+/// carries: separate storage, separate command, separate affordance.
+#[must_use]
+pub fn is_visible(params: &BTreeMap<String, ParamSource>) -> bool {
+    !matches!(
+        params.get("visible"),
+        Some(ParamSource::Literal(ParamValue::Bool(false)))
+    )
+}
+
 /// A duration in microseconds, at a scale a human reads.
 ///
 /// Microseconds below a millisecond because that is where most nodes live
@@ -562,6 +591,45 @@ mod tests {
         assert_eq!(fmt_number(1.0), "1");
         assert_eq!(fmt_number(0.25), "0.25");
         assert_eq!(fmt_number(1.23456), "1.235");
+    }
+
+    #[test]
+    fn a_type_declaring_the_visibility_param_gets_the_affordance() {
+        let with = desc(
+            Category::Generators,
+            vec![ParamSpec::new(
+                "visible",
+                "Visible",
+                "general",
+                ParamType::Bool,
+                ParamValue::Bool(true),
+            )],
+        );
+        assert!(declares_visibility(&with));
+        assert!(!declares_visibility(&desc(Category::Utility, Vec::new())));
+    }
+
+    #[test]
+    fn only_an_explicit_false_hides_a_node() {
+        // Parameters are override-only, so a fresh node carries no entry
+        // and must read as shown. An expression reads as shown too: the
+        // reserve refuses to evaluate it, and hiding on an unevaluated
+        // expression would make nodes disappear at random.
+        assert!(is_visible(&BTreeMap::new()));
+        assert!(is_visible(&stored(vec![(
+            "visible",
+            lit(ParamValue::Bool(true))
+        )])));
+        assert!(!is_visible(&stored(vec![(
+            "visible",
+            lit(ParamValue::Bool(false))
+        )])));
+        assert!(is_visible(&stored(vec![(
+            "visible",
+            ParamSource::Expression {
+                expr: "0 > 1".to_string()
+            }
+        )])));
     }
 
     #[test]

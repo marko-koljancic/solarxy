@@ -16,12 +16,12 @@ function node(id: number, typeId: string, name?: string): NodeMirror {
 }
 
 function graph(nodes: NodeMirror[], activeOutput: number | null = null): GraphMirror {
-  return { nodes, edges: [], activeOutput, selection: [] };
+  return { kind: "sop", nodes, edges: [], activeOutput, selection: [] };
 }
 
 /** A minimal registry: only the fields the tree consumes (opens, names). */
 const REGISTRY = {
-  nodes: [
+  kind: "sop", nodes: [
     { typeId: "sopnet", displayName: "Sop", opens: "sop" },
     { typeId: "copnet", displayName: "Cop", opens: "cop" },
     { typeId: "box", displayName: "Box", opens: null },

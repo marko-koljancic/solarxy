@@ -31,6 +31,7 @@ diagnostics = []
 # Native-safe: these compile on every target, so `cargo build --workspace`
 # stays green. The wasm-only host lives behind cfg(target_arch = "wasm32").
 solarxy-graph = { path = "../solarxy-graph" }
+solarxy-studio = { path = "../solarxy-studio" }
 solarxy-core = { path = "../solarxy-core", default-features = false, features = ["serde"] }
 # The renderer builds natively (the desktop shell depends on it), so it can sit
 # here rather than behind the wasm cfg.

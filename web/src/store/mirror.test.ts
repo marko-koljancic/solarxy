@@ -3,7 +3,7 @@ import type { DocumentSnapshot, EventBatch, GraphMirror } from "../engine/types"
 import { selectGraph, useMirror } from "./mirror";
 
 function emptyGraph(): GraphMirror {
-  return { nodes: [], edges: [], activeOutput: null, selection: [] };
+  return { kind: "sop", nodes: [], edges: [], activeOutput: null, selection: [] };
 }
 
 function node(id: number, typeId = "box"): GraphMirror["nodes"][number] {
@@ -84,8 +84,8 @@ describe("mirror store", () => {
 
   it("rebuilds the whole mirror from a snapshot, including subflows", () => {
     const snap: DocumentSnapshot = {
-      root: { nodes: [node(1, "sopnet")], edges: [], activeOutput: null, selection: [] },
-      subflows: { "1": { nodes: [node(2, "box")], edges: [], activeOutput: 2, selection: [] } },
+      root: { kind: "sop", nodes: [node(1, "sopnet")], edges: [], activeOutput: null, selection: [] },
+      subflows: { "1": { kind: "sop", nodes: [node(2, "box")], edges: [], activeOutput: 2, selection: [] } },
       annotations: [],
     };
     useMirror.getState().replaceFromSnapshot(snap, 7);

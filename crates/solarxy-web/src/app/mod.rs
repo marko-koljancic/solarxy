@@ -196,6 +196,7 @@ mod capture;
 mod gizmo_drag;
 mod lifecycle;
 mod pointer;
+mod presentation;
 mod preview;
 mod queries;
 mod render;

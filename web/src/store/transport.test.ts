@@ -7,7 +7,7 @@ import type { EventBatch, GraphMirror, RuntimeSettings } from "../engine/types";
 import { DEFAULT_RUNTIME, useMirror } from "./mirror";
 
 function emptyGraph(): GraphMirror {
-  return { nodes: [], edges: [], activeOutput: null, selection: [] };
+  return { kind: "sop", nodes: [], edges: [], activeOutput: null, selection: [] };
 }
 
 beforeEach(() => {

@@ -13,7 +13,7 @@ const measure = () => DIMS;
 
 function chainGraph(): GraphMirror {
   return {
-    nodes: [
+    kind: "sop", nodes: [
       { id: 1, typeId: "box", typeVersion: 1, params: {}, position: [0, 0], bypassed: false },
       { id: 2, typeId: "transform", typeVersion: 1, params: {}, position: [5, 5], bypassed: false },
       { id: 3, typeId: "note", typeVersion: 1, params: {}, position: [9, 9], bypassed: false },

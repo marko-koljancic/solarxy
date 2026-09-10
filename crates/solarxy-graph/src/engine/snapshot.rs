@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::document::{Document, Edge, EdgeId, Graph, GraphContext, NodeId};
+use crate::document::{ContextKind, Document, Edge, EdgeId, Graph, GraphContext, NodeId};
 use crate::params::ParamSource;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
 use crate::registry::{Arity, BypassBehavior, NodeTypeDescriptor, PortSpec, Registry};
@@ -70,6 +70,14 @@ impl From<&Edge> for EdgeMirror {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphMirror {
+    /// Which network this is.
+    ///
+    /// The engine has always known: a graph is stamped with its kind when
+    /// its container creates it. It was absent here, so the browser
+    /// reconstructed it by looking up the owning container's descriptor
+    /// and guessing when the owner was unknown. A reader of a mirror
+    /// should not have to re-derive a field the document holds.
+    pub kind: ContextKind,
     pub nodes: Vec<NodeMirror>,
     pub edges: Vec<EdgeMirror>,
     pub active_output: Option<NodeId>,
@@ -79,6 +87,7 @@ pub struct GraphMirror {
 impl GraphMirror {
     fn from_graph(graph: &Graph) -> Self {
         Self {
+            kind: graph.kind,
             nodes: graph.nodes().map(NodeMirror::from_public).collect(),
             edges: graph.edges().map(EdgeMirror::from).collect(),
             active_output: graph.active_output,

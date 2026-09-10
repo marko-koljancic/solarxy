@@ -95,7 +95,7 @@ describe("connectionSummary", () => {
     ({ id, typeId: "box", params: {}, position: [0, 0], bypassed: false }) as unknown as NodeMirror;
 
   const graph: GraphMirror = {
-    nodes: [node(1), node(2), node(3), node(4)],
+    kind: "sop", nodes: [node(1), node(2), node(3), node(4)],
     edges: [
       { id: 10, from: 1, fromPort: "geometry", to: 3, toPort: "geometry" },
       { id: 11, from: 2, fromPort: "geometry", to: 3, toPort: "geometry" },
