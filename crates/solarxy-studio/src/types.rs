@@ -19,12 +19,24 @@ use solarxy_graph::registry::{Category, NodeRole, Registry};
 ///
 /// Colour says which family a value belongs to and shape separates the
 /// members of that family, so a reader who cannot tell two hues apart can
-/// still tell an integer from a float. Neither channel is decorative.
+/// still tell one port from another. Neither channel is decorative.
+///
+/// **Among the vectors the shape counts components**, which is the rule
+/// that makes the channel legible rather than arbitrary: a bar is two, a
+/// triangle three, a square four. That also puts `vec4` and `color` on the
+/// same square, which is honest rather than a collision, because a colour
+/// is an RGBA four-vector and the two convert in both directions without
+/// loss.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HandleShape {
     Round,
     Diamond,
+    /// Two components.
+    Bar,
+    /// Three components.
+    Triangle,
+    /// Four components.
     Square,
     Hexagon,
 }
@@ -34,7 +46,9 @@ pub enum HandleShape {
 pub fn handle_shape(data_type: DataType) -> HandleShape {
     match data_type {
         DataType::Int => HandleShape::Diamond,
-        DataType::Color => HandleShape::Square,
+        DataType::Vec2 => HandleShape::Bar,
+        DataType::Vec3 => HandleShape::Triangle,
+        DataType::Vec4 | DataType::Color => HandleShape::Square,
         DataType::Image | DataType::Material => HandleShape::Hexagon,
         _ => HandleShape::Round,
     }
@@ -259,47 +273,88 @@ mod tests {
     }
 
     #[test]
-    fn two_handles_that_look_alike_are_either_interchangeable_or_a_named_exception() {
-        // The encoding's promise is that hue says family and shape
-        // separates the family, so two ports drawn identically should be
-        // ports you can wire together.
+    fn two_handles_that_look_alike_can_be_wired_together() {
+        // The encoding's promise: hue says family, shape separates the
+        // family, so two ports drawn identically are ports you can wire.
         //
-        // It does not hold, and the exception is worth pinning rather than
-        // discovering. `vec2`, `vec3` and `vec4` share a hue AND a shape
-        // and coerce to each other in no direction at all, so three
-        // identical-looking handles refuse to connect. `float` and `int`,
-        // which DO coerce both ways, are the pair the shape channel
-        // separates. The encoding distinguishes the compatible pair and
-        // not the incompatible one.
+        // It did not hold until 0.10.0. `vec2`, `vec3` and `vec4` shared a
+        // hue AND a round handle while coercing to each other in no
+        // direction at all, so three identical-looking handles refused to
+        // connect, and the pair the shape channel did separate, `float` and
+        // `int`, is the one that converts both ways. The vectors now count
+        // their components in the shape.
         //
-        // Inherited from the browser and matched rather than corrected,
-        // because the shells conform to one another this release. Adding a
-        // type to an existing hue and shape lands here and has to be
-        // argued.
-        const KNOWN_LOOKALIKES: &[(DataType, DataType)] = &[
-            (DataType::Vec2, DataType::Vec3),
-            (DataType::Vec2, DataType::Vec4),
-            (DataType::Vec3, DataType::Vec4),
-        ];
-
+        // No exception list: a new pair that looks alike and cannot be
+        // wired fails here, which is the whole point of stating the rule as
+        // a rule.
         for a in DataType::ALL {
             for b in DataType::ALL {
                 if a == b || (a as u8) > (b as u8) {
                     continue;
                 }
-                let alike = wire_token(a) == wire_token(b) && handle_shape(a) == handle_shape(b);
-                if !alike {
+                if wire_token(a) != wire_token(b) || handle_shape(a) != handle_shape(b) {
                     continue;
                 }
                 let both_ways = solarxy_graph::registry::coerce::can_coerce(a, b).is_legal()
                     && solarxy_graph::registry::coerce::can_coerce(b, a).is_legal();
                 assert!(
-                    both_ways || KNOWN_LOOKALIKES.contains(&(a, b)),
-                    "{a:?} and {b:?} are drawn identically and cannot be wired together, \
-                     which is neither the encoding's promise nor a listed exception"
+                    both_ways,
+                    "{a:?} and {b:?} are drawn identically and cannot be wired together"
                 );
             }
         }
+    }
+
+    #[test]
+    fn shape_alone_does_not_identify_a_type_and_the_sharing_is_stated() {
+        // Thirteen types cannot have thirteen shapes legible at handle
+        // size, so shape narrows rather than identifies, and hue finishes
+        // the job. This pins which shapes are shared so the limit is a
+        // recorded fact rather than something a reader has to rediscover.
+        //
+        // `Round` is the absence of a claim: six unrelated families carry
+        // it. `Hexagon` is a real claim, "a resource", carried by two types
+        // that convert in neither direction, so a reader who cannot use hue
+        // cannot tell an image port from a material one. That is milder
+        // than what the vectors had, since those were identical on BOTH
+        // channels, but it is the same shape of gap and it is left standing
+        // deliberately rather than overlooked.
+        let mut groups: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for dt in DataType::ALL {
+            groups
+                .entry(format!("{:?}", handle_shape(dt)))
+                .or_default()
+                .push(format!("{dt:?}"));
+        }
+        let shared: Vec<(String, Vec<String>)> = groups
+            .into_iter()
+            .filter(|(_, types)| types.len() > 1)
+            .collect();
+        assert_eq!(
+            shared,
+            vec![
+                (
+                    "Hexagon".to_string(),
+                    vec!["Image".to_string(), "Material".to_string()]
+                ),
+                (
+                    "Round".to_string(),
+                    vec![
+                        "Geometry".to_string(),
+                        "Light".to_string(),
+                        "Report".to_string(),
+                        "Float".to_string(),
+                        "Bool".to_string(),
+                        "Text".to_string(),
+                    ]
+                ),
+                (
+                    "Square".to_string(),
+                    vec!["Vec4".to_string(), "Color".to_string()]
+                ),
+            ]
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@
 // every one of its params maps to a widget. No per-node code exists anywhere.
 
 import { describe, expect, it } from "vitest";
-import type { NodeTypeSnapshot, RegistrySnapshot } from "../engine/types";
+import type { DataType, NodeTypeSnapshot, RegistrySnapshot } from "../engine/types";
 import { GLYPH_PATHS, glyphPath, nodeRole } from "../flow/nodeVisual";
 import {
   DATA_TYPE_COLOR,
@@ -103,12 +103,47 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
   it("has typed handles the frontend can color + validate", () => {
     const out = portDataType(SNAP, "probe", "geometry", "output");
     expect(out).toBe("geometry");
-    expect(DATA_TYPE_COLOR[out!]).toBeDefined();
+    // By VALUE, not merely defined: a hue that resolved to undefined would
+    // have satisfied the old assertion and drawn nothing.
+    expect(DATA_TYPE_COLOR[out!]).toBe("#5aa0ff");
     // Probe -> Probe geometry is a legal (same) connection.
     expect(connectionLegal(SNAP, "probe", "geometry", "probe", "geometry").legal).toBe(true);
     // The matrix still classifies lossy/lossless for the frontend rings.
     expect(coercionKind(SNAP, "float", "int")).toBe("lossy");
     expect(coercionKind(SNAP, "int", "float")).toBe("lossless");
+  });
+
+  // The encoding's promise is that hue says family and shape separates the
+  // family, so no two data types are drawn identically. It did not hold:
+  // vec2, vec3 and vec4 were all round and all one hue, while converting
+  // to each other in no direction at all, so three identical handles
+  // refused to connect.
+  //
+  // The half that reads the coercion matrix lives in `solarxy-studio`,
+  // where the real matrix is. Asserting it here against this file's
+  // four-entry fixture would prove nothing, which is how the first draft
+  // of this test passed while checking almost nothing. What this owns is
+  // the presentation tables, which are real here.
+  it("never draws two data types identically", () => {
+    const types = Object.keys(DATA_TYPE_COLOR) as DataType[];
+    const seen = new Map<string, DataType>();
+    for (const dt of types) {
+      const key = `${DATA_TYPE_COLOR[dt]}/${dataTypeShape(dt)}`;
+      const clash = seen.get(key);
+      expect(clash, `${dt} and ${clash} are drawn identically`).toBeUndefined();
+      seen.set(key, dt);
+    }
+  });
+
+  it("counts vector components in the handle shape", () => {
+    expect(dataTypeShape("vec2")).toBe("bar");
+    expect(dataTypeShape("vec3")).toBe("triangle");
+    expect(dataTypeShape("vec4")).toBe("square");
+    // A colour is an RGBA four-vector, so it carries the four-component
+    // shape too; the hue is what separates the two, and they convert both
+    // ways without loss (asserted against the real matrix in Rust).
+    expect(dataTypeShape("color")).toBe("square");
+    expect(DATA_TYPE_COLOR.vec4).not.toBe(DATA_TYPE_COLOR.color);
   });
 
   it("speaks the Image vocabulary", () => {

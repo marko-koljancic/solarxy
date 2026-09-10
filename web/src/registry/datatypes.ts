@@ -33,12 +33,23 @@ export const DATA_TYPE_COLOR: Record<DataType, string> = {
   material: "#c96f4a",
 };
 
-/** Handle shape channel for color-blind safety. */
-export type HandleShape = "round" | "diamond" | "square" | "hexagon";
+/** Handle shape channel for color-blind safety.
+ *
+ * Among the vectors the shape counts components: a bar is two, a triangle
+ * three, a square four. That is what makes the channel legible rather than
+ * arbitrary, and it is why `vec4` and `color` share the square -- a color
+ * is an RGBA four-vector and the two convert both ways without loss.
+ *
+ * Until 0.10.0 all three vectors were round, so they were identical on
+ * both channels while converting to each other in no direction at all:
+ * three handles that looked the same and refused to connect. */
+export type HandleShape = "round" | "diamond" | "bar" | "triangle" | "square" | "hexagon";
 
 export function dataTypeShape(dt: DataType): HandleShape {
   if (dt === "int") return "diamond";
-  if (dt === "color") return "square";
+  if (dt === "vec2") return "bar";
+  if (dt === "vec3") return "triangle";
+  if (dt === "vec4" || dt === "color") return "square";
   if (dt === "image" || dt === "material") return "hexagon";
   return "round";
 }

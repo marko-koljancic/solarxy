@@ -71,6 +71,20 @@ function handleStyle(color: string, shape: string, side: "in" | "out"): React.CS
       borderRadius: 2,
     };
   if (shape === "square") return { ...base, borderRadius: 2 };
+  if (shape === "bar")
+    // Two components, as a horizontal band. Clipped like the hexagon
+    // below, which drops the border, so the fill carries the full width.
+    return {
+      ...base,
+      clipPath: "polygon(0% 27%, 100% 27%, 100% 73%, 0% 73%)",
+      border: "none",
+    };
+  if (shape === "triangle")
+    return {
+      ...base,
+      clipPath: "polygon(50% 0%, 100% 100%, 0% 100%)",
+      border: "none",
+    };
   if (shape === "hexagon")
     return {
       ...base,
