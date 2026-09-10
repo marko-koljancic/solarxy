@@ -24,26 +24,73 @@
 //! pointer button is down, which is the whole of "an in-flight gesture is
 //! not disturbed by an unrelated cook".
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use egui_snarl::Snarl;
+use solarxy_graph::cook::state::CookState;
 use solarxy_graph::document::{Document, GraphContext, NodeId};
 use solarxy_graph::registry::{Arity, Registry};
+
+/// What a node's last cook says about it, which the document does not
+/// carry and the canvas has to draw.
+///
+/// Assembled by the state layer for the shown context alone, because a
+/// panel never sees the engine and these five answers come from five
+/// different places on it. A context holds a handful of nodes, so a map
+/// per frame costs nothing measurable and buys the panel a plain lookup.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NodeCook {
+    pub state: CookState,
+    /// Microseconds the last successful cook took. Zero when there has
+    /// not been one.
+    pub last_us: u64,
+    /// Why the last cook failed, when it did.
+    pub error: Option<String>,
+    pub errors: u32,
+    pub warnings: u32,
+}
+
+/// A cooked scene's document and everything drawn beside it that the
+/// document does not carry.
+///
+/// Behind one reference rather than spread across the enum, because
+/// [`PanelSources`] is `Copy` and passed by value into every interface
+/// pass: seven fields inline would push that struct past the size a lint
+/// is standing over, and the fix would be to move the entry point's
+/// signature, which is the one thing the panel-source rule promises not
+/// to do.
+///
+/// [`PanelSources`]: crate::gui::pass::PanelSources
+pub(crate) struct CanvasScene<'a> {
+    pub doc: &'a Document,
+    pub registry: &'a Registry,
+    /// The engine revision that produced this document. It rides here
+    /// because a panel never sees the engine, and re-seeding correctly is
+    /// the one thing on the canvas that has to know when the document
+    /// moved.
+    pub revision: u64,
+    /// Per-node cook facts for the shown context.
+    pub cook: &'a BTreeMap<NodeId, NodeCook>,
+    /// Content hash to file name, so an import node's summary line names
+    /// the file rather than its hash. The shells hold the manifest; the
+    /// shared rule takes a lookup.
+    pub assets: &'a BTreeMap<String, String>,
+    /// Manual cook mode, where a dirty node is stale rather than about to
+    /// be recooked. The distinction is the whole difference between the
+    /// two badges a user reads.
+    pub manual: bool,
+    /// Whether the clock is running. A cook time that changes sixty times
+    /// a second is unreadable, so it is suppressed rather than shown,
+    /// which is also what keeps the label stack still.
+    pub playing: bool,
+}
 
 /// What the canvas draws, or nothing.
 #[derive(Clone, Copy)]
 pub(crate) enum CanvasSource<'a> {
     /// Nothing is open at all.
     Empty,
-    /// A cooked scene's document, with the engine revision that produced
-    /// it. The revision rides the source because a panel never sees the
-    /// engine, and re-seeding correctly is the one thing here that has to
-    /// know when the document moved.
-    Scene {
-        doc: &'a Document,
-        registry: &'a Registry,
-        revision: u64,
-    },
+    Scene(&'a CanvasScene<'a>),
 }
 
 /// One node on the canvas: its engine identifier, and nothing else.

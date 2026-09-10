@@ -567,6 +567,34 @@ impl State {
                 }
                 self.apply_node_command(solarxy_graph::Command::MoveNodes { ctx, moves });
             }
+            CanvasAction::SetBypass(ctx, node, bypassed) => {
+                self.apply_node_command(solarxy_graph::Command::SetBypass {
+                    ctx,
+                    node,
+                    bypassed,
+                });
+            }
+            CanvasAction::SetActiveOutput(ctx, node) => {
+                self.apply_node_command(solarxy_graph::Command::SetActiveOutput {
+                    ctx,
+                    node: Some(node),
+                });
+            }
+            // Visibility is an ordinary parameter edit rather than a
+            // direct write, and deliberately so: an object's visibility
+            // is re-emitted from its owning node on every cook, so a
+            // renderer-side write would look right for one frame and be
+            // undone by the next edit.
+            CanvasAction::SetVisible(ctx, node, visible) => {
+                self.apply_node_command(solarxy_graph::Command::SetParam {
+                    ctx,
+                    node,
+                    key: "visible".to_string(),
+                    value: solarxy_graph::params::ParamSource::Literal(
+                        solarxy_graph::params::ParamValue::Bool(visible),
+                    ),
+                });
+            }
         }
     }
 }

@@ -10,7 +10,10 @@
 //! intents they raise afterwards; the drain is what triggers any expensive
 //! recomputation (background, wireframe, composite, IBL).
 
+use std::collections::BTreeMap;
+
 use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, ResolvedBackground};
+use solarxy_graph::document::NodeId;
 use solarxy_host::EncodedPane;
 use solarxy_renderer::backend::{FrameCtx, PaneContent, RenderBackend, UvSource};
 use solarxy_renderer::camera::Camera;
@@ -479,15 +482,33 @@ impl State {
         // because it draws things no delta carries: edges, positions and
         // selection. `Empty` for a closed tab, so a canvas nobody is
         // looking at costs nothing.
-        let canvas_source = match &self.engine {
-            _ if !self.gui.nodes_tab_present() => crate::gui::CanvasSource::Empty,
-            Some(engine) => crate::gui::CanvasSource::Scene {
+        //
+        // The cook facts are gathered here rather than mirrored, for the
+        // shown context alone: they come from four different places on
+        // the engine, a panel never sees one, and a context holds a
+        // handful of nodes.
+        let canvas_cook = self.canvas_cook();
+        let canvas_assets: BTreeMap<String, String> =
+            match (&self.engine, self.gui.nodes_tab_present()) {
+                (Some(engine), true) => engine.asset_manifest().into_iter().collect(),
+                _ => BTreeMap::new(),
+            };
+        let canvas_scene = match &self.engine {
+            Some(engine) if self.gui.nodes_tab_present() => Some(crate::gui::CanvasScene {
                 doc: engine.document(),
                 registry: engine.registry(),
                 revision: engine.revision(),
-            },
-            None => crate::gui::CanvasSource::Empty,
+                cook: &canvas_cook,
+                assets: &canvas_assets,
+                manual: engine.cook_mode() == solarxy_graph::engine::CookMode::Manual,
+                playing: engine.clock().playing,
+            }),
+            _ => None,
         };
+        let canvas_source = canvas_scene.as_ref().map_or(
+            crate::gui::CanvasSource::Empty,
+            crate::gui::CanvasSource::Scene,
+        );
 
         // The Actions section's subject: the node selected in the Node Tree's
         // context, read from the document each frame rather than mirrored,
@@ -720,6 +741,45 @@ impl State {
 ///
 /// Read from the document rather than mirrored, because selection is engine
 /// state and this shell's only writer of it is the Node Tree's drain arm.
+impl State {
+    /// What the canvas needs to know about the shown context's cooks.
+    ///
+    /// Built per frame rather than mirrored, because the four answers
+    /// live in four different places on the engine and a panel sees none
+    /// of them. Empty when the tab is closed or nothing is open, so the
+    /// cost is paid only by a canvas somebody is looking at.
+    fn canvas_cook(&self) -> BTreeMap<NodeId, crate::gui::NodeCook> {
+        let mut out = BTreeMap::new();
+        if !self.gui.nodes_tab_present() {
+            return out;
+        }
+        let Some(engine) = self.engine.as_deref() else {
+            return out;
+        };
+        let ctx = self.gui.graph_ctx();
+        let Ok(graph) = engine.document().graph(ctx) else {
+            return out;
+        };
+        for node in graph.nodes() {
+            let report = engine.node_report(ctx, node.id);
+            let validation = engine.validation(node.id);
+            out.insert(
+                node.id,
+                crate::gui::NodeCook {
+                    state: engine.cook_state(node.id),
+                    last_us: report.map_or(0, |r| r.last_cook_us),
+                    error: self.cook_health.failure(node.id).map(str::to_owned),
+                    #[allow(clippy::cast_possible_truncation)]
+                    errors: validation.map_or(0, |v| v.report.error_count() as u32),
+                    #[allow(clippy::cast_possible_truncation)]
+                    warnings: validation.map_or(0, |v| v.report.warning_count() as u32),
+                },
+            );
+        }
+        out
+    }
+}
+
 fn selected_node(
     doc: &solarxy_graph::document::Document,
     prefer: solarxy_graph::document::GraphContext,

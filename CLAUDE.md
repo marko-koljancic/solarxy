@@ -187,8 +187,11 @@ step any more.
   - CPU picking is `solarxy_core::raycast`, re-exported here so call sites keep their paths.
 - `gui/` - **split along panel boundaries**, so a reader looking for a panel finds a module:
   - `panels/` - one module per dock tab: `sidebar`, `outliner`, `node_tree`, `properties`,
-    `console`, `material_inspector`, `nodes/` (the node canvas: the panel, the seed and
-    read-back, and the substrate's viewer) and `review/` (panel, overlay, popup, and the
+    `console`, `material_inspector`, `nodes/` (the node canvas: `mod` the panel, `seed` the
+    mirror-to-substrate seed and the position read-back, `viewer` the substrate's view of one
+    graph, `art` how a node looks in every state, `glyphs` the 76 stroke paths held **verbatim**
+    so they can be compared character for character against the browser's copy, and `vector` the
+    path-subset flattener both of those draw through) and `review/` (panel, overlay, popup, and the
     `visuals` the first two share, because marker colour and panel chip colour are the
     reader's first correlation cue).
   - `chrome/` - the shell's own furniture, which is everything that draws outside a dock tab or

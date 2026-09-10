@@ -1,11 +1,10 @@
 //! Which nodes' cooks are failing, read off the engine's event stream.
 //!
-//! The desktop drives the engine but has no per-node badges (the editing
-//! canvas is a later release), so a cook failure must surface somewhere
-//! or a scene silently shows stale or missing geometry. This tracker
-//! turns `CookStatus` events into two things: the fresh failures the
-//! shell toasts, and a standing map of failing nodes the still render
-//! consults before it is willing to report success.
+//! A cook failure must surface somewhere or a scene silently shows stale
+//! or missing geometry. This tracker turns `CookStatus` events into three
+//! things: the fresh failures the shell toasts, a standing map the still
+//! render consults before it is willing to report success, and the
+//! per-node reason the canvas draws on the failing node itself.
 //!
 //! "Once per cook rather than once per frame" is inherited from the
 //! engine rather than re-implemented here: the cook driver emits a
@@ -68,6 +67,12 @@ impl CookHealth {
     /// refusal message.
     pub(crate) fn failing(&self) -> &BTreeMap<NodeId, String> {
         &self.failures
+    }
+
+    /// Why one node's last cook failed, for the badge the canvas draws on
+    /// it.
+    pub(crate) fn failure(&self, node: NodeId) -> Option<&str> {
+        self.failures.get(&node).map(String::as_str)
     }
 
     /// Forget everything, for a scene open or close: the ledger describes

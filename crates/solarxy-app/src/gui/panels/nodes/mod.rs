@@ -27,12 +27,15 @@
 //!
 //! [`Command::MoveNodes`]: solarxy_graph::Command::MoveNodes
 
+mod art;
+mod glyphs;
 mod seed;
+mod vector;
 mod viewer;
 
 use solarxy_graph::document::{GraphContext, NodeId};
 
-pub(crate) use seed::{CanvasSource, CanvasState};
+pub(crate) use seed::{CanvasScene, CanvasSource, CanvasState, NodeCook};
 
 use crate::gui::intent::{Intents, PanelIntent};
 use crate::gui::theme::Theme;
@@ -44,6 +47,14 @@ pub(crate) enum CanvasAction {
     /// A drag finished. Every node it moved travels in one command, which
     /// is what makes the whole gesture one undo step.
     MoveNodes(GraphContext, Vec<(NodeId, [f32; 2])>),
+    /// The leading wing: switch a node off without removing it.
+    SetBypass(GraphContext, NodeId, bool),
+    /// The trailing wing inside a container: which node's output the
+    /// context shows. A radio, so it is only ever raised to set.
+    SetActiveOutput(GraphContext, NodeId),
+    /// The trailing wing at the root: an object's additive `visible`
+    /// param, which is an ordinary parameter edit and undoes like one.
+    SetVisible(GraphContext, NodeId, bool),
 }
 
 /// Render the node canvas into `ui` (the `egui_dock` tab supplies it).
@@ -55,17 +66,11 @@ pub(in crate::gui) fn draw_nodes_content(
     intents: &mut Intents,
     theme: Theme,
 ) {
-    let (doc, registry, revision) = match source {
-        CanvasSource::Empty => {
-            state.reset();
-            return draw_placeholder(ui, "No document open");
-        }
-        CanvasSource::Scene {
-            doc,
-            registry,
-            revision,
-        } => (doc, registry, revision),
+    let CanvasSource::Scene(scene) = source else {
+        state.reset();
+        return draw_placeholder(ui, "No document open");
     };
+    let (doc, registry) = (scene.doc, scene.registry);
 
     // A dive whose container has gone falls back to the root rather than
     // leaving the panel blank with no way out. The same rule the Node Tree
@@ -75,14 +80,17 @@ pub(in crate::gui) fn draw_nodes_content(
     }
 
     let pointer_down = ui.ctx().input(|i| i.pointer.any_down());
-    state.seed_if_stale(doc, registry, *ctx, revision, pointer_down);
+    state.seed_if_stale(doc, registry, *ctx, scene.revision, pointer_down);
 
     let style = canvas_style(theme);
     let mut canvas_viewer = viewer::CanvasViewer {
-        doc,
-        registry,
+        scene,
         ctx: *ctx,
+        intents: &mut *intents,
         theme,
+        // Replaced before any node is drawn, by the substrate's own
+        // transform hook.
+        scale: 1.0,
     };
     state
         .snarl_mut()
@@ -139,6 +147,7 @@ fn draw_placeholder(ui: &mut egui::Ui, headline: &str) {
 mod tests {
     use super::*;
     use crate::gui::theme::Theme;
+    use std::collections::BTreeMap;
     use solarxy_core::preferences::ThemeChoice;
     use solarxy_graph::{Command, Engine};
 
@@ -209,11 +218,15 @@ mod tests {
             egui::CentralPanel::default().show(c, |ui| {
                 draw_nodes_content(
                     ui,
-                    CanvasSource::Scene {
+                    CanvasSource::Scene(&CanvasScene {
                         doc: engine.document(),
                         registry: engine.registry(),
                         revision: engine.revision(),
-                    },
+                        cook: &BTreeMap::new(),
+                        assets: &BTreeMap::new(),
+                        manual: false,
+                        playing: false,
+                    }),
                     state,
                     ctx,
                     intents,
