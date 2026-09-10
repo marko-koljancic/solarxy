@@ -122,6 +122,71 @@ fn walk_branches(row: &TreeRow, out: &mut Vec<String>) {
     }
 }
 
+/// One step on the path into a network: where it jumps to, and what it
+/// reads.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Crumb {
+    pub ctx: GraphContext,
+    pub label: String,
+}
+
+/// The label the root crumb carries, which is the object network every
+/// scene starts in.
+pub const ROOT_CRUMB: &str = "/obj";
+
+/// The rows a context shows, and the path back out of it.
+///
+/// **One walk for both answers, and that is the point.** A separate
+/// parent lookup could disagree with the descent about who owns what,
+/// which is the kind of disagreement that shows up as a breadcrumb
+/// pointing somewhere the tree does not go. The path falls out of the
+/// descent because the descent is what knows it.
+///
+/// `None` when the context is not in the tree at all, which is how a dive
+/// survives the scene it was made in being replaced: the caller falls
+/// back to the root rather than showing an empty surface with no way out.
+/// The root crumb is always present and always first, so a dived view can
+/// always be escaped.
+#[must_use]
+pub fn subtree(rows: &[TreeRow], ctx: GraphContext) -> Option<(&[TreeRow], Vec<Crumb>)> {
+    let mut crumbs = vec![Crumb {
+        ctx: GraphContext::Root,
+        label: ROOT_CRUMB.to_string(),
+    }];
+    if ctx == GraphContext::Root {
+        return Some((rows, crumbs));
+    }
+    descend(rows, ctx, &mut crumbs).map(|found| (found, crumbs))
+}
+
+/// Depth-first hunt for `ctx`, pushing a crumb on the way down and
+/// popping it on the way back up, so `crumbs` ends as the path to
+/// whatever is returned and is left untouched when nothing is.
+fn descend<'a>(
+    rows: &'a [TreeRow],
+    ctx: GraphContext,
+    crumbs: &mut Vec<Crumb>,
+) -> Option<&'a [TreeRow]> {
+    for row in rows {
+        if row.opens.is_none() {
+            continue;
+        }
+        crumbs.push(Crumb {
+            ctx: GraphContext::Subflow(row.node),
+            label: row.label.clone(),
+        });
+        if GraphContext::Subflow(row.node) == ctx {
+            return Some(&row.children);
+        }
+        if let Some(found) = descend(&row.children, ctx, crumbs) {
+            return Some(found);
+        }
+        crumbs.pop();
+    }
+    None
+}
+
 /// What a search turns up: the rows that matched, and the ancestors that
 /// have to be forced open for every match to be reachable.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
@@ -254,6 +319,65 @@ mod tests {
             collect(row, &mut out);
         }
         out
+    }
+
+    /// The root's subtree is the whole tree, with one crumb saying so.
+    #[test]
+    fn the_root_subtree_is_the_whole_tree_with_one_crumb() {
+        let doc = document();
+        let rows = scene_tree(&doc, &registry());
+        let (visible, crumbs) =
+            subtree(&rows, GraphContext::Root).expect("the root always resolves");
+
+        assert_eq!(visible.len(), rows.len());
+        assert_eq!(crumbs.len(), 1);
+        assert_eq!(crumbs[0].label, ROOT_CRUMB);
+        assert_eq!(crumbs[0].ctx, GraphContext::Root);
+    }
+
+    /// The breadcrumb is what gets a user back out, so it must start at
+    /// the root and end where they are, with every step between.
+    #[test]
+    fn diving_yields_the_children_and_a_walkable_breadcrumb() {
+        let doc = document();
+        let rows = scene_tree(&doc, &registry());
+        let (visible, crumbs) =
+            subtree(&rows, GraphContext::Subflow(NodeId(1))).expect("the container resolves");
+
+        assert!(!visible.is_empty(), "a dived container shows its children");
+        assert_eq!(crumbs.len(), 2, "root, then the container dived into");
+        assert_eq!(crumbs[0].ctx, GraphContext::Root);
+        assert_eq!(crumbs[1].ctx, GraphContext::Subflow(NodeId(1)));
+    }
+
+    /// A container inside a container: every level on the way down is a
+    /// step back out, or a user reaches somewhere they cannot leave.
+    #[test]
+    fn a_nested_dive_carries_every_level_on_the_way_down() {
+        let doc = document();
+        let rows = scene_tree(&doc, &registry());
+        let nested = rows
+            .iter()
+            .find(|r| r.node == NodeId(1))
+            .and_then(|r| r.children.iter().find(|c| c.opens.is_some()))
+            .expect("the fixture nests a container inside a container");
+
+        let (_, crumbs) =
+            subtree(&rows, GraphContext::Subflow(nested.node)).expect("the nested one resolves");
+        assert_eq!(crumbs.len(), 3, "root, the outer container, the inner one");
+        assert_eq!(crumbs[1].ctx, GraphContext::Subflow(NodeId(1)));
+        assert_eq!(crumbs[2].ctx, GraphContext::Subflow(nested.node));
+    }
+
+    /// The case that keeps a stale dive from blanking a surface: opening
+    /// a second scene leaves a context pointing at a node the new
+    /// document does not have. It must not resolve, so the caller can
+    /// fall back to the root rather than showing nothing with no way out.
+    #[test]
+    fn a_context_outside_the_tree_does_not_resolve() {
+        let doc = document();
+        let rows = scene_tree(&doc, &registry());
+        assert!(subtree(&rows, GraphContext::Subflow(NodeId(9_999))).is_none());
     }
 
     #[test]

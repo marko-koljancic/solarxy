@@ -103,11 +103,12 @@ pub(in crate::gui) fn draw_nodes_content(
     let (doc, registry) = (scene.doc, scene.registry);
 
     // A dive whose container has gone falls back to the root rather than
-    // leaving the panel blank with no way out. The same rule the Node Tree
-    // applies, on the context the two of them now share.
-    if doc.graph(*ctx).is_err() {
-        *ctx = GraphContext::Root;
-    }
+    // leaving the panel blank with no way out, and the breadcrumb's own
+    // lookup is where that happens. Checking the graph exists as well
+    // would be a second fallback for the same case and a weaker one: a
+    // context whose graph survives its owner passes that check and fails
+    // this one.
+    draw_breadcrumb(ui, doc, registry, ctx, state, theme);
 
     let pointer_down = ui.ctx().input(|i| i.pointer.any_down());
     state.seed_if_stale(doc, registry, *ctx, scene.revision, pointer_down);
@@ -125,15 +126,34 @@ pub(in crate::gui) fn draw_nodes_content(
         boxes: state.boxes(),
         sockets: HashMap::new(),
         pending: viewer::Pending::default(),
+        dive: None,
     };
     state
         .snarl_mut()
         .show(&mut canvas_viewer, &style, "solarxy-node-canvas", ui);
-    state.accept_frame(canvas_viewer.sockets, canvas_viewer.boxes);
+    // Taken apart rather than read field by field: the viewer holds the
+    // intent queue mutably, and everything below raises into it.
+    let viewer::CanvasViewer {
+        sockets,
+        boxes,
+        pending,
+        dive,
+        ..
+    } = canvas_viewer;
+
+    state.accept_frame(sockets, boxes);
     mark_coercions(ui, doc, registry, *ctx, state, theme);
 
     let released = ui.ctx().input(|i| i.pointer.any_released());
-    resolve_rewiring(canvas_viewer.pending, state, *ctx, released, intents);
+    resolve_rewiring(pending, state, *ctx, released, intents);
+
+    // Diving is the canvas's own, not the engine's: which graph is on
+    // screen is session state that the tree beside it shares, so it is
+    // written here rather than asked for through the queue.
+    if let Some(node) = dive {
+        *ctx = GraphContext::Subflow(node);
+        state.reset();
+    }
 
     // Cycling the routing is a canvas-scoped binding rather than a global
     // one: the same key types an `s` anywhere a field has focus, so it is
@@ -207,6 +227,57 @@ fn resolve_rewiring(
         remove,
         add: pending.connect,
     }));
+}
+
+/// The path into the network being shown, and the way back out.
+///
+/// **The same walk the scene tree descends**, in the shared crate, so a
+/// breadcrumb here and a breadcrumb there cannot disagree about who owns
+/// what. It is skipped at the root, where the path is one crumb long and
+/// says nothing a user does not already know.
+fn draw_breadcrumb(
+    ui: &mut egui::Ui,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: &mut GraphContext,
+    state: &mut CanvasState,
+    theme: Theme,
+) {
+    if *ctx == GraphContext::Root {
+        return;
+    }
+    let rows = solarxy_studio::tree::scene_tree(doc, registry);
+    let Some((_, crumbs)) = solarxy_studio::tree::subtree(&rows, *ctx) else {
+        *ctx = GraphContext::Root;
+        state.reset();
+        return;
+    };
+    egui::Frame::new()
+        .fill(theme.bg_elevated)
+        .inner_margin(egui::Margin::symmetric(6, 4))
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let last = crumbs.len() - 1;
+                for (i, crumb) in crumbs.iter().enumerate() {
+                    if i > 0 {
+                        ui.label(egui::RichText::new("/").color(theme.muted).size(10.0));
+                    }
+                    let text = egui::RichText::new(&crumb.label).size(10.0);
+                    if i == last {
+                        ui.label(text.color(theme.fg));
+                    } else if ui
+                        .add(egui::Label::new(text.color(theme.accent)).sense(egui::Sense::click()))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        *ctx = crumb.ctx;
+                        state.reset();
+                    }
+                }
+            });
+        });
+    ui.separator();
 }
 
 /// Mark every wire that does not carry its value across unchanged.
@@ -865,6 +936,31 @@ mod tests {
             state.snarl_mut().wires().count(),
             wired,
             "the canvas must show what the document holds, not what a gesture left"
+        );
+    }
+
+    /// A dive that no longer resolves falls back to the root rather than
+    /// leaving the canvas blank with no way out, which is what a second
+    /// scene does to a context recorded against the first.
+    #[test]
+    fn a_stale_dive_falls_back_to_the_root() {
+        let (engine, _, _, _) = scene();
+        let mut state = CanvasState::default();
+        let mut ctx = GraphContext::Subflow(NodeId(9_999));
+        let mut intents = Intents::default();
+
+        one_frame(
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            egui::RawInput::default(),
+        );
+
+        assert_eq!(ctx, GraphContext::Root, "a dive with no home returns");
+        assert!(
+            raised(&mut intents).is_empty(),
+            "and it asks the engine for nothing on the way"
         );
     }
 

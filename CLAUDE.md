@@ -186,7 +186,10 @@ step any more.
   - `hdri_info.rs` - what the Properties panel says about the loaded HDRI.
   - CPU picking is `solarxy_core::raycast`, re-exported here so call sites keep their paths.
 - `gui/` - **split along panel boundaries**, so a reader looking for a panel finds a module:
-  - `panels/` - one module per dock tab: `sidebar`, `outliner`, `node_tree`, `properties`,
+  - `panels/` - one module per dock tab. The Node Tree and the canvas share one graph
+    context and one descent: `solarxy_studio::tree::subtree` folds the path and the rows
+    together, so a breadcrumb in either cannot disagree with the other about who owns what.
+    The modules are: `sidebar`, `outliner`, `node_tree`, `properties`,
     `console`, `material_inspector`, `nodes/` (the node canvas: `mod` the panel, `seed` the
     mirror-to-substrate seed and the position read-back, `viewer` the substrate's view of one
     graph, `pins` the sockets, placed on the box's top and bottom edges by hand because the substrate

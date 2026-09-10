@@ -76,6 +76,8 @@ pub(super) struct CanvasViewer<'a> {
     /// What the frame's rewiring gestures asked for, gathered rather than
     /// applied.
     pub pending: Pending,
+    /// The container a double-click asked to enter.
+    pub dive: Option<NodeId>,
 }
 
 /// What the four mutation points recorded this frame.
@@ -166,6 +168,42 @@ impl CanvasViewer<'_> {
             title.push_str(&spec.doc);
         }
         Some(title)
+    }
+
+    /// A double-click inside a node's box enters the network it opens.
+    ///
+    /// **Read from the input rather than through a widget**, deliberately.
+    /// The substrate already interacts with the node's frame for dragging
+    /// and selection; a second widget over the same rectangle would take
+    /// the press and the node would stop moving. Nothing here senses
+    /// anything, so nothing is stolen.
+    ///
+    /// **Whether a node is a container is its descriptor's answer**, never
+    /// its type identifier. That is the same correction 0.10.0 applied to
+    /// the engine, and applying it here is what leaves the canvas free for
+    /// network kinds that do not exist yet. A node that opens nothing does
+    /// nothing at all, and in particular does not zoom: the substrate's own
+    /// double-click centring is switched off so the gesture means one
+    /// thing.
+    fn watch_for_dive(&mut self, ui: &egui::Ui, box_rect: egui::Rect, id: NodeId) {
+        if self.dive.is_some() {
+            return;
+        }
+        let hit = ui.input(|i| {
+            i.pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| box_rect.contains(p))
+        });
+        if !hit {
+            return;
+        }
+        if let Some(data) = self.node_data(id)
+            && opens_a_network(self.scene.registry, &data.type_id)
+        {
+            self.dive = Some(id);
+        }
     }
 
     /// One end of a gesture, as the engine names it.
@@ -431,6 +469,7 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
         // Recorded before the sockets are drawn, so each one can sit on
         // this box's edge rather than on the side the substrate expects.
         self.boxes.insert(node, box_rect);
+        self.watch_for_dive(ui, box_rect, id);
         let Some(painted) = self.gather(id) else {
             return;
         };
@@ -814,6 +853,18 @@ fn authored_description(data: &NodeData) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+/// Whether a node type may be entered.
+///
+/// **Its descriptor's answer, never its type identifier.** A container
+/// added in Rust with an identifier this shell has never heard of is
+/// enterable with no change here, and an identifier that merely reads
+/// like a container is not. That is the same correction 0.10.0 applied to
+/// the engine, and it is a named function so it can be driven against a
+/// registry built to disagree with the naming.
+pub(super) fn opens_a_network(registry: &solarxy_graph::registry::Registry, type_id: &str) -> bool {
+    registry.opens(type_id).is_some()
+}
+
 /// What a lossy but legal connection says.
 pub(super) const LOSSY_WARNING: &str = "Lossy connection (value narrowed)";
 
@@ -917,6 +968,68 @@ mod tests {
         }
         assert_eq!(at.next(), WireRouting::default());
         assert_eq!(seen.len(), WireRouting::ALL.len());
+    }
+
+    /// A registry built to disagree with its own naming: a type whose
+    /// identifier reads like nothing in particular opens a network, and a
+    /// type whose identifier reads exactly like a container opens
+    /// nothing.
+    ///
+    /// The point of the fixture is that it is wrong on both counts by
+    /// naming, so an implementation reading a type identifier fails both
+    /// ways rather than one.
+    fn contrary_registry() -> solarxy_graph::registry::Registry {
+        use solarxy_graph::document::ContextKind;
+        use solarxy_graph::registry::{
+            BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor,
+        };
+
+        let make = |type_id: &'static str, opens: Option<ContextKind>| NodeTypeDescriptor {
+            type_id,
+            version: 1,
+            display_name: "Probe",
+            category: Category::Utility,
+            contexts: ContextSet::ALL,
+            opens,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            params: Vec::new(),
+            bypass: BypassBehavior::Mute,
+            doc: "A fabricated type this shell has never seen.",
+            search_aliases: &[],
+            glyph: "null",
+            role: NodeRole::Standard,
+            // Never cooked: nothing here drives a cook, and a probe
+            // that produced geometry would be claiming to be a node type
+            // rather than standing in for one.
+            cook: |_, _, _| {
+                Ok(solarxy_graph::cook::CookOutcome::Done(
+                    solarxy_graph::cook::Outputs::default(),
+                ))
+            },
+            migrate: None,
+        };
+
+        solarxy_graph::registry::Registry::with_descriptors(vec![
+            make("widget", Some(ContextKind::Sop)),
+            make("sopnet", None),
+        ])
+        .expect("two distinct type ids build a registry")
+    }
+
+    /// Whether a node can be entered is its descriptor's answer.
+    #[test]
+    fn a_container_is_decided_by_its_descriptor_rather_than_its_type_id() {
+        let registry = contrary_registry();
+        assert!(
+            opens_a_network(&registry, "widget"),
+            "a type that opens a network is enterable whatever it is called"
+        );
+        assert!(
+            !opens_a_network(&registry, "sopnet"),
+            "a type that opens nothing is not enterable however it is named"
+        );
+        assert!(!opens_a_network(&registry, "absent"));
     }
 
     /// A refusal names both wire types, because "cannot connect" alone

@@ -25,9 +25,11 @@
 //!
 //! [`solarxy_studio::tree::scene_tree`] folds the whole document from the
 //! root exactly once, and the dived view is a subtree of that result
-//! ([`find_subtree`]). The breadcrumb falls out of the same walk, so there
-//! is no second parent lookup that could disagree with the first about who
-//! owns what.
+//! ([`solarxy_studio::tree::subtree`]). The breadcrumb falls out of the
+//! same walk, so there is no second parent lookup that could disagree
+//! with the first about who owns what. The walk itself left this file
+//! when the canvas needed it too: two panels descending the same tree is
+//! the pair the shared crate exists to remove.
 //!
 //! The fold itself is **not** this panel's. It was, and it was a
 //! line-for-line reimplementation of the browser's, down to the depth
@@ -40,64 +42,10 @@ use std::collections::HashSet;
 
 use solarxy_graph::document::{Document, GraphContext, NodeId};
 use solarxy_graph::registry::Registry;
-use solarxy_studio::tree::TreeRow;
+use solarxy_studio::tree::{Crumb, TreeRow, subtree};
 
 use crate::gui::intent::{Intents, PanelIntent};
 use crate::gui::theme::Theme;
-
-/// One breadcrumb step: where it jumps to, and what it reads.
-pub(crate) struct Crumb {
-    pub ctx: GraphContext,
-    pub label: String,
-}
-
-/// Resolve a dived context to the rows it shows plus the breadcrumb back
-/// out. `None` when the context no longer exists in the tree, which is how
-/// a dive survives the scene it was made in being replaced: the caller
-/// falls back to the root instead of showing an empty panel.
-///
-/// The root crumb is always present and always first, so a dived view can
-/// always be escaped.
-pub(crate) fn find_subtree(
-    rows: &[TreeRow],
-    ctx: GraphContext,
-) -> Option<(&[TreeRow], Vec<Crumb>)> {
-    let mut crumbs = vec![Crumb {
-        ctx: GraphContext::Root,
-        label: "/obj".to_string(),
-    }];
-    if ctx == GraphContext::Root {
-        return Some((rows, crumbs));
-    }
-    descend(rows, ctx, &mut crumbs).map(|found| (found, crumbs))
-}
-
-/// Depth-first hunt for `ctx`, pushing a crumb on the way down and popping
-/// it on the way back up, so `crumbs` ends as the path to whatever is
-/// returned and is left untouched when nothing is.
-fn descend<'a>(
-    rows: &'a [TreeRow],
-    ctx: GraphContext,
-    crumbs: &mut Vec<Crumb>,
-) -> Option<&'a [TreeRow]> {
-    for row in rows {
-        if row.opens.is_none() {
-            continue;
-        }
-        crumbs.push(Crumb {
-            ctx: GraphContext::Subflow(row.node),
-            label: row.label.clone(),
-        });
-        if GraphContext::Subflow(row.node) == ctx {
-            return Some(&row.children);
-        }
-        if let Some(found) = descend(&row.children, ctx, crumbs) {
-            return Some(found);
-        }
-        crumbs.pop();
-    }
-    None
-}
 
 /// What the panel draws: the open document, or nothing.
 #[derive(Clone, Copy)]
@@ -162,11 +110,11 @@ pub(in crate::gui) fn draw_node_tree_content(
     let rows = solarxy_studio::tree::scene_tree(doc, registry);
     // A dive that no longer resolves falls back to the root rather than
     // leaving the panel blank with no way out.
-    if find_subtree(&rows, *ctx).is_none() {
+    if subtree(&rows, *ctx).is_none() {
         *ctx = GraphContext::Root;
         state.reset();
     }
-    let Some((visible, crumbs)) = find_subtree(&rows, *ctx) else {
+    let Some((visible, crumbs)) = subtree(&rows, *ctx) else {
         return;
     };
 
@@ -447,45 +395,5 @@ mod tests {
             .find(|r| r.node == geo)
             .expect("geo row present");
         assert!(container.children[0].bypassed);
-    }
-
-    #[test]
-    fn the_root_subtree_is_the_whole_tree_with_one_crumb() {
-        let (engine, _, _) = scene();
-        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
-
-        let (visible, crumbs) =
-            find_subtree(&rows, GraphContext::Root).expect("the root always resolves");
-        assert_eq!(visible.len(), rows.len());
-        assert_eq!(crumbs.len(), 1);
-        assert_eq!(crumbs[0].label, "/obj");
-        assert_eq!(crumbs[0].ctx, GraphContext::Root);
-    }
-
-    /// The breadcrumb is what gets a user back out, so it must always
-    /// start at the root and end at where they are.
-    #[test]
-    fn diving_yields_the_children_and_a_walkable_breadcrumb() {
-        let (engine, geo, leaf) = scene();
-        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
-
-        let (visible, crumbs) =
-            find_subtree(&rows, GraphContext::Subflow(geo)).expect("the geo subflow resolves");
-        assert_eq!(visible.len(), 1);
-        assert_eq!(visible[0].node, leaf);
-
-        assert_eq!(crumbs.len(), 2, "root, then the container dived into");
-        assert_eq!(crumbs[0].ctx, GraphContext::Root);
-        assert_eq!(crumbs[1].ctx, GraphContext::Subflow(geo));
-    }
-
-    /// The case that keeps a stale dive from blanking the panel: opening a
-    /// second scene leaves `NodeTreeState.ctx` pointing at a node the new
-    /// document does not have.
-    #[test]
-    fn a_context_outside_the_tree_does_not_resolve() {
-        let (engine, _, _) = scene();
-        let rows = solarxy_studio::tree::scene_tree(engine.document(), engine.registry());
-        assert!(find_subtree(&rows, GraphContext::Subflow(NodeId(9_999))).is_none());
     }
 }
