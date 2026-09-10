@@ -29,10 +29,14 @@
 
 mod art;
 mod glyphs;
+mod pins;
 mod seed;
 mod vector;
 mod viewer;
 
+use std::collections::HashMap;
+
+use solarxy_core::preferences::WireRouting;
 use solarxy_graph::document::{GraphContext, NodeId};
 
 pub(crate) use seed::{CanvasScene, CanvasSource, CanvasState, NodeCook};
@@ -55,6 +59,9 @@ pub(crate) enum CanvasAction {
     /// The trailing wing at the root: an object's additive `visible`
     /// param, which is an ordinary parameter edit and undoes like one.
     SetVisible(GraphContext, NodeId, bool),
+    /// The next wire routing. A reading preference, so it changes no
+    /// document state and adds nothing to the undo history.
+    CycleRouting,
 }
 
 /// Render the node canvas into `ui` (the `egui_dock` tab supplies it).
@@ -63,6 +70,7 @@ pub(in crate::gui) fn draw_nodes_content(
     source: CanvasSource<'_>,
     state: &mut CanvasState,
     ctx: &mut GraphContext,
+    routing: WireRouting,
     intents: &mut Intents,
     theme: Theme,
 ) {
@@ -91,13 +99,105 @@ pub(in crate::gui) fn draw_nodes_content(
         // Replaced before any node is drawn, by the substrate's own
         // transform hook.
         scale: 1.0,
+        routing,
+        boxes: state.boxes(),
+        sockets: HashMap::new(),
     };
     state
         .snarl_mut()
         .show(&mut canvas_viewer, &style, "solarxy-node-canvas", ui);
+    state.accept_frame(canvas_viewer.sockets, canvas_viewer.boxes);
+    mark_coercions(ui, doc, registry, *ctx, state, theme);
+
+    // Cycling the routing is a canvas-scoped binding rather than a global
+    // one: the same key types an `s` anywhere a field has focus, so it is
+    // claimed only while the pointer is over this panel and nothing is
+    // taking text.
+    let over = ui.rect_contains_pointer(ui.max_rect());
+    if over
+        && ui
+            .ctx()
+            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::S))
+    {
+        intents.panel(PanelIntent::Canvas(CanvasAction::CycleRouting));
+    }
 
     let released = ui.ctx().input(|i| i.pointer.any_released());
     read_back_positions(released, state, *ctx, intents);
+}
+
+/// Mark every wire that does not carry its value across unchanged.
+///
+/// **A pass of its own, and the substrate is why.** Colour already says
+/// what a wire carries, so a second channel is needed for what happens to
+/// the value on the way; the library declares a per-wire widget hook for
+/// exactly that and never calls it. It draws each wire itself in one
+/// colour and one routing, neither of which is free. So the marks are
+/// painted afterwards, at the midpoint of the two sockets the canvas
+/// recorded as it drew them, which is the same arithmetic the sockets
+/// themselves used and therefore lands on the wire rather than beside it.
+///
+/// Two marks, and neither is a colour: a coerced wire gets one tick
+/// across it, a lossy one gets two. A clean wire gets nothing, which is
+/// the common case and should stay quiet.
+fn mark_coercions(
+    ui: &egui::Ui,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: GraphContext,
+    state: &CanvasState,
+    theme: Theme,
+) {
+    let Ok(graph) = doc.graph(ctx) else {
+        return;
+    };
+    for edge in graph.edges() {
+        let (Some(from), Some(to)) = (graph.node(edge.from), graph.node(edge.to)) else {
+            continue;
+        };
+        let verdict = solarxy_studio::types::connection_verdict(
+            registry,
+            &from.type_id,
+            &edge.from_port,
+            &to.type_id,
+            &edge.to_port,
+        );
+        let ticks = match verdict.coercion {
+            Some(solarxy_graph::registry::coerce::Coercion::Lossy) => 2,
+            Some(solarxy_graph::registry::coerce::Coercion::Lossless) => 1,
+            _ => continue,
+        };
+        // A wire into a variadic port lands on the socket its edge
+        // order gives it, so the tick goes on the line it belongs to.
+        let occurrence = to
+            .port_order
+            .get(&edge.to_port)
+            .and_then(|order| order.iter().position(|e| *e == edge.id))
+            .unwrap_or(0);
+        let (Some(out), Some(inp)) = (
+            state.socket_key(edge.from, &edge.from_port, false, doc, registry, ctx, 0),
+            state.socket_key(edge.to, &edge.to_port, true, doc, registry, ctx, occurrence),
+        ) else {
+            continue;
+        };
+        let (Some(a), Some(b)) = (state.socket_at(&out), state.socket_at(&inp)) else {
+            continue;
+        };
+        paint_ticks(ui.painter(), a, b, ticks, theme);
+    }
+}
+
+/// One or two short strokes across a wire at its midpoint.
+fn paint_ticks(painter: &egui::Painter, a: egui::Pos2, b: egui::Pos2, ticks: usize, theme: Theme) {
+    let along = (b - a).normalized();
+    let across = egui::vec2(-along.y, along.x) * 4.0;
+    let mid = a + (b - a) * 0.5;
+    let stroke = egui::Stroke::new(1.5_f32, theme.fg);
+    for tick in 0..ticks {
+        #[allow(clippy::cast_precision_loss)]
+        let offset = along * ((tick as f32) - (ticks as f32 - 1.0) / 2.0) * 4.0;
+        painter.line_segment([mid + offset - across, mid + offset + across], stroke);
+    }
 }
 
 /// Turn whatever the substrate moved into one command, once the gesture
@@ -229,6 +329,7 @@ mod tests {
                     }),
                     state,
                     ctx,
+                    WireRouting::default(),
                     intents,
                     theme(),
                 );
@@ -396,6 +497,87 @@ mod tests {
         assert!(
             intents.take_ordered().is_empty(),
             "a twice-run frame must not move a node twice"
+        );
+    }
+
+    /// A variadic port shows one socket per wire plus one to grow into,
+    /// asked for every frame and answered from the document. A stored
+    /// count is what would let the canvas disagree with the wiring.
+    #[test]
+    fn a_variadic_port_grows_a_socket_as_its_last_one_fills() {
+        let (mut engine, geo, boxy, merge) = scene();
+        let ctx = GraphContext::Subflow(geo);
+        let slots =
+            |engine: &Engine| seed::input_slots(engine.document(), engine.registry(), ctx, merge);
+
+        // The scene already wired one box into the merge.
+        assert_eq!(slots(&engine).len(), 2, "one wire in, one socket spare");
+
+        let second = added(&mut engine, ctx, "sphere");
+        engine
+            .apply(Command::Connect {
+                ctx,
+                from: solarxy_graph::engine::PortRefDto {
+                    node: second,
+                    port: "geometry".to_string(),
+                },
+                to: solarxy_graph::engine::PortRefDto {
+                    node: merge,
+                    port: "inputs".to_string(),
+                },
+            })
+            .expect("a merge takes many inputs");
+        assert_eq!(slots(&engine).len(), 3, "the spare socket grew a new spare");
+
+        engine.apply(Command::Undo).expect("undo is available");
+        assert_eq!(slots(&engine).len(), 2, "and it shrinks back");
+
+        // A single-arity port never grows, however the graph changes.
+        assert_eq!(
+            seed::input_slots(engine.document(), engine.registry(), ctx, boxy).len(),
+            0,
+            "a box takes no geometry input"
+        );
+    }
+
+    /// Every socket the document declares gets a position, which is what
+    /// the wire marks are drawn between.
+    ///
+    /// **Two frames, deliberately.** The substrate draws a node's sockets
+    /// before it draws the node, so the box a socket sits on is one frame
+    /// behind. Asserting after a single frame passed while this was being
+    /// written, because egui had run that frame's closure twice for its
+    /// own reasons, which is not something to build on.
+    #[test]
+    fn every_declared_socket_is_placed_by_the_frame_after_the_first() {
+        let (engine, geo, _, _) = scene();
+        let mut state = CanvasState::default();
+        let mut ctx = GraphContext::Subflow(geo);
+        let mut intents = Intents::default();
+
+        for _ in 0..2 {
+            one_frame(
+                &engine,
+                &mut state,
+                &mut ctx,
+                &mut intents,
+                egui::RawInput::default(),
+            );
+        }
+
+        let graph = engine.document().graph(ctx).expect("the network exists");
+        let declared: usize = graph
+            .nodes()
+            .map(|n| {
+                seed::input_slots(engine.document(), engine.registry(), ctx, n.id).len()
+                    + seed::output_slots(engine.document(), engine.registry(), ctx, n.id).len()
+            })
+            .sum();
+        assert!(declared > 0, "the fixture declares no sockets at all");
+        assert_eq!(
+            state.socket_count(),
+            declared,
+            "the canvas placed a different number of sockets than the document declares"
         );
     }
 

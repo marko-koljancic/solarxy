@@ -189,7 +189,9 @@ step any more.
   - `panels/` - one module per dock tab: `sidebar`, `outliner`, `node_tree`, `properties`,
     `console`, `material_inspector`, `nodes/` (the node canvas: `mod` the panel, `seed` the
     mirror-to-substrate seed and the position read-back, `viewer` the substrate's view of one
-    graph, `art` how a node looks in every state, `glyphs` the 76 stroke paths held **verbatim**
+    graph, `pins` the sockets, placed on the box's top and bottom edges by hand because the substrate
+    puts them on the sides and its source says vertical layouts are still to come,
+    `art` how a node looks in every state, `glyphs` the 76 stroke paths held **verbatim**
     so they can be compared character for character against the browser's copy, and `vector` the
     path-subset flattener both of those draw through) and `review/` (panel, overlay, popup, and the
     `visuals` the first two share, because marker colour and panel chip colour are the

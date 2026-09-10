@@ -216,6 +216,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.sources.canvas,
                     self.panels.canvas,
                     self.panels.graph_ctx,
+                    self.sources.settings.canvas_routing,
                     self.intents,
                     self.theme,
                 );

@@ -76,6 +76,10 @@ pub(crate) struct PanelSettings<'a> {
     pub projection_mode: ProjectionMode,
     /// The header strip's cook readout, refreshed from the engine each frame.
     pub cook: CookReadout,
+    /// How the node canvas routes a wire. A reading preference rather
+    /// than anything about the document, which is why it sits with the
+    /// display settings and persists with them.
+    pub canvas_routing: solarxy_core::preferences::WireRouting,
 }
 
 impl PanelSettings<'_> {

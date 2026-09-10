@@ -612,6 +612,74 @@ pub struct Preferences {
     pub dock: DockPrefs,
     #[serde(default)]
     pub view: ViewPrefs,
+    #[serde(default)]
+    pub canvas: CanvasPrefs,
+}
+
+/// How a wire is routed between two sockets.
+///
+/// Four of them, and they are the four the browser offers, in the order it
+/// cycles them. Purely a reading preference: the routing changes nothing
+/// about what is connected, which is why it lives here rather than in the
+/// document.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WireRouting {
+    /// A curve that leaves each socket along the flow direction.
+    #[default]
+    Bezier,
+    /// The shortest path, which is the clearest reading of a dense graph
+    /// and the worst of a sparse one.
+    Straight,
+    /// A gentler curve than the default: fewer inflections, so a long
+    /// wire reads as one line rather than as an S.
+    SimpleBezier,
+    /// Right angles with rounded corners, for a reader who wants to trace
+    /// a wire through a crowd rather than see its shape.
+    SmoothStep,
+}
+
+impl WireRouting {
+    /// In the order the canvas cycles them.
+    pub const ALL: [Self; 4] = [
+        Self::Bezier,
+        Self::Straight,
+        Self::SimpleBezier,
+        Self::SmoothStep,
+    ];
+
+    /// The label a menu or a readout shows.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Bezier => "Bezier",
+            Self::Straight => "Straight",
+            Self::SimpleBezier => "Simple Bezier",
+            Self::SmoothStep => "Smooth Step",
+        }
+    }
+
+    /// The next routing in the cycle, wrapping.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Bezier => Self::Straight,
+            Self::Straight => Self::SimpleBezier,
+            Self::SimpleBezier => Self::SmoothStep,
+            Self::SmoothStep => Self::Bezier,
+        }
+    }
+}
+
+/// What the node canvas remembers between sessions.
+///
+/// Reading preferences only. Nothing here describes a document, which is
+/// what keeps a scene opening the same way on a machine that has never
+/// seen it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanvasPrefs {
+    #[serde(default)]
+    pub routing: WireRouting,
 }
 
 /// View-related preferences — currently the user's custom-background
@@ -852,6 +920,7 @@ impl Default for Preferences {
             review: ReviewPrefs::default(),
             dock: DockPrefs::default(),
             view: ViewPrefs::default(),
+            canvas: CanvasPrefs::default(),
         }
     }
 }
@@ -1073,6 +1142,12 @@ mod tests {
                     },
                 ],
                 next_custom_id: 2,
+            },
+            // Not the default, so a routing that failed to round-trip
+            // would come back as Bezier and be caught rather than agreeing
+            // with itself.
+            canvas: CanvasPrefs {
+                routing: WireRouting::SmoothStep,
             },
         };
         let toml_str = toml::to_string_pretty(&prefs).unwrap();

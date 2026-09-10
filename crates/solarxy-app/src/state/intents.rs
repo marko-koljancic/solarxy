@@ -585,6 +585,15 @@ impl State {
             // is re-emitted from its owning node on every cook, so a
             // renderer-side write would look right for one frame and be
             // undone by the next edit.
+            // Not an engine write at all: the routing is how wires are
+            // drawn, so it changes a preference and repaints.
+            CanvasAction::CycleRouting => {
+                self.preferences.canvas.routing = self.preferences.canvas.routing.next();
+                self.gui.set_toast(
+                    &format!("Wires: {}", self.preferences.canvas.routing.label()),
+                    crate::gui::ToastSeverity::Info,
+                );
+            }
             CanvasAction::SetVisible(ctx, node, visible) => {
                 self.apply_node_command(solarxy_graph::Command::SetParam {
                     ctx,

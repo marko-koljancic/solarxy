@@ -22,8 +22,12 @@
 //! applied to the layer, so a node's rect arrives already in the
 //! coordinates its art was authored in and nothing has to unproject.
 
-use egui::{Sense, Stroke, epaint::CornerRadiusF32};
-use egui_snarl::ui::{PinInfo, SnarlPin, SnarlViewer};
+use std::collections::HashMap;
+
+use egui::{Pos2, Sense, Stroke, epaint::CornerRadiusF32};
+use solarxy_core::preferences::WireRouting;
+use solarxy_studio::types::{HandleShape, PortSide};
+use egui_snarl::ui::{SnarlPin, SnarlViewer};
 use egui_snarl::{InPin, OutPin, Snarl};
 use solarxy_graph::cook::state::CookState;
 use solarxy_graph::document::{GraphContext, NodeData, NodeId};
@@ -31,7 +35,7 @@ use solarxy_graph::registry::{NodeRole, NodeTypeDescriptor};
 use solarxy_studio::types;
 
 use super::art::{self, NODE_BOX, NodeVisual};
-use super::seed::{CanvasNode, CanvasScene, NodeCook, input_slots, output_slots};
+use super::seed::{CanvasNode, CanvasScene, NodeCook, Slot, input_slots, output_slots};
 use crate::gui::intent::{Intents, PanelIntent};
 use crate::gui::theme::Theme;
 
@@ -56,6 +60,29 @@ pub(super) struct CanvasViewer<'a> {
     /// The canvas transform's scale, captured before any node is drawn.
     /// The label stack sheds rows by it.
     pub scale: f32,
+    /// How wires are routed, which is a reading preference rather than
+    /// anything about the document.
+    pub routing: WireRouting,
+    /// Each node's layout box as its own draw recorded it, so a socket
+    /// sits on the box's edge rather than on the side the substrate would
+    /// put it. Written by the header and read by the sockets, both within
+    /// one frame.
+    pub boxes: HashMap<egui_snarl::NodeId, egui::Rect>,
+    /// Where every socket drawn this frame ended up, so the pass after
+    /// the canvas can mark the wires between them. The substrate declares
+    /// a per-wire widget hook and never calls it, so a wire that narrows
+    /// its value has to be marked from outside.
+    pub sockets: HashMap<PinKey, Pos2>,
+}
+
+/// One socket, on the side it belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct PinKey {
+    pub node: egui_snarl::NodeId,
+    /// The side, as a flag rather than as the shared enum, which carries
+    /// no hash because nothing else ever needed one.
+    pub input: bool,
+    pub index: usize,
 }
 
 /// Everything one node needs drawn, gathered once and owned.
@@ -81,6 +108,114 @@ struct Painted {
 }
 
 impl CanvasViewer<'_> {
+    /// A port's declared wire type, through the shared lookup.
+    fn port_type(
+        &self,
+        id: NodeId,
+        slot: &Slot,
+        side: PortSide,
+    ) -> Option<solarxy_graph::registry::coerce::DataType> {
+        let type_id = &self.node_data(id)?.type_id;
+        types::port_data_type(self.scene.registry, type_id, &slot.port, side)
+    }
+
+    /// What a port says about itself, for the hover.
+    fn slot_doc(&self, id: NodeId, slot: &Slot, side: PortSide) -> Option<String> {
+        let desc = self.registry_descriptor(id)?;
+        let spec = match side {
+            PortSide::Input => desc.input(&slot.port),
+            PortSide::Output => desc.output(&slot.port),
+        }?;
+        let variadic = matches!(spec.arity, solarxy_graph::registry::Arity::Variadic { .. });
+        let mut title = format!(
+            "{} ({}",
+            spec.label,
+            format!("{:?}", spec.data_type).to_ascii_lowercase()
+        );
+        if variadic {
+            title.push_str(", variadic");
+        }
+        title.push(')');
+        if !spec.doc.is_empty() {
+            title.push('\n');
+            title.push_str(&spec.doc);
+        }
+        Some(title)
+    }
+
+    fn registry_descriptor(&self, id: NodeId) -> Option<&NodeTypeDescriptor> {
+        self.scene.registry.get(&self.node_data(id)?.type_id)
+    }
+
+    /// Build one socket, record where it landed, and hover it.
+    ///
+    /// The colour and the shape both come from the shared rules, so the
+    /// two shells cannot drift apart on what a wire type looks like; an
+    /// unknown type falls back to the text hue and a plain round socket,
+    /// which is what a shell reading a newer engine sees.
+    #[allow(clippy::too_many_arguments)]
+    fn socket(
+        &mut self,
+        node: egui_snarl::NodeId,
+        id: Option<NodeId>,
+        side: PortSide,
+        index: usize,
+        ui: &mut egui::Ui,
+    ) -> super::pins::EdgePin {
+        let slots = id.map(|id| match side {
+            PortSide::Input => input_slots(self.scene.doc, self.scene.registry, self.ctx, id),
+            PortSide::Output => output_slots(self.scene.doc, self.scene.registry, self.ctx, id),
+        });
+        let count = slots.as_ref().map_or(1, Vec::len).max(1);
+        let slot = slots.as_ref().and_then(|s| s.get(index));
+        let data_type = id
+            .zip(slot)
+            .and_then(|(id, slot)| self.port_type(id, slot, side));
+        let hover = id
+            .zip(slot)
+            .and_then(|(id, slot)| self.slot_doc(id, slot, side));
+        let palette = solarxy_core::theme::Palette::for_dark(self.theme.dark);
+        let (shape, fill) = data_type.map_or((HandleShape::Round, self.theme.muted), |dt| {
+            let rgb = types::wire_color(dt, &palette);
+            (
+                types::handle_shape(dt),
+                egui::Color32::from_rgb(rgb.r, rgb.g, rgb.b),
+            )
+        });
+        let box_rect = self.boxes.get(&node).copied();
+        if let Some(rect) = box_rect {
+            self.sockets.insert(
+                PinKey {
+                    node,
+                    input: side == PortSide::Input,
+                    index,
+                },
+                super::pins::centre(rect, side, index, count),
+            );
+        }
+        if let (Some(rect), Some(text)) = (box_rect, hover) {
+            let at = super::pins::centre(rect, side, index, count);
+            let target = egui::Rect::from_center_size(at, egui::Vec2::splat(12.0));
+            ui.interact(
+                target,
+                ui.id()
+                    .with(("socket", node, side == PortSide::Input, index)),
+                Sense::hover(),
+            )
+            .on_hover_text(text);
+        }
+        super::pins::EdgePin {
+            box_rect,
+            side,
+            index,
+            count,
+            shape,
+            fill,
+            border: self.theme.bg_elevated,
+            wire_style: routing_style(self.routing),
+        }
+    }
+
     fn node_data(&self, id: NodeId) -> Option<&NodeData> {
         self.scene.doc.graph(self.ctx).ok().and_then(|g| g.node(id))
     }
@@ -211,6 +346,9 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
             return;
         };
         let (box_rect, _) = ui.allocate_exact_size(NODE_BOX, Sense::hover());
+        // Recorded before the sockets are drawn, so each one can sit on
+        // this box's edge rather than on the side the substrate expects.
+        self.boxes.insert(node, box_rect);
         let Some(painted) = self.gather(id) else {
             return;
         };
@@ -241,20 +379,22 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
 
     fn show_input(
         &mut self,
-        _pin: &InPin,
-        _ui: &mut egui::Ui,
-        _snarl: &mut Snarl<CanvasNode>,
+        pin: &InPin,
+        ui: &mut egui::Ui,
+        snarl: &mut Snarl<CanvasNode>,
     ) -> impl SnarlPin + 'static {
-        PinInfo::circle()
+        let id = snarl.get_node(pin.id.node).map(|n| n.id);
+        self.socket(pin.id.node, id, PortSide::Input, pin.id.input, ui)
     }
 
     fn show_output(
         &mut self,
-        _pin: &OutPin,
-        _ui: &mut egui::Ui,
-        _snarl: &mut Snarl<CanvasNode>,
+        pin: &OutPin,
+        ui: &mut egui::Ui,
+        snarl: &mut Snarl<CanvasNode>,
     ) -> impl SnarlPin + 'static {
-        PinInfo::circle()
+        let id = snarl.get_node(pin.id.node).map(|n| n.id);
+        self.socket(pin.id.node, id, PortSide::Output, pin.id.output, ui)
     }
 
     fn has_body(&mut self, _node: &CanvasNode) -> bool {
@@ -534,4 +674,74 @@ fn authored_description(data: &NodeData) -> Option<String> {
     };
     let trimmed = text.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// The routing a wire is drawn with.
+///
+/// The four the browser offers map one to one onto the four the substrate
+/// draws, which is the whole of the translation: a straight line, two
+/// curve degrees and right angles with rounded corners.
+fn routing_style(routing: WireRouting) -> egui_snarl::ui::WireStyle {
+    match routing {
+        WireRouting::Bezier => egui_snarl::ui::WireStyle::Bezier5,
+        WireRouting::Straight => egui_snarl::ui::WireStyle::Line,
+        WireRouting::SimpleBezier => egui_snarl::ui::WireStyle::Bezier3,
+        WireRouting::SmoothStep => egui_snarl::ui::WireStyle::AxisAligned { corner_radius: 8.0 },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solarxy_graph::registry::coerce::DataType;
+
+    /// Four routings, four distinct drawings. Two of them collapsing onto
+    /// one style would make a menu entry a lie.
+    #[test]
+    fn the_four_routings_are_four_distinct_drawings() {
+        let styles: Vec<_> = WireRouting::ALL.into_iter().map(routing_style).collect();
+        for (i, a) in styles.iter().enumerate() {
+            for b in &styles[i + 1..] {
+                assert_ne!(a, b, "two routings draw the same wire");
+            }
+        }
+        assert_eq!(styles.len(), 4);
+    }
+
+    /// The cycle visits every routing and comes back, so pressing the key
+    /// four times is where you started.
+    #[test]
+    fn the_routing_cycle_closes() {
+        let mut seen = vec![WireRouting::default()];
+        let mut at = WireRouting::default();
+        for _ in 0..3 {
+            at = at.next();
+            assert!(!seen.contains(&at), "the cycle repeats before it closes");
+            seen.push(at);
+        }
+        assert_eq!(at.next(), WireRouting::default());
+        assert_eq!(seen.len(), WireRouting::ALL.len());
+    }
+
+    /// A socket's two channels both come from the shared rules, and a
+    /// reader who cannot tell two hues apart is who the second one is
+    /// for: every data type must be told from every other by colour, by
+    /// shape, or by both.
+    #[test]
+    fn every_wire_type_is_told_apart_by_colour_or_by_shape() {
+        let palette = solarxy_core::theme::Palette::dark();
+        let signature = |dt: DataType| {
+            let rgb = types::wire_color(dt, &palette);
+            ((rgb.r, rgb.g, rgb.b), types::handle_shape(dt))
+        };
+        for (i, a) in DataType::ALL.into_iter().enumerate() {
+            for b in DataType::ALL.into_iter().skip(i + 1) {
+                assert_ne!(
+                    signature(a),
+                    signature(b),
+                    "{a:?} and {b:?} draw identically on both channels"
+                );
+            }
+        }
+    }
 }

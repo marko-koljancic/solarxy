@@ -199,6 +199,21 @@ pub(crate) struct CanvasState {
     seeded: Option<Seeded>,
     /// Positions as last seeded, which is what a read-back diffs against.
     seeded_pos: HashMap<NodeId, [f32; 2]>,
+    /// Where every socket landed on the last frame, handed over once the
+    /// canvas has drawn. The marker pass reads it, and a test reads it to
+    /// assert that every declared socket got a position.
+    sockets: HashMap<super::viewer::PinKey, egui::Pos2>,
+    /// Each node's layout box, as its own draw recorded it.
+    ///
+    /// **One frame behind, and it has to be**: the substrate draws a
+    /// node's sockets before it draws the node, so a socket asking where
+    /// its box is this frame gets no answer. The box is a fixed size and
+    /// a node moves only by a drag the canvas is already watching, so a
+    /// frame of latency is invisible; the pass a node first appears in
+    /// falls through to the geometry recovered from what the socket is
+    /// handed, which `the_fallback_recovers_the_box_from_the_edge_it_is_given`
+    /// pins.
+    boxes: HashMap<egui_snarl::NodeId, egui::Rect>,
 }
 
 impl Default for CanvasState {
@@ -208,6 +223,8 @@ impl Default for CanvasState {
             to_snarl: HashMap::new(),
             seeded: None,
             seeded_pos: HashMap::new(),
+            sockets: HashMap::new(),
+            boxes: HashMap::new(),
         }
     }
 }
@@ -221,6 +238,8 @@ impl CanvasState {
         self.to_snarl.clear();
         self.seeded = None;
         self.seeded_pos.clear();
+        self.sockets.clear();
+        self.boxes.clear();
     }
 
     /// The substrate's graph, for the frame that draws it.
@@ -307,6 +326,72 @@ impl CanvasState {
             }
         }
         moves
+    }
+
+    /// Take over what the frame just drew: where every socket landed,
+    /// and where every node's box was.
+    pub(super) fn accept_frame(
+        &mut self,
+        sockets: HashMap<super::viewer::PinKey, egui::Pos2>,
+        boxes: HashMap<egui_snarl::NodeId, egui::Rect>,
+    ) {
+        self.sockets = sockets;
+        self.boxes = boxes;
+    }
+
+    /// The boxes the previous frame recorded, for the sockets this one
+    /// draws.
+    pub(super) fn boxes(&self) -> HashMap<egui_snarl::NodeId, egui::Rect> {
+        self.boxes.clone()
+    }
+
+    /// Where a socket landed, or `None` on the frame before it was first
+    /// drawn.
+    pub(super) fn socket_at(&self, key: &super::viewer::PinKey) -> Option<egui::Pos2> {
+        self.sockets.get(key).copied()
+    }
+
+    /// How many sockets the last frame placed. Zero before the first
+    /// frame, and after that the number the document declares.
+    ///
+    /// Nothing in the shipped path asks: the marker pass looks sockets up
+    /// one at a time. It exists so a test can assert that the canvas
+    /// placed every socket the document declares rather than none, which
+    /// is the failure the box handover actually has.
+    #[cfg(test)]
+    pub(super) fn socket_count(&self) -> usize {
+        self.sockets.len()
+    }
+
+    /// The socket one end of an edge lands on, as the marker pass keys
+    /// them.
+    ///
+    /// The occurrence within a variadic port is what makes this more than
+    /// a port lookup: a merge's third wire arrives at its third socket,
+    /// and marking the first would put the tick on the wrong line.
+    pub(super) fn socket_key(
+        &self,
+        node: NodeId,
+        port: &str,
+        input: bool,
+        doc: &Document,
+        registry: &Registry,
+        ctx: GraphContext,
+        occurrence: usize,
+    ) -> Option<super::viewer::PinKey> {
+        let slots = if input {
+            input_slots(doc, registry, ctx, node)
+        } else {
+            output_slots(doc, registry, ctx, node)
+        };
+        let index = slots
+            .iter()
+            .position(|s| s.port == port && s.occurrence == occurrence)?;
+        Some(super::viewer::PinKey {
+            node: *self.to_snarl.get(&node)?,
+            input,
+            index,
+        })
     }
 
     /// Accept a set of moves as the new baseline, so the frame after a
