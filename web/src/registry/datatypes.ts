@@ -42,15 +42,32 @@ export const DATA_TYPE_COLOR: Record<DataType, string> = {
  *
  * Until 0.10.0 all three vectors were round, so they were identical on
  * both channels while converting to each other in no direction at all:
- * three handles that looked the same and refused to connect. */
-export type HandleShape = "round" | "diamond" | "bar" | "triangle" | "square" | "hexagon";
+ * three handles that looked the same and refused to connect. `image` and
+ * `material` shared the hexagon for the same reason and were separated at
+ * the same time.
+ *
+ * `round` is the only shape that makes no claim. Every other one names a
+ * type, or a set of types that convert to each other freely. */
+export type HandleShape =
+  | "round"
+  | "diamond"
+  | "bar"
+  | "triangle"
+  | "square"
+  | "hexagon"
+  | "ring";
 
 export function dataTypeShape(dt: DataType): HandleShape {
   if (dt === "int") return "diamond";
   if (dt === "vec2") return "bar";
   if (dt === "vec3") return "triangle";
   if (dt === "vec4" || dt === "color") return "square";
-  if (dt === "image" || dt === "material") return "hexagon";
+  if (dt === "image") return "hexagon";
+  // A hollow circle: a material port names a shading network rather than
+  // carrying pixels. It shared the hexagon with image until 0.10.0, and
+  // the two convert in neither direction, so the shared mark said two
+  // things to anyone reading shape rather than hue.
+  if (dt === "material") return "ring";
   return "round";
 }
 

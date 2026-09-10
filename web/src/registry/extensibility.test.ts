@@ -152,6 +152,10 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     // Distinct hue and the resource (hexagon) shape.
     expect(DATA_TYPE_COLOR[map!]).toBeDefined();
     expect(dataTypeShape(map!)).toBe("hexagon");
+    // Material is a ring, not the hexagon it used to share: the two
+    // convert in neither direction, so one mark for both told a reader
+    // going by shape that they were interchangeable.
+    expect(dataTypeShape("material")).toBe("ring");
     // Image wires only into Image; nothing coerces across.
     expect(coercionKind(SNAP, "image", "image")).toBe("same");
     expect(coercionKind(SNAP, "image", "geometry")).toBeNull();

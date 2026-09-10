@@ -85,6 +85,9 @@ function handleStyle(color: string, shape: string, side: "in" | "out"): React.CS
       clipPath: "polygon(50% 0%, 100% 100%, 0% 100%)",
       border: "none",
     };
+  if (shape === "ring")
+    // A hollow circle: the type colour is the ring, not the fill.
+    return { ...base, background: "var(--handle-border)", border: `3px solid ${color}`, borderRadius: "50%" };
   if (shape === "hexagon")
     return {
       ...base,

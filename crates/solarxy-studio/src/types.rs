@@ -27,6 +27,10 @@ use solarxy_graph::registry::{Category, NodeRole, Registry};
 /// same square, which is honest rather than a collision, because a colour
 /// is an RGBA four-vector and the two convert in both directions without
 /// loss.
+///
+/// `Round` is the only shape that makes no claim, and six unrelated
+/// families carry it. Every other shape identifies one type, or a set of
+/// types that convert to each other freely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HandleShape {
@@ -39,6 +43,9 @@ pub enum HandleShape {
     /// Four components.
     Square,
     Hexagon,
+    /// A hollow circle, for a value that names something rather than
+    /// carrying it.
+    Ring,
 }
 
 /// The handle shape for a data type.
@@ -49,7 +56,8 @@ pub fn handle_shape(data_type: DataType) -> HandleShape {
         DataType::Vec2 => HandleShape::Bar,
         DataType::Vec3 => HandleShape::Triangle,
         DataType::Vec4 | DataType::Color => HandleShape::Square,
-        DataType::Image | DataType::Material => HandleShape::Hexagon,
+        DataType::Image => HandleShape::Hexagon,
+        DataType::Material => HandleShape::Ring,
         _ => HandleShape::Round,
     }
 }
@@ -306,55 +314,66 @@ mod tests {
     }
 
     #[test]
-    fn shape_alone_does_not_identify_a_type_and_the_sharing_is_stated() {
+    fn a_shape_other_than_round_identifies_one_type_or_an_interchangeable_set() {
         // Thirteen types cannot have thirteen shapes legible at handle
-        // size, so shape narrows rather than identifies, and hue finishes
-        // the job. This pins which shapes are shared so the limit is a
-        // recorded fact rather than something a reader has to rediscover.
+        // size, so `Round` is the shape that makes no claim: six unrelated
+        // families carry it and hue is what separates them. Every OTHER
+        // shape has to mean something, which means the types carrying it
+        // must convert to each other freely, or a reader who cannot use
+        // hue is being told two things by one mark.
         //
-        // `Round` is the absence of a claim: six unrelated families carry
-        // it. `Hexagon` is a real claim, "a resource", carried by two types
-        // that convert in neither direction, so a reader who cannot use hue
-        // cannot tell an image port from a material one. That is milder
-        // than what the vectors had, since those were identical on BOTH
-        // channels, but it is the same shape of gap and it is left standing
-        // deliberately rather than overlooked.
-        let mut groups: std::collections::BTreeMap<String, Vec<String>> =
+        // Two pairs failed this before 0.10.0. The vectors were identical
+        // on both channels while converting in no direction; image and
+        // material shared the hexagon while converting in no direction.
+        let mut groups: std::collections::BTreeMap<String, Vec<DataType>> =
             std::collections::BTreeMap::new();
         for dt in DataType::ALL {
             groups
                 .entry(format!("{:?}", handle_shape(dt)))
                 .or_default()
-                .push(format!("{dt:?}"));
+                .push(dt);
         }
-        let shared: Vec<(String, Vec<String>)> = groups
-            .into_iter()
-            .filter(|(_, types)| types.len() > 1)
-            .collect();
-        assert_eq!(
-            shared,
-            vec![
-                (
-                    "Hexagon".to_string(),
-                    vec!["Image".to_string(), "Material".to_string()]
-                ),
-                (
-                    "Round".to_string(),
-                    vec![
-                        "Geometry".to_string(),
-                        "Light".to_string(),
-                        "Report".to_string(),
-                        "Float".to_string(),
-                        "Bool".to_string(),
-                        "Text".to_string(),
-                    ]
-                ),
-                (
-                    "Square".to_string(),
-                    vec!["Vec4".to_string(), "Color".to_string()]
-                ),
-            ]
-        );
+        for (shape, types) in groups {
+            if shape == "Round" || types.len() < 2 {
+                continue;
+            }
+            for a in &types {
+                for b in &types {
+                    if a == b {
+                        continue;
+                    }
+                    let both_ways = solarxy_graph::registry::coerce::can_coerce(*a, *b).is_legal()
+                        && solarxy_graph::registry::coerce::can_coerce(*b, *a).is_legal();
+                    assert!(
+                        both_ways,
+                        "{a:?} and {b:?} both carry the {shape} handle but do not convert \
+                         both ways, so one mark says two things"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn round_is_the_only_shape_more_than_one_family_shares() {
+        let mut shared: Vec<String> = Vec::new();
+        let mut groups: std::collections::BTreeMap<String, Vec<DataType>> =
+            std::collections::BTreeMap::new();
+        for dt in DataType::ALL {
+            groups
+                .entry(format!("{:?}", handle_shape(dt)))
+                .or_default()
+                .push(dt);
+        }
+        for (shape, types) in groups {
+            let families: std::collections::BTreeSet<&str> =
+                types.iter().map(|dt| wire_token(*dt)).collect();
+            if families.len() > 1 {
+                shared.push(shape);
+            }
+        }
+        // `Square` is the deliberate one: a colour is a four-vector.
+        assert_eq!(shared, ["Round", "Square"]);
     }
 
     #[test]
