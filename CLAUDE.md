@@ -192,7 +192,9 @@ step any more.
     The modules are: `sidebar`, `outliner`, `node_tree`, `properties`,
     `console`, `material_inspector`, `nodes/` (the node canvas: `mod` the panel, `seed` the
     mirror-to-substrate seed and the position read-back, `viewer` the substrate's view of one
-    graph, `radial` the hover ring, six operations at fixed directions with the ones that do not apply
+    graph, `layout` the hand-rolled layered tidy raising one move command, `list` the same graph read
+    as rows with the same selection and the same six operations, `chrome` the toolbar, the
+    overview inset, the zoom readout and the eighteen-pixel snap, `radial` the hover ring, six operations at fixed directions with the ones that do not apply
     drawn disabled rather than dropped, so the geometry is stable enough to become muscle memory,
     `pins` the sockets, placed on the box's top and bottom edges by hand because the substrate
     puts them on the sides and its source says vertical layouts are still to come,

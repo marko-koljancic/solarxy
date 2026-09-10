@@ -225,6 +225,14 @@ pub(crate) struct CanvasState {
     pub(super) rename: Option<(NodeId, String)>,
     /// The node whose info card is open.
     pub(super) info: Option<NodeId>,
+    /// Whether this canvas is showing rows rather than a graph.
+    ///
+    /// Per session rather than per document: it is how a user prefers to
+    /// read, not a fact about the scene, so it does not travel in a
+    /// `.slxy` and does not make a scene open differently elsewhere.
+    pub(super) list_view: bool,
+    /// The note being edited, and the text so far.
+    pub(super) note_edit: Option<(NodeId, String)>,
     /// The substrate's own selected set as the previous frame left it.
     ///
     /// **Read as a change rather than as a value**, because the
@@ -234,6 +242,18 @@ pub(crate) struct CanvasState {
     /// every frame; treating a *change* in it as a gesture is what makes
     /// box selection work without that fight.
     substrate_selection: Vec<egui_snarl::NodeId>,
+    /// The canvas scale as the last frame's transform reported it, for
+    /// the readout that shows it.
+    scale: f32,
+    /// A zoom the toolbar asked for, applied on the next frame through
+    /// the substrate's own transform hook.
+    ///
+    /// The hook takes the transform mutably and stores what it is handed,
+    /// which is the only way in: the transform lives in egui's memory
+    /// behind a private type, so it is written through the substrate
+    /// rather than around it.
+    pending_view: Option<super::chrome::ZoomStep>,
+    pending_fit: bool,
     /// Each node's layout box, as its own draw recorded it.
     ///
     /// **One frame behind, and it has to be**: the substrate draws a
@@ -260,6 +280,11 @@ impl Default for CanvasState {
             radial: None,
             rename: None,
             info: None,
+            list_view: false,
+            note_edit: None,
+            scale: 1.0,
+            pending_view: None,
+            pending_fit: false,
             substrate_selection: Vec::new(),
             boxes: HashMap::new(),
         }
@@ -282,6 +307,7 @@ impl CanvasState {
         self.radial = None;
         self.rename = None;
         self.info = None;
+        self.note_edit = None;
         self.boxes.clear();
     }
 
@@ -464,6 +490,40 @@ impl CanvasState {
     ) -> Option<egui::Rect> {
         let key = self.to_snarl.get(&node)?;
         self.boxes.get(key).map(|rect| to_screen * *rect)
+    }
+
+    /// The scale the last frame drew at.
+    pub(super) fn last_scale(&self) -> f32 {
+        self.scale
+    }
+
+    /// Remember what the toolbar asked of the view.
+    pub(super) fn request_view(&mut self, zoom: Option<super::chrome::ZoomStep>, fit: bool) {
+        if zoom.is_some() {
+            self.pending_view = zoom;
+        }
+        self.pending_fit |= fit;
+    }
+
+    /// Hand the frame's transform back, and take whatever the toolbar
+    /// asked of it.
+    pub(super) fn exchange_view(&mut self, scale: f32) -> (Option<super::chrome::ZoomStep>, bool) {
+        self.scale = scale;
+        (
+            self.pending_view.take(),
+            std::mem::take(&mut self.pending_fit),
+        )
+    }
+
+    /// Every node's box in graph space, for a fit.
+    pub(super) fn graph_extent(&self) -> Option<egui::Rect> {
+        let mut bounds: Option<egui::Rect> = None;
+        for (_, _, _) in self.snarl.nodes_pos_ids() {}
+        for (_, pos, _) in self.snarl.nodes_pos_ids() {
+            let rect = egui::Rect::from_min_size(pos, super::art::NODE_BOX);
+            bounds = Some(bounds.map_or(rect, |b: egui::Rect| b.union(rect)));
+        }
+        bounds
     }
 
     pub(super) fn radial(&self) -> Option<super::radial::Radial> {

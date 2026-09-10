@@ -676,10 +676,42 @@ impl WireRouting {
 /// Reading preferences only. Nothing here describes a document, which is
 /// what keeps a scene opening the same way on a machine that has never
 /// seen it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CanvasPrefs {
     #[serde(default)]
     pub routing: WireRouting,
+    /// The background grid. On by default, because a graph with nothing
+    /// behind it gives the eye no sense of how far it has panned.
+    #[serde(default = "yes")]
+    pub grid: bool,
+    /// Snap a dragged node to the grid on release. Off by default,
+    /// matching the browser: a graph is read by flow rather than by
+    /// alignment, and a user who wants alignment has auto-layout.
+    #[serde(default)]
+    pub snap: bool,
+    /// The overview inset. Off by default: it costs a corner of the
+    /// canvas and earns it only on a graph too large to see.
+    #[serde(default)]
+    pub minimap: bool,
+    /// The zoom readout and its buttons.
+    #[serde(default = "yes")]
+    pub controls: bool,
+}
+
+const fn yes() -> bool {
+    true
+}
+
+impl Default for CanvasPrefs {
+    fn default() -> Self {
+        Self {
+            routing: WireRouting::default(),
+            grid: true,
+            snap: false,
+            minimap: false,
+            controls: true,
+        }
+    }
 }
 
 /// View-related preferences — currently the user's custom-background
@@ -1148,6 +1180,10 @@ mod tests {
             // with itself.
             canvas: CanvasPrefs {
                 routing: WireRouting::SmoothStep,
+                grid: false,
+                snap: true,
+                minimap: true,
+                controls: false,
             },
         };
         let toml_str = toml::to_string_pretty(&prefs).unwrap();

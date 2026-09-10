@@ -28,7 +28,10 @@
 //! [`Command::MoveNodes`]: solarxy_graph::Command::MoveNodes
 
 mod art;
+mod chrome;
 mod glyphs;
+mod layout;
+mod list;
 mod pins;
 mod radial;
 mod seed;
@@ -37,10 +40,10 @@ mod viewer;
 
 use std::collections::HashMap;
 
-use solarxy_core::preferences::WireRouting;
 use solarxy_graph::document::{EdgeId, GraphContext, NodeId};
 use solarxy_graph::engine::PortRefDto;
 
+pub(crate) use chrome::Toggle as CanvasToggle;
 pub(crate) use seed::{CanvasScene, CanvasSource, CanvasState, NodeCook};
 
 use crate::gui::intent::{Intents, PanelIntent};
@@ -67,6 +70,8 @@ pub(crate) enum CanvasAction {
     SetSelection(GraphContext, Vec<NodeId>),
     /// Remove the selection, in one command and therefore one undo step.
     RemoveNodes(GraphContext, Vec<NodeId>),
+    /// A canvas reading preference the toolbar toggled.
+    ToggleChrome(chrome::Toggle),
     /// A node's name, which is an ordinary parameter and undoes like one.
     Rename(GraphContext, NodeId, String),
     /// The next wire routing. A reading preference, so it changes no
@@ -96,15 +101,17 @@ pub(crate) enum CanvasAction {
 }
 
 /// Render the node canvas into `ui` (the `egui_dock` tab supplies it).
+#[allow(clippy::too_many_arguments)]
 pub(in crate::gui) fn draw_nodes_content(
     ui: &mut egui::Ui,
     source: CanvasSource<'_>,
     state: &mut CanvasState,
     ctx: &mut GraphContext,
-    routing: WireRouting,
+    prefs: solarxy_core::preferences::CanvasPrefs,
     intents: &mut Intents,
     theme: Theme,
 ) {
+    let routing = prefs.routing;
     let CanvasSource::Scene(scene) = source else {
         state.reset();
         return draw_placeholder(ui, "No document open");
@@ -118,11 +125,36 @@ pub(in crate::gui) fn draw_nodes_content(
     // context whose graph survives its owner passes that check and fails
     // this one.
     draw_breadcrumb(ui, doc, registry, ctx, state, theme);
+    let request = chrome::toolbar(ui, prefs, state.list_view, state.last_scale(), theme);
+    apply_chrome_request(request, doc, registry, *ctx, state, intents);
+
+    // Rows rather than a graph: the same document, the same selection and
+    // the same six operations, read as a list because finding one node
+    // among sixty is a scan rather than a search of a plane.
+    if state.list_view {
+        let picked = list::draw(ui, doc, registry, *ctx, scene.cook, intents, theme);
+        apply_row(picked, doc, registry, *ctx, state, ctx, intents);
+        draw_rename(
+            ui,
+            doc,
+            registry,
+            *ctx,
+            state,
+            egui::emath::TSTransform::IDENTITY,
+            intents,
+            theme,
+        );
+        draw_info(ui, doc, registry, *ctx, state, theme);
+        return;
+    }
 
     let pointer_down = ui.ctx().input(|i| i.pointer.any_down());
     state.seed_if_stale(doc, registry, *ctx, scene.revision, pointer_down);
 
-    let style = canvas_style(theme);
+    let (zoom, fit) = state.exchange_view(state.last_scale());
+    let extent = fit.then(|| state.graph_extent()).flatten();
+    let viewport = ui.max_rect();
+    let style = canvas_style(theme, prefs);
     let mut canvas_viewer = viewer::CanvasViewer {
         scene,
         ctx: *ctx,
@@ -139,6 +171,9 @@ pub(in crate::gui) fn draw_nodes_content(
         clicked: None,
         hovered: None,
         to_screen: egui::emath::TSTransform::IDENTITY,
+        zoom,
+        extent,
+        viewport,
     };
     state
         .snarl_mut()
@@ -158,6 +193,11 @@ pub(in crate::gui) fn draw_nodes_content(
 
     state.accept_frame(sockets, boxes);
     mark_coercions(ui, doc, registry, *ctx, state, theme);
+    if prefs.minimap
+        && let Ok(graph) = doc.graph(*ctx)
+    {
+        chrome::minimap(ui, viewport, graph, registry, viewport, to_screen, theme);
+    }
 
     let released = ui.ctx().input(|i| i.pointer.any_released());
     resolve_rewiring(pending, state, *ctx, released, intents);
@@ -204,7 +244,7 @@ pub(in crate::gui) fn draw_nodes_content(
     {
         state.cancel_drag();
     }
-    read_back_positions(released, state, *ctx, intents);
+    read_back_positions(released, prefs.snap, state, *ctx, intents);
 }
 
 /// Turn the frame's rewiring gestures into at most one command batch.
@@ -263,6 +303,68 @@ fn resolve_rewiring(
         remove,
         add: pending.connect,
     }));
+}
+
+/// Apply whatever the toolbar asked for.
+///
+/// The toggles go through the queue so a preference is written and saved
+/// in one place; the view swap and the zoom are the canvas's own, since
+/// neither is a preference nor a document change.
+#[allow(clippy::fn_params_excessive_bools)]
+fn apply_chrome_request(
+    request: chrome::ChromeRequest,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: GraphContext,
+    state: &mut CanvasState,
+    intents: &mut Intents,
+) {
+    if request.layout
+        && let Ok(graph) = doc.graph(ctx)
+    {
+        let moves = layout::layered(graph, registry);
+        if !moves.is_empty() {
+            // One command for the whole tidy, which is what makes it one
+            // undo entry rather than one per node.
+            intents.panel(PanelIntent::Canvas(CanvasAction::MoveNodes(ctx, moves)));
+        }
+    }
+    if let Some(toggle) = request.toggled {
+        intents.panel(PanelIntent::Canvas(CanvasAction::ToggleChrome(toggle)));
+    }
+    if request.view {
+        state.list_view = !state.list_view;
+    }
+    state.request_view(request.zoom, request.fit);
+}
+
+/// Turn a list row's action into the same thing the ring would do.
+#[allow(clippy::too_many_arguments)]
+fn apply_row(
+    picked: Option<list::RowAction>,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: GraphContext,
+    state: &mut CanvasState,
+    ctx_out: &mut GraphContext,
+    intents: &mut Intents,
+) {
+    let wedge = match picked {
+        Some(list::RowAction::Select(node)) => {
+            intents.panel(PanelIntent::Canvas(CanvasAction::SetSelection(
+                ctx,
+                vec![node],
+            )));
+            return;
+        }
+        Some(list::RowAction::Rename(node)) => Some((radial::Wedge::Rename, node)),
+        Some(list::RowAction::Dive(node)) => Some((radial::Wedge::Dive, node)),
+        Some(list::RowAction::Info(node)) => Some((radial::Wedge::Info, node)),
+        Some(list::RowAction::Bypass(node, _)) => Some((radial::Wedge::Bypass, node)),
+        Some(list::RowAction::Delete(node)) => Some((radial::Wedge::Delete, node)),
+        None => None,
+    };
+    apply_wedge(wedge, doc, registry, ctx, state, ctx_out, intents);
 }
 
 /// The path into the network being shown, and the way back out.
@@ -778,6 +880,7 @@ fn resolve_selection(
 /// twice.
 fn read_back_positions(
     released: bool,
+    snap: bool,
     state: &mut CanvasState,
     ctx: GraphContext,
     intents: &mut Intents,
@@ -785,9 +888,18 @@ fn read_back_positions(
     if !released {
         return;
     }
-    let moves = state.moved_nodes();
+    let mut moves = state.moved_nodes();
     if moves.is_empty() {
         return;
+    }
+    // Snapped at the commit rather than during the drag, which is where
+    // the two shells differ and not in a way anybody sees: the browser
+    // snaps the node under the pointer, this snaps what the document
+    // records, and the document ends up holding the same numbers.
+    if snap {
+        for (_, position) in &mut moves {
+            *position = chrome::snap(*position);
+        }
     }
     state.accept_moves(&moves);
     intents.panel(PanelIntent::Canvas(CanvasAction::MoveNodes(ctx, moves)));
@@ -795,9 +907,21 @@ fn read_back_positions(
 
 /// The substrate's own style. Colour comes from the shared palette through
 /// the theme adapter; nothing here authors one.
-fn canvas_style(theme: Theme) -> egui_snarl::ui::SnarlStyle {
+fn canvas_style(
+    theme: Theme,
+    prefs: solarxy_core::preferences::CanvasPrefs,
+) -> egui_snarl::ui::SnarlStyle {
     let mut style = egui_snarl::ui::SnarlStyle::new();
+    style.bg_pattern = Some(if prefs.grid {
+        egui_snarl::ui::BackgroundPattern::new()
+    } else {
+        egui_snarl::ui::BackgroundPattern::NoPattern
+    });
     style.bg_pattern_stroke = Some(egui::Stroke::new(1.0_f32, theme.border));
+    // Sockets on the box's edges, which is what the placement override
+    // needs: an edge placement is the one that hands a pin the node's own
+    // left or right edge rather than an inset from it.
+    style.pin_placement = Some(egui_snarl::ui::PinPlacement::Edge);
     style.select_stoke = Some(egui::Stroke::new(1.0_f32, theme.accent));
     style.select_fill = Some(theme.accent.linear_multiply(0.12));
     // Double-click is the dive gesture, so it must not also be a zoom.
@@ -898,7 +1022,7 @@ mod tests {
                     }),
                     state,
                     ctx,
-                    WireRouting::default(),
+                    solarxy_core::preferences::CanvasPrefs::default(),
                     intents,
                     theme(),
                 );
@@ -1041,10 +1165,10 @@ mod tests {
         move_in_snarl(&mut state, merge, [30.0, 40.0]);
 
         // Still dragging: nothing is asked for.
-        read_back_positions(false, &mut state, ctx, &mut intents);
+        read_back_positions(false, false, &mut state, ctx, &mut intents);
         assert!(intents.take_ordered().is_empty());
 
-        read_back_positions(true, &mut state, ctx, &mut intents);
+        read_back_positions(true, false, &mut state, ctx, &mut intents);
         let raised = intents.take_ordered();
         assert_eq!(raised.len(), 1, "one gesture is one command");
         let Some(crate::gui::Intent::Panel(PanelIntent::Canvas(CanvasAction::MoveNodes(
@@ -1062,7 +1186,7 @@ mod tests {
 
         // The baseline moved with it, so the next pass of the same frame
         // does not raise the same command again.
-        read_back_positions(true, &mut state, ctx, &mut intents);
+        read_back_positions(true, false, &mut state, ctx, &mut intents);
         assert!(
             intents.take_ordered().is_empty(),
             "a twice-run frame must not move a node twice"
@@ -1407,7 +1531,7 @@ mod tests {
             Some([0.0, 0.0]),
             "the node goes back where the document has it"
         );
-        read_back_positions(true, &mut state, ctx, &mut intents);
+        read_back_positions(true, false, &mut state, ctx, &mut intents);
         assert!(
             raised(&mut intents).is_empty(),
             "and nothing is asked for, so the history gains nothing"

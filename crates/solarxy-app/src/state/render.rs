@@ -438,7 +438,7 @@ impl State {
             is_split,
             projection_mode,
             cook: self.cook_readout,
-            canvas_routing: self.preferences.canvas.routing,
+            canvas: self.preferences.canvas,
         };
         let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
         let active_pane_mode = self.view.pane_settings[self.view.active_pane].pane_mode;

@@ -84,6 +84,14 @@ pub(super) struct CanvasViewer<'a> {
     /// in graph space can be put on the screen where the ring reads in
     /// pixels rather than in graph units.
     pub to_screen: egui::emath::TSTransform,
+    /// What the toolbar asked of the view, applied through the
+    /// substrate's own transform hook because that is the only way in.
+    pub zoom: Option<super::chrome::ZoomStep>,
+    /// Every node's box in graph space, so a fit has something to fit to.
+    pub extent: Option<egui::Rect>,
+    /// The area the canvas is drawn into, so a fit knows what it is
+    /// fitting into.
+    pub viewport: egui::Rect,
     /// The node a plain or modified click landed on.
     ///
     /// The substrate does not select on an unmodified click at all, and
@@ -440,6 +448,21 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
         to_global: &mut egui::emath::TSTransform,
         _snarl: &mut Snarl<CanvasNode>,
     ) {
+        // The one way in: the hook takes the transform mutably and the
+        // substrate stores what it is handed. Everything else about the
+        // view lives in egui's memory behind a private type.
+        if let Some(step) = self.zoom {
+            let centre = self.viewport.center();
+            let scale = match step {
+                super::chrome::ZoomStep::In => to_global.scaling * 1.25,
+                super::chrome::ZoomStep::Out => to_global.scaling / 1.25,
+                super::chrome::ZoomStep::Reset => 1.0,
+            };
+            *to_global = zoom_about(*to_global, scale.clamp(0.1, 4.0), centre);
+        }
+        if let Some(extent) = self.extent {
+            *to_global = fit_extent(extent, self.viewport);
+        }
         self.scale = to_global.scaling;
         self.to_screen = *to_global;
     }
@@ -979,6 +1002,33 @@ fn routing_style(routing: WireRouting) -> egui_snarl::ui::WireStyle {
         WireRouting::SimpleBezier => egui_snarl::ui::WireStyle::Bezier3,
         WireRouting::SmoothStep => egui_snarl::ui::WireStyle::AxisAligned { corner_radius: 8.0 },
     }
+}
+
+/// Scale a transform about a fixed screen point, so zooming keeps what
+/// is under the middle of the canvas under the middle of the canvas.
+fn zoom_about(
+    transform: egui::emath::TSTransform,
+    scale: f32,
+    about: egui::Pos2,
+) -> egui::emath::TSTransform {
+    let anchor = transform.inverse() * about;
+    let mut out = transform;
+    out.scaling = scale;
+    out.translation += about - (out * anchor);
+    out
+}
+
+/// The transform that puts a graph-space box inside a screen-space one,
+/// with a margin so the outermost nodes are not against the edge.
+fn fit_extent(extent: egui::Rect, viewport: egui::Rect) -> egui::emath::TSTransform {
+    let target = viewport.shrink(24.0);
+    let scale = (target.width() / extent.width().max(1.0))
+        .min(target.height() / extent.height().max(1.0))
+        .clamp(0.1, 1.0);
+    let mut out = egui::emath::TSTransform::IDENTITY;
+    out.scaling = scale;
+    out.translation = target.center().to_vec2() - (extent.center().to_vec2() * scale);
+    out
 }
 
 #[cfg(test)]

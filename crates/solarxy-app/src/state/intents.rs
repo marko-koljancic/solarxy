@@ -680,6 +680,17 @@ impl State {
                     ),
                 });
             }
+            // A reading preference: written once, saved with the rest,
+            // and never a document change.
+            CanvasAction::ToggleChrome(toggle) => {
+                let canvas = &mut self.preferences.canvas;
+                match toggle {
+                    crate::gui::CanvasToggle::Grid => canvas.grid = !canvas.grid,
+                    crate::gui::CanvasToggle::Snap => canvas.snap = !canvas.snap,
+                    crate::gui::CanvasToggle::Minimap => canvas.minimap = !canvas.minimap,
+                    crate::gui::CanvasToggle::Controls => canvas.controls = !canvas.controls,
+                }
+            }
             CanvasAction::Refuse(message) => {
                 self.gui
                     .set_toast(&message, crate::gui::ToastSeverity::Error);
