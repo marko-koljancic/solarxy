@@ -30,6 +30,7 @@
 mod art;
 mod glyphs;
 mod pins;
+mod radial;
 mod seed;
 mod vector;
 mod viewer;
@@ -66,6 +67,8 @@ pub(crate) enum CanvasAction {
     SetSelection(GraphContext, Vec<NodeId>),
     /// Remove the selection, in one command and therefore one undo step.
     RemoveNodes(GraphContext, Vec<NodeId>),
+    /// A node's name, which is an ordinary parameter and undoes like one.
+    Rename(GraphContext, NodeId, String),
     /// The next wire routing. A reading preference, so it changes no
     /// document state and adds nothing to the undo history.
     CycleRouting,
@@ -134,6 +137,8 @@ pub(in crate::gui) fn draw_nodes_content(
         pending: viewer::Pending::default(),
         dive: None,
         clicked: None,
+        hovered: None,
+        to_screen: egui::emath::TSTransform::IDENTITY,
     };
     state
         .snarl_mut()
@@ -146,6 +151,8 @@ pub(in crate::gui) fn draw_nodes_content(
         pending,
         dive,
         clicked,
+        hovered,
+        to_screen,
         ..
     } = canvas_viewer;
 
@@ -156,7 +163,14 @@ pub(in crate::gui) fn draw_nodes_content(
     resolve_rewiring(pending, state, *ctx, released, intents);
 
     let over = ui.rect_contains_pointer(ui.max_rect());
-    resolve_selection(ui, doc, *ctx, state, clicked, over, intents);
+    let picked = drive_radial(ui, doc, registry, *ctx, state, hovered, to_screen, theme);
+    if picked.is_some() {
+        // A wedge took the press, so the click underneath it is the
+        // ring's rather than the canvas's.
+        apply_wedge(picked, doc, registry, *ctx, state, ctx, intents);
+    } else {
+        resolve_selection(ui, doc, *ctx, state, clicked, over, intents);
+    }
 
     // Diving is the canvas's own, not the engine's: which graph is on
     // screen is session state that the tree beside it shares, so it is
@@ -177,6 +191,9 @@ pub(in crate::gui) fn draw_nodes_content(
     {
         intents.panel(PanelIntent::Canvas(CanvasAction::CycleRouting));
     }
+
+    draw_rename(ui, doc, registry, *ctx, state, to_screen, intents, theme);
+    draw_info(ui, doc, registry, *ctx, state, theme);
 
     // Escape abandons a drag, and abandoning has to mean it never
     // happened: applying the move and undoing it would leave an entry in
@@ -370,6 +387,302 @@ fn paint_ticks(painter: &egui::Painter, a: egui::Pos2, b: egui::Pos2, ticks: usi
         #[allow(clippy::cast_precision_loss)]
         let offset = along * ((tick as f32) - (ticks as f32 - 1.0) / 2.0) * 4.0;
         painter.line_segment([mid + offset - across, mid + offset + across], stroke);
+    }
+}
+
+/// The inline rename field, over the node it renames.
+///
+/// A node's name is an ordinary parameter, so committing one is an
+/// ordinary parameter write and undoes like any other edit. Escape
+/// abandons without writing, which is what makes trying a name free.
+#[allow(clippy::too_many_arguments)]
+fn draw_rename(
+    ui: &egui::Ui,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: GraphContext,
+    state: &mut CanvasState,
+    to_screen: egui::emath::TSTransform,
+    intents: &mut Intents,
+    theme: Theme,
+) {
+    let Some((node, _)) = state.rename else {
+        return;
+    };
+    // A node that has gone takes its rename with it.
+    if doc.graph(ctx).ok().and_then(|g| g.node(node)).is_none() {
+        state.rename = None;
+        return;
+    }
+    let _ = registry;
+    let Some(box_rect) = state.screen_box(node, to_screen) else {
+        state.rename = None;
+        return;
+    };
+
+    let mut commit = false;
+    let mut cancel = false;
+    egui::Area::new(ui.id().with(("rename", node)))
+        .order(egui::Order::Foreground)
+        .fixed_pos(box_rect.left_bottom() + egui::vec2(0.0, 6.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style())
+                .fill(theme.bg_elevated)
+                .show(ui, |ui| {
+                    let Some((_, text)) = state.rename.as_mut() else {
+                        return;
+                    };
+                    let field = ui.add(
+                        egui::TextEdit::singleline(text)
+                            .desired_width(140.0)
+                            .hint_text("Name"),
+                    );
+                    field.request_focus();
+                    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        commit = true;
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        cancel = true;
+                    }
+                });
+        });
+
+    if cancel {
+        state.rename = None;
+        return;
+    }
+    if commit && let Some((node, text)) = state.rename.take() {
+        let trimmed = text.trim().to_string();
+        // An empty name is a cancel rather than a write: a node with no
+        // name answers to its display name, and expressions address it by
+        // the one it has.
+        if !trimmed.is_empty() {
+            intents.panel(PanelIntent::Canvas(CanvasAction::Rename(
+                ctx, node, trimmed,
+            )));
+        }
+    }
+}
+
+/// The node info card: what this node is, what it did, and what it is
+/// wired to.
+///
+/// Every line comes from the shared derivation, so the card says the same
+/// thing the browser's does. Modeless and draggable, because it is read
+/// beside the graph rather than instead of it.
+fn draw_info(
+    ui: &egui::Ui,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: GraphContext,
+    state: &mut CanvasState,
+    theme: Theme,
+) {
+    let Some(node) = state.info else {
+        return;
+    };
+    let Ok(graph) = doc.graph(ctx) else {
+        state.info = None;
+        return;
+    };
+    let Some(data) = graph.node(node) else {
+        state.info = None;
+        return;
+    };
+    let Some(desc) = registry.get(&data.type_id) else {
+        state.info = None;
+        return;
+    };
+
+    let title = solarxy_graph::naming::node_name(data, registry);
+    let kind = solarxy_studio::node::describe_kind(desc);
+    let summary = solarxy_studio::node::node_info_line(desc, &data.params, None);
+    let wiring = solarxy_studio::node::connection_summary(graph, node, registry);
+
+    let mut open = true;
+    egui::Window::new(title)
+        .id(ui.id().with(("node-info", node)))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .show(ui.ctx(), |ui| {
+            ui.label(egui::RichText::new(kind).color(theme.muted).size(11.0));
+            if let Some(line) = summary {
+                ui.label(egui::RichText::new(line).color(theme.accent).size(11.0));
+            }
+            ui.separator();
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} upstream, {} downstream",
+                    wiring.upstream, wiring.downstream
+                ))
+                .size(11.0),
+            );
+            for port in wiring.inputs.iter().chain(wiring.outputs.iter()) {
+                ui.label(
+                    egui::RichText::new(format!("{}: {}", port.port, port.nodes.join(", ")))
+                        .color(theme.muted)
+                        .size(10.0),
+                );
+            }
+        });
+    if !open {
+        state.info = None;
+    }
+}
+
+/// Run the hover clock, draw the ring, and answer what a press picked.
+///
+/// The ring is drawn into the panel's own painter rather than the
+/// canvas's transform layer, so it is measured in pixels and reads the
+/// same at every zoom. Only its centre comes from the graph.
+#[allow(clippy::too_many_arguments)]
+fn drive_radial(
+    ui: &egui::Ui,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: GraphContext,
+    state: &mut CanvasState,
+    hovered: Option<(NodeId, egui::Rect)>,
+    to_screen: egui::emath::TSTransform,
+    theme: Theme,
+) -> Option<(radial::Wedge, NodeId)> {
+    let (pointer, pointer_down, pressed, escaped) = ui.input_mut(|i| {
+        (
+            i.pointer.latest_pos(),
+            i.pointer.any_down(),
+            i.pointer.any_pressed(),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+        )
+    });
+    state.tick_dwell(
+        hovered,
+        pointer_down,
+        ui.input(|i| i.time) * 1000.0,
+        |rect| to_screen * rect,
+    );
+
+    let open = state.radial()?;
+    if escaped {
+        state.close_radial();
+        return None;
+    }
+    // Straying past the grace radius closes it, measured from the same
+    // inner radius the band is drawn at so the two cannot disagree.
+    if pointer.is_none_or(|at| (at - open.centre).length() > radial::stray_distance(open.radius)) {
+        state.close_radial();
+        return None;
+    }
+
+    let applies = wedge_applies(doc, registry, ctx, open.node);
+    let hovered_wedge = radial::draw(ui.painter(), open, applies, pointer, theme);
+    ui.ctx().request_repaint();
+
+    if !pressed {
+        return None;
+    }
+    let picked = hovered_wedge.map(|wedge| (wedge, open.node));
+    // Any press closes the ring, whether it landed on a wedge or outside
+    // it: a menu that survives a click somewhere else is a menu in the way.
+    state.close_radial();
+    picked
+}
+
+/// Which of the six operations apply to one node.
+fn wedge_applies(
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: GraphContext,
+    node: NodeId,
+) -> radial::Applies {
+    let Ok(graph) = doc.graph(ctx) else {
+        return radial::Applies::default();
+    };
+    let Some(data) = graph.node(node) else {
+        return radial::Applies::default();
+    };
+    let desc = registry.get(&data.type_id);
+    let root = ctx == GraphContext::Root;
+    let declares_visibility = desc.is_some_and(solarxy_studio::node::declares_visibility);
+    radial::Applies {
+        dive: viewer::opens_a_network(registry, &data.type_id),
+        bypass: desc.is_some_and(|d| {
+            !matches!(
+                d.bypass,
+                solarxy_graph::registry::BypassBehavior::NotBypassable
+            )
+        }),
+        display_or_visibility: if root { declares_visibility } else { true },
+        root,
+        is_display: graph.active_output == Some(node),
+        visible: solarxy_studio::node::is_visible(&data.params),
+        bypassed: data.bypassed,
+    }
+}
+
+/// Turn a picked wedge into whatever it means.
+#[allow(clippy::too_many_arguments)]
+fn apply_wedge(
+    picked: Option<(radial::Wedge, NodeId)>,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: GraphContext,
+    state: &mut CanvasState,
+    ctx_out: &mut GraphContext,
+    intents: &mut Intents,
+) {
+    let Some((wedge, node)) = picked else {
+        return;
+    };
+    let applies = doc.graph(ctx).ok().and_then(|g| g.node(node)).map(|data| {
+        (
+            data.bypassed,
+            solarxy_studio::node::is_visible(&data.params),
+        )
+    });
+    match wedge {
+        radial::Wedge::Rename => {
+            // Seeded with the name the node answers to rather than with
+            // nothing, so a rename is an edit rather than a retype.
+            let name = doc
+                .graph(ctx)
+                .ok()
+                .and_then(|g| g.node(node))
+                .map(|data| solarxy_graph::naming::node_name(data, registry))
+                .unwrap_or_default();
+            state.rename = Some((node, name));
+        }
+        radial::Wedge::Info => state.info = Some(node),
+        radial::Wedge::Dive => {
+            *ctx_out = GraphContext::Subflow(node);
+            state.reset();
+        }
+        radial::Wedge::Bypass => {
+            if let Some((bypassed, _)) = applies {
+                intents.panel(PanelIntent::Canvas(CanvasAction::SetBypass(
+                    ctx, node, !bypassed,
+                )));
+            }
+        }
+        radial::Wedge::DisplayOrVisibility => {
+            if ctx == GraphContext::Root {
+                if let Some((_, visible)) = applies {
+                    intents.panel(PanelIntent::Canvas(CanvasAction::SetVisible(
+                        ctx, node, !visible,
+                    )));
+                }
+            } else {
+                intents.panel(PanelIntent::Canvas(CanvasAction::SetActiveOutput(
+                    ctx, node,
+                )));
+            }
+        }
+        radial::Wedge::Delete => {
+            intents.panel(PanelIntent::Canvas(CanvasAction::RemoveNodes(
+                ctx,
+                vec![node],
+            )));
+        }
     }
 }
 

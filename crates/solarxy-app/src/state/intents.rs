@@ -667,6 +667,19 @@ impl State {
                     self.apply_node_command(solarxy_graph::Command::RemoveNodes { ctx, ids });
                 }
             }
+            // A name is an ordinary parameter, so renaming is an
+            // ordinary parameter write: it undoes like any other edit and
+            // every expression addressing the node by name follows it.
+            CanvasAction::Rename(ctx, node, name) => {
+                self.apply_node_command(solarxy_graph::Command::SetParam {
+                    ctx,
+                    node,
+                    key: "name".to_string(),
+                    value: solarxy_graph::params::ParamSource::Literal(
+                        solarxy_graph::params::ParamValue::Text(name),
+                    ),
+                });
+            }
             CanvasAction::Refuse(message) => {
                 self.gui
                     .set_toast(&message, crate::gui::ToastSeverity::Error);

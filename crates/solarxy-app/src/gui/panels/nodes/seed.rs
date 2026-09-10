@@ -213,6 +213,18 @@ pub(crate) struct CanvasState {
     /// reconnect be one undo step and a wire dropped on nothing be a
     /// disconnect rather than a wire that silently reappears.
     seeded_wires: HashMap<(egui_snarl::OutPinId, egui_snarl::InPinId), EdgeId>,
+    /// The node the pointer is resting on, and since when.
+    ///
+    /// Armed on entering a node with no button held, which is what stops
+    /// the ring opening in the middle of a drag, and cleared the moment
+    /// the pointer leaves or a button goes down.
+    dwell: Option<(NodeId, f64)>,
+    /// The ring that is open, if one is.
+    radial: Option<super::radial::Radial>,
+    /// The node being renamed inline, and the text so far.
+    pub(super) rename: Option<(NodeId, String)>,
+    /// The node whose info card is open.
+    pub(super) info: Option<NodeId>,
     /// The substrate's own selected set as the previous frame left it.
     ///
     /// **Read as a change rather than as a value**, because the
@@ -244,6 +256,10 @@ impl Default for CanvasState {
             seeded_pos: HashMap::new(),
             sockets: HashMap::new(),
             seeded_wires: HashMap::new(),
+            dwell: None,
+            radial: None,
+            rename: None,
+            info: None,
             substrate_selection: Vec::new(),
             boxes: HashMap::new(),
         }
@@ -262,6 +278,10 @@ impl CanvasState {
         self.sockets.clear();
         self.seeded_wires.clear();
         self.substrate_selection.clear();
+        self.dwell = None;
+        self.radial = None;
+        self.rename = None;
+        self.info = None;
         self.boxes.clear();
     }
 
@@ -388,6 +408,71 @@ impl CanvasState {
             }
         }
         moves
+    }
+
+    /// Advance the hover clock, and open the ring once it has run.
+    ///
+    /// `over` is the node under the pointer with its box, or `None`. A
+    /// button being down clears the clock outright: a ring opening
+    /// mid-drag would be a menu nobody asked for on top of a gesture in
+    /// progress.
+    pub(super) fn tick_dwell(
+        &mut self,
+        over: Option<(NodeId, egui::Rect)>,
+        pointer_down: bool,
+        now_ms: f64,
+        to_screen: impl Fn(egui::Rect) -> egui::Rect,
+    ) {
+        if pointer_down || self.rename.is_some() {
+            self.dwell = None;
+            return;
+        }
+        let Some((node, rect)) = over else {
+            self.dwell = None;
+            return;
+        };
+        match self.dwell {
+            Some((resting, since)) if resting == node => {
+                if self.radial.is_none() && now_ms - since >= super::radial::DWELL_MS {
+                    let screen = to_screen(rect);
+                    self.radial = Some(super::radial::Radial {
+                        node,
+                        centre: screen.center(),
+                        radius: super::radial::anchor_radius(screen),
+                    });
+                }
+            }
+            _ => self.dwell = Some((node, now_ms)),
+        }
+        // The centre is refreshed every frame rather than remembered, so
+        // the ring follows a pan without the pointer having to move.
+        if let (Some(open), Some((_, rect))) = (self.radial.as_mut(), over)
+            && open.node == node
+        {
+            let screen = to_screen(rect);
+            open.centre = screen.center();
+            open.radius = super::radial::anchor_radius(screen);
+        }
+    }
+
+    /// A node's box on the screen, for a surface that has to sit beside
+    /// it rather than inside the canvas's transform layer.
+    pub(super) fn screen_box(
+        &self,
+        node: NodeId,
+        to_screen: egui::emath::TSTransform,
+    ) -> Option<egui::Rect> {
+        let key = self.to_snarl.get(&node)?;
+        self.boxes.get(key).map(|rect| to_screen * *rect)
+    }
+
+    pub(super) fn radial(&self) -> Option<super::radial::Radial> {
+        self.radial
+    }
+
+    pub(super) fn close_radial(&mut self) {
+        self.radial = None;
+        self.dwell = None;
     }
 
     /// The engine nodes the substrate has selected, and whether that set

@@ -78,6 +78,12 @@ pub(super) struct CanvasViewer<'a> {
     pub pending: Pending,
     /// The container a double-click asked to enter.
     pub dive: Option<NodeId>,
+    /// The node the pointer is resting on, and its box, for the ring.
+    pub hovered: Option<(NodeId, egui::Rect)>,
+    /// The canvas transform, captured before any node is drawn, so a rect
+    /// in graph space can be put on the screen where the ring reads in
+    /// pixels rather than in graph units.
+    pub to_screen: egui::emath::TSTransform,
     /// The node a plain or modified click landed on.
     ///
     /// The substrate does not select on an unmodified click at all, and
@@ -435,6 +441,7 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
         _snarl: &mut Snarl<CanvasNode>,
     ) {
         self.scale = to_global.scaling;
+        self.to_screen = *to_global;
     }
 
     /// Transparent and marginless: the art is painted by hand, and a
@@ -501,6 +508,12 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
         self.boxes.insert(node, box_rect);
         self.watch_for_dive(ui, box_rect, id);
         self.watch_for_click(ui, box_rect, id);
+        if ui
+            .input(|i| i.pointer.latest_pos())
+            .is_some_and(|p| box_rect.contains(p))
+        {
+            self.hovered = Some((id, box_rect));
+        }
         let Some(painted) = self.gather(id) else {
             return;
         };
