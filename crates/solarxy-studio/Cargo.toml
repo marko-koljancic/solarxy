@@ -10,4 +10,5 @@ authors.workspace = true
 
 [dependencies]
 solarxy-graph = { path = "../solarxy-graph" }
+solarxy-core = { path = "../solarxy-core", default-features = false }
 serde = { version = "1.0", features = ["derive"] }

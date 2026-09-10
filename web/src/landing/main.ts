@@ -11,11 +11,17 @@
 // top-to-bottom in dependency order, as if someone were building a
 // subflow. The geometry mirrors flow/nodeVisual.ts (NODE_BOX) by hand --
 // this entry must stay React-free and a few KB, so it cannot import from
-// the app -- and colors are copied from web/src/styles/tokens.css
-// (category pastels, light set) and registry/datatypes.ts
-// (DATA_TYPE_COLOR).
+// the app -- so its colours are literals here. The category pastels are
+// copied from web/src/styles/tokens.css (light set); the wire hues come
+// from the shared palette and are drift-tested against it below.
 
 const CATEGORY_FILLS = ["#dcebfb", "#d9f3e4", "#eae0f7", "#f7e6d7", "#fff7de"];
+// The geometry, scalar and image wire hues. Literals on purpose: this
+// entry stays self-contained like `landing.css` beside it, so it does not
+// pull in the app's generated tokens for three colours. They are held to
+// `solarxy_core::theme::WireColors` by `landing_wire_colours_match_the_palette`
+// in `crates/solarxy-core/tests/tokens_drift.rs`; change one and the test
+// names the other.
 const WIRE_COLORS = ["#5aa0ff", "#5aa0ff", "#5aa0ff", "#7fd962", "#e879c8"];
 const NODE_W = 112;
 const NODE_H = 32;

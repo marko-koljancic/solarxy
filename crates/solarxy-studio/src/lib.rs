@@ -62,3 +62,4 @@
 pub mod node;
 pub mod palette;
 pub mod params;
+pub mod types;

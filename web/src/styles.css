@@ -2936,22 +2936,28 @@ body.reduce-motion .cook-arc {
 .flow-node.cat-cop_adjust { --cat-fill: var(--node-cat-cop_adjust); }
 .flow-node.cat-cop_composite { --cat-fill: var(--node-cat-cop_composite); }
 
-/* ---- Typed wires (source data-type colors, matching the
- * handle palette in registry/datatypes.ts) ---- */
+/* ---- Typed wires ----
+ *
+ * One hue per family of port data type, from the generated tokens rather
+ * than authored here: the same wire has to be the same colour on the
+ * browser canvas and the desktop one, and these were hex literals in three
+ * separate files until 0.10.0 put them in `solarxy_core::theme`. The
+ * handle's SHAPE is the second channel; see `solarxy-studio`'s type rules
+ * for which shape goes with which family. */
 
-.react-flow__edge.edge-type-geometry .react-flow__edge-path { stroke: #5aa0ff; }
-.react-flow__edge.edge-type-light .react-flow__edge-path { stroke: #ffcc66; }
-.react-flow__edge.edge-type-report .react-flow__edge-path { stroke: #4dd0c8; }
+.react-flow__edge.edge-type-geometry .react-flow__edge-path { stroke: var(--wire-geometry); }
+.react-flow__edge.edge-type-light .react-flow__edge-path { stroke: var(--wire-light); }
+.react-flow__edge.edge-type-report .react-flow__edge-path { stroke: var(--wire-report); }
 .react-flow__edge.edge-type-float .react-flow__edge-path,
-.react-flow__edge.edge-type-int .react-flow__edge-path { stroke: #7fd962; }
-.react-flow__edge.edge-type-bool .react-flow__edge-path { stroke: #ff8a80; }
+.react-flow__edge.edge-type-int .react-flow__edge-path { stroke: var(--wire-scalar); }
+.react-flow__edge.edge-type-bool .react-flow__edge-path { stroke: var(--wire-bool); }
 .react-flow__edge.edge-type-vec2 .react-flow__edge-path,
 .react-flow__edge.edge-type-vec3 .react-flow__edge-path,
-.react-flow__edge.edge-type-vec4 .react-flow__edge-path { stroke: #b39ddb; }
-.react-flow__edge.edge-type-color .react-flow__edge-path { stroke: #f5a623; }
-.react-flow__edge.edge-type-text .react-flow__edge-path { stroke: #9aa0a6; }
-.react-flow__edge.edge-type-image .react-flow__edge-path { stroke: #e879c8; }
-.react-flow__edge.edge-type-material .react-flow__edge-path { stroke: #c96f4a; }
+.react-flow__edge.edge-type-vec4 .react-flow__edge-path { stroke: var(--wire-vector); }
+.react-flow__edge.edge-type-color .react-flow__edge-path { stroke: var(--wire-color); }
+.react-flow__edge.edge-type-text .react-flow__edge-path { stroke: var(--wire-text); }
+.react-flow__edge.edge-type-image .react-flow__edge-path { stroke: var(--wire-image); }
+.react-flow__edge.edge-type-material .react-flow__edge-path { stroke: var(--wire-material); }
 
 /* ---- Map-overrides-factor indicator (registry-driven via
  * ParamSnapshot.drivenByPort) ---- */

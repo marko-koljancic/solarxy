@@ -100,6 +100,20 @@ body.dark-theme {
   --cat-question: #a06dff;
   --cat-change: #2dd4bf;
 
+  /* Wire colours: one hue per family of port data type. The
+   * handle's SHAPE separates the members of a family, so the
+   * encoding survives a reader who cannot tell the hues apart. */
+  --wire-geometry: #5aa0ff;
+  --wire-light: #ffcc66;
+  --wire-report: #4dd0c8;
+  --wire-scalar: #7fd962;
+  --wire-bool: #ff8a80;
+  --wire-vector: #b39ddb;
+  --wire-color: #f5a623;
+  --wire-text: #9aa0a6;
+  --wire-image: #e879c8;
+  --wire-material: #c96f4a;
+
   /* Derived from --accent. */
   --accent-subtle: color-mix(in srgb, var(--accent) 14%, transparent);
 }
@@ -150,6 +164,20 @@ body.light-theme {
   --cat-warning: #b7791f;
   --cat-question: #7c3aed;
   --cat-change: #0f766e;
+
+  /* Wire colours: one hue per family of port data type. The
+   * handle's SHAPE separates the members of a family, so the
+   * encoding survives a reader who cannot tell the hues apart. */
+  --wire-geometry: #5aa0ff;
+  --wire-light: #ffcc66;
+  --wire-report: #4dd0c8;
+  --wire-scalar: #7fd962;
+  --wire-bool: #ff8a80;
+  --wire-vector: #b39ddb;
+  --wire-color: #f5a623;
+  --wire-text: #9aa0a6;
+  --wire-image: #e879c8;
+  --wire-material: #c96f4a;
 
   /* Derived from --accent. */
   --accent-subtle: color-mix(in srgb, var(--accent) 12%, transparent);

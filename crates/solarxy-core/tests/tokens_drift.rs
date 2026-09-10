@@ -140,6 +140,47 @@ fn landing_light_values_match_the_palette() {
     }
 }
 
+/// The landing page's wire animation carries three of the wire hues as
+/// literals, for the same reason `landing.css` beside it is self-contained:
+/// the entry stays React-free and a few kilobytes, so it does not pull in
+/// the app's generated tokens for three colours.
+///
+/// That leaves the copy this pins. Until 0.10.0 the wire hues were hex
+/// literals in `registry/datatypes.ts`, copied by hand into `styles.css`
+/// and again into this animation, with nothing holding the three together.
+/// The first two now read the palette; this one is checked instead.
+#[test]
+fn landing_wire_colours_match_the_palette() {
+    let src = std::fs::read_to_string(workspace_root().join("web/src/landing/main.ts"))
+        .expect("web/src/landing/main.ts must exist");
+    let block = src
+        .split("const WIRE_COLORS = [")
+        .nth(1)
+        .and_then(|s| s.split(']').next())
+        .expect("the WIRE_COLORS array");
+    let found: Vec<String> = block
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect();
+
+    let wire = Palette::light().wire;
+    let want = [
+        wire.geometry.css(),
+        wire.geometry.css(),
+        wire.geometry.css(),
+        wire.scalar.css(),
+        wire.image.css(),
+    ];
+    assert_eq!(
+        found, want,
+        "the landing page's wire hues and the shared palette have drifted apart.\n\
+         The animation draws three geometry wires, one scalar and one image; if a hue \
+         moved on purpose, update whichever side is now wrong."
+    );
+}
+
 /// The public pages' shared stylesheet is deliberately PARALLEL to the
 /// landing's self-contained `landing.css` rather than extracted from it: the
 /// landing shipped first and its bytes are the ones already published. Two

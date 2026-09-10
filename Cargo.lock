@@ -4285,6 +4285,7 @@ name = "solarxy-studio"
 version = "0.9.0"
 dependencies = [
  "serde",
+ "solarxy-core",
  "solarxy-graph",
 ]
 

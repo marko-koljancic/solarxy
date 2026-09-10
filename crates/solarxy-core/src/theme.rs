@@ -247,12 +247,86 @@ impl ReviewColors {
     }
 }
 
+/// The wire colours: one hue per family of port data types.
+///
+/// A wire's colour says what family of value travels down it, and the
+/// handle's *shape* separates the members of a family, so the encoding
+/// survives a reader who cannot tell the hues apart. That is why there are
+/// ten of these for thirteen data types: the scalars share a hue and are
+/// told apart by a diamond, the vectors share one, and image and material
+/// are both hexagons with different hues.
+///
+/// These live here for the same reason the review categories do. A wire on
+/// the browser canvas and the same wire on the desktop canvas must be the
+/// one colour, and until 0.10.0 they could not be: the values were hex
+/// literals in the browser, copied by hand into two more places, guarded
+/// by nothing.
+///
+/// **Identical in both themes today**, deliberately, because that is what
+/// shipped and this release moved them without retuning them. They are a
+/// set that accreted one colour at a time rather than one designed as a
+/// family, so a later pass may well give the light theme its own values;
+/// the shape here already allows that.
+#[derive(Debug, Clone, Copy)]
+pub struct WireColors {
+    pub geometry: Rgb,
+    pub light: Rgb,
+    pub report: Rgb,
+    /// `float` and `int`, told apart by the diamond handle.
+    pub scalar: Rgb,
+    pub boolean: Rgb,
+    /// `vec2`, `vec3` and `vec4`.
+    pub vector: Rgb,
+    pub color: Rgb,
+    pub text: Rgb,
+    pub image: Rgb,
+    /// A copper hue owned by nothing else. The hexagon groups it with
+    /// image as a resource handle, so the hue is what separates them.
+    pub material: Rgb,
+}
+
+impl WireColors {
+    /// The values every theme currently shares.
+    const fn shared() -> Self {
+        Self {
+            geometry: Rgb::hex(0x5aa0ff),
+            light: Rgb::hex(0xffcc66),
+            report: Rgb::hex(0x4dd0c8),
+            scalar: Rgb::hex(0x7fd962),
+            boolean: Rgb::hex(0xff8a80),
+            vector: Rgb::hex(0xb39ddb),
+            color: Rgb::hex(0xf5a623),
+            text: Rgb::hex(0x9aa0a6),
+            image: Rgb::hex(0xe879c8),
+            material: Rgb::hex(0xc96f4a),
+        }
+    }
+
+    /// In family order, as (CSS custom property name without the leading
+    /// `--`, value).
+    pub fn entries(&self) -> Vec<(&'static str, Rgb)> {
+        vec![
+            ("wire-geometry", self.geometry),
+            ("wire-light", self.light),
+            ("wire-report", self.report),
+            ("wire-scalar", self.scalar),
+            ("wire-bool", self.boolean),
+            ("wire-vector", self.vector),
+            ("wire-color", self.color),
+            ("wire-text", self.text),
+            ("wire-image", self.image),
+            ("wire-material", self.material),
+        ]
+    }
+}
+
 /// A complete interface palette. `Copy`: pass it by value freely.
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
     pub dark: bool,
     pub roles: Roles,
     pub review: ReviewColors,
+    pub wire: WireColors,
 }
 
 impl Palette {
@@ -321,6 +395,7 @@ impl Palette {
                 // to err-400; "change" needs a hue no other state owns.
                 change: Rgb::hex(0x2dd4bf),
             },
+            wire: WireColors::shared(),
         }
     }
 
@@ -386,6 +461,10 @@ impl Palette {
                 question: Rgb::hex(0x7c3aed),
                 change: Rgb::hex(0x0f766e),
             },
+            // The same set as the dark theme. See `WireColors`: they were
+            // moved here rather than retuned, and the shape allows a light
+            // set later without another migration.
+            wire: WireColors::shared(),
         }
     }
 
@@ -468,6 +547,13 @@ fn write_theme(css: &mut String, palette: &Palette, label: &str) {
     css.push_str("\n  /* Review categories: the same hue colors a viewport pin and its\n");
     css.push_str("   * panel chip, on every shell. */\n");
     for (name, rgb) in palette.review.entries() {
+        let _ = writeln!(css, "  --{name}: {};", rgb.css());
+    }
+
+    css.push_str("\n  /* Wire colours: one hue per family of port data type. The\n");
+    css.push_str("   * handle's SHAPE separates the members of a family, so the\n");
+    css.push_str("   * encoding survives a reader who cannot tell the hues apart. */\n");
+    for (name, rgb) in palette.wire.entries() {
         let _ = writeln!(css, "  --{name}: {};", rgb.css());
     }
 
