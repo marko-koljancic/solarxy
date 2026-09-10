@@ -36,6 +36,7 @@ use solarxy_graph::registry::NodeTypeDescriptor;
 use solarxy_graph::registry::param_spec::{NodePathAccept, ParamSpec, ParamType, Unit};
 
 use super::draft::{self, Draft};
+use super::drag::{self, DragKind, NumericDrag};
 use crate::gui::theme::Theme;
 
 /// Which family of control a parameter type gets.
@@ -156,6 +157,10 @@ pub(super) fn drag_speed(spec: &ParamSpec) -> f64 {
 /// What a control asked for.
 #[derive(Debug, Clone)]
 pub(super) enum ControlEdit {
+    /// Values to stream while a gesture is open: no write, no undo entry.
+    Preview(Vec<(String, ParamValue)>),
+    /// A gesture was abandoned, so its preview has to be dropped.
+    Clear(Vec<String>),
     /// Parameters to write together.
     ///
     /// Usually one. It is a list because a single pick can decide two: an
@@ -202,6 +207,13 @@ fn one(spec: &ParamSpec, value: ParamValue) -> ControlEdit {
     ControlEdit::Write(vec![(spec.key.clone(), value)])
 }
 
+/// The gesture bundle a numeric control drives.
+pub(super) struct Gesture<'a> {
+    pub draft: &'a mut Option<Draft>,
+    pub drag: &'a mut Option<NumericDrag>,
+    pub ctx: solarxy_graph::document::GraphContext,
+}
+
 /// Draw one parameter's control and answer what it asked for.
 #[allow(clippy::too_many_lines)]
 pub(super) fn draw(
@@ -209,50 +221,13 @@ pub(super) fn draw(
     spec: &ParamSpec,
     stored: Option<&ParamSource>,
     env: &ControlEnv<'_>,
-    draft: &mut Option<Draft>,
+    gesture: &mut Gesture<'_>,
 ) -> Option<ControlEdit> {
     let value = shown_value(spec, stored);
-    let suffix = unit_suffix(spec.unit);
     match control_kind(&spec.ty) {
         ControlKind::Number => {
-            let int = matches!(spec.ty, ParamType::Int);
-            let mut current = match &value {
-                ParamValue::Float(v) => *v,
-                #[allow(clippy::cast_precision_loss)]
-                ParamValue::Int(v) => *v as f64,
-                _ => 0.0,
-            };
-            let mut changed = false;
-            ui.horizontal(|ui| {
-                // The slider rides beside the field rather than replacing
-                // it, so a soft-ranged parameter can still be typed a
-                // value outside the slider's reach and inside its hard
-                // range.
-                if let Some((low, high)) = slider_range(spec) {
-                    changed |= ui
-                        .add(egui::Slider::new(&mut current, low..=high).show_value(false))
-                        .changed();
-                }
-                changed |= ui
-                    .add(
-                        egui::DragValue::new(&mut current)
-                            .speed(drag_speed(spec))
-                            .suffix(suffix),
-                    )
-                    .changed();
-            });
-            changed.then(|| {
-                let clamped = clamp(current, spec);
-                one(
-                    spec,
-                    if int {
-                        #[allow(clippy::cast_possible_truncation)]
-                        ParamValue::Int(clamped.round() as i64)
-                    } else {
-                        ParamValue::Float(clamped)
-                    },
-                )
-            })
+            let stored = number_of(&value);
+            numeric_row(ui, spec, env, gesture, &[stored], 0)
         }
         ControlKind::Toggle => {
             let mut on = matches!(value, ParamValue::Bool(true));
@@ -295,34 +270,20 @@ pub(super) fn draw(
                 _ => vec![0.0; size],
             };
             parts.resize(size, 0.0);
-            let mut changed = false;
+            let mut edit = None;
             ui.horizontal(|ui| {
-                for (index, part) in parts.iter_mut().enumerate() {
+                for slot in 0..size {
                     ui.label(
-                        egui::RichText::new(component_label(index))
+                        egui::RichText::new(component_label(slot))
                             .color(env.theme.muted)
                             .size(9.0),
                     );
-                    changed |= ui
-                        .add(
-                            egui::DragValue::new(part)
-                                .speed(drag_speed(spec))
-                                .suffix(suffix),
-                        )
-                        .changed();
+                    if let Some(asked) = numeric_row(ui, spec, env, gesture, &parts, slot) {
+                        edit = Some(asked);
+                    }
                 }
             });
-            changed.then(|| {
-                let c = |i: usize| clamp(parts[i], spec);
-                one(
-                    spec,
-                    match size {
-                        2 => ParamValue::Vec2([c(0), c(1)]),
-                        3 => ParamValue::Vec3([c(0), c(1), c(2)]),
-                        _ => ParamValue::Vec4([c(0), c(1), c(2), c(3)]),
-                    },
-                )
-            })
+            edit
         }
         ControlKind::Colour => {
             let mut rgba = match &value {
@@ -342,19 +303,19 @@ pub(super) fn draw(
         }
         ControlKind::Line => {
             let stored = text_of(&value);
-            text_row(ui, spec, env, draft, &stored, TextShape::Line)
+            text_row(ui, spec, env, gesture.draft, &stored, TextShape::Line)
         }
         ControlKind::Attribute => {
             let stored = text_of(&value);
             let mut edit = None;
             ui.horizontal(|ui| {
-                edit = text_row(ui, spec, env, draft, &stored, TextShape::Line);
+                edit = text_row(ui, spec, env, gesture.draft, &stored, TextShape::Line);
                 // Picking is immediate where typing is drafted, and the
                 // asymmetry is deliberate: a pick is a complete choice
                 // rather than a half-typed word, so waiting for a blur
                 // would only make the list feel broken.
                 if let Some(picked) = lane_menu(ui, spec, env) {
-                    *draft = None;
+                    *gesture.draft = None;
                     edit = Some(picked);
                 }
             });
@@ -362,11 +323,11 @@ pub(super) fn draw(
         }
         ControlKind::Multiline => {
             let stored = text_of(&value);
-            text_row(ui, spec, env, draft, &stored, TextShape::Prose)
+            text_row(ui, spec, env, gesture.draft, &stored, TextShape::Prose)
         }
         ControlKind::Snippet => {
             let stored = text_of(&value);
-            snippet_row(ui, spec, env, draft, &stored)
+            snippet_row(ui, spec, env, gesture.draft, &stored)
         }
         ControlKind::Asset => {
             let hash = match &value {
@@ -465,6 +426,232 @@ pub(super) fn asset_label(hash: &str, assets: &[(String, String)]) -> String {
         },
         |(_, name)| name.clone(),
     )
+}
+
+/// One numeric field, with its slider where a soft range is declared, and
+/// the whole preview-and-commit lane behind it.
+///
+/// `values` is every component of the parameter and `slot` says which one
+/// this field edits, so a vector row calls this once per component and the
+/// preview it streams is still a whole value.
+fn numeric_row(
+    ui: &mut Ui,
+    spec: &ParamSpec,
+    env: &ControlEnv<'_>,
+    gesture: &mut Gesture<'_>,
+    values: &[f64],
+    slot: usize,
+) -> Option<ControlEdit> {
+    let int = matches!(spec.ty, ParamType::Int);
+    let stored = values.get(slot).copied().unwrap_or_default();
+    let owned = gesture
+        .drag
+        .as_ref()
+        .is_some_and(|d| d.owns(env.node, &spec.key) && d.slot() == slot);
+    let mut current = drag::shown(gesture.drag.as_ref(), env.node, &spec.key, slot, stored);
+
+    let mut response = None;
+    ui.horizontal(|ui| {
+        // The slider rides beside the field rather than replacing it, so a
+        // soft-ranged parameter can still be typed a value outside the
+        // slider's reach and inside its hard range.
+        if let Some((low, high)) = slider_range(spec).filter(|_| values.len() == 1) {
+            let slider = ui.add(egui::Slider::new(&mut current, low..=high).show_value(false));
+            if slider.dragged() || slider.drag_stopped() || slider.changed() {
+                response = Some(slider);
+            }
+        }
+        let field = ui.add(
+            egui::DragValue::new(&mut current)
+                .speed(drag_speed(spec))
+                .suffix(unit_suffix(spec.unit)),
+        );
+        if response.is_none() || field.dragged() || field.drag_stopped() || field.changed() {
+            response = Some(field);
+        }
+    });
+    let response = response?;
+
+    // The middle button is this shell's own gesture: egui's drag value
+    // reads the primary button, so the decade ladder has to be driven by
+    // hand or it does not exist.
+    if !owned
+        && response.hovered()
+        && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Middle))
+        && let Some(origin) = ui.input(|i| i.pointer.latest_pos())
+    {
+        *gesture.drag = Some(NumericDrag::begin(
+            gesture.ctx,
+            env.node,
+            &spec.key,
+            values.to_vec(),
+            slot,
+            DragKind::Precision {
+                origin,
+                last_change_y: origin.y,
+                decade: drag::DEFAULT_DECADE,
+            },
+        ));
+        return None;
+    }
+    if owned
+        && gesture
+            .drag
+            .as_ref()
+            .and_then(NumericDrag::decade)
+            .is_some()
+    {
+        return advance_precision(ui, spec, env, gesture, int);
+    }
+
+    // **A widget gesture ends when the button is up, not only when egui
+    // says so.** A pointer released outside the window, or a frame the
+    // widget did not see, leaves `drag_stopped` unreported and the gesture
+    // open for good, previewing a value nothing will ever commit or clear.
+    // The browser closes the same hole with a window-level listener.
+    if owned
+        && !response.dragged()
+        && !ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary))
+    {
+        return finish(spec, gesture, int);
+    }
+
+    // An ordinary drag: open a gesture on the first frame that moves, keep
+    // previewing while it is held, and write once when it lets go.
+    if response.dragged() {
+        let live = clamp(current, spec);
+        if !owned {
+            *gesture.drag = Some(NumericDrag::begin(
+                gesture.ctx,
+                env.node,
+                &spec.key,
+                values.to_vec(),
+                slot,
+                DragKind::Widget,
+            ));
+        }
+        let held = gesture.drag.as_mut()?;
+        held.set(slot, live);
+        return Some(ControlEdit::Preview(vec![(
+            spec.key.clone(),
+            compose(spec, held.values(), int),
+        )]));
+    }
+    if response.drag_stopped() {
+        return finish(spec, gesture, int);
+    }
+    // A typed value, or an arrow key: no gesture, one write.
+    if response.changed() {
+        let mut parts = values.to_vec();
+        if let Some(part) = parts.get_mut(slot) {
+            *part = clamp(current, spec);
+        }
+        return Some(one(spec, compose(spec, &parts, int)));
+    }
+    None
+}
+
+/// Carry a precision drag one frame, and end it on release or on escape.
+fn advance_precision(
+    ui: &Ui,
+    spec: &ParamSpec,
+    env: &ControlEnv<'_>,
+    gesture: &mut Gesture<'_>,
+    int: bool,
+) -> Option<ControlEdit> {
+    // Escape abandons, and the preview has to be dropped explicitly:
+    // nothing else will.
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        let key = spec.key.clone();
+        *gesture.drag = None;
+        return Some(ControlEdit::Clear(vec![key]));
+    }
+    if !ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle)) {
+        return finish(spec, gesture, int);
+    }
+    let pointer = ui.input(|i| i.pointer.latest_pos())?;
+    let held = gesture.drag.as_mut()?;
+    let raw = held.advance(pointer, int);
+    held.set(held.slot(), clamp(raw, spec));
+    if let Some(rung) = held.decade() {
+        draw_ladder(ui, pointer, rung, env.theme);
+    }
+    Some(ControlEdit::Preview(vec![(
+        spec.key.clone(),
+        compose(spec, held.values(), int),
+    )]))
+}
+
+/// The floating decade ladder a precision drag scrubs against.
+///
+/// Drawn beside the pointer rather than beside the field, because the
+/// gesture leaves the field almost immediately and a ladder anchored to
+/// the row would be somewhere else by the second rung.
+fn draw_ladder(ui: &Ui, pointer: egui::Pos2, selected: usize, theme: Theme) {
+    let top = pointer.y - drag::ROW_HEIGHT * (drag::DEFAULT_DECADE as f32 + 0.5);
+    egui::Area::new(ui.id().with("precision_ladder"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(egui::pos2(pointer.x + 24.0, top))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (index, decade) in drag::DECADES.iter().enumerate() {
+                    let chosen = index == selected;
+                    ui.allocate_ui(egui::vec2(64.0, drag::ROW_HEIGHT), |ui| {
+                        ui.label(
+                            egui::RichText::new(format!("{decade}"))
+                                .monospace()
+                                .size(11.0)
+                                .color(if chosen { theme.fg } else { theme.muted })
+                                .background_color(if chosen {
+                                    theme.selection
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                }),
+                        );
+                    });
+                }
+            });
+        });
+}
+
+/// End a gesture: one write if it moved the value, a cleared preview if it
+/// did not.
+fn finish(spec: &ParamSpec, gesture: &mut Gesture<'_>, int: bool) -> Option<ControlEdit> {
+    let held = gesture.drag.take()?;
+    if !held.moved() {
+        // A press and release that scrubbed nothing writes nothing, for
+        // the same reason an untouched text field does. The preview still
+        // has to go: one was streamed the moment the gesture opened.
+        return Some(ControlEdit::Clear(vec![spec.key.clone()]));
+    }
+    Some(one(spec, compose(spec, held.values(), int)))
+}
+
+/// Rebuild a whole parameter value from its components.
+fn compose(spec: &ParamSpec, parts: &[f64], int: bool) -> ParamValue {
+    let at = |i: usize| clamp(parts.get(i).copied().unwrap_or_default(), spec);
+    match control_kind(&spec.ty) {
+        ControlKind::Vector(2) => ParamValue::Vec2([at(0), at(1)]),
+        ControlKind::Vector(3) => ParamValue::Vec3([at(0), at(1), at(2)]),
+        ControlKind::Vector(_) => ParamValue::Vec4([at(0), at(1), at(2), at(3)]),
+        _ if int =>
+        {
+            #[allow(clippy::cast_possible_truncation)]
+            ParamValue::Int(at(0).round() as i64)
+        }
+        _ => ParamValue::Float(at(0)),
+    }
+}
+
+/// A parameter's number, whatever numeric shape it wears.
+fn number_of(value: &ParamValue) -> f64 {
+    match value {
+        ParamValue::Float(v) => *v,
+        #[allow(clippy::cast_precision_loss)]
+        ParamValue::Int(v) => *v as f64,
+        _ => 0.0,
+    }
 }
 
 /// How a text row is shaped.

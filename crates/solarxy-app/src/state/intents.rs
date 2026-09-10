@@ -748,6 +748,23 @@ impl State {
             CanvasAction::SetParams(ctx, node, params) => {
                 self.set_params(ctx, node, params);
             }
+            // The non-committing lane. Nothing is written, nothing is
+            // undoable, and the cook that follows resolves these instead
+            // of what is stored.
+            CanvasAction::PreviewParams(ctx, node, params) => {
+                if let Some(engine) = self.engine.as_mut() {
+                    for (key, value) in params {
+                        engine.preview_param(ctx, node, key.as_str(), value);
+                    }
+                }
+            }
+            CanvasAction::ClearPreviews(ctx, node, keys) => {
+                if let Some(engine) = self.engine.as_mut() {
+                    for key in keys {
+                        engine.clear_preview(ctx, node, key.as_str());
+                    }
+                }
+            }
             CanvasAction::AddNode(ctx, node_type, position) => {
                 self.apply_node_command(solarxy_graph::Command::AddNode {
                     ctx,

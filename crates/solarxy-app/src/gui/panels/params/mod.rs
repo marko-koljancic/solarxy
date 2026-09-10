@@ -20,6 +20,7 @@
 
 mod controls;
 mod draft;
+mod drag;
 mod frame;
 
 pub(crate) use frame::{ParamPanelSource, ParamPanelState, ParamScene, draw_params_content};

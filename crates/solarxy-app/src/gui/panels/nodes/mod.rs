@@ -91,6 +91,26 @@ pub(crate) enum CanvasAction {
         NodeId,
         Vec<(String, solarxy_graph::params::ParamSource)>,
     ),
+    /// Values to stream while a gesture is open.
+    ///
+    /// **No document write, no event, no undo entry.** The engine's
+    /// preview lane only dirty-marks, so the next cook resolves these
+    /// instead of what is stored and the committing `SetParams` clears
+    /// them. A drag that wrote through the ordinary lane on every frame
+    /// would be right on screen and wrong everywhere else: one undo step
+    /// per frame of the gesture, and a cook queue each write invalidates.
+    PreviewParams(
+        GraphContext,
+        NodeId,
+        Vec<(String, solarxy_graph::params::ParamSource)>,
+    ),
+    /// A gesture was abandoned, so its preview has to go.
+    ///
+    /// The preview is otherwise dropped only by the committing write, so
+    /// a cancel that forgets this leaves the viewport asserting the
+    /// dragged value while the panel and the document both say something
+    /// else, with nothing left to end the disagreement.
+    ClearPreviews(GraphContext, NodeId, Vec<String>),
     /// A node's name, which is an ordinary parameter and undoes like one.
     Rename(GraphContext, NodeId, String),
     /// The next wire routing. A reading preference, so it changes no

@@ -75,6 +75,10 @@ pub(crate) struct ParamPanelState {
     /// frame, and re-reading the document every frame would discard
     /// every keystroke. See [`super::draft`].
     draft: Option<super::draft::Draft>,
+    /// The numeric gesture in flight, if any. On the panel rather than in
+    /// the widget for the same reason the draft is, and additionally
+    /// because a gesture that outlives its row has a preview to drop.
+    drag: Option<super::drag::NumericDrag>,
     /// The tab last chosen, by name. Asked of the shared resolver every
     /// frame rather than trusted, because a group whose parameters all
     /// hide stops being a tab and the stored name then names nothing.
@@ -93,6 +97,7 @@ impl ParamPanelState {
         self.pin = None;
         self.tab.clear();
         self.draft = None;
+        self.drag = None;
     }
 
     pub(crate) fn pinned(&self) -> Option<NodeId> {
@@ -319,6 +324,23 @@ pub(crate) fn draw_params_content(
             let Some(active) = active else {
                 return placeholder(ui, "No parameters.", theme);
             };
+            // A gesture belongs to the row it opened on. Selecting another
+            // node abandons it, and its preview has to be dropped by hand
+            // or the viewport goes on asserting a value nothing else holds.
+            if let Some(stale) = state
+                .drag
+                .as_ref()
+                .filter(|held| held.node() != node || held.ctx() != ctx)
+            {
+                intents.panel(crate::gui::PanelIntent::Canvas(
+                    CanvasAction::ClearPreviews(
+                        stale.ctx(),
+                        stale.node(),
+                        vec![stale.key().to_string()],
+                    ),
+                ));
+                state.drag = None;
+            }
             // Node-path candidates come from the **root** graph, which is
             // the browser's rule; offering nested containers would give
             // the two shells different candidate lists for one document.
@@ -378,7 +400,11 @@ pub(crate) fn draw_params_content(
                                         spec,
                                         data.params.get(&spec.key),
                                         &env,
-                                        &mut state.draft,
+                                        &mut controls::Gesture {
+                                            draft: &mut state.draft,
+                                            drag: &mut state.drag,
+                                            ctx,
+                                        },
                                     )
                                 })
                                 .inner;
@@ -400,6 +426,30 @@ pub(crate) fn draw_params_content(
                                                 })
                                                 .collect(),
                                         ),
+                                    ));
+                                }
+                                Some(ControlEdit::Preview(values)) => {
+                                    intents.panel(crate::gui::PanelIntent::Canvas(
+                                        CanvasAction::PreviewParams(
+                                            ctx,
+                                            node,
+                                            values
+                                                .into_iter()
+                                                .map(|(key, value)| {
+                                                    (
+                                                        key,
+                                                        solarxy_graph::params::ParamSource::Literal(
+                                                            value,
+                                                        ),
+                                                    )
+                                                })
+                                                .collect(),
+                                        ),
+                                    ));
+                                }
+                                Some(ControlEdit::Clear(keys)) => {
+                                    intents.panel(crate::gui::PanelIntent::Canvas(
+                                        CanvasAction::ClearPreviews(ctx, node, keys),
                                     ));
                                 }
                                 Some(ControlEdit::Invoke) => {
@@ -478,6 +528,298 @@ fn placeholder(ui: &mut Ui, message: &str, theme: Theme) {
 mod tests {
     use super::*;
     use solarxy_graph::cook::state::NodeCookStats;
+
+    use solarxy_core::preferences::ThemeChoice;
+    use solarxy_graph::{Command, Engine};
+
+    fn theme() -> Theme {
+        Theme::from_choice(ThemeChoice::default())
+    }
+
+    /// A document with one box in it, cooked.
+    fn scene() -> (Engine, GraphContext, NodeId) {
+        let mut engine = Engine::new().expect("registry builds");
+        let geo = added(&mut engine, GraphContext::Root, "sopnet");
+        let ctx = GraphContext::Subflow(geo);
+        let box_node = added(&mut engine, ctx, "box");
+        engine
+            .apply(Command::SetSelection {
+                ctx,
+                ids: vec![box_node],
+            })
+            .expect("select the box");
+        (engine, ctx, box_node)
+    }
+
+    fn added(engine: &mut Engine, ctx: GraphContext, ty: &str) -> NodeId {
+        let before: Vec<NodeId> = engine
+            .document()
+            .graph(ctx)
+            .map(|g| g.nodes().map(|n| n.id).collect())
+            .unwrap_or_default();
+        engine
+            .apply(Command::AddNode {
+                ctx,
+                node_type: ty.to_string(),
+                position: [0.0, 0.0],
+            })
+            .expect("add a node");
+        engine
+            .document()
+            .graph(ctx)
+            .expect("the graph")
+            .nodes()
+            .map(|n| n.id)
+            .find(|id| !before.contains(id))
+            .expect("exactly one node was added")
+    }
+
+    /// Draw one real interface pass over a real document.
+    fn one_frame(
+        engine: &Engine,
+        ctx: GraphContext,
+        state: &mut ParamPanelState,
+        intents: &mut Intents,
+        input: egui::RawInput,
+    ) {
+        let egui_ctx = egui::Context::default();
+        let _ = egui_ctx.run(input, |c| {
+            egui::CentralPanel::default().show(c, |ui| {
+                draw_params_content(
+                    ui,
+                    ParamPanelSource::Scene(&ParamScene {
+                        doc: engine.document(),
+                        registry: engine.registry(),
+                        ctx,
+                        stats: None,
+                        has_report: false,
+                        counts: (0, 0),
+                        assets: &[],
+                        lanes: &[],
+                        error: None,
+                    }),
+                    state,
+                    intents,
+                    theme(),
+                );
+            });
+        });
+    }
+
+    /// Input with the middle button held and the pointer somewhere.
+    fn held(x: f32, y: f32) -> egui::RawInput {
+        let pos = egui::pos2(x, y);
+        egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Middle,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
+    fn writes(intents: &mut Intents) -> (usize, usize, usize) {
+        let mut written = 0;
+        let mut previewed = 0;
+        let mut cleared = 0;
+        for intent in intents.take_ordered() {
+            match intent {
+                crate::gui::Intent::Panel(crate::gui::PanelIntent::Canvas(
+                    CanvasAction::SetParams(..),
+                )) => written += 1,
+                crate::gui::Intent::Panel(crate::gui::PanelIntent::Canvas(
+                    CanvasAction::PreviewParams(..),
+                )) => previewed += 1,
+                crate::gui::Intent::Panel(crate::gui::PanelIntent::Canvas(
+                    CanvasAction::ClearPreviews(..),
+                )) => cleared += 1,
+                _ => {}
+            }
+        }
+        (written, previewed, cleared)
+    }
+
+    /// Looking at a parameter must not change it.
+    ///
+    /// Drawn twice deliberately: egui runs a pass twice on any frame a
+    /// layout is still settling, and a queue fed from a condition that is
+    /// merely true while the panel is open passes the first and fails the
+    /// second.
+    #[test]
+    fn an_idle_frame_raises_no_commands() {
+        let (engine, ctx, _) = scene();
+        let mut state = ParamPanelState::default();
+        let mut intents = Intents::default();
+        one_frame(
+            &engine,
+            ctx,
+            &mut state,
+            &mut intents,
+            egui::RawInput::default(),
+        );
+        one_frame(
+            &engine,
+            ctx,
+            &mut state,
+            &mut intents,
+            egui::RawInput::default(),
+        );
+        assert!(
+            intents.take_ordered().is_empty(),
+            "a panel nobody touched must ask for nothing"
+        );
+    }
+
+    /// **One gesture is one undo step.** A drag streams previews for as
+    /// long as it is held and writes exactly once when it lets go.
+    ///
+    /// The gesture is opened directly rather than by hovering a widget,
+    /// because where a field lands depends on the panel's layout and a
+    /// test that hunts for it would be measuring egui rather than this.
+    /// Everything after the first frame is the real branch order in
+    /// `numeric_row`, driven by real pointer input.
+    #[test]
+    fn a_drag_previews_while_it_is_held_and_writes_once_on_release() {
+        let (engine, ctx, node) = scene();
+        // The box's numbers live on its geometry tab, and only the rows of
+        // the active tab draw.
+        let mut state = ParamPanelState {
+            tab: "geometry".to_string(),
+            ..Default::default()
+        };
+        let mut intents = Intents::default();
+        state.drag = Some(super::super::drag::NumericDrag::begin(
+            ctx,
+            node,
+            "width",
+            vec![1.0],
+            0,
+            super::super::drag::DragKind::Precision {
+                origin: egui::pos2(100.0, 100.0),
+                last_change_y: 100.0,
+                decade: super::super::drag::DEFAULT_DECADE,
+            },
+        ));
+
+        for step in 1..=3 {
+            #[allow(clippy::cast_precision_loss)]
+            let x = 100.0 + (step as f32) * 40.0;
+            one_frame(&engine, ctx, &mut state, &mut intents, held(x, 100.0));
+            let (written, previewed, cleared) = writes(&mut intents);
+            assert_eq!(
+                (written, cleared),
+                (0, 0),
+                "frame {step} of a held drag wrote to the document"
+            );
+            assert!(
+                previewed > 0,
+                "frame {step} of a held drag previewed nothing"
+            );
+        }
+
+        // The button comes up: one write, and no further preview.
+        one_frame(
+            &engine,
+            ctx,
+            &mut state,
+            &mut intents,
+            egui::RawInput::default(),
+        );
+        let (written, previewed, cleared) = writes(&mut intents);
+        assert_eq!(
+            (written, previewed, cleared),
+            (1, 0, 0),
+            "a released drag is one write and nothing else"
+        );
+        assert!(state.drag.is_none(), "the gesture outlived its release");
+
+        // And an idle frame after it is quiet again.
+        one_frame(
+            &engine,
+            ctx,
+            &mut state,
+            &mut intents,
+            egui::RawInput::default(),
+        );
+        assert_eq!(writes(&mut intents), (0, 0, 0));
+    }
+
+    /// A gesture that scrubbed nothing writes nothing, and still drops its
+    /// preview: one was streamed the moment it opened.
+    #[test]
+    fn a_gesture_that_moved_nothing_clears_instead_of_writing() {
+        let (engine, ctx, node) = scene();
+        let mut state = ParamPanelState {
+            tab: "geometry".to_string(),
+            ..Default::default()
+        };
+        let mut intents = Intents::default();
+        state.drag = Some(super::super::drag::NumericDrag::begin(
+            ctx,
+            node,
+            "width",
+            vec![1.0],
+            0,
+            super::super::drag::DragKind::Widget,
+        ));
+        one_frame(
+            &engine,
+            ctx,
+            &mut state,
+            &mut intents,
+            egui::RawInput::default(),
+        );
+        assert_eq!(
+            writes(&mut intents),
+            (0, 0, 1),
+            "a gesture that did not move must clear its preview and write nothing"
+        );
+    }
+
+    /// Selecting another node abandons an open gesture and drops its
+    /// preview, which nothing else would.
+    #[test]
+    fn changing_the_subject_clears_a_stale_preview() {
+        let (mut engine, ctx, node) = scene();
+        let other = added(&mut engine, ctx, "sphere");
+        engine
+            .apply(Command::SetSelection {
+                ctx,
+                ids: vec![other],
+            })
+            .expect("select the sphere");
+
+        let mut state = ParamPanelState::default();
+        let mut intents = Intents::default();
+        // A gesture left open on the node that is no longer the subject.
+        state.drag = Some(super::super::drag::NumericDrag::begin(
+            ctx,
+            node,
+            "width",
+            vec![1.0],
+            0,
+            super::super::drag::DragKind::Widget,
+        ));
+        one_frame(
+            &engine,
+            ctx,
+            &mut state,
+            &mut intents,
+            egui::RawInput::default(),
+        );
+        let (written, _, cleared) = writes(&mut intents);
+        assert_eq!(
+            (written, cleared),
+            (0, 1),
+            "a gesture stranded by a selection change must be cleared, not committed"
+        );
+        assert!(state.drag.is_none());
+    }
 
     fn stats(points: u64, image: Option<(u32, u32)>) -> NodeCookStats {
         NodeCookStats {
