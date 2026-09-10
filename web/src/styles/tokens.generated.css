@@ -114,6 +114,28 @@ body.dark-theme {
   --wire-image: #e879c8;
   --wire-material: #c96f4a;
 
+  /* Node body fills: one pastel per registry category, plus the
+   * three a root container wears according to the network it
+   * opens. Dark text stays readable on every one of them. */
+  --node-cat-generators: #c9dcf2;
+  --node-cat-attribute: #f2cfd6;
+  --node-cat-transform: #c5e6e6;
+  --node-cat-copy: #d9ecc4;
+  --node-cat-topology: #c8e8d6;
+  --node-cat-shaders: #f0cfe3;
+  --node-cat-import: #ddd0ee;
+  --node-cat-export: #f4d7b0;
+  --node-cat-utility: #eed9c9;
+  --node-cat-lights: #f8e7b0;
+  --node-cat-cameras: #cfd8e8;
+  --node-cat-container: #e5e7eb;
+  --node-cat-container-sop: #e5e7eb;
+  --node-cat-container-cop: #bfe0d6;
+  --node-cat-container-mat: #eecdde;
+  --node-cat-cop_generate: #e9ddc3;
+  --node-cat-cop_adjust: #cfdce8;
+  --node-cat-cop_composite: #d2e4dc;
+
   /* Derived from --accent. */
   --accent-subtle: color-mix(in srgb, var(--accent) 14%, transparent);
 }
@@ -178,6 +200,28 @@ body.light-theme {
   --wire-text: #9aa0a6;
   --wire-image: #e879c8;
   --wire-material: #c96f4a;
+
+  /* Node body fills: one pastel per registry category, plus the
+   * three a root container wears according to the network it
+   * opens. Dark text stays readable on every one of them. */
+  --node-cat-generators: #dcebfb;
+  --node-cat-attribute: #fbdfe6;
+  --node-cat-transform: #d8f1f1;
+  --node-cat-copy: #e6f5d4;
+  --node-cat-topology: #d9f3e4;
+  --node-cat-shaders: #f9dcef;
+  --node-cat-import: #eae0f7;
+  --node-cat-export: #fce4c2;
+  --node-cat-utility: #f7e6d7;
+  --node-cat-lights: #fff7de;
+  --node-cat-cameras: #dee6f3;
+  --node-cat-container: #f8f8f8;
+  --node-cat-container-sop: #f8f8f8;
+  --node-cat-container-cop: #d9f0e8;
+  --node-cat-container-mat: #f8def0;
+  --node-cat-cop_generate: #f3e9d2;
+  --node-cat-cop_adjust: #dfe8f4;
+  --node-cat-cop_composite: #def0e8;
 
   /* Derived from --accent. */
   --accent-subtle: color-mix(in srgb, var(--accent) 12%, transparent);

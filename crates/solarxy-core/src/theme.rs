@@ -320,6 +320,138 @@ impl WireColors {
     }
 }
 
+/// The pastel body fill a node wears, one per registry category, plus the
+/// three a root container wears according to the network it opens.
+///
+/// These live here for the same reason the wire colours do, and they
+/// arrived later for a worse reason: they were hand-authored CSS in the
+/// browser, thirty-six declarations across two themes, and the desktop
+/// canvas needed the same thirty. Two hand-authored copies of one family
+/// is the pair this release exists to remove, and the milestone's own
+/// theme rule already said a canvas colour authors here.
+///
+/// **Keyed by name, not by `Category`.** This crate cannot see the node
+/// registry, which sits above it, so the mapping from a category to its
+/// fill is `solarxy_studio::types::category_fill`, exactly as
+/// `wire_color` maps a data type onto [`WireColors`].
+///
+/// **Three of them are a container's, chosen by what it opens** rather
+/// than by its type id. The browser selects them from a type-id class and
+/// therefore has to learn a new one whenever a network kind arrives; the
+/// rule here asks the descriptor instead, which is the same correction
+/// 0.10.0 applied to the engine.
+#[derive(Debug, Clone, Copy)]
+pub struct NodeCategoryFills {
+    pub generators: Rgb,
+    pub attribute: Rgb,
+    pub transform: Rgb,
+    pub copy: Rgb,
+    pub topology: Rgb,
+    pub shaders: Rgb,
+    pub import: Rgb,
+    pub export: Rgb,
+    pub utility: Rgb,
+    /// Shares its value with the light-node background, so a light node
+    /// reads the same on the canvas as it does everywhere else.
+    pub lights: Rgb,
+    /// A cool slate, deliberately not the lights cream: cameras and lights
+    /// sit side by side in the root graph and are the two things placed
+    /// there that are not geometry, so they must read apart at a glance.
+    pub cameras: Rgb,
+    /// A container with no opened kind to go on, and the value the
+    /// neutral node background carries.
+    pub container: Rgb,
+    /// A container that opens a surface network: the neutral tile, so the
+    /// commonest container is the quiet one.
+    pub container_sop: Rgb,
+    /// A container that opens an image network: green-teal, away from
+    /// transform's cyan.
+    pub container_cop: Rgb,
+    /// A container that opens a material network: the shaders rose family
+    /// it contains.
+    pub container_mat: Rgb,
+    pub cop_generate: Rgb,
+    pub cop_adjust: Rgb,
+    pub cop_composite: Rgb,
+}
+
+impl NodeCategoryFills {
+    const fn dark() -> Self {
+        Self {
+            generators: Rgb::hex(0xc9dcf2),
+            attribute: Rgb::hex(0xf2cfd6),
+            transform: Rgb::hex(0xc5e6e6),
+            copy: Rgb::hex(0xd9ecc4),
+            topology: Rgb::hex(0xc8e8d6),
+            shaders: Rgb::hex(0xf0cfe3),
+            import: Rgb::hex(0xddd0ee),
+            export: Rgb::hex(0xf4d7b0),
+            utility: Rgb::hex(0xeed9c9),
+            lights: Rgb::hex(0xf8e7b0),
+            cameras: Rgb::hex(0xcfd8e8),
+            container: Rgb::hex(0xe5e7eb),
+            container_sop: Rgb::hex(0xe5e7eb),
+            container_cop: Rgb::hex(0xbfe0d6),
+            container_mat: Rgb::hex(0xeecdde),
+            cop_generate: Rgb::hex(0xe9ddc3),
+            cop_adjust: Rgb::hex(0xcfdce8),
+            cop_composite: Rgb::hex(0xd2e4dc),
+        }
+    }
+
+    const fn light() -> Self {
+        Self {
+            generators: Rgb::hex(0xdcebfb),
+            attribute: Rgb::hex(0xfbdfe6),
+            transform: Rgb::hex(0xd8f1f1),
+            copy: Rgb::hex(0xe6f5d4),
+            topology: Rgb::hex(0xd9f3e4),
+            shaders: Rgb::hex(0xf9dcef),
+            import: Rgb::hex(0xeae0f7),
+            export: Rgb::hex(0xfce4c2),
+            utility: Rgb::hex(0xf7e6d7),
+            lights: Rgb::hex(0xfff7de),
+            cameras: Rgb::hex(0xdee6f3),
+            container: Rgb::hex(0xf8f8f8),
+            container_sop: Rgb::hex(0xf8f8f8),
+            container_cop: Rgb::hex(0xd9f0e8),
+            container_mat: Rgb::hex(0xf8def0),
+            cop_generate: Rgb::hex(0xf3e9d2),
+            cop_adjust: Rgb::hex(0xdfe8f4),
+            cop_composite: Rgb::hex(0xdef0e8),
+        }
+    }
+
+    /// In registry-category order, as (CSS custom property name without
+    /// the leading `--`, value).
+    ///
+    /// The three `cop_` names carry an underscore because the browser
+    /// derives the property name from the `snake_case` category id, and a
+    /// name that does not match the id resolves to nothing.
+    pub fn entries(&self) -> Vec<(&'static str, Rgb)> {
+        vec![
+            ("node-cat-generators", self.generators),
+            ("node-cat-attribute", self.attribute),
+            ("node-cat-transform", self.transform),
+            ("node-cat-copy", self.copy),
+            ("node-cat-topology", self.topology),
+            ("node-cat-shaders", self.shaders),
+            ("node-cat-import", self.import),
+            ("node-cat-export", self.export),
+            ("node-cat-utility", self.utility),
+            ("node-cat-lights", self.lights),
+            ("node-cat-cameras", self.cameras),
+            ("node-cat-container", self.container),
+            ("node-cat-container-sop", self.container_sop),
+            ("node-cat-container-cop", self.container_cop),
+            ("node-cat-container-mat", self.container_mat),
+            ("node-cat-cop_generate", self.cop_generate),
+            ("node-cat-cop_adjust", self.cop_adjust),
+            ("node-cat-cop_composite", self.cop_composite),
+        ]
+    }
+}
+
 /// A complete interface palette. `Copy`: pass it by value freely.
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
@@ -327,6 +459,7 @@ pub struct Palette {
     pub roles: Roles,
     pub review: ReviewColors,
     pub wire: WireColors,
+    pub node_cat: NodeCategoryFills,
 }
 
 impl Palette {
@@ -396,6 +529,7 @@ impl Palette {
                 change: Rgb::hex(0x2dd4bf),
             },
             wire: WireColors::shared(),
+            node_cat: NodeCategoryFills::dark(),
         }
     }
 
@@ -465,6 +599,7 @@ impl Palette {
             // moved here rather than retuned, and the shape allows a light
             // set later without another migration.
             wire: WireColors::shared(),
+            node_cat: NodeCategoryFills::light(),
         }
     }
 
@@ -554,6 +689,13 @@ fn write_theme(css: &mut String, palette: &Palette, label: &str) {
     css.push_str("   * handle's SHAPE separates the members of a family, so the\n");
     css.push_str("   * encoding survives a reader who cannot tell the hues apart. */\n");
     for (name, rgb) in palette.wire.entries() {
+        let _ = writeln!(css, "  --{name}: {};", rgb.css());
+    }
+
+    css.push_str("\n  /* Node body fills: one pastel per registry category, plus the\n");
+    css.push_str("   * three a root container wears according to the network it\n");
+    css.push_str("   * opens. Dark text stays readable on every one of them. */\n");
+    for (name, rgb) in palette.node_cat.entries() {
         let _ = writeln!(css, "  --{name}: {};", rgb.css());
     }
 

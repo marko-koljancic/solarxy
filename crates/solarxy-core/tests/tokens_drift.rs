@@ -215,28 +215,6 @@ fn landing_and_base_css_agree() {
         out
     }
 
-    /// The body of the first `{ ... }` block following `marker`.
-    fn block_after<'a>(css: &'a str, marker: &str) -> &'a str {
-        let start = css
-            .find(marker)
-            .unwrap_or_else(|| panic!("`{marker}` not found"));
-        let open = css[start..].find('{').expect("an opening brace") + start;
-        let mut depth = 0usize;
-        for (i, c) in css[open..].char_indices() {
-            match c {
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return &css[open + 1..open + i];
-                    }
-                }
-                _ => {}
-            }
-        }
-        panic!("unclosed block after `{marker}`");
-    }
-
     const DARK: &str = "@media (prefers-color-scheme: dark)";
     let root = workspace_root();
     let landing = std::fs::read_to_string(root.join("web/src/landing/landing.css"))
@@ -305,6 +283,80 @@ fn landing_and_base_css_agree() {
 }
 
 /// Strip block comments: prose naming a token must not read as a use.
+/// Two of the eighteen node fills used to be CSS `var()` indirections
+/// rather than values: the lights fill pointed at the light-node
+/// background, and the container fill at the neutral node background.
+/// Moving them into the palette made them literals, which is correct, but
+/// it dropped the relationship, and a relationship nothing checks is one
+/// that quietly stops holding.
+///
+/// So the link is asserted here instead of drawn in CSS. It is not a
+/// coincidence worth preserving for its own sake: a light node on the
+/// canvas and a light node anywhere else being the same colour is the
+/// whole point, and so is a container reading as the plain tile.
+#[test]
+fn the_two_aliased_fills_still_track_what_they_aliased() {
+    let css = std::fs::read_to_string(workspace_root().join("web/src/styles/tokens.css"))
+        .expect("tokens.css must exist");
+    let css = strip_comments(&css);
+
+    for (marker, palette) in [
+        (":root,\nbody,\nbody.dark-theme", Palette::dark()),
+        ("body.light-theme", Palette::light()),
+    ] {
+        let block = block_after(&css, marker);
+        let declared = |name: &str| -> String {
+            block
+                .lines()
+                .map(str::trim)
+                .find_map(|l| l.strip_prefix(name)?.strip_prefix(':'))
+                .unwrap_or_else(|| panic!("{name} is declared in {marker}"))
+                .trim()
+                .trim_end_matches(';')
+                .to_ascii_lowercase()
+        };
+
+        assert_eq!(
+            declared("--light-node-background"),
+            palette.node_cat.lights.css(),
+            "the lights fill must stay the light-node background it used to alias",
+        );
+        let node_background = declared("--node-background");
+        assert_eq!(
+            node_background,
+            palette.node_cat.container.css(),
+            "the container fill must stay the neutral node background",
+        );
+        assert_eq!(
+            node_background,
+            palette.node_cat.container_sop.css(),
+            "a surface container is the neutral tile, which is the point of it",
+        );
+    }
+}
+
+/// The body of the first `{ ... }` block following `marker`.
+fn block_after<'a>(css: &'a str, marker: &str) -> &'a str {
+    let start = css
+        .find(marker)
+        .unwrap_or_else(|| panic!("`{marker}` not found"));
+    let open = css[start..].find('{').expect("an opening brace") + start;
+    let mut depth = 0usize;
+    for (i, c) in css[open..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &css[open + 1..open + i];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unclosed block after `{marker}`");
+}
+
 fn strip_comments(css: &str) -> String {
     let mut out = String::with_capacity(css.len());
     let mut rest = css;

@@ -10,11 +10,12 @@
  *
  * Counts are single-sourced in the consts below; STATS, HERO_CHIPS and
  * FOOTER_META derive from them so the numbers cannot disagree with each
- * other. counts.test.ts pins NODE_TYPE_COUNT to the landing page stats band.
+ * other. counts.test.ts pins NODE_TYPE_COUNT to the landing page stats band
+ * and CRATE_COUNT to the workspace member list.
  */
 
 export const NODE_TYPE_COUNT = 77;
-export const CRATE_COUNT = 15;
+export const CRATE_COUNT = 16;
 export const CONTEXT_COUNT = 4;
 export const SHELL_COUNT = 3;
 export const VALIDATION_KIND_COUNT = 11;

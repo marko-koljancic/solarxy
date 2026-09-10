@@ -13,6 +13,7 @@ use std::cmp::Ordering;
 
 use solarxy_core::theme::{Palette, Rgb};
 use solarxy_graph::registry::coerce::{Coercion, DataType};
+use solarxy_graph::document::ContextKind;
 use solarxy_graph::registry::{Category, NodeRole, Registry};
 
 /// The second encoding channel on a port handle.
@@ -102,6 +103,53 @@ pub fn wire_color(data_type: DataType, palette: &Palette) -> Rgb {
         DataType::Text => wire.text,
         DataType::Image => wire.image,
         DataType::Material => wire.material,
+    }
+}
+
+/// A node's body fill, resolved against a palette.
+///
+/// **One function rather than a table plus a caller-written precedence**,
+/// because the precedence is itself the rule: a container takes its colour
+/// from the network it opens, and only a container with nothing to open
+/// falls back to the container fill. Two shells writing that ordering
+/// themselves is exactly how they would come to disagree about what a
+/// material network's container looks like.
+///
+/// `opens` comes from the descriptor, never from a type id. The browser
+/// selects the same three fills from a type-id class and therefore has to
+/// learn a new one whenever a network kind arrives; asking what the node
+/// opens is the correction 0.10.0 applied to the engine, and it belongs
+/// here for the same reason.
+#[must_use]
+pub fn node_fill(category: Category, opens: Option<ContextKind>, palette: &Palette) -> Rgb {
+    let fills = &palette.node_cat;
+    if let Some(kind) = opens {
+        return match kind {
+            ContextKind::Sop => fills.container_sop,
+            ContextKind::Cop => fills.container_cop,
+            ContextKind::Mat => fills.container_mat,
+            // An object network has no container that opens one, so
+            // nothing reaches here today. It answers with the plain
+            // container fill rather than picking a hue nobody chose.
+            ContextKind::Obj => fills.container,
+        };
+    }
+    match category {
+        Category::Container => fills.container,
+        Category::Generators => fills.generators,
+        Category::Attribute => fills.attribute,
+        Category::Transform => fills.transform,
+        Category::Copy => fills.copy,
+        Category::Topology => fills.topology,
+        Category::Shaders => fills.shaders,
+        Category::Import => fills.import,
+        Category::Export => fills.export,
+        Category::Lights => fills.lights,
+        Category::Cameras => fills.cameras,
+        Category::Utility => fills.utility,
+        Category::CopGenerate => fills.cop_generate,
+        Category::CopAdjust => fills.cop_adjust,
+        Category::CopComposite => fills.cop_composite,
     }
 }
 
@@ -233,10 +281,55 @@ pub fn category_role(category: Category) -> NodeRole {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn registry() -> Registry {
         solarxy_graph::nodes::builtin_registry().expect("builtin registry")
+    }
+
+    /// Every category a registered node actually declares must resolve to
+    /// a fill, and no two categories may share one, because the fill is
+    /// the only thing separating two nodes of the same silhouette.
+    ///
+    /// Driven off the real registry rather than off `Category`'s variants,
+    /// so it says something about what ships rather than about an enum.
+    #[test]
+    fn every_declared_category_has_its_own_fill() {
+        let registry = registry();
+        let palette = Palette::dark();
+        let mut seen: BTreeMap<String, Category> = BTreeMap::new();
+        for desc in registry.descriptors() {
+            let fill = node_fill(desc.category, None, &palette).css();
+            if let Some(other) = seen.insert(fill.clone(), desc.category) {
+                assert_eq!(
+                    other, desc.category,
+                    "{:?} and {:?} share the fill {fill}",
+                    other, desc.category
+                );
+            }
+        }
+        assert!(
+            seen.len() >= 12,
+            "the registry declares more categories than {} distinct fills",
+            seen.len()
+        );
+    }
+
+    /// A container takes its colour from the network it opens, and the
+    /// three kinds must differ, since telling a material network from an
+    /// image one at a glance is the whole reason they are tinted.
+    #[test]
+    fn a_container_is_tinted_by_what_it_opens() {
+        let palette = Palette::dark();
+        let base = node_fill(Category::Container, None, &palette);
+        let sop = node_fill(Category::Container, Some(ContextKind::Sop), &palette);
+        let cop = node_fill(Category::Container, Some(ContextKind::Cop), &palette);
+        let mat = node_fill(Category::Container, Some(ContextKind::Mat), &palette);
+
+        assert_eq!(base, sop, "a surface container is the neutral tile");
+        assert_ne!(sop, cop);
+        assert_ne!(sop, mat);
+        assert_ne!(cop, mat);
     }
 
     #[test]
