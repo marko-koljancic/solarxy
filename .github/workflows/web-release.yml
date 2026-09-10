@@ -35,7 +35,15 @@ permissions:
 env:
   # The wasm budget, on the COMPRESSED artifact. gzip is what nginx actually
   # serves (the box has gzip_static; it has no brotli module), so gzip is what we
-  # gate on. Current: ~1.32 MB.
+  # gate on.
+  #
+  # Current: ~2.09 MB, which is 80 percent of the budget, not the half the
+  # figure here implied for two releases. It said ~1.32 MB from before the
+  # path tracer, and nothing re-measures it, because the gate compares
+  # against the number below rather than against the comment. Re-measure
+  # with `gzip -9 -c web/src/wasm/pkg/solarxy_web_bg.wasm | wc -c` after a
+  # release build and correct this line, or the next reader budgets against
+  # headroom that is not there.
   WASM_GZIP_BUDGET_BYTES: 2621440   # 2.5 MiB
   # The PLAYER's own eager JS, gzipped. Separate from the wasm budget and from
   # the whole-site JS figure below, because a player-only regression is

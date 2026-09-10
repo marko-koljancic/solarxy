@@ -5,8 +5,8 @@
 
 ## Context
 
-Eleven DOM-free TypeScript modules under `web/src`, 1,329 source lines and 1,088 test lines,
-encode rules that both shells need: which parameter is visible under which condition, how a
+Eleven TypeScript modules under `web/src`, 1,329 source lines and 1,216 test lines, encode rules
+that both shells need: which parameter is visible under which condition, how a
 node's report reads, what a wire type looks like and which coercions are legal, how the scene
 tree folds, how an attribute table formats, when a dragged parameter commits, and what the
 expression lane may hold.
@@ -100,10 +100,19 @@ The four crate tasks on the 0.10.0 board were written assuming a module-by-modul
 boundaries drawn by module. They are redrawn by rule as part of starting that work, which is a
 change of shape rather than of scope.
 
-`web/src` loses the eleven modules and reads the results across the boundary it already has. The
-1,088 lines of tests come across and become the Rust tests, which is what makes the move
-verifiable rather than hopeful, and the browser suite staying green with the modules deleted is
-the proof that behaviour did not change.
+`web/src` loses the rules and reads the results across the boundary it already has. The 1,216
+lines of tests come across and become the Rust tests, which is what makes the move verifiable
+rather than hopeful, and the browser suite staying green without them is the proof that behaviour
+did not change.
+
+It loses the rules rather than the modules, and the difference was found by doing it. Six of the
+eleven carry a residue that is host-bound rather than shared: an absolute date needs a locale and
+a timezone, a virtualization window is a fact about a scrolling container, parked expression text
+is per-session interface memory the frozen scene schema pushed out of the document, glyph art and
+the set of drawable silhouettes are what one shell can draw, a draft-commit hook is React, and an
+index lookup over a snapshot the caller is already holding is not worth a crossing. The measure of
+this decision is therefore that no rule has two implementations, not that eleven files are gone;
+each residue names what left it and why what stayed had to.
 
 `solarxy-studio`'s first content is therefore presentation rather than session state, which is
 the opposite order from the migration sequence in

@@ -78,12 +78,18 @@ third-party rules are exclusions such as "no windowing toolkit here" rather than
 | `solarxy-cli` | `solarxy-studio`, `solarxy-render`, `solarxy-validate`, `solarxy-formats`, `solarxy-core` |
 | `solarxy` (root binary) | `solarxy-app`, `solarxy-core` |
 
-`solarxy-studio` does not exist yet. Its row is the target, and the two shell rows above
-assume it: today `solarxy-app` depends on `solarxy-graph`, `solarxy-host`, `solarxy-renderer`,
-`solarxy-formats` and `solarxy-scenefile` directly, and `solarxy-web` depends on
-`solarxy-graph`, `solarxy-formats` and `solarxy-bvh` directly. Those extra edges are the
-measure of how much application logic still sits in the shells. They shrink as the migration
-in [09](09-evolution-and-roadmap.md) proceeds, and the matrix above is what "done" looks like.
+`solarxy-studio` exists as of 0.10.0 and holds the shared interface derivation. Its row is
+still the target rather than a description: it takes `solarxy-graph` and `solarxy-core` today,
+which is all the presentation rules need, and the two shell rows above assume more than is
+true. `solarxy-app` still depends on `solarxy-graph`, `solarxy-host`, `solarxy-renderer`,
+`solarxy-formats` and `solarxy-scenefile` directly, and `solarxy-web` on `solarxy-graph`,
+`solarxy-formats` and `solarxy-bvh`. Those extra edges are the measure of how much application
+logic still sits in the shells. They shrink as the migration in
+[09](09-evolution-and-roadmap.md) proceeds, and the matrix above is what "done" looks like.
+
+The allow-matrix assertion reads this table, so a subset is legal and an edge outside it is
+not: the crate having fewer dependencies than its row grants is the migration being unfinished,
+not a violation.
 
 ### Test-only edges
 
@@ -372,10 +378,11 @@ and is worth doing at the same time, since the allow-list is already written.
 ## What this document owes
 
 One thing is stated here as target and is not true yet: the `solarxy-studio` rows in the
-allow-matrix describe a crate that does not exist. It is a step in
-[09-evolution-and-roadmap.md](09-evolution-and-roadmap.md), and until it lands, that part of
-this document is a specification rather than a description. The boundary exhaustiveness test
-for the TypeScript mirror was the other, and it landed in 0.10.0.
+allow-matrix describe a crate that exists but has taken only the first of its
+responsibilities. Until the rest of the sequence in
+[09-evolution-and-roadmap.md](09-evolution-and-roadmap.md) lands, that part of this document is
+a specification rather than a description. The boundary exhaustiveness test for the TypeScript
+mirror was the other, and it landed in 0.10.0, along with the crate itself.
 
 ## Open questions
 

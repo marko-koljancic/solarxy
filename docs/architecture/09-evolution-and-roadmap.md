@@ -364,16 +364,20 @@ The measure of progress is concrete: today the desktop shell dispatches two of t
 commands. Each step below moves a behaviour into the shared layer, and both shells gain it at
 once.
 
-### E0. Create the crate
+### E0. Create the crate -- landed in 0.10.0
 
-**What.** An empty `solarxy-studio` depending on `solarxy-graph` and `solarxy-host`, with its
-allow-list entry in [05](05-boundaries-and-contracts.md) and the A1 assertion covering it.
+**What.** A `solarxy-studio` depending on `solarxy-graph`, with its allow-list entry in
+[05](05-boundaries-and-contracts.md) and the A1 assertion covering it.
 
-**Size.** Small in code and gated in process: a new workspace crate is an addition the working
-agreement requires approval for. Nothing moves until that approval exists.
-
-**If skipped.** Everything else in this group is blocked, which is the reason it is listed
-separately rather than folded into E1.
+**What actually happened.** It arrived carrying content rather than empty, and not the content
+this sequence expected: the shared interface derivation, decided by
+[adr/0016](adr/0016-interface-derivation-splits-between-registry-and-application-layer.md).
+That is the opposite order from the steps below, and deliberately so, because the presentation
+rules had a second consumer waiting on them in the same release and the session behaviours did
+not. It took `solarxy-graph` and `solarxy-core` rather than `solarxy-host`, since no
+presentation rule needs a render host; the host edge arrives with the first step that moves
+session behaviour. The boundary mirror's scan roots were widened to cover it in the same pass,
+because a rule's result that crosses to the browser must have a counterpart held to it.
 
 ### E1. Move the keymap
 

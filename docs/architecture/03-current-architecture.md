@@ -216,9 +216,9 @@ reduced-feature clippy variants, and it returns early with a printed notice when
 model is absent, meaning a green run proves nothing about raycast performance.
 
 **There is no workspace `[lints]` table.** `#![warn(clippy::pedantic)]` plus a hand-maintained
-allow block is copied into all fifteen crate roots, in twelve distinct configurations. Only
-four are identical: `solarxy-core`, `solarxy-formats`, `solarxy-graph` and `solarxy-kernel`
-share the same twenty-one allows. `solarxy-renderer` allows twenty-two, `solarxy-host` twenty,
+allow block is copied into all sixteen crate roots, in twelve distinct configurations. Only
+five are identical: `solarxy-core`, `solarxy-formats`, `solarxy-graph`, `solarxy-kernel` and
+`solarxy-studio`, which arrived in 0.10.0, share the same twenty-one allows. `solarxy-renderer` allows twenty-two, `solarxy-host` twenty,
 `solarxy-app` twenty, `solarxy-bvh` and `solarxy-cli` fifteen, `solarxy-validate` ten,
 `solarxy-web` nine, `solarxy-imaging` six, the root binary five, `solarxy-scenefile` two and
 `solarxy-render` exactly one. Five lints appear in exactly one crate each. There is no `deny`

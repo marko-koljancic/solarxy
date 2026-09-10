@@ -133,8 +133,10 @@ graph, and the only member that can be changed and tested in isolation.
 
 ## Responsibility cards
 
-Fifteen Cargo members, plus `solarxy-studio` which does not exist yet, plus each `web/src`
-module. A card's `Does not own` and `Must not depend on` fields are the ones that prevent drift,
+Sixteen Cargo members, plus each `web/src` module. `solarxy-studio` arrived in 0.10.0 with the
+presentation half of its charter and widens as the migration in
+[09](09-evolution-and-roadmap.md) proceeds; its card below is the target, and the gap between
+the target and what it holds today is stated in the card itself. A card's `Does not own` and `Must not depend on` fields are the ones that prevent drift,
 and they are the fields to read first.
 
 ### solarxy, the root binary
@@ -281,12 +283,12 @@ and they are the fields to read first.
 
 | Field | Content |
 |---|---|
-| Name | `crates/solarxy-studio` (does not exist; created by the migration step named in [09](09-evolution-and-roadmap.md)) |
+| Name | `crates/solarxy-studio` (created in 0.10.0 by the migration step named in [09](09-evolution-and-roadmap.md); it holds the shared interface derivation today and none of the session behaviour below, which arrives with the later steps of that sequence) |
 | Purpose | The shared headless application layer: the session both graphical shells and the headless surfaces render. |
 | Owns | The application intent vocabulary and the state a shell renders; document lifecycle including open, save, autosave and recovery policy; selection and tool or gizmo mode; the pane and workspace arrangement model; the menu model and the single keymap table; the notification and modal model; the preferences schema, distinct from any one platform's storage; render-settings resolution from the document and its mapping into backend settings; the still-render job driver; and the progress view model every surface presents. |
 | Does not own | Any view. No widget, no DOM, no terminal cell, no colour choice beyond reading the shared palette. No device or surface acquisition. No platform storage: it says what to persist, not where. No clock: like the still job, it takes time from its caller, because one of its consumers is a WebAssembly build. If a type in this crate names a widget, the crate has become a third shell. |
 | Public surface | The intent enum, the session type, the state snapshot it returns, and the keymap table. Stable once it exists, because it is what both shells are written against. |
-| May depend on | `solarxy-graph`, `solarxy-host`, `solarxy-renderer`, `solarxy-core`, `solarxy-formats`. |
+| May depend on | `solarxy-graph`, `solarxy-host`, `solarxy-renderer`, `solarxy-core`, `solarxy-formats`. It takes only `solarxy-graph`, `solarxy-core` and `serde` today, which is the presentation charter's whole need; the rest arrive with the session behaviour. |
 | Must not depend on | `winit`, `egui`, `wasm-bindgen`, `rfd`, `ratatui` or any view or platform toolkit, because a view dependency is how a shared layer becomes a shell; `solarxy-app`, `solarxy-web`, `solarxy-cli`, `solarxy-render`, all of which are its consumers; `std::fs` in the required path, because the browser has none and every persistence decision must be expressible as bytes plus a destination the shell resolves. |
 | Platforms | all |
 | Test strategy | The layer's whole point is that a behaviour is testable once. Every intent gets a headless test that drives a session and asserts the resulting state, with no device and no window. The cross-shell parity tests that exist today, which compare two hand-written resolvers field by field, are deleted rather than extended, because after the move there is one body to test. |
