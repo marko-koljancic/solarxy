@@ -71,6 +71,8 @@ pub(crate) enum SolarxyTab {
     Texture,
     /// The watched geometry's attributes, paged.
     Attributes,
+    /// Every text snippet in the document, with an editor.
+    Text,
     /// A tab a saved arrangement named that this build does not have.
     /// Never drawn: [`sweep_retired`] removes every one after a restore.
     #[serde(other)]
@@ -93,6 +95,7 @@ impl SolarxyTab {
             Self::AssetPreview => "asset-preview",
             Self::Texture => "texture",
             Self::Attributes => "attributes",
+            Self::Text => "text",
             Self::Retired => "retired",
         }
     }
@@ -124,6 +127,7 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
         vec![
             SolarxyTab::Nodes,
             SolarxyTab::Attributes,
+            SolarxyTab::Text,
             SolarxyTab::Console,
             SolarxyTab::MaterialInspector,
         ],
@@ -170,6 +174,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Assets => "Assets".into(),
             SolarxyTab::Texture => "Texture".into(),
             SolarxyTab::Attributes => "Attributes".into(),
+            SolarxyTab::Text => "Text".into(),
             SolarxyTab::AssetPreview => self
                 .panels
                 .asset_preview
@@ -275,6 +280,15 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     ui,
                     self.sources.attributes,
                     self.panels.attributes,
+                    self.theme,
+                );
+            }
+            SolarxyTab::Text => {
+                super::panels::text::draw_text_content(
+                    ui,
+                    self.sources.text,
+                    self.panels.text,
+                    self.intents,
                     self.theme,
                 );
             }
@@ -422,6 +436,7 @@ mod tests {
             SolarxyTab::Assets,
             SolarxyTab::Texture,
             SolarxyTab::Attributes,
+            SolarxyTab::Text,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }

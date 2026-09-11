@@ -686,7 +686,17 @@ fn text_row(
                 .desired_width(f32::INFINITY),
         ),
     };
-    resolve_text(ui, spec, env, draft, stored, shape, &response, text)
+    resolve_text(
+        ui,
+        spec,
+        env,
+        draft,
+        stored,
+        shape,
+        response.changed(),
+        &response,
+        text,
+    )
 }
 
 /// The half of a text row that is state rather than drawing, so the
@@ -698,42 +708,22 @@ fn resolve_text(
     draft: &mut Option<Draft>,
     stored: &str,
     shape: TextShape,
+    changed: bool,
     response: &egui::Response,
     text: String,
 ) -> Option<ControlEdit> {
-    if response.changed() {
-        if let Some(existing) = draft.as_mut().filter(|d| d.owns(env.node, &spec.key)) {
-            existing.set(text);
-        } else {
-            let mut fresh = Draft::begin(env.node, &spec.key, stored);
-            fresh.set(text);
-            *draft = Some(fresh);
-        }
-        return None;
-    }
-    // Escape abandons. Checked before the commit, because egui surrenders
-    // focus on Escape and the commit would otherwise write the very text
-    // the user just asked to discard.
-    let escaped = ui.input(|i| i.key_pressed(egui::Key::Escape));
-    if escaped && (response.has_focus() || response.lost_focus()) {
-        *draft = None;
-        return None;
-    }
-    let commit_key = shape == TextShape::Prose
-        && response.has_focus()
-        && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
-    if !(response.lost_focus() || commit_key) {
-        return None;
-    }
-    let out = draft
-        .as_mut()
-        .filter(|d| d.owns(env.node, &spec.key))
-        .and_then(Draft::take_commit)
-        .map(|text| one(spec, ParamValue::Text(text)));
-    // The draft ends whether or not it wrote, which is what lets a name
-    // the engine uniquified come back into the row.
-    *draft = None;
-    out
+    draft::step(
+        ui,
+        draft,
+        env.node,
+        &spec.key,
+        stored,
+        shape == TextShape::Prose,
+        changed,
+        response,
+        text,
+    )
+    .map(|text| one(spec, ParamValue::Text(text)))
 }
 
 /// A program's row: a line-number gutter beside the editor.
@@ -756,43 +746,29 @@ fn snippet_row(
         })
         .flatten();
     let rows = text.lines().count().clamp(3, 12);
-    let mut edit = None;
-    ui.horizontal_top(|ui| {
-        let mut buffer = text;
-        let gutter = rows.max(buffer.lines().count());
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for line in 1..=gutter {
-                let marked = bad.as_ref().is_some_and(|p| p.line == line);
-                ui.label(
-                    egui::RichText::new(format!("{line:>3}"))
-                        .monospace()
-                        .size(10.0)
-                        .color(if marked {
-                            env.theme.severity_error
-                        } else {
-                            env.theme.muted
-                        }),
-                );
-            }
-        });
-        let response = ui.add(
-            egui::TextEdit::multiline(&mut buffer)
-                .desired_rows(rows)
-                .desired_width(f32::INFINITY)
-                .code_editor(),
-        );
-        edit = resolve_text(
-            ui,
-            spec,
-            env,
-            draft,
-            stored,
-            TextShape::Prose,
-            &response,
-            buffer,
-        );
-    });
+    let mut buffer = text;
+    // The shared editor: the gutter, the marked line, and the completion
+    // vocabulary over the input's lanes.
+    let out = crate::gui::code_editor::code_editor(
+        ui,
+        egui::Id::new(("snippet", env.node, spec.key.as_str())),
+        &mut buffer,
+        rows,
+        bad.as_ref(),
+        Some(env.lanes),
+        env.theme,
+    );
+    let edit = resolve_text(
+        ui,
+        spec,
+        env,
+        draft,
+        stored,
+        TextShape::Prose,
+        out.changed,
+        &out.response,
+        buffer,
+    );
     if let Some(message) = env.error.filter(|_| bad.is_some()) {
         ui.label(
             egui::RichText::new(message)

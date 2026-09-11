@@ -684,6 +684,14 @@ impl State {
                     }
                     _ => crate::gui::AttributesSource::Empty,
                 },
+                text: match &self.engine {
+                    Some(engine) if self.gui.text_tab_present() => crate::gui::TextSource::Scene {
+                        doc: engine.document(),
+                        registry: engine.registry(),
+                        current: self.gui.graph_ctx(),
+                    },
+                    _ => crate::gui::TextSource::Empty,
+                },
                 preview: crate::gui::PreviewView {
                     texture: self.preview.texture(),
                     loading: self.preview.loading(),

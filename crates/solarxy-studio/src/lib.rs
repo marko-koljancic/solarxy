@@ -65,5 +65,6 @@ pub mod expression;
 pub mod node;
 pub mod palette;
 pub mod params;
+pub mod text;
 pub mod tree;
 pub mod types;

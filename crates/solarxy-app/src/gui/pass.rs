@@ -22,6 +22,7 @@ use super::panels::assets::{AssetsSource, AssetsState};
 use super::panels::attributes::{AttributesSource, AttributesState};
 use super::panels::nodes::{CanvasSource, CanvasState};
 use super::panels::params::{ParamPanelSource, ParamPanelState};
+use super::panels::text::{TextSource, TextState};
 use super::panels::texture::{TextureSource, TextureState};
 use super::panels::tree::{TreeSource, TreeState};
 use super::panels::review::overlay::ReviewPaneOverlay;
@@ -84,6 +85,9 @@ pub(crate) struct PanelSources<'a> {
     /// The engine and the graph the user is in, for the paged table, when
     /// the Attributes tab is mounted.
     pub attributes: AttributesSource<'a>,
+    /// The document and the graph the user is in, for the snippets, when
+    /// the Text tab is mounted.
+    pub text: TextSource<'a>,
     pub recent_files: &'a [String],
 }
 
@@ -99,6 +103,7 @@ pub(crate) struct PanelState<'a> {
     pub preview: &'a mut AssetPreviewState,
     pub texture: &'a mut TextureState,
     pub attributes: &'a mut AttributesState,
+    pub text: &'a mut TextState,
     pub canvas: &'a mut CanvasState,
     pub params: &'a mut ParamPanelState,
     /// **Shared, and deliberately so.** Which graph the user is looking

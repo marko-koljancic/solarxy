@@ -25,6 +25,7 @@ mod expression;
 mod frame;
 
 pub(crate) use expression::Resolved as ResolvedParams;
+pub(in crate::gui) use draft::{Draft, shown_text, step as draft_step};
 /// Re-exported for the interpretability twin. See `nodes` for why it does
 /// not live inside either panel.
 #[cfg(test)]

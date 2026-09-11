@@ -37,6 +37,7 @@
 //! used in menu shortcut labels.
 
 mod chrome;
+mod code_editor;
 mod dock;
 mod intent;
 mod modals;
@@ -69,6 +70,7 @@ pub(crate) use intent::{
 pub(crate) use panels::asset_preview::PreviewView;
 pub(crate) use panels::assets::AssetsSource;
 pub(crate) use panels::attributes::AttributesSource;
+pub(crate) use panels::text::TextSource;
 pub(crate) use panels::texture::{OwnerView, TextureSource, texture_owner};
 pub(crate) use panels::tree::{TreeAction, TreeSource};
 pub(crate) use panels::nodes::{CanvasAction, CanvasScene, CanvasSource, CanvasToggle, NodeCook};

@@ -12,6 +12,7 @@ use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
 use super::panels::asset_preview::AssetPreviewState;
 use super::panels::assets::AssetsState;
 use super::panels::attributes::AttributesState;
+use super::panels::text::TextState;
 use super::panels::texture::TextureState;
 use super::panels::tree::TreeState;
 use super::chrome::menu::{MenuContext, draw_menu_bar};
@@ -56,6 +57,7 @@ pub struct EguiRenderer {
     asset_preview_state: AssetPreviewState,
     texture: TextureState,
     attributes: AttributesState,
+    text: TextState,
     /// The size the preview tab last drew at, read by the state layer.
     preview_size_seen: Option<(u32, u32)>,
     canvas: super::panels::nodes::CanvasState,
@@ -139,6 +141,7 @@ impl EguiRenderer {
             asset_preview_state: AssetPreviewState::default(),
             texture: TextureState::default(),
             attributes: AttributesState::default(),
+            text: TextState::default(),
             preview_size_seen: None,
             canvas: super::panels::nodes::CanvasState::default(),
             params: super::panels::params::ParamPanelState::default(),
@@ -205,6 +208,12 @@ impl EguiRenderer {
     #[must_use]
     pub fn attributes_tab_present(&self) -> bool {
         self.tab_present(SolarxyTab::Attributes)
+    }
+
+    /// `true` iff the Text tab is mounted.
+    #[must_use]
+    pub fn text_tab_present(&self) -> bool {
+        self.tab_present(SolarxyTab::Text)
     }
 
     /// The size the preview tab last drew its model at, in physical pixels.
@@ -427,6 +436,7 @@ impl EguiRenderer {
     pub fn reset_graph_surfaces(&mut self) {
         self.graph_ctx = solarxy_graph::document::GraphContext::Root;
         self.tree.reset();
+        self.text.reset();
         self.asset_preview = None;
         self.canvas.reset();
         // The pin especially: node ids are minted per document, so one
@@ -656,6 +666,7 @@ impl EguiRenderer {
                     preview: &mut self.asset_preview_state,
                     texture: &mut self.texture,
                     attributes: &mut self.attributes,
+                    text: &mut self.text,
                     canvas: &mut self.canvas,
                     params: &mut self.params,
                     graph_ctx: &mut self.graph_ctx,

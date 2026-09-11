@@ -33,7 +33,7 @@ use solarxy_graph::document::NodeId;
 
 /// The row being typed into.
 #[derive(Debug, Clone)]
-pub(super) struct Draft {
+pub(in crate::gui) struct Draft {
     node: NodeId,
     key: String,
     /// The in-flight text.
@@ -45,7 +45,7 @@ pub(super) struct Draft {
 
 impl Draft {
     /// Start a draft on a row, seeded from what is stored there.
-    pub(super) fn begin(node: NodeId, key: &str, stored: &str) -> Self {
+    pub(in crate::gui) fn begin(node: NodeId, key: &str, stored: &str) -> Self {
         Self {
             node,
             key: key.to_string(),
@@ -55,15 +55,15 @@ impl Draft {
     }
 
     /// Whether this draft is the given row's.
-    pub(super) fn owns(&self, node: NodeId, key: &str) -> bool {
+    pub(in crate::gui) fn owns(&self, node: NodeId, key: &str) -> bool {
         self.node == node && self.key == key
     }
 
-    pub(super) fn text(&self) -> &str {
+    pub(in crate::gui) fn text(&self) -> &str {
         &self.text
     }
 
-    pub(super) fn set(&mut self, text: String) {
+    pub(in crate::gui) fn set(&mut self, text: String) {
         self.text = text;
     }
 
@@ -72,7 +72,7 @@ impl Draft {
     ///
     /// Marks the text as sent, so a commit key that also drops focus
     /// commits once rather than twice.
-    pub(super) fn take_commit(&mut self) -> Option<String> {
+    pub(in crate::gui) fn take_commit(&mut self) -> Option<String> {
         if !solarxy_studio::expression::should_commit(&self.text, &self.sent) {
             return None;
         }
@@ -83,7 +83,7 @@ impl Draft {
 
 /// What a text row shows: its own draft where it has one, the stored value
 /// otherwise.
-pub(super) fn shown_text<'a>(
+pub(in crate::gui) fn shown_text<'a>(
     draft: Option<&'a Draft>,
     node: NodeId,
     key: &str,
@@ -93,6 +93,56 @@ pub(super) fn shown_text<'a>(
         Some(draft) if draft.owns(node, key) => draft.text(),
         _ => stored,
     }
+}
+
+/// One frame of the draft-and-commit contract for a text row: the text
+/// the widget now shows, and whether it committed.
+///
+/// A change updates or begins the draft. Escape abandons it, checked before
+/// the commit because egui surrenders focus on Escape and the commit would
+/// otherwise write the very text the user asked to discard. Losing focus
+/// commits, and so does the platform's command modifier with Enter on a
+/// prose row. The draft ends whether or not it wrote, which is what lets a
+/// value the engine changed underneath come back into the row.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::gui) fn step(
+    ui: &egui::Ui,
+    draft: &mut Option<Draft>,
+    node: NodeId,
+    key: &str,
+    stored: &str,
+    prose: bool,
+    changed: bool,
+    response: &egui::Response,
+    text: String,
+) -> Option<String> {
+    if changed {
+        if let Some(existing) = draft.as_mut().filter(|d| d.owns(node, key)) {
+            existing.set(text);
+        } else {
+            let mut fresh = Draft::begin(node, key, stored);
+            fresh.set(text);
+            *draft = Some(fresh);
+        }
+        return None;
+    }
+    let escaped = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    if escaped && (response.has_focus() || response.lost_focus()) {
+        *draft = None;
+        return None;
+    }
+    let commit_key = prose
+        && response.has_focus()
+        && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
+    if !(response.lost_focus() || commit_key) {
+        return None;
+    }
+    let out = draft
+        .as_mut()
+        .filter(|d| d.owns(node, key))
+        .and_then(Draft::take_commit);
+    *draft = None;
+    out
 }
 
 #[cfg(test)]
