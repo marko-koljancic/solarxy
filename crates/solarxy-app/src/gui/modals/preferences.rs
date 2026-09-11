@@ -94,6 +94,7 @@ impl PreferencesModal {
             PrefsTab::Interface => {
                 self.draft.ui.max_recent_files = defaults.ui.max_recent_files;
                 self.draft.ui.status_bar_visible = defaults.ui.status_bar_visible;
+                self.draft.autosave = defaults.autosave;
             }
             PrefsTab::Updater => {
                 self.draft.updater = defaults.updater;
@@ -490,6 +491,21 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             ui.add(
                 egui::Slider::new(&mut draft.ui.max_recent_files, 1..=MAX_RECENT_FILES_CAP)
                     .integer(),
+            );
+            ui.end_row();
+
+            ui.label("Autosave")
+                .on_hover_text("Keep a recovery copy of unsaved work in the data directory");
+            ui.checkbox(&mut draft.autosave.enabled, "");
+            ui.end_row();
+
+            ui.label("Autosave after")
+                .on_hover_text("Seconds of quiet before a recovery copy is written; one is forced every 15 seconds while editing");
+            ui.add_enabled(
+                draft.autosave.enabled,
+                egui::Slider::new(&mut draft.autosave.debounce_secs, 0.5..=30.0)
+                    .step_by(0.5)
+                    .suffix(" s"),
             );
             ui.end_row();
 

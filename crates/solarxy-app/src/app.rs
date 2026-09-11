@@ -286,6 +286,7 @@ impl ApplicationHandler<State> for App {
         if let Some(state) = &mut self.state {
             state.flush_review_on_exit();
             state.flush_dock_layout_on_exit();
+            state.flush_autosave_on_exit();
         }
     }
 }

@@ -181,10 +181,14 @@ impl State {
     }
 
     /// Record that what the engine holds now is what the file holds.
+    ///
+    /// The autosave ring is cleared with it: the file holds the document now,
+    /// so there is nothing for a launch to recover.
     pub(super) fn mark_saved(&mut self) {
         if let Some(engine) = &self.engine {
             self.saved_revision = engine.revision();
         }
+        self.clear_autosaves();
     }
 
     /// Put the document's name and its dirty state in the window title.
@@ -271,7 +275,7 @@ impl State {
     }
 
     /// Everything the scene file carries that is not the document.
-    fn scene_sidecar(&mut self) -> SceneSidecar {
+    pub(super) fn scene_sidecar(&mut self) -> SceneSidecar {
         let now = now_rfc3339();
         let (name, created) = self.engine_scene.as_ref().map_or_else(
             || (String::new(), String::new()),

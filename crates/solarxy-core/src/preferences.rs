@@ -614,6 +614,8 @@ pub struct Preferences {
     pub view: ViewPrefs,
     #[serde(default)]
     pub canvas: CanvasPrefs,
+    #[serde(default)]
+    pub autosave: AutosavePrefs,
 }
 
 /// How a wire is routed between two sockets.
@@ -894,6 +896,33 @@ impl Default for UiPrefs {
     }
 }
 
+/// Autosave, on the browser's cadence: a write after `debounce_secs` of
+/// quiet, and one forced every fifteen seconds under continuous editing.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AutosavePrefs {
+    #[serde(default = "default_autosave_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_autosave_debounce")]
+    pub debounce_secs: f32,
+}
+
+fn default_autosave_enabled() -> bool {
+    true
+}
+
+fn default_autosave_debounce() -> f32 {
+    2.0
+}
+
+impl Default for AutosavePrefs {
+    fn default() -> Self {
+        Self {
+            enabled: default_autosave_enabled(),
+            debounce_secs: default_autosave_debounce(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct UpdaterPrefs {
     #[serde(default)]
@@ -953,6 +982,7 @@ impl Default for Preferences {
             dock: DockPrefs::default(),
             view: ViewPrefs::default(),
             canvas: CanvasPrefs::default(),
+            autosave: AutosavePrefs::default(),
         }
     }
 }
@@ -1004,6 +1034,16 @@ impl Default for RenderingPrefs {
 ///
 /// `None` when the platform reports no config root, which is a real state on
 /// a bare container and never an error: every caller falls back to defaults.
+/// Solarxy's own directory under the platform's data root, for what is
+/// state rather than configuration: the autosave ring lives here.
+///
+/// Beside [`config_dir`] for the reason it gives: one answer to where the
+/// directory is, rather than each writer resolving its own.
+#[cfg(feature = "fs")]
+pub fn data_dir() -> Option<PathBuf> {
+    dirs::data_dir().map(|d| d.join("solarxy"))
+}
+
 #[cfg(feature = "fs")]
 pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("solarxy"))
@@ -1185,6 +1225,7 @@ mod tests {
                 minimap: true,
                 controls: false,
             },
+            autosave: AutosavePrefs::default(),
         };
         let toml_str = toml::to_string_pretty(&prefs).unwrap();
         let parsed: Preferences = toml::from_str(&toml_str).unwrap();

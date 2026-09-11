@@ -472,6 +472,10 @@ impl State {
         if let Some(choice) = self.gui.take_unsaved_choice() {
             self.resolve_discard(choice);
         }
+        if let Some(choice) = self.gui.take_recovery_choice() {
+            self.resolve_recovery(choice);
+        }
+        self.poll_autosave();
         // Uncaptured GPU faults recorded since the last frame. The hook
         // already logged each full message on the `solarxy::gpu` target,
         // which the console captures; the toast is the short pointer, and

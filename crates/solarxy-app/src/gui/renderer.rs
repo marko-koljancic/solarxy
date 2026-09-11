@@ -22,6 +22,7 @@ use super::modals::screenshot::{ScreenshotModal, draw_screenshot_modal};
 use super::modals::still::{StillRenderModal, draw_still_modal};
 use super::panels::properties::ModelInfo;
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
+use super::modals::recovery::{RecoveryChoice, RecoveryModalState, draw_recovery_modal};
 use super::modals::unsaved::{DiscardWhat, UnsavedChoice, UnsavedModalState, draw_unsaved_modal};
 use super::modals::update::{UpdateModalState, draw_update_modal};
 use egui_dock::{DockArea, DockState};
@@ -41,6 +42,7 @@ pub struct EguiRenderer {
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
     unsaved_modal: UnsavedModalState,
+    recovery_modal: RecoveryModalState,
     screenshot_modal: ScreenshotModal,
     still_modal: StillRenderModal,
     node_tree: NodeTreeState,
@@ -116,6 +118,7 @@ impl EguiRenderer {
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
             unsaved_modal: UnsavedModalState::default(),
+            recovery_modal: RecoveryModalState::default(),
             screenshot_modal: ScreenshotModal::default(),
             still_modal: StillRenderModal::default(),
             node_tree: NodeTreeState::default(),
@@ -393,8 +396,19 @@ impl EguiRenderer {
             || self.update_modal.open
             || self.shortcuts_modal.open
             || self.unsaved_modal.open
+            || self.recovery_modal.open
             || review.delete_confirm.is_some()
             || review.editing.is_some()
+    }
+
+    /// Offer the autosave a launch found.
+    pub(crate) fn open_recovery_prompt(&mut self, name: &str, when: &str) {
+        self.recovery_modal.open(name, when);
+    }
+
+    /// The offer's answer, once.
+    pub(crate) fn take_recovery_choice(&mut self) -> Option<RecoveryChoice> {
+        self.recovery_modal.take_choice()
     }
 
     /// Ask whether to save before an action that discards the document.
@@ -634,6 +648,7 @@ impl EguiRenderer {
                 || self.update_modal.open
                 || self.shortcuts_modal.open
                 || self.unsaved_modal.open
+                || self.recovery_modal.open
                 || screenshot_drawn
                 || review.delete_confirm.is_some()
                 || review.editing.is_some();
@@ -662,6 +677,7 @@ impl EguiRenderer {
             // Ahead of the escape chain for the same reason: while the
             // question is up, Escape answers it.
             draw_unsaved_modal(ctx, &mut self.unsaved_modal, &self.theme);
+            draw_recovery_modal(ctx, &mut self.recovery_modal);
 
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);

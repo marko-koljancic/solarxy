@@ -239,6 +239,7 @@ impl State {
             screenshot_expand_review: false,
             quit_requested: false,
             pending_discard: None,
+            autosave: autosave::AutosaveState::new(),
             saved_revision: 0,
             hdri_hash: None,
             last_title: String::new(),
@@ -258,6 +259,9 @@ impl State {
         if let Some(path) = model_path {
             state.open_file(std::path::PathBuf::from(path));
         }
+        // After the command-line open, so a launch that names a file and
+        // finds an autosave is asked about the autosave over that file.
+        state.check_recovery_on_launch();
 
         Ok(state)
     }

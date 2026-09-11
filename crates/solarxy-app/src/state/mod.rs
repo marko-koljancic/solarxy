@@ -33,6 +33,7 @@
 //!   so call sites keep their paths.
 
 mod actions;
+mod autosave;
 mod camera;
 mod capture;
 mod cook;
@@ -291,6 +292,8 @@ pub struct State {
     pub(super) quit_requested: bool,
     /// The discarding action waiting on the unsaved-changes prompt.
     pub(super) pending_discard: Option<discard::DiscardAction>,
+    /// The autosave ring and its timing.
+    pub(super) autosave: autosave::AutosaveState,
     /// The engine revision the open document was last written at, or
     /// opened at. Dirty is `engine.revision() != saved_revision`, which is
     /// what keeps the answer the engine's rather than a flag's.

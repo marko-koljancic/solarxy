@@ -72,7 +72,12 @@ impl State {
         };
         let saved = match choice {
             UnsavedChoice::Save => self.save_document(),
-            UnsavedChoice::Discard | UnsavedChoice::Cancel => false,
+            UnsavedChoice::Discard => {
+                // Chosen, so a launch must not offer back what was let go.
+                self.clear_autosaves();
+                false
+            }
+            UnsavedChoice::Cancel => false,
         };
         if proceeds(choice, saved) {
             self.run_discard(action);

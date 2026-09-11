@@ -331,24 +331,43 @@ impl State {
                 return;
             }
         };
+        let display_path = path.canonicalize().map_or_else(
+            |_| path.display().to_string(),
+            |p| p.to_string_lossy().to_string(),
+        );
+        self.adopt_scene_bytes(&bytes, &filename, &display_path);
+    }
 
+    /// Install a scene archive as the document: from a file, or from the
+    /// autosave ring, which is why the bytes and the identity arrive apart.
+    /// An empty `display_path` is a document with no file, kept out of
+    /// Recent Files.
+    ///
+    /// Returns whether the archive was adopted; a refused one leaves
+    /// whatever was open untouched.
+    pub(super) fn adopt_scene_bytes(
+        &mut self,
+        bytes: &[u8],
+        filename: &str,
+        display_path: &str,
+    ) -> bool {
         let mut engine = match Engine::new() {
             Ok(e) => Box::new(e),
             Err(e) => {
                 self.gui
                     .set_toast(&format!("Engine unavailable: {e}"), ToastSeverity::Error);
-                return;
+                return false;
             }
         };
 
-        let loaded = match engine.load_slxy(&bytes) {
+        let loaded = match engine.load_slxy(bytes) {
             Ok(l) => l,
             Err(e) => {
                 self.gui.set_toast(
                     &format!("Cannot open {filename}: {e}"),
                     ToastSeverity::Error,
                 );
-                return;
+                return false;
             }
         };
 
@@ -357,12 +376,15 @@ impl State {
         let environment = loaded.sidecar.environment.clone();
         let created = loaded.sidecar.meta.created.clone();
 
-        let display_path = path.canonicalize().map_or_else(
-            |_| path.display().to_string(),
-            |p| p.to_string_lossy().to_string(),
-        );
         let file_size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        self.adopt_document(engine, &filename, &display_path, file_size);
+        if display_path.is_empty() {
+            self.install_engine(
+                engine,
+                EngineSceneInfo::new(filename.to_string(), String::new(), file_size),
+            );
+        } else {
+            self.adopt_document(engine, filename, display_path, file_size);
+        }
         if let Some(scene) = &mut self.engine_scene {
             scene.created = created;
         }
@@ -382,6 +404,7 @@ impl State {
             self.gui
                 .set_toast(&format!("Opened {filename}"), ToastSeverity::Success);
         }
+        true
     }
 
     /// Adopt the per-pane cameras, display settings and camera bindings a
@@ -632,6 +655,7 @@ impl State {
         // What the engine holds now is what the file holds, so the document
         // opens clean and the first command dirties it.
         self.saved_revision = engine.revision();
+        self.autosave.reset(engine.revision());
         self.hdri_hash = None;
         self.engine = Some(engine);
         // Identity now; the counters and the merged report fill in as the
