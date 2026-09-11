@@ -639,6 +639,14 @@ impl State {
                     )
                 }),
                 tree: tree_source,
+                assets: match &self.engine {
+                    Some(engine) if self.gui.assets_tab_present() => {
+                        crate::gui::AssetsSource::Scene {
+                            table: engine.asset_table(),
+                        }
+                    }
+                    _ => crate::gui::AssetsSource::Empty,
+                },
                 canvas: canvas_source,
                 params: params_source,
                 recent_files: &recent_files,

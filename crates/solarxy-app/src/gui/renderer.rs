@@ -9,6 +9,7 @@ use super::modals::about::draw_about_modal;
 use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
+use super::panels::assets::AssetsState;
 use super::panels::tree::TreeState;
 use super::chrome::menu::{MenuContext, draw_menu_bar};
 use super::chrome::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
@@ -46,6 +47,9 @@ pub struct EguiRenderer {
     screenshot_modal: ScreenshotModal,
     still_modal: StillRenderModal,
     tree: TreeState,
+    assets: AssetsState,
+    /// The asset the preview tab shows, by hash and name.
+    asset_preview: Option<(String, String)>,
     canvas: super::panels::nodes::CanvasState,
     params: super::panels::params::ParamPanelState,
     /// The node canvas's rect as the last frame drew it, so a key claim
@@ -122,6 +126,8 @@ impl EguiRenderer {
             screenshot_modal: ScreenshotModal::default(),
             still_modal: StillRenderModal::default(),
             tree: TreeState::default(),
+            assets: AssetsState::default(),
+            asset_preview: None,
             canvas: super::panels::nodes::CanvasState::default(),
             params: super::panels::params::ParamPanelState::default(),
             canvas_rect: None,
@@ -150,6 +156,24 @@ impl EguiRenderer {
     /// Cache the loaded HDRI's metadata for the Properties panel.
     pub(crate) fn update_hdri_info(&mut self, info: HdriInfo) {
         self.hdri_info = Some(info);
+    }
+
+    /// Preview one asset: remember which, and bring the preview tab up
+    /// beside the Assets panel.
+    pub(crate) fn open_asset_preview(&mut self, hash: String, name: String) {
+        self.asset_preview = Some((hash, name));
+        super::dock::show_tab_beside(
+            &mut self.dock_state,
+            SolarxyTab::AssetPreview,
+            SolarxyTab::Assets,
+        );
+    }
+
+    /// `true` iff the Assets tab is mounted, so the state layer can skip
+    /// gathering what it would draw.
+    #[must_use]
+    pub fn assets_tab_present(&self) -> bool {
+        self.tab_present(SolarxyTab::Assets)
     }
 
     /// Show the Environment dialog.
@@ -335,6 +359,7 @@ impl EguiRenderer {
     pub fn reset_graph_surfaces(&mut self) {
         self.graph_ctx = solarxy_graph::document::GraphContext::Root;
         self.tree.reset();
+        self.asset_preview = None;
         self.canvas.reset();
         // The pin especially: node ids are minted per document, so one
         // carried across an open would point at whatever holds that id in
@@ -557,6 +582,8 @@ impl EguiRenderer {
                 panels: super::pass::PanelState {
                     console: &mut self.console,
                     tree: &mut self.tree,
+                    assets: &mut self.assets,
+                    asset_preview: self.asset_preview.as_ref(),
                     canvas: &mut self.canvas,
                     params: &mut self.params,
                     graph_ctx: &mut self.graph_ctx,

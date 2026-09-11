@@ -62,6 +62,11 @@ pub(crate) enum SolarxyTab {
     #[serde(rename = "NodeTree")]
     Tree,
     Nodes,
+    /// The staged assets, one tile each.
+    Assets,
+    /// One asset, previewed. Opened by a double-click in Assets rather
+    /// than from any menu, as the browser's is.
+    AssetPreview,
     /// A tab a saved arrangement named that this build does not have.
     /// Never drawn: [`sweep_retired`] removes every one after a restore.
     #[serde(other)]
@@ -80,6 +85,8 @@ impl SolarxyTab {
             Self::Properties => "properties",
             Self::Tree => "tree",
             Self::Nodes => "nodes",
+            Self::Assets => "assets",
+            Self::AssetPreview => "asset-preview",
             Self::Retired => "retired",
         }
     }
@@ -93,7 +100,11 @@ impl SolarxyTab {
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let mut state = DockState::new(vec![SolarxyTab::Viewport]);
     let surface = state.main_surface_mut();
-    let [center_etc, left] = surface.split_left(NodeIndex::root(), 0.18, vec![SolarxyTab::Tree]);
+    let [center_etc, left] = surface.split_left(
+        NodeIndex::root(),
+        0.18,
+        vec![SolarxyTab::Tree, SolarxyTab::Assets],
+    );
     let [_tree, _sidebar] = surface.split_below(left, 0.5, vec![SolarxyTab::Sidebar]);
     let [center, right] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::Properties]);
     let [_props, _review] = surface.split_below(right, 0.5, vec![SolarxyTab::ReviewPanel]);
@@ -142,6 +153,15 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Properties => "Properties".into(),
             SolarxyTab::Tree => "Tree".into(),
             SolarxyTab::Nodes => "Nodes".into(),
+            SolarxyTab::Assets => "Assets".into(),
+            SolarxyTab::AssetPreview => self
+                .panels
+                .asset_preview
+                .map_or_else(
+                    || "Preview".to_string(),
+                    |(_, name)| format!("Preview: {name}"),
+                )
+                .into(),
             SolarxyTab::Retired => String::new().into(),
         }
     }
@@ -202,6 +222,22 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.panels.tree,
                     self.panels.graph_ctx,
                     self.intents,
+                    self.theme,
+                );
+            }
+            SolarxyTab::Assets => {
+                super::panels::assets::draw_assets_content(
+                    ui,
+                    self.sources.assets,
+                    self.panels.assets,
+                    self.intents,
+                    self.theme,
+                );
+            }
+            SolarxyTab::AssetPreview => {
+                super::panels::assets::draw_asset_preview_content(
+                    ui,
+                    self.panels.asset_preview,
                     self.theme,
                 );
             }
@@ -287,6 +323,29 @@ pub(super) fn sweep_retired(dock: &mut DockState<SolarxyTab>) -> usize {
     removed
 }
 
+/// Show `tab`, adding it beside `neighbour` when that tab is mounted and
+/// to the first leaf otherwise, and make it the active tab of its leaf.
+/// The preview opens beside the Assets panel this way, as the browser's
+/// opens in the assets panel's group.
+pub(super) fn show_tab_beside(
+    dock: &mut DockState<SolarxyTab>,
+    tab: SolarxyTab,
+    neighbour: SolarxyTab,
+) {
+    if let Some((surface, node, index)) = dock.find_tab(&tab) {
+        dock.set_active_tab((surface, node, index));
+        return;
+    }
+    if let Some((surface, node, _)) = dock.find_tab(&neighbour) {
+        dock[surface][node].append_tab(tab);
+    } else {
+        dock.main_surface_mut().push_to_first_leaf(tab);
+    }
+    if let Some(found) = dock.find_tab(&tab) {
+        dock.set_active_tab(found);
+    }
+}
+
 /// Add `tab` to the first main-surface leaf if absent; remove all
 /// occurrences if present. Window-menu toggles route through this.
 pub(super) fn toggle_tab(dock: &mut DockState<SolarxyTab>, tab: SolarxyTab) {
@@ -323,6 +382,7 @@ mod tests {
             SolarxyTab::MaterialInspector,
             SolarxyTab::Tree,
             SolarxyTab::Nodes,
+            SolarxyTab::Assets,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }
@@ -407,6 +467,45 @@ mod tests {
 
         toggle_tab(&mut dock, SolarxyTab::Tree);
         assert!(tab_present(&dock, SolarxyTab::Tree));
+    }
+
+    /// The preview opens beside the Assets panel, in its leaf and in
+    /// front, and a second open brings the same tab forward rather than
+    /// adding another.
+    #[test]
+    fn the_preview_opens_beside_assets_once() {
+        // Assets deliberately not in the first leaf, so opening beside it
+        // is distinguishable from opening anywhere.
+        let mut dock = DockState::new(vec![SolarxyTab::Viewport]);
+        dock.main_surface_mut()
+            .split_right(NodeIndex::root(), 0.7, vec![SolarxyTab::Assets]);
+        assert!(!tab_present(&dock, SolarxyTab::AssetPreview));
+        show_tab_beside(&mut dock, SolarxyTab::AssetPreview, SolarxyTab::Assets);
+        let (surface, node, _) = dock.find_tab(&SolarxyTab::AssetPreview).expect("mounted");
+        let (asset_surface, asset_node, _) = dock.find_tab(&SolarxyTab::Assets).expect("assets");
+        assert_eq!(
+            (surface, node),
+            (asset_surface, asset_node),
+            "in the Assets leaf"
+        );
+        let leaf = dock[surface][node].get_leaf().expect("a leaf");
+        assert_eq!(
+            leaf.tabs.get(leaf.active.0).copied(),
+            Some(SolarxyTab::AssetPreview),
+            "and in front"
+        );
+        show_tab_beside(&mut dock, SolarxyTab::AssetPreview, SolarxyTab::Assets);
+        let count = dock
+            .iter_all_tabs()
+            .filter(|(_, t)| **t == SolarxyTab::AssetPreview)
+            .count();
+        assert_eq!(count, 1, "a second open is not a second tab");
+
+        // With no Assets tab mounted, it still opens somewhere.
+        toggle_tab(&mut dock, SolarxyTab::Assets);
+        toggle_tab(&mut dock, SolarxyTab::AssetPreview);
+        show_tab_beside(&mut dock, SolarxyTab::AssetPreview, SolarxyTab::Assets);
+        assert!(tab_present(&dock, SolarxyTab::AssetPreview));
     }
 
     #[test]

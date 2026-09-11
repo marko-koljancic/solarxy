@@ -54,6 +54,7 @@ pub(in crate::gui::panels) use art::{body_size, silhouette};
 #[cfg(test)]
 pub(in crate::gui::panels) use glyphs::art as glyph_art;
 pub(in crate::gui::panels) use glyphs::paint as paint_glyph;
+pub(in crate::gui::panels) use glyphs::paint_path;
 #[cfg(test)]
 pub(in crate::gui::panels) use palette::candidates;
 pub(in crate::gui::panels) use viewer::glyph_key;

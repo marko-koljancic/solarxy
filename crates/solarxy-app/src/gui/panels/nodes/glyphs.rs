@@ -335,7 +335,21 @@ pub(in crate::gui::panels) fn paint(
     let Some(path) = art(key) else {
         return;
     };
-    let map = vector::fit(vec2(GLYPH_BOX, GLYPH_BOX), rect);
+    paint_path(painter, path, GLYPH_BOX, rect, color, width);
+}
+
+/// Stroke SVG path data drawn in a `view_box`-sized square into `rect`.
+/// The glyph table draws through this, and so does anything else with a
+/// path to show, such as the Assets panel's placeholders.
+pub(in crate::gui::panels) fn paint_path(
+    painter: &Painter,
+    path: &str,
+    view_box: f32,
+    rect: Rect,
+    color: Color32,
+    width: f32,
+) {
+    let map = vector::fit(vec2(view_box, view_box), rect);
     let stroke = Stroke::new(width, color);
     for sub in vector::flatten_path(path) {
         let mut points: Vec<_> = sub.points.into_iter().map(&map).collect();

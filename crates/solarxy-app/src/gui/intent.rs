@@ -282,6 +282,8 @@ pub(crate) enum PanelIntent {
     LoadHdri,
     /// The Tree.
     Tree(TreeAction),
+    /// An Assets tile was double-clicked: preview it.
+    PreviewAsset { hash: String, name: String },
     /// The node canvas.
     Canvas(CanvasAction),
     /// The parameter panel's tab reset: every key in a group, hidden
@@ -346,7 +348,11 @@ impl Intent {
                 PanelIntent::Tree(_) | PanelIntent::Canvas(_) | PanelIntent::ResetParams(..),
             ) => 14,
             Self::Cook(_) => 15,
-            Self::Panel(PanelIntent::InvokeAction { .. } | PanelIntent::ChooseAsset { .. }) => 16,
+            Self::Panel(
+                PanelIntent::InvokeAction { .. }
+                | PanelIntent::ChooseAsset { .. }
+                | PanelIntent::PreviewAsset { .. },
+            ) => 16,
         }
     }
 }

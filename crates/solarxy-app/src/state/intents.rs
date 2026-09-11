@@ -128,6 +128,9 @@ impl State {
                 Intent::Panel(PanelIntent::FlyToIssue { ctx, node, index }) => {
                     self.fly_to_node_issue(ctx, node, index);
                 }
+                Intent::Panel(PanelIntent::PreviewAsset { hash, name }) => {
+                    self.gui.open_asset_preview(hash, name);
+                }
                 Intent::Panel(PanelIntent::ClearHdri) => self.clear_hdri(),
                 Intent::Panel(PanelIntent::LoadHdri) => self.open_hdri_dialog(),
                 Intent::Panel(PanelIntent::Tree(action)) => {

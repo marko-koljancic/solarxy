@@ -66,6 +66,7 @@ pub(crate) use intent::{
     CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
     LayoutIntent, PaneChange, PanelIntent, PostChange, ReviewIntent,
 };
+pub(crate) use panels::assets::AssetsSource;
 pub(crate) use panels::tree::{TreeAction, TreeSource};
 pub(crate) use panels::nodes::{CanvasAction, CanvasScene, CanvasSource, CanvasToggle, NodeCook};
 pub(crate) use panels::params::{ParamPanelSource, ParamScene, ResolvedParams};

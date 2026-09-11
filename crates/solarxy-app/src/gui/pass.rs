@@ -17,6 +17,7 @@ use crate::console::ConsoleState;
 
 use super::chrome::divider::DividerInfo;
 use super::chrome::overlays::HudInfo;
+use super::panels::assets::{AssetsSource, AssetsState};
 use super::panels::nodes::{CanvasSource, CanvasState};
 use super::panels::params::{ParamPanelSource, ParamPanelState};
 use super::panels::tree::{TreeSource, TreeState};
@@ -70,6 +71,8 @@ pub(crate) struct PanelSources<'a> {
     /// The node the parameter panel edits, and what its last cook said,
     /// when the Properties tab that hosts it is mounted.
     pub params: ParamPanelSource<'a>,
+    /// The staged assets, when the Assets tab is mounted.
+    pub assets: AssetsSource<'a>,
     pub recent_files: &'a [String],
 }
 
@@ -78,6 +81,9 @@ pub(crate) struct PanelSources<'a> {
 pub(crate) struct PanelState<'a> {
     pub console: &'a mut ConsoleState,
     pub tree: &'a mut TreeState,
+    pub assets: &'a mut AssetsState,
+    /// The asset the preview tab shows, as its hash and name.
+    pub asset_preview: Option<&'a (String, String)>,
     pub canvas: &'a mut CanvasState,
     pub params: &'a mut ParamPanelState,
     /// **Shared, and deliberately so.** Which graph the user is looking

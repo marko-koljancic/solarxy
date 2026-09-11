@@ -59,6 +59,7 @@
     clippy::wildcard_imports
 )]
 
+pub mod assets;
 pub mod attributes;
 pub mod expression;
 pub mod node;
