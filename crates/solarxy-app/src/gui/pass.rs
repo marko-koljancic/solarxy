@@ -21,6 +21,7 @@ use super::panels::asset_preview::{AssetPreviewState, PreviewView};
 use super::panels::assets::{AssetsSource, AssetsState};
 use super::panels::nodes::{CanvasSource, CanvasState};
 use super::panels::params::{ParamPanelSource, ParamPanelState};
+use super::panels::texture::{TextureSource, TextureState};
 use super::panels::tree::{TreeSource, TreeState};
 use super::panels::review::overlay::ReviewPaneOverlay;
 use super::settings::PanelSettings;
@@ -76,6 +77,9 @@ pub(crate) struct PanelSources<'a> {
     pub assets: AssetsSource<'a>,
     /// The model preview's texture and status, for the preview tab.
     pub preview: PreviewView<'a>,
+    /// The image network's published output, when the Texture tab is
+    /// mounted.
+    pub texture: TextureSource<'a>,
     pub recent_files: &'a [String],
 }
 
@@ -89,6 +93,7 @@ pub(crate) struct PanelState<'a> {
     pub asset_preview: Option<&'a (String, String)>,
     /// The preview tab's own image view.
     pub preview: &'a mut AssetPreviewState,
+    pub texture: &'a mut TextureState,
     pub canvas: &'a mut CanvasState,
     pub params: &'a mut ParamPanelState,
     /// **Shared, and deliberately so.** Which graph the user is looking

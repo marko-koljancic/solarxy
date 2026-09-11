@@ -18,4 +18,5 @@ pub(in crate::gui) mod nodes;
 pub(in crate::gui) mod params;
 pub(in crate::gui) mod review;
 pub(in crate::gui) mod sidebar;
+pub(in crate::gui) mod texture;
 pub(in crate::gui) mod tree;

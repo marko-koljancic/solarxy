@@ -68,6 +68,7 @@ pub(crate) use intent::{
 };
 pub(crate) use panels::asset_preview::PreviewView;
 pub(crate) use panels::assets::AssetsSource;
+pub(crate) use panels::texture::{OwnerView, TextureSource, texture_owner};
 pub(crate) use panels::tree::{TreeAction, TreeSource};
 pub(crate) use panels::nodes::{CanvasAction, CanvasScene, CanvasSource, CanvasToggle, NodeCook};
 pub(crate) use panels::params::{ParamPanelSource, ParamScene, ResolvedParams};

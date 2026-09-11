@@ -11,6 +11,7 @@ use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortc
 use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
 use super::panels::asset_preview::AssetPreviewState;
 use super::panels::assets::AssetsState;
+use super::panels::texture::TextureState;
 use super::panels::tree::TreeState;
 use super::chrome::menu::{MenuContext, draw_menu_bar};
 use super::chrome::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
@@ -52,6 +53,7 @@ pub struct EguiRenderer {
     /// The asset the preview tab shows, by hash and name.
     asset_preview: Option<(String, String)>,
     asset_preview_state: AssetPreviewState,
+    texture: TextureState,
     /// The size the preview tab last drew at, read by the state layer.
     preview_size_seen: Option<(u32, u32)>,
     canvas: super::panels::nodes::CanvasState,
@@ -133,6 +135,7 @@ impl EguiRenderer {
             assets: AssetsState::default(),
             asset_preview: None,
             asset_preview_state: AssetPreviewState::default(),
+            texture: TextureState::default(),
             preview_size_seen: None,
             canvas: super::panels::nodes::CanvasState::default(),
             params: super::panels::params::ParamPanelState::default(),
@@ -186,6 +189,13 @@ impl EguiRenderer {
     #[must_use]
     pub fn asset_preview_tab_present(&self) -> bool {
         self.tab_present(SolarxyTab::AssetPreview)
+    }
+
+    /// `true` iff the Texture tab is mounted, so the state layer can skip
+    /// the image query.
+    #[must_use]
+    pub fn texture_tab_present(&self) -> bool {
+        self.tab_present(SolarxyTab::Texture)
     }
 
     /// The size the preview tab last drew its model at, in physical pixels.
@@ -635,6 +645,7 @@ impl EguiRenderer {
                     assets: &mut self.assets,
                     asset_preview: self.asset_preview.as_ref(),
                     preview: &mut self.asset_preview_state,
+                    texture: &mut self.texture,
                     canvas: &mut self.canvas,
                     params: &mut self.params,
                     graph_ctx: &mut self.graph_ctx,

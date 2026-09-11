@@ -67,6 +67,8 @@ pub(crate) enum SolarxyTab {
     /// One asset, previewed. Opened by a double-click in Assets rather
     /// than from any menu, as the browser's is.
     AssetPreview,
+    /// The image network's published output.
+    Texture,
     /// A tab a saved arrangement named that this build does not have.
     /// Never drawn: [`sweep_retired`] removes every one after a restore.
     #[serde(other)]
@@ -87,6 +89,7 @@ impl SolarxyTab {
             Self::Nodes => "nodes",
             Self::Assets => "assets",
             Self::AssetPreview => "asset-preview",
+            Self::Texture => "texture",
             Self::Retired => "retired",
         }
     }
@@ -106,7 +109,11 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
         vec![SolarxyTab::Tree, SolarxyTab::Assets],
     );
     let [_tree, _sidebar] = surface.split_below(left, 0.5, vec![SolarxyTab::Sidebar]);
-    let [center, right] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::Properties]);
+    let [center, right] = surface.split_right(
+        center_etc,
+        0.78,
+        vec![SolarxyTab::Properties, SolarxyTab::Texture],
+    );
     let [_props, _review] = surface.split_below(right, 0.5, vec![SolarxyTab::ReviewPanel]);
     let [_main, _bottom] = surface.split_below(
         center,
@@ -157,6 +164,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Tree => "Tree".into(),
             SolarxyTab::Nodes => "Nodes".into(),
             SolarxyTab::Assets => "Assets".into(),
+            SolarxyTab::Texture => "Texture".into(),
             SolarxyTab::AssetPreview => self
                 .panels
                 .asset_preview
@@ -246,6 +254,14 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.panels.preview,
                     self.preview_size_out,
                     self.intents,
+                    self.theme,
+                );
+            }
+            SolarxyTab::Texture => {
+                super::panels::texture::draw_texture_content(
+                    ui,
+                    self.sources.texture,
+                    self.panels.texture,
                     self.theme,
                 );
             }
@@ -391,6 +407,7 @@ mod tests {
             SolarxyTab::Tree,
             SolarxyTab::Nodes,
             SolarxyTab::Assets,
+            SolarxyTab::Texture,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }

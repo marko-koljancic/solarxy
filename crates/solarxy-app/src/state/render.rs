@@ -555,6 +555,30 @@ impl State {
             node_error,
             &resolved,
         );
+        // The image network's published output, asked for only while the
+        // tab is up: an `Arc` clone and a hash compare per frame.
+        let texture_owner = self
+            .engine
+            .as_deref()
+            .filter(|_| self.gui.texture_tab_present())
+            .and_then(|e| {
+                crate::gui::texture_owner(e.document(), e.registry(), self.gui.graph_ctx())
+            });
+        let texture_label: Option<String> = texture_owner.and_then(|id| {
+            let engine = self.engine.as_deref()?;
+            let node = engine.document().graph(GraphContext::Root).ok()?.node(id)?;
+            Some(solarxy_graph::naming::node_name(node, engine.registry()))
+        });
+        let texture_image = texture_owner.and_then(|id| self.engine.as_deref()?.display_image(id));
+        let texture_source = match (&self.engine, self.gui.texture_tab_present()) {
+            (Some(_), true) => crate::gui::TextureSource::Scene {
+                owner: texture_label.as_deref().map(|label| crate::gui::OwnerView {
+                    label,
+                    image: texture_image.as_ref(),
+                }),
+            },
+            _ => crate::gui::TextureSource::Empty,
+        };
         let params_source = params_scene.as_ref().map_or(
             crate::gui::ParamPanelSource::Empty,
             crate::gui::ParamPanelSource::Scene,
@@ -650,6 +674,7 @@ impl State {
                     }
                     _ => crate::gui::AssetsSource::Empty,
                 },
+                texture: texture_source,
                 preview: crate::gui::PreviewView {
                     texture: self.preview.texture(),
                     loading: self.preview.loading(),
