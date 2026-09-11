@@ -69,6 +69,8 @@ pub(crate) enum SolarxyTab {
     AssetPreview,
     /// The image network's published output.
     Texture,
+    /// The watched geometry's attributes, paged.
+    Attributes,
     /// A tab a saved arrangement named that this build does not have.
     /// Never drawn: [`sweep_retired`] removes every one after a restore.
     #[serde(other)]
@@ -90,6 +92,7 @@ impl SolarxyTab {
             Self::Assets => "assets",
             Self::AssetPreview => "asset-preview",
             Self::Texture => "texture",
+            Self::Attributes => "attributes",
             Self::Retired => "retired",
         }
     }
@@ -120,6 +123,7 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
         0.72,
         vec![
             SolarxyTab::Nodes,
+            SolarxyTab::Attributes,
             SolarxyTab::Console,
             SolarxyTab::MaterialInspector,
         ],
@@ -165,6 +169,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Nodes => "Nodes".into(),
             SolarxyTab::Assets => "Assets".into(),
             SolarxyTab::Texture => "Texture".into(),
+            SolarxyTab::Attributes => "Attributes".into(),
             SolarxyTab::AssetPreview => self
                 .panels
                 .asset_preview
@@ -262,6 +267,14 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     ui,
                     self.sources.texture,
                     self.panels.texture,
+                    self.theme,
+                );
+            }
+            SolarxyTab::Attributes => {
+                super::panels::attributes::draw_attributes_content(
+                    ui,
+                    self.sources.attributes,
+                    self.panels.attributes,
                     self.theme,
                 );
             }
@@ -408,6 +421,7 @@ mod tests {
             SolarxyTab::Nodes,
             SolarxyTab::Assets,
             SolarxyTab::Texture,
+            SolarxyTab::Attributes,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }

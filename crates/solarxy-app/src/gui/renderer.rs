@@ -11,6 +11,7 @@ use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortc
 use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
 use super::panels::asset_preview::AssetPreviewState;
 use super::panels::assets::AssetsState;
+use super::panels::attributes::AttributesState;
 use super::panels::texture::TextureState;
 use super::panels::tree::TreeState;
 use super::chrome::menu::{MenuContext, draw_menu_bar};
@@ -54,6 +55,7 @@ pub struct EguiRenderer {
     asset_preview: Option<(String, String)>,
     asset_preview_state: AssetPreviewState,
     texture: TextureState,
+    attributes: AttributesState,
     /// The size the preview tab last drew at, read by the state layer.
     preview_size_seen: Option<(u32, u32)>,
     canvas: super::panels::nodes::CanvasState,
@@ -136,6 +138,7 @@ impl EguiRenderer {
             asset_preview: None,
             asset_preview_state: AssetPreviewState::default(),
             texture: TextureState::default(),
+            attributes: AttributesState::default(),
             preview_size_seen: None,
             canvas: super::panels::nodes::CanvasState::default(),
             params: super::panels::params::ParamPanelState::default(),
@@ -196,6 +199,12 @@ impl EguiRenderer {
     #[must_use]
     pub fn texture_tab_present(&self) -> bool {
         self.tab_present(SolarxyTab::Texture)
+    }
+
+    /// `true` iff the Attributes tab is mounted.
+    #[must_use]
+    pub fn attributes_tab_present(&self) -> bool {
+        self.tab_present(SolarxyTab::Attributes)
     }
 
     /// The size the preview tab last drew its model at, in physical pixels.
@@ -531,7 +540,7 @@ impl EguiRenderer {
         &mut self,
         frame: super::pass::FramePaint<'_>,
         chrome: super::pass::ViewportChrome<'_>,
-        sources: super::pass::PanelSources<'_>,
+        sources: &super::pass::PanelSources<'_>,
         review: &mut crate::state::review::ReviewState,
         // Everything the panels ask for this pass. Raised during it, applied
         // once it is over, and never cleared inside it: the pass can run
@@ -638,7 +647,7 @@ impl EguiRenderer {
             }
 
             let mut tab_viewer = SolarxyTabViewer {
-                sources,
+                sources: *sources,
                 panels: super::pass::PanelState {
                     console: &mut self.console,
                     tree: &mut self.tree,
@@ -646,6 +655,7 @@ impl EguiRenderer {
                     asset_preview: self.asset_preview.as_ref(),
                     preview: &mut self.asset_preview_state,
                     texture: &mut self.texture,
+                    attributes: &mut self.attributes,
                     canvas: &mut self.canvas,
                     params: &mut self.params,
                     graph_ctx: &mut self.graph_ctx,

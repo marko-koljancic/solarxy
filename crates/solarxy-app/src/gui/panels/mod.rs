@@ -12,6 +12,7 @@ mod extensibility;
 
 pub(in crate::gui) mod asset_preview;
 pub(in crate::gui) mod assets;
+pub(in crate::gui) mod attributes;
 pub(in crate::gui) mod console;
 pub(in crate::gui) mod material_inspector;
 pub(in crate::gui) mod nodes;

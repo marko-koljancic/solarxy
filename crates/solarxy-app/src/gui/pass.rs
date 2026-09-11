@@ -19,6 +19,7 @@ use super::chrome::divider::DividerInfo;
 use super::chrome::overlays::HudInfo;
 use super::panels::asset_preview::{AssetPreviewState, PreviewView};
 use super::panels::assets::{AssetsSource, AssetsState};
+use super::panels::attributes::{AttributesSource, AttributesState};
 use super::panels::nodes::{CanvasSource, CanvasState};
 use super::panels::params::{ParamPanelSource, ParamPanelState};
 use super::panels::texture::{TextureSource, TextureState};
@@ -80,6 +81,9 @@ pub(crate) struct PanelSources<'a> {
     /// The image network's published output, when the Texture tab is
     /// mounted.
     pub texture: TextureSource<'a>,
+    /// The engine and the graph the user is in, for the paged table, when
+    /// the Attributes tab is mounted.
+    pub attributes: AttributesSource<'a>,
     pub recent_files: &'a [String],
 }
 
@@ -94,6 +98,7 @@ pub(crate) struct PanelState<'a> {
     /// The preview tab's own image view.
     pub preview: &'a mut AssetPreviewState,
     pub texture: &'a mut TextureState,
+    pub attributes: &'a mut AttributesState,
     pub canvas: &'a mut CanvasState,
     pub params: &'a mut ParamPanelState,
     /// **Shared, and deliberately so.** Which graph the user is looking

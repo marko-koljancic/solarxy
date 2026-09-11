@@ -652,7 +652,7 @@ impl State {
                 review_panes: &review_panes,
                 toolbars: pane_toolbar,
             },
-            crate::gui::PanelSources {
+            &crate::gui::PanelSources {
                 settings,
                 hud: &hud,
                 document,
@@ -675,6 +675,15 @@ impl State {
                     _ => crate::gui::AssetsSource::Empty,
                 },
                 texture: texture_source,
+                attributes: match &self.engine {
+                    Some(engine) if self.gui.attributes_tab_present() => {
+                        crate::gui::AttributesSource::Scene {
+                            engine,
+                            ctx: self.gui.graph_ctx(),
+                        }
+                    }
+                    _ => crate::gui::AttributesSource::Empty,
+                },
                 preview: crate::gui::PreviewView {
                     texture: self.preview.texture(),
                     loading: self.preview.loading(),

@@ -6,10 +6,14 @@
 //! engine contract.
 
 use serde::Serialize;
-use solarxy_kernel::{AttributeData, AttributeDomain, GeometrySet, KernelMesh};
+use solarxy_kernel::{AttributeData, GeometrySet, KernelMesh};
 
 /// The hard ceiling on one page. Small enough that a page is a few KB of
 /// JSON; a virtualized table fetches windows, never the whole geometry.
+/// The domain a page is asked for. Re-exported beside the query that takes
+/// it, so a shell reaching the table needs no dependency on the kernel.
+pub use solarxy_kernel::AttributeDomain;
+
 pub const ATTR_PAGE_LIMIT: u32 = 256;
 
 /// One named lane in one domain: its declared type and element count
