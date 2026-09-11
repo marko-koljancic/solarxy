@@ -389,12 +389,14 @@ impl State {
         true
     }
 
-    /// Replace the document with an empty one.
-    ///
-    /// Asking first when the current one has unsaved changes is the guard's
-    /// job, which routes every discarding action through one prompt; this is
-    /// the action itself.
+    /// Replace the document with an empty one, asking first when the
+    /// current one has unsaved changes.
     pub fn new_scene(&mut self) {
+        self.guard_discard(super::discard::DiscardAction::NewScene);
+    }
+
+    /// The action itself, past the guard.
+    pub(super) fn new_scene_now(&mut self) {
         if self.adopt_untitled_document() {
             self.reset_pane_zero_for_new_document();
             self.gui.set_toast("New scene", ToastSeverity::Success);

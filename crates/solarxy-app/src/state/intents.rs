@@ -346,7 +346,7 @@ impl State {
             // once.
             FileIntent::OpenRecent(path) => self.open_file(std::path::PathBuf::from(path)),
             FileIntent::Close => self.close_document(),
-            FileIntent::Quit => self.quit_requested = true,
+            FileIntent::Quit => self.request_quit(),
         }
     }
 

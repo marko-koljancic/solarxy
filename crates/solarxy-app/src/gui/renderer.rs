@@ -22,6 +22,7 @@ use super::modals::screenshot::{ScreenshotModal, draw_screenshot_modal};
 use super::modals::still::{StillRenderModal, draw_still_modal};
 use super::panels::properties::ModelInfo;
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
+use super::modals::unsaved::{DiscardWhat, UnsavedChoice, UnsavedModalState, draw_unsaved_modal};
 use super::modals::update::{UpdateModalState, draw_update_modal};
 use egui_dock::{DockArea, DockState};
 use solarxy_core::preferences::{Preferences, ThemeChoice};
@@ -39,6 +40,7 @@ pub struct EguiRenderer {
     update_modal: UpdateModalState,
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
+    unsaved_modal: UnsavedModalState,
     screenshot_modal: ScreenshotModal,
     still_modal: StillRenderModal,
     node_tree: NodeTreeState,
@@ -113,6 +115,7 @@ impl EguiRenderer {
             update_modal: UpdateModalState::new(),
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
+            unsaved_modal: UnsavedModalState::default(),
             screenshot_modal: ScreenshotModal::default(),
             still_modal: StillRenderModal::default(),
             node_tree: NodeTreeState::default(),
@@ -389,8 +392,19 @@ impl EguiRenderer {
             || self.preferences_modal.open
             || self.update_modal.open
             || self.shortcuts_modal.open
+            || self.unsaved_modal.open
             || review.delete_confirm.is_some()
             || review.editing.is_some()
+    }
+
+    /// Ask whether to save before an action that discards the document.
+    pub(crate) fn open_unsaved_prompt(&mut self, filename: &str, what: DiscardWhat) {
+        self.unsaved_modal.open(filename, what);
+    }
+
+    /// The prompt's answer, once.
+    pub(crate) fn take_unsaved_choice(&mut self) -> Option<UnsavedChoice> {
+        self.unsaved_modal.take_choice()
     }
 
     pub fn set_backend_info(&mut self, info: String) {
@@ -619,6 +633,7 @@ impl EguiRenderer {
                 || self.preferences_modal.open
                 || self.update_modal.open
                 || self.shortcuts_modal.open
+                || self.unsaved_modal.open
                 || screenshot_drawn
                 || review.delete_confirm.is_some()
                 || review.editing.is_some();
@@ -644,6 +659,9 @@ impl EguiRenderer {
             // Drawn ahead of the escape chain below: while a render runs,
             // Escape cancels it before it dismisses anything else.
             draw_still_modal(ctx, &mut self.still_modal, &self.theme);
+            // Ahead of the escape chain for the same reason: while the
+            // question is up, Escape answers it.
+            draw_unsaved_modal(ctx, &mut self.unsaved_modal, &self.theme);
 
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);

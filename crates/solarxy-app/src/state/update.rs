@@ -469,6 +469,9 @@ impl State {
 
     pub fn update(&mut self) {
         self.refresh_title();
+        if let Some(choice) = self.gui.take_unsaved_choice() {
+            self.resolve_discard(choice);
+        }
         // Uncaptured GPU faults recorded since the last frame. The hook
         // already logged each full message on the `solarxy::gpu` target,
         // which the console captures; the toast is the short pointer, and

@@ -238,6 +238,7 @@ impl State {
             capture_requested: false,
             screenshot_expand_review: false,
             quit_requested: false,
+            pending_discard: None,
             saved_revision: 0,
             hdri_hash: None,
             last_title: String::new(),

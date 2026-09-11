@@ -55,6 +55,7 @@ const MOD: &str = "Ctrl";
 pub use chrome::overlays::ToastSeverity;
 pub use renderer::EguiRenderer;
 
+pub(crate) use modals::unsaved::{DiscardWhat, UnsavedChoice};
 pub(crate) use chrome::divider::DividerInfo;
 pub(crate) use dock::SolarxyTab;
 pub(crate) use pass::{CaptureFrame, FramePaint, PanelSources, ViewportChrome};

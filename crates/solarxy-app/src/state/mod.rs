@@ -39,6 +39,7 @@ mod cook;
 pub(crate) mod cook_health;
 #[cfg(debug_assertions)]
 mod dev;
+mod discard;
 mod document;
 mod drop;
 pub(crate) mod engine_scene;
@@ -288,6 +289,8 @@ pub struct State {
     /// checkbox on a re-capture.
     pub(super) screenshot_expand_review: bool,
     pub(super) quit_requested: bool,
+    /// The discarding action waiting on the unsaved-changes prompt.
+    pub(super) pending_discard: Option<discard::DiscardAction>,
     /// The engine revision the open document was last written at, or
     /// opened at. Dirty is `engine.revision() != saved_revision`, which is
     /// what keeps the answer the engine's rather than a flag's.

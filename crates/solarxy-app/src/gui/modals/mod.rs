@@ -10,4 +10,5 @@ pub(in crate::gui) mod preferences;
 pub(in crate::gui) mod screenshot;
 pub(in crate::gui) mod shortcuts;
 pub(in crate::gui) mod still;
+pub(crate) mod unsaved;
 pub(in crate::gui) mod update;

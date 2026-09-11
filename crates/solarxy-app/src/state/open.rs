@@ -147,7 +147,19 @@ impl State {
     /// The one router for opening a file of any supported kind: HDRI, scene,
     /// or model. The Open dialogs, a drag and drop, the startup argument, and
     /// Recent Files all land here, so extension routing exists exactly once.
+    ///
+    /// A scene or a model replaces the document, so those ask first when it
+    /// has unsaved changes; an HDRI joins the document and never asks.
     pub fn open_file(&mut self, path: std::path::PathBuf) {
+        if replaces_document(&path) && self.is_dirty() {
+            self.guard_discard(super::discard::DiscardAction::OpenFile(path));
+            return;
+        }
+        self.open_file_now(path);
+    }
+
+    /// The router itself, past the guard.
+    pub(super) fn open_file_now(&mut self, path: std::path::PathBuf) {
         if let Some(ext) = path.extension().and_then(|e| e.to_str())
             && (ext.eq_ignore_ascii_case("hdr") || ext.eq_ignore_ascii_case("exr"))
         {
@@ -717,6 +729,22 @@ impl State {
         self.renderer.uv_overlap.overlap_pct = None;
         self.renderer.uv_overlap.stats_dirty = false;
     }
+}
+
+/// Whether opening `path` replaces the document rather than joining it.
+///
+/// A scene and a model both become the document; an HDRI becomes its
+/// lighting. A folder or an unsupported file replaces nothing, and is left
+/// to the router to name.
+fn replaces_document(path: &std::path::Path) -> bool {
+    if path.is_dir() {
+        return false;
+    }
+    let is_scene = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("slxy"));
+    is_scene || resources::is_supported_model_extension(path)
 }
 
 /// The camera binding a saved pane carries, in this shell's vocabulary.

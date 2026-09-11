@@ -178,7 +178,10 @@ impl ApplicationHandler<State> for App {
         let egui_consumed = state.gui.on_window_event(&state.window, &event);
 
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            // Through the guard rather than straight to the exit: a dirty
+            // document asks first, and `exiting` still runs its flushes on
+            // every path that does leave.
+            WindowEvent::CloseRequested => state.request_quit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
             // One event per dropped item, with no event to say the gesture
             // is complete. Collected, and handled once per frame, so a
