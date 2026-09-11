@@ -204,7 +204,23 @@ step any more.
     `visuals` the first two share, because marker colour and panel chip colour are the
     reader's first correlation cue), plus `params/` (the parameter panel: `frame` the target
     resolution, the header, the tab strip and the sections, all of them read from
-    `solarxy_studio::params` and the registry's own visibility evaluator).
+    `solarxy_studio::params` and the registry's own visibility evaluator; `controls` one control
+    per `ParamType` dispatched by an **exhaustive match with no catch-all**, so a sixteenth
+    variant fails the build rather than drawing a blank row, and every numeric one clamps before
+    it writes because `SetParam` stores what it is given and the *resolver* clamps on the read
+    side; `draft` the draft-and-commit contract every text-like row follows, which compares
+    against what was last **sent** rather than against storage because the commit key also drops
+    focus; `drag` the preview lane and the middle-button decade ladder, whose constants are the
+    browser's and are held there by a test that reads its TypeScript; and `expression` the `=`
+    lane, whose parked text is per-session interface memory rather than document state because
+    the scene schema is frozen).
+  - `extensibility.rs` - **the zero-interface-change contract, as a test**, and the twin of
+    `web/src/registry/extensibility.test.ts` case for case. It sits beside the panels rather than
+    inside one because the contract spans the canvas and the parameter panel together, which is
+    also why a handful of items in both are visible to it and no wider. Three of the browser's
+    cases have no counterpart and each absence is structural: a parameter type with no control is
+    a build failure here rather than a stale list, and an unknown category or data type is a
+    compile error rather than a string arriving over a boundary.
   - `chrome/` - the shell's own furniture, which is everything that draws outside a dock tab or
     on top of one: `menu`, `status_bar`, `pane_toolbar`, `overlays`, `divider`,
     `viewport_context_menu`.
