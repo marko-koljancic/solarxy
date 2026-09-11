@@ -24,6 +24,8 @@ pub(crate) enum DiscardAction {
     /// Open through the file router, which is where a scene or a model
     /// replaces the document.
     OpenFile(PathBuf),
+    /// Open one of the bundled samples, by its index in the menu.
+    OpenSample(usize),
 }
 
 impl DiscardAction {
@@ -31,7 +33,7 @@ impl DiscardAction {
         match self {
             Self::Quit => DiscardWhat::Quit,
             Self::NewScene => DiscardWhat::NewScene,
-            Self::OpenFile(_) => DiscardWhat::OpenFile,
+            Self::OpenFile(_) | Self::OpenSample(_) => DiscardWhat::OpenFile,
         }
     }
 }
@@ -90,6 +92,7 @@ impl State {
             DiscardAction::Quit => self.quit_requested = true,
             DiscardAction::NewScene => self.new_scene_now(),
             DiscardAction::OpenFile(path) => self.open_file_now(path),
+            DiscardAction::OpenSample(index) => self.open_sample_now(index),
         }
     }
 

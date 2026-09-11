@@ -66,6 +66,13 @@ pub(crate) struct HistoryReadout {
     pub can_redo: bool,
 }
 
+/// What the Edit menu's clipboard entries enable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ClipboardReadout {
+    pub has_selection: bool,
+    pub has_clipboard: bool,
+}
+
 /// The display state the panels draw from, borrowed rather than copied.
 #[derive(Clone, Copy)]
 pub(crate) struct PanelSettings<'a> {
@@ -87,6 +94,8 @@ pub(crate) struct PanelSettings<'a> {
     pub cook: CookReadout,
     /// The undo and redo controls' readout, likewise.
     pub history: HistoryReadout,
+    /// Whether Copy, Duplicate and Paste have anything to act on.
+    pub clipboard: ClipboardReadout,
     /// How the node canvas draws: the wire routing, the grid, the snap,
     /// the overview inset and the zoom readout. Reading preferences
     /// rather than anything about the document, which is why they sit

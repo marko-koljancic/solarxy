@@ -171,6 +171,8 @@ pub(crate) enum FileIntent {
     Save,
     /// Ask for a path, then write there.
     SaveAs,
+    /// One of the bundled sample scenes, by its index in the menu.
+    OpenSample(usize),
     /// One entry from the recent list. Routed through the file router
     /// rather than the model loader, because the one list holds scenes and
     /// models and the routing on extension exists once.
@@ -184,6 +186,9 @@ pub(crate) enum FileIntent {
 pub(crate) enum EditIntent {
     Undo,
     Redo,
+    Copy,
+    Paste,
+    Duplicate,
     OpenPreferences,
     /// Persist the current display, rendering and lighting settings.
     SaveViewDefaults,

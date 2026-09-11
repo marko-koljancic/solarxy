@@ -60,7 +60,7 @@ pub(crate) use modals::unsaved::{DiscardWhat, UnsavedChoice};
 pub(crate) use chrome::divider::DividerInfo;
 pub(crate) use dock::SolarxyTab;
 pub(crate) use pass::{CaptureFrame, FramePaint, PanelSources, ViewportChrome};
-pub(crate) use settings::{CookReadout, HistoryReadout, PanelSettings};
+pub(crate) use settings::{ClipboardReadout, CookReadout, HistoryReadout, PanelSettings};
 pub(crate) use modals::still::StillOpening;
 pub(crate) use intent::{
     CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,

@@ -277,6 +277,14 @@ fn draw_file_menu(
             intents.raise(Intent::File(FileIntent::OpenModel));
             ui.close();
         }
+        ui.menu_button("Sample Scenes", |ui| {
+            for (index, sample) in crate::state::samples::SAMPLES.iter().enumerate() {
+                if ui.button(sample.label).clicked() {
+                    intents.raise(Intent::File(FileIntent::OpenSample(index)));
+                    ui.close();
+                }
+            }
+        });
         ui.separator();
         if ui
             .add_enabled(
@@ -389,6 +397,37 @@ fn draw_edit_menu(ui: &mut egui::Ui, settings: PanelSettings<'_>, intents: &mut 
             .clicked()
         {
             intents.raise(Intent::Edit(EditIntent::Redo));
+            ui.close();
+        }
+        ui.separator();
+        if ui
+            .add_enabled(
+                settings.clipboard.has_selection,
+                egui::Button::new("Copy").shortcut_text(format!("{MOD}+C")),
+            )
+            .clicked()
+        {
+            intents.raise(Intent::Edit(EditIntent::Copy));
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                settings.clipboard.has_clipboard,
+                egui::Button::new("Paste").shortcut_text(format!("{MOD}+V")),
+            )
+            .clicked()
+        {
+            intents.raise(Intent::Edit(EditIntent::Paste));
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                settings.clipboard.has_selection,
+                egui::Button::new("Duplicate").shortcut_text(format!("{MOD}+D")),
+            )
+            .clicked()
+        {
+            intents.raise(Intent::Edit(EditIntent::Duplicate));
             ui.close();
         }
         ui.separator();

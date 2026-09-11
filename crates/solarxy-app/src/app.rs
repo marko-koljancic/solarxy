@@ -163,6 +163,9 @@ impl ApplicationHandler<State> for App {
                     }
                     ShellKey::Undo => state.undo(),
                     ShellKey::Redo => state.redo(),
+                    ShellKey::Copy => state.copy_selection(),
+                    ShellKey::Paste => state.paste_clipboard(),
+                    ShellKey::Duplicate => state.duplicate_selection(),
                     ShellKey::ToggleConsole => {
                         state.gui.toggle_tab(crate::gui::SolarxyTab::Console);
                     }

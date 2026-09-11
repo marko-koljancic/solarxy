@@ -241,6 +241,7 @@ impl State {
             pending_discard: None,
             autosave: autosave::AutosaveState::new(),
             history: history::UndoContexts::default(),
+            clipboard: None,
             saved_revision: 0,
             hdri_hash: None,
             last_title: String::new(),

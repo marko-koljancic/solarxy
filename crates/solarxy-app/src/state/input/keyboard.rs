@@ -74,6 +74,10 @@ pub(crate) enum ShellKey {
     /// whose own undo the field keeps.
     Undo,
     Redo,
+    /// The clipboard, likewise left to a focused text field.
+    Copy,
+    Paste,
+    Duplicate,
     ToggleConsole,
     ToggleViewport,
     /// Cook what is stale now, in manual cook mode. A chord, so it stays
@@ -114,6 +118,9 @@ pub(crate) fn shell_key(
         KeyCode::KeyZ if cmd_or_ctrl && shift && !wants_text => Some(ShellKey::Redo),
         KeyCode::KeyZ if cmd_or_ctrl && !wants_text => Some(ShellKey::Undo),
         KeyCode::KeyY if cmd_or_ctrl && !wants_text => Some(ShellKey::Redo),
+        KeyCode::KeyC if cmd_or_ctrl && !wants_text => Some(ShellKey::Copy),
+        KeyCode::KeyV if cmd_or_ctrl && !wants_text => Some(ShellKey::Paste),
+        KeyCode::KeyD if cmd_or_ctrl && !wants_text => Some(ShellKey::Duplicate),
         KeyCode::Backquote if !wants_text => Some(ShellKey::ToggleConsole),
         KeyCode::Digit1 if cmd_or_ctrl && !wants_text => Some(ShellKey::ToggleViewport),
         KeyCode::Enter | KeyCode::NumpadEnter if cmd_or_ctrl => Some(ShellKey::CookNow),
@@ -611,6 +618,14 @@ mod tests {
             (KeyCode::KeyY, true, false, Some(ShellKey::Redo)),
             (KeyCode::KeyZ, false, false, None),
             (KeyCode::KeyY, false, false, None),
+            (KeyCode::KeyC, true, false, Some(ShellKey::Copy)),
+            (KeyCode::KeyV, true, false, Some(ShellKey::Paste)),
+            (KeyCode::KeyD, true, false, Some(ShellKey::Duplicate)),
+            // Bare C screenshots, bare V spins the turntable, Shift+D is
+            // bloom: all the map's.
+            (KeyCode::KeyC, false, false, None),
+            (KeyCode::KeyV, false, false, None),
+            (KeyCode::KeyD, false, true, None),
             // Bare N cycles normals and bare S sets shaded, both the map's.
             (KeyCode::KeyN, false, false, None),
             (KeyCode::KeyS, false, false, None),
@@ -662,6 +677,9 @@ mod tests {
         assert_eq!(shell_key(KeyCode::KeyZ, true, false, true, false), None);
         assert_eq!(shell_key(KeyCode::KeyZ, true, true, true, false), None);
         assert_eq!(shell_key(KeyCode::KeyY, true, false, true, false), None);
+        assert_eq!(shell_key(KeyCode::KeyC, true, false, true, false), None);
+        assert_eq!(shell_key(KeyCode::KeyV, true, false, true, false), None);
+        assert_eq!(shell_key(KeyCode::KeyD, true, false, true, false), None);
         assert_eq!(shell_key(KeyCode::Tab, false, false, true, true), None);
 
         // Nothing else changes with the pointer.

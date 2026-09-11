@@ -68,6 +68,18 @@ const SECTIONS: &[Section] = &[
                 keys: "__MOD__+Y",
                 action: "Redo (alternate)",
             },
+            Entry {
+                keys: "__MOD__+C",
+                action: "Copy selected nodes",
+            },
+            Entry {
+                keys: "__MOD__+V",
+                action: "Paste nodes",
+            },
+            Entry {
+                keys: "__MOD__+D",
+                action: "Duplicate selected nodes",
+            },
         ],
     },
     Section {

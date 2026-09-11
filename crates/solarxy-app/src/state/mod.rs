@@ -36,6 +36,7 @@ mod actions;
 mod autosave;
 mod camera;
 mod capture;
+mod clipboard;
 mod cook;
 pub(crate) mod cook_health;
 #[cfg(debug_assertions)]
@@ -57,6 +58,7 @@ mod persist;
 pub(crate) use solarxy_core::raycast;
 mod render;
 pub(crate) mod review;
+pub(crate) mod samples;
 mod still;
 mod update;
 pub(crate) mod view_state;
@@ -298,6 +300,8 @@ pub struct State {
     /// One graph context per undo step, so an undo shows where the change
     /// was made.
     pub(super) history: history::UndoContexts,
+    /// The copied fragment, in memory, as the browser keeps it.
+    pub(super) clipboard: Option<solarxy_graph::document::GraphFragment>,
     /// The engine revision the open document was last written at, or
     /// opened at. Dirty is `engine.revision() != saved_revision`, which is
     /// what keeps the answer the engine's rather than a flag's.

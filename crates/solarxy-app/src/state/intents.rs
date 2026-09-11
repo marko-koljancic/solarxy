@@ -102,6 +102,9 @@ impl State {
                 Intent::File(intent) => self.apply_file_intent(intent),
                 Intent::Edit(EditIntent::Undo) => self.undo(),
                 Intent::Edit(EditIntent::Redo) => self.redo(),
+                Intent::Edit(EditIntent::Copy) => self.copy_selection(),
+                Intent::Edit(EditIntent::Paste) => self.paste_clipboard(),
+                Intent::Edit(EditIntent::Duplicate) => self.duplicate_selection(),
                 Intent::Edit(EditIntent::OpenPreferences) => {
                     self.gui.open_preferences(self.preferences.clone());
                 }
@@ -343,6 +346,7 @@ impl State {
             FileIntent::SaveAs => {
                 self.save_document_as();
             }
+            FileIntent::OpenSample(index) => self.open_sample(index),
             // Through the router rather than the model loader: the one list
             // holds scenes and models, and the routing on extension exists
             // once.
