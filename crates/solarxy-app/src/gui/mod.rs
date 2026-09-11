@@ -73,7 +73,9 @@ pub(crate) use panels::attributes::AttributesSource;
 pub(crate) use panels::text::TextSource;
 pub(crate) use panels::texture::{OwnerView, TextureSource, texture_owner};
 pub(crate) use panels::tree::{TreeAction, TreeSource};
-pub(crate) use panels::nodes::{CanvasAction, CanvasScene, CanvasSource, CanvasToggle, NodeCook};
+pub(crate) use panels::nodes::{
+    CanvasAction, CanvasScene, CanvasSource, CanvasToggle, NodeCook, NodeInfoView,
+};
 pub(crate) use panels::params::{ParamPanelSource, ParamScene, ResolvedParams};
 pub(crate) use chrome::pane_toolbar::{LookThroughChange, PaneToolbarData, PaneView};
 pub(crate) use panels::review::overlay::ReviewPaneOverlay;

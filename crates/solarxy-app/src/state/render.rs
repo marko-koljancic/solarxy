@@ -494,6 +494,37 @@ impl State {
                 (Some(engine), true) => engine.asset_manifest().into_iter().collect(),
                 _ => BTreeMap::new(),
             };
+        // The info card's node, gathered only while the card is up: one
+        // report, one warnings list, one stats read and one validation read.
+        let node_info: Option<crate::gui::NodeInfoView> = self
+            .engine
+            .as_deref()
+            .zip(self.gui.canvas_info())
+            .map(|(engine, node)| {
+                let ctx = self.gui.graph_ctx();
+                #[allow(clippy::cast_precision_loss)]
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0.0, |d| d.as_millis() as f64);
+                let report = engine.node_report(ctx, node).and_then(|report| {
+                    let graph = engine.document().graph(ctx).ok()?;
+                    Some(solarxy_studio::node::node_report_text(
+                        &report,
+                        graph,
+                        node,
+                        engine.registry(),
+                        now_ms,
+                    ))
+                });
+                crate::gui::NodeInfoView {
+                    report,
+                    stats: engine.node_stats(node),
+                    warnings: engine.cook_warnings(node),
+                    validation: engine
+                        .validation(node)
+                        .map(|v| (v.report.error_count(), v.report.warning_count())),
+                }
+            });
         let canvas_scene = match &self.engine {
             Some(engine) if self.gui.nodes_tab_present() => Some(crate::gui::CanvasScene {
                 doc: engine.document(),
@@ -503,6 +534,7 @@ impl State {
                 assets: &canvas_assets,
                 manual: engine.cook_mode() == solarxy_graph::engine::CookMode::Manual,
                 playing: engine.clock().playing,
+                info: node_info.as_ref(),
             }),
             _ => None,
         };

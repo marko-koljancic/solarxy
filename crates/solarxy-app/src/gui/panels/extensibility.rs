@@ -518,6 +518,7 @@ fn a_novel_node_draws_in_both_surfaces_and_asks_for_nothing() {
                         assets: &std::collections::BTreeMap::new(),
                         manual: false,
                         playing: false,
+                        info: None,
                     }),
                     &mut canvas,
                     &mut current,

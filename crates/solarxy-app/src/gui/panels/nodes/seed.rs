@@ -75,6 +75,9 @@ pub(crate) struct CanvasScene<'a> {
     /// the file rather than its hash. The shells hold the manifest; the
     /// shared rule takes a lookup.
     pub assets: &'a BTreeMap<String, String>,
+    /// What the state layer gathered for the info card's node, while the
+    /// card is up.
+    pub info: Option<&'a super::info::NodeInfoView>,
     /// Manual cook mode, where a dirty node is stale rather than about to
     /// be recooked. The distinction is the whole difference between the
     /// two badges a user reads.
@@ -304,6 +307,11 @@ impl Default for CanvasState {
 }
 
 impl CanvasState {
+    /// The node the info card is open on, if any.
+    pub(crate) fn info_node(&self) -> Option<NodeId> {
+        self.info
+    }
+
     /// Forget everything, so the next frame seeds from scratch. Called
     /// whenever the open document is replaced, since every identifier held
     /// here addresses nodes the new document need not contain.

@@ -35,6 +35,8 @@ pub(super) struct ChromeRequest {
     /// A preference the toolbar toggled, applied by the drain so it is
     /// written and saved in one place.
     pub toggled: Option<Toggle>,
+    /// Open the info card on the selected node.
+    pub info: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +88,13 @@ pub(super) fn toolbar(
                     .clicked()
                 {
                     request.layout = true;
+                }
+                if ui
+                    .small_button("Info")
+                    .on_hover_text("Open the info card on the selected node (I)")
+                    .clicked()
+                {
+                    request.info = true;
                 }
                 if ui
                     .small_button("Fit")

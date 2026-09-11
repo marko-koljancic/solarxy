@@ -216,6 +216,13 @@ impl EguiRenderer {
         self.tab_present(SolarxyTab::Text)
     }
 
+    /// The node the canvas's info card is open on, so the state layer can
+    /// gather its report.
+    #[must_use]
+    pub fn canvas_info(&self) -> Option<solarxy_graph::document::NodeId> {
+        self.canvas.info_node()
+    }
+
     /// The size the preview tab last drew its model at, in physical pixels.
     #[must_use]
     pub fn preview_size(&self) -> Option<(u32, u32)> {

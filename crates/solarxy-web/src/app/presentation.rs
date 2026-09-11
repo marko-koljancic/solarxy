@@ -147,51 +147,6 @@ struct ParamSection {
     param_keys: Vec<String>,
 }
 
-/// One timestamp as the info card prints it.
-///
-/// Split in half deliberately. The relative phrase is a rule and comes
-/// from the shared derivation; the absolute date needs a locale and a
-/// timezone, which is host knowledge rather than document knowledge, so
-/// the milliseconds cross and each shell renders that half itself. Taking
-/// an internationalization stack into the engine to print one line would
-/// be a large bill for a small answer.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TimestampText {
-    /// Unix milliseconds, or nothing on a document saved before the
-    /// engine kept them. Nothing must render as "unknown", never as an
-    /// epoch date.
-    ms: Option<f64>,
-    /// "5 minutes ago", or empty once the absolute date carries it alone.
-    relative: String,
-}
-
-/// A node's report, already read as text.
-///
-/// The formatted twin of [`queries::node_report`](super::queries), on the
-/// same terms as [`SolarxyApp::attribute_text`] against
-/// `attribute_table`: the engine's own query keeps its numbers and a
-/// later reader that wants one asks it. What this adds is the reading,
-/// which is a rule, and the wiring, which the browser used to derive from
-/// its mirror while the desktop had no answer at all.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NodeReportText {
-    /// Size then centre, or nothing when there is no finite box.
-    bounds: Option<String>,
-    /// Cooks this session. Zero hides the row.
-    cook_count: u64,
-    total_cook: String,
-    /// Absent for a single cook, because an average of one is the figure
-    /// beside it and says nothing.
-    average_cook: Option<String>,
-    last_cook: String,
-    created: TimestampText,
-    modified: TimestampText,
-    /// Who is wired to this node, by name, in edge order.
-    connections: node::ConnectionSummary,
-}
-
 #[wasm_bindgen]
 impl SolarxyApp {
     /// The rules that read only a node type: wire colour tokens, handle
@@ -398,27 +353,15 @@ impl SolarxyApp {
             return Ok(JsValue::NULL);
         };
 
-        #[allow(clippy::cast_precision_loss)]
-        let total = report.total_cook_us as f64;
-        #[allow(clippy::cast_precision_loss)]
-        let last = report.last_cook_us as f64;
-        #[allow(clippy::cast_precision_loss)]
-        let count = report.cook_count as f64;
-        let stamp = |ms: Option<f64>| TimestampText {
-            ms,
-            relative: ms.map_or_else(String::new, |ms| node::relative_time(ms, now_ms)),
-        };
-
-        to_js(&NodeReportText {
-            bounds: node::format_bounds(report.bounds),
-            cook_count: report.cook_count,
-            total_cook: node::format_duration(total),
-            average_cook: (report.cook_count > 1).then(|| node::format_duration(total / count)),
-            last_cook: node::format_duration(last),
-            created: stamp(report.created_ms),
-            modified: stamp(report.modified_ms),
-            connections: node::connection_summary(graph, id, self.engine.registry()),
-        })
+        // The reading is the shared rule, so the desktop's card and this one
+        // describe a node the same way.
+        to_js(&node::node_report_text(
+            &report,
+            graph,
+            id,
+            self.engine.registry(),
+            now_ms,
+        ))
     }
 
     /// The text an expression field opens on for this parameter.

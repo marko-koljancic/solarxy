@@ -819,3 +819,157 @@ mod registry_tests {
         );
     }
 }
+
+/// One timestamp as the info card reads it: the milliseconds, for the
+/// shell to render as a date in the reader's locale, and the relative
+/// phrase, which needs no locale.
+///
+/// Nothing must render as "unknown", never as an epoch date: a document
+/// saved before the engine kept stamps has none.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimestampText {
+    pub ms: Option<f64>,
+    /// "5 minutes ago", or empty once the absolute date carries it alone.
+    pub relative: String,
+}
+
+/// One node's report as its info card reads it, wiring included.
+///
+/// The formatted twin of the engine's `node_report`: the engine keeps its
+/// numbers and a reader that wants one asks it. What this adds is the
+/// reading, which is a rule, and both shells read it here rather than
+/// each deriving its own.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeReportText {
+    /// Size then centre, or nothing when there is no finite box.
+    pub bounds: Option<String>,
+    /// Cooks this session. Zero hides the row.
+    pub cook_count: u64,
+    pub total_cook: String,
+    /// Absent for a single cook, because an average of one is the figure
+    /// beside it and says nothing.
+    pub average_cook: Option<String>,
+    pub last_cook: String,
+    pub created: TimestampText,
+    pub modified: TimestampText,
+    /// Who is wired to this node, by name, in edge order.
+    pub connections: ConnectionSummary,
+}
+
+/// The card's reading of `report`, at `now_ms`.
+///
+/// `now_ms` is supplied rather than read, because this crate takes no
+/// clock; the caller passes the same instant it stamps the card with, so
+/// the phrase and the date beside it cannot describe different moments.
+#[must_use]
+pub fn node_report_text(
+    report: &solarxy_graph::engine::NodeReport,
+    graph: &Graph,
+    node: NodeId,
+    registry: &Registry,
+    now_ms: f64,
+) -> NodeReportText {
+    #[allow(clippy::cast_precision_loss)]
+    let total = report.total_cook_us as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let last = report.last_cook_us as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let count = report.cook_count as f64;
+    let stamp = |ms: Option<f64>| TimestampText {
+        ms,
+        relative: ms.map_or_else(String::new, |ms| relative_time(ms, now_ms)),
+    };
+    NodeReportText {
+        bounds: format_bounds(report.bounds),
+        cook_count: report.cook_count,
+        total_cook: format_duration(total),
+        average_cook: (report.cook_count > 1).then(|| format_duration(total / count)),
+        last_cook: format_duration(last),
+        created: stamp(report.created_ms),
+        modified: stamp(report.modified_ms),
+        connections: connection_summary(graph, node, registry),
+    }
+}
+
+#[cfg(test)]
+mod report_tests {
+    use super::*;
+    use solarxy_graph::Command;
+    use solarxy_graph::document::GraphContext;
+    use solarxy_graph::engine::{Engine, EngineEvent, NodeReport};
+
+    fn add(engine: &mut Engine, ctx: GraphContext, ty: &str) -> NodeId {
+        let batch = engine
+            .apply(Command::AddNode {
+                ctx,
+                node_type: ty.to_string(),
+                position: [0.0, 0.0],
+            })
+            .expect("the node adds");
+        batch
+            .events
+            .iter()
+            .find_map(|ev| match ev {
+                EngineEvent::NodeAdded { node, .. } => Some(node.id),
+                _ => None,
+            })
+            .expect("a node was added")
+    }
+
+    /// An average is offered only above one cook, a missing stamp reads as
+    /// nothing rather than an epoch date, and a present one carries the
+    /// relative phrase against the instant supplied.
+    #[test]
+    fn the_average_needs_two_cooks_and_a_missing_stamp_is_nothing() {
+        let mut engine = Engine::new().expect("engine");
+        let container = add(&mut engine, GraphContext::Root, "sopnet");
+        let ctx = GraphContext::Subflow(container);
+        let node = add(&mut engine, ctx, "box");
+        let graph = engine.document().graph(ctx).expect("graph");
+        let registry = engine.registry();
+
+        let once = NodeReport {
+            bounds: Some([0.0, 0.0, 0.0, 2.0, 1.0, 2.0]),
+            last_cook_us: 1_500,
+            cook_count: 1,
+            total_cook_us: 1_500,
+            placeholder: None,
+            created_ms: None,
+            modified_ms: Some(1_000_000.0),
+        };
+        let text = node_report_text(&once, graph, node, registry, 1_000_000.0 + 5.0 * 60_000.0);
+        assert_eq!(text.average_cook, None, "an average of one says nothing");
+        assert_eq!(text.last_cook, format_duration(1_500.0));
+        assert_eq!(
+            text.created,
+            TimestampText {
+                ms: None,
+                relative: String::new()
+            }
+        );
+        assert_eq!(text.modified.ms, Some(1_000_000.0));
+        assert_eq!(
+            text.modified.relative,
+            relative_time(1_000_000.0, 1_000_000.0 + 300_000.0)
+        );
+        assert!(
+            !text.modified.relative.is_empty(),
+            "a present stamp carries a phrase"
+        );
+        assert_eq!(text.bounds, format_bounds(once.bounds));
+
+        let thrice = NodeReport {
+            cook_count: 3,
+            total_cook_us: 3_000,
+            ..once
+        };
+        let text = node_report_text(&thrice, graph, node, registry, 0.0);
+        assert_eq!(
+            text.average_cook.as_deref(),
+            Some(format_duration(1_000.0).as_str())
+        );
+        assert_eq!(text.connections.upstream, 0);
+    }
+}

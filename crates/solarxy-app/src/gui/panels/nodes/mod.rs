@@ -30,6 +30,7 @@
 mod art;
 mod chrome;
 mod glyphs;
+mod info;
 mod layout;
 mod list;
 mod note;
@@ -58,6 +59,7 @@ pub(in crate::gui::panels) use glyphs::paint_path;
 #[cfg(test)]
 pub(in crate::gui::panels) use palette::candidates;
 pub(in crate::gui::panels) use viewer::glyph_key;
+pub(crate) use info::NodeInfoView;
 pub(crate) use seed::{CanvasScene, CanvasSource, CanvasState, NodeCook};
 
 use crate::gui::intent::{Intents, PanelIntent};
@@ -201,7 +203,9 @@ pub(in crate::gui) fn draw_nodes_content(
             intents,
             theme,
         );
-        draw_info(ui, doc, registry, *ctx, state, theme);
+        info::draw_info(
+            ui, doc, registry, *ctx, scene.cook, scene.info, state, theme,
+        );
         return;
     }
 
@@ -292,10 +296,24 @@ pub(in crate::gui) fn draw_nodes_content(
         intents.panel(PanelIntent::Canvas(CanvasAction::CycleRouting));
     }
 
+    // The info card, from the toolbar's button and from `I` over the
+    // canvas, opens on the selection's last node; the radial opens it on
+    // the node under the pointer.
+    if over
+        && state.info.is_none()
+        && ui
+            .ctx()
+            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::I))
+        && let Ok(graph) = doc.graph(*ctx)
+    {
+        state.info = graph.selection.last().copied();
+    }
     apply_note(note, *ctx, doc, state, intents);
     draw_note_editor(ui, doc, *ctx, state, to_screen, intents, theme);
     draw_rename(ui, doc, registry, *ctx, state, to_screen, intents, theme);
-    draw_info(ui, doc, registry, *ctx, state, theme);
+    info::draw_info(
+        ui, doc, registry, *ctx, scene.cook, scene.info, state, theme,
+    );
 
     // Escape abandons a drag, and abandoning has to mean it never
     // happened: applying the move and undoing it would leave an entry in
@@ -435,6 +453,11 @@ fn apply_chrome_request(
     }
     if request.view {
         state.list_view = !state.list_view;
+    }
+    if request.info
+        && let Ok(graph) = doc.graph(ctx)
+    {
+        state.info = graph.selection.last().copied();
     }
     state.request_view(request.zoom, request.fit);
 }
@@ -799,73 +822,6 @@ fn draw_rename(
                 ctx, node, trimmed,
             )));
         }
-    }
-}
-
-/// The node info card: what this node is, what it did, and what it is
-/// wired to.
-///
-/// Every line comes from the shared derivation, so the card says the same
-/// thing the browser's does. Modeless and draggable, because it is read
-/// beside the graph rather than instead of it.
-fn draw_info(
-    ui: &egui::Ui,
-    doc: &solarxy_graph::document::Document,
-    registry: &solarxy_graph::registry::Registry,
-    ctx: GraphContext,
-    state: &mut CanvasState,
-    theme: Theme,
-) {
-    let Some(node) = state.info else {
-        return;
-    };
-    let Ok(graph) = doc.graph(ctx) else {
-        state.info = None;
-        return;
-    };
-    let Some(data) = graph.node(node) else {
-        state.info = None;
-        return;
-    };
-    let Some(desc) = registry.get(&data.type_id) else {
-        state.info = None;
-        return;
-    };
-
-    let title = solarxy_graph::naming::node_name(data, registry);
-    let kind = solarxy_studio::node::describe_kind(desc);
-    let summary = solarxy_studio::node::node_info_line(desc, &data.params, None);
-    let wiring = solarxy_studio::node::connection_summary(graph, node, registry);
-
-    let mut open = true;
-    egui::Window::new(title)
-        .id(ui.id().with(("node-info", node)))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .show(ui.ctx(), |ui| {
-            ui.label(egui::RichText::new(kind).color(theme.muted).size(11.0));
-            if let Some(line) = summary {
-                ui.label(egui::RichText::new(line).color(theme.accent).size(11.0));
-            }
-            ui.separator();
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} upstream, {} downstream",
-                    wiring.upstream, wiring.downstream
-                ))
-                .size(11.0),
-            );
-            for port in wiring.inputs.iter().chain(wiring.outputs.iter()) {
-                ui.label(
-                    egui::RichText::new(format!("{}: {}", port.port, port.nodes.join(", ")))
-                        .color(theme.muted)
-                        .size(10.0),
-                );
-            }
-        });
-    if !open {
-        state.info = None;
     }
 }
 
@@ -1255,6 +1211,7 @@ mod tests {
                         assets: &BTreeMap::new(),
                         manual: false,
                         playing: false,
+                        info: None,
                     }),
                     state,
                     ctx,
