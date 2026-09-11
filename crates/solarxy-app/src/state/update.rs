@@ -383,20 +383,6 @@ impl State {
                 }),
         );
         info.validation = merged;
-
-        let bounds = self
-            .raster
-            .scene()
-            .visible_bounds()
-            .unwrap_or(self.env_bounds)
-            .size();
-        self.gui.update_scene_info(
-            &info.filename,
-            &info.path,
-            info.file_size,
-            info.counts,
-            [bounds.x, bounds.y, bounds.z],
-        );
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -516,16 +502,9 @@ impl State {
                         .and_then(|f| f.to_str())
                         .unwrap_or("HDRI")
                         .to_string();
-                    let file_size = std::fs::metadata(&pending.path).map_or(0, |m| m.len());
-                    let resolution = new_ibl
-                        .equirect
-                        .as_ref()
-                        .map_or((0, 0), |e| (e.texture.width(), e.texture.height()));
                     self.gui.update_hdri_info(hdri_info::HdriInfo {
                         filename,
                         path: pending.path.display().to_string(),
-                        resolution,
-                        file_size,
                     });
                 }
                 self.renderer.ibl_res.ibl = new_ibl;

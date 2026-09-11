@@ -65,7 +65,6 @@ pub(crate) enum ShellKey {
     /// keeps its bare `N`.
     NewScene,
     OpenModel,
-    OpenHdri,
     /// Write the document to its own path, or ask for one.
     Save,
     /// Ask for a path, then write there.
@@ -111,8 +110,7 @@ pub(crate) fn shell_key(
         KeyCode::F10 => Some(ShellKey::ToggleMenuBar),
         KeyCode::F11 => Some(ShellKey::ToggleFullscreen),
         KeyCode::KeyN if cmd_or_ctrl => Some(ShellKey::NewScene),
-        KeyCode::KeyO if cmd_or_ctrl && shift => Some(ShellKey::OpenHdri),
-        KeyCode::KeyO if cmd_or_ctrl => Some(ShellKey::OpenModel),
+        KeyCode::KeyO if cmd_or_ctrl && !shift => Some(ShellKey::OpenModel),
         KeyCode::KeyS if cmd_or_ctrl && shift => Some(ShellKey::SaveAs),
         KeyCode::KeyS if cmd_or_ctrl => Some(ShellKey::Save),
         KeyCode::KeyZ if cmd_or_ctrl && shift && !wants_text => Some(ShellKey::Redo),
@@ -609,7 +607,8 @@ mod tests {
                 Some(ShellKey::ToggleConsole),
             ),
             (KeyCode::KeyO, true, false, Some(ShellKey::OpenModel)),
-            (KeyCode::KeyO, true, true, Some(ShellKey::OpenHdri)),
+            // Import HDRI's chord went with the Environment dialog.
+            (KeyCode::KeyO, true, true, None),
             (KeyCode::KeyN, true, false, Some(ShellKey::NewScene)),
             (KeyCode::KeyS, true, false, Some(ShellKey::Save)),
             (KeyCode::KeyS, true, true, Some(ShellKey::SaveAs)),

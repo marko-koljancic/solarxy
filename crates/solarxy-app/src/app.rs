@@ -154,7 +154,6 @@ impl ApplicationHandler<State> for App {
                     ShellKey::ToggleFullscreen => state.toggle_fullscreen(),
                     ShellKey::NewScene => state.new_scene(),
                     ShellKey::OpenModel => state.open_model_dialog(),
-                    ShellKey::OpenHdri => state.open_hdri_dialog(),
                     ShellKey::Save => {
                         state.save_document();
                     }

@@ -14,15 +14,12 @@
 use egui_wgpu::ScreenDescriptor;
 
 use crate::console::ConsoleState;
-use crate::state::hdri_info::HdriInfo;
 
 use super::chrome::divider::DividerInfo;
-use super::panels::node_tree::{NodeTreeSource, NodeTreeState};
+use super::chrome::overlays::HudInfo;
 use super::panels::nodes::{CanvasSource, CanvasState};
 use super::panels::params::{ParamPanelSource, ParamPanelState};
-use super::panels::outliner::OutlinerSource;
-use super::chrome::overlays::HudInfo;
-use super::panels::properties::{ModelInfo, ValidationView};
+use super::panels::tree::{TreeSource, TreeState};
 use super::panels::review::overlay::ReviewPaneOverlay;
 use super::settings::PanelSettings;
 
@@ -59,40 +56,28 @@ pub(crate) struct PanelSources<'a> {
     /// one is an intent, so this is read-only like everything else here.
     pub settings: PanelSettings<'a>,
     pub hud: &'a HudInfo,
-    pub validation: ValidationView<'a>,
-    pub outliner: OutlinerSource<'a>,
-    /// The open document, when the Node Tree tab is mounted. The state layer
+    /// The open document's file name and format, for the status bar.
+    pub document: Option<(&'a str, &'a str)>,
+    /// Errors and warnings across every object, for the status bar.
+    pub validation_counts: (usize, usize),
+    /// The open document, when the Tree tab is mounted. The state layer
     /// passes `Empty` for a closed tab so the fold is skipped.
-    pub node_tree: NodeTreeSource<'a>,
+    pub tree: TreeSource<'a>,
     /// The open document and the revision that produced it, when the
     /// canvas tab is mounted. `Empty` for a closed tab, so a canvas nobody
     /// is looking at costs nothing.
     pub canvas: CanvasSource<'a>,
     /// The node the parameter panel edits, and what its last cook said,
-    /// when that tab is mounted.
+    /// when the Properties tab that hosts it is mounted.
     pub params: ParamPanelSource<'a>,
-    /// The node selected in the graph and the actions it declares, for
-    /// the Properties panel's Actions section.
-    pub actions: super::panels::properties::NodeActionsView<'a>,
     pub recent_files: &'a [String],
-}
-
-/// What the renderer caches about the open file.
-///
-/// Its own group rather than part of [`PanelSources`], because the state layer
-/// hands these over once at load rather than every frame, and the renderer is
-/// what holds them in between.
-#[derive(Clone, Copy)]
-pub(super) struct OpenFile<'a> {
-    pub model_info: Option<&'a ModelInfo>,
-    pub hdri_info: Option<&'a HdriInfo>,
 }
 
 /// The per-panel interface state the dock's tabs write directly: folds,
 /// selections, filters. Never document state, which the engine owns.
 pub(crate) struct PanelState<'a> {
     pub console: &'a mut ConsoleState,
-    pub node_tree: &'a mut NodeTreeState,
+    pub tree: &'a mut TreeState,
     pub canvas: &'a mut CanvasState,
     pub params: &'a mut ParamPanelState,
     /// **Shared, and deliberately so.** Which graph the user is looking

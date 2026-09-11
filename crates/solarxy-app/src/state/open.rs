@@ -746,7 +746,6 @@ impl State {
         self.clear_scene_objects();
         self.environment.invalidate();
         self.reset_env_for_empty_scene();
-        self.gui.clear_model_info();
         self.gui.reset_graph_surfaces();
         self.selected_object = None;
         self.hdri_hash = None;

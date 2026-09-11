@@ -8,12 +8,24 @@
 //! 0.10.0, because a file model's meshes were the shell's own; with one root
 //! there is nothing the shell owns to write.
 
-use crate::gui::{OutlinerAction, ViewportAction};
+use crate::gui::ViewportAction;
 use solarxy_core::scene::SceneObjectId;
 use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_graph::params::{ParamSource, ParamValue};
 
 use super::State;
+
+/// One thing the viewport context menu can ask of a scene object. These
+/// were the Outliner's actions until that panel was replaced by the Tree;
+/// the menu raised them through the Outliner's handler and still does
+/// through this one.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ObjectAction {
+    /// Frame the active pane on the object's world bounds.
+    FrameObject(solarxy_core::scene::SceneObjectId),
+    /// Flip the object's visibility through its node's parameter.
+    ToggleObject(solarxy_core::scene::SceneObjectId),
+}
 
 impl State {
     /// Apply a [`ViewportAction`] raised by the right-click menu.
@@ -33,10 +45,10 @@ impl State {
                 }
             }
             ViewportAction::FrameObject(id) => {
-                self.handle_outliner_action(OutlinerAction::FrameObject(id));
+                self.handle_object_action(ObjectAction::FrameObject(id));
             }
             ViewportAction::ToggleVisible(id) => {
-                self.handle_outliner_action(OutlinerAction::ToggleObject(id));
+                self.handle_object_action(ObjectAction::ToggleObject(id));
             }
             ViewportAction::Duplicate(id) => {
                 self.apply_node_command(solarxy_graph::Command::DuplicateNodes {
@@ -97,11 +109,10 @@ impl State {
         }
     }
 
-    /// Apply an [`OutlinerAction`] (mesh / material visibility or camera
-    /// framing) raised by the Outliner panel.
-    pub(super) fn handle_outliner_action(&mut self, action: OutlinerAction) {
+    /// Apply an [`ObjectAction`] raised by the viewport context menu.
+    pub(super) fn handle_object_action(&mut self, action: ObjectAction) {
         match action {
-            OutlinerAction::FrameObject(id) => {
+            ObjectAction::FrameObject(id) => {
                 // The object's own bounds are in its local space; the
                 // transform is what places it in the world, and framing the
                 // untransformed box would send the camera to the origin for
@@ -115,18 +126,7 @@ impl State {
                     self.frame_active_pane(aabb);
                 }
             }
-            OutlinerAction::FrameObjectMesh(id, mesh) => {
-                let aabb = self.raster.scene().get(id).and_then(|o| {
-                    o.model
-                        .mesh_bounds
-                        .get(mesh)
-                        .map(|b| b.transformed(&o.transform))
-                });
-                if let Some(aabb) = aabb {
-                    self.frame_active_pane(aabb);
-                }
-            }
-            OutlinerAction::ToggleObject(id) => self.toggle_scene_object(id),
+            ObjectAction::ToggleObject(id) => self.toggle_scene_object(id),
         }
     }
 

@@ -62,7 +62,6 @@ impl EngineSceneInfo {
 /// explain the drawn ones.
 #[derive(Default, Clone, Copy)]
 pub(crate) struct SceneGeometryCounts {
-    pub objects: usize,
     pub meshes: usize,
     pub materials: usize,
     /// Placements across every mesh. Equal to `meshes` when nothing is
@@ -77,14 +76,7 @@ pub(crate) struct SceneGeometryCounts {
     pub has_uvs: bool,
 }
 
-impl SceneGeometryCounts {
-    /// Whether any mesh is placed more than once, which is the only case
-    /// where the drawn and source counts differ and the split is worth
-    /// showing.
-    pub fn is_instanced(&self) -> bool {
-        self.drawn_tris != self.unique_tris || self.drawn_verts != self.unique_verts
-    }
-}
+impl SceneGeometryCounts {}
 
 /// Sum every object's geometry into one set of counters.
 ///
@@ -93,7 +85,6 @@ impl SceneGeometryCounts {
 /// describes the scene, not the frame.
 pub(crate) fn count_geometry(objects: &SceneObjects) -> SceneGeometryCounts {
     let mut c = SceneGeometryCounts {
-        objects: objects.len(),
         ..SceneGeometryCounts::default()
     };
     for (_, object) in objects.iter() {

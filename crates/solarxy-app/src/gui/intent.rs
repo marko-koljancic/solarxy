@@ -46,9 +46,8 @@ use solarxy_core::view_config::PostStrengths;
 use crate::state::view_state::{BoundsMode, ViewLayout};
 
 use super::dock::SolarxyTab;
-use super::panels::node_tree::NodeTreeAction;
+use super::panels::tree::TreeAction;
 use super::panels::nodes::CanvasAction;
-use super::panels::outliner::OutlinerAction;
 use super::chrome::pane_toolbar::{LookThroughChange, PaneView};
 use super::chrome::viewport_context_menu::ViewportAction;
 
@@ -166,7 +165,9 @@ pub(crate) enum FileIntent {
     /// Replace the document with an empty one.
     NewScene,
     OpenModel,
-    OpenHdri,
+    /// Show the Environment dialog: the HDRI, its lighting mode, rotation
+    /// and intensity.
+    OpenEnvironment,
     /// Write the document to its own path, or ask for one.
     Save,
     /// Ask for a path, then write there.
@@ -253,8 +254,13 @@ pub(crate) enum CookIntent {
 /// What a panel asked for.
 #[derive(Debug, Clone)]
 pub(crate) enum PanelIntent {
-    /// A validation row was clicked: frame the issue it names.
-    FlyToIssue(usize),
+    /// A validation row in the parameter panel was clicked: frame the
+    /// issue it names, on the object the node's network belongs to.
+    FlyToIssue {
+        ctx: solarxy_graph::document::GraphContext,
+        node: solarxy_graph::document::NodeId,
+        index: usize,
+    },
     /// An action parameter's button in the Properties panel. The key is the
     /// parameter's, and the drain decides what the press does.
     InvokeAction {
@@ -270,15 +276,12 @@ pub(crate) enum PanelIntent {
         node: solarxy_graph::document::NodeId,
         key: String,
     },
-    /// The Properties panel's Clear HDRI button.
+    /// The Environment dialog's Clear button.
     ClearHdri,
-    /// The Properties panel's Load HDRI button, shown when none is loaded.
+    /// The Environment dialog's Load button.
     LoadHdri,
-    /// The Outliner, or the viewport context menu, which raises the same
-    /// actions on purpose because they are the same actions.
-    Outliner(OutlinerAction),
-    /// The Node Tree.
-    NodeTree(NodeTreeAction),
+    /// The Tree.
+    Tree(TreeAction),
     /// The node canvas.
     Canvas(CanvasAction),
     /// The parameter panel's tab reset: every key in a group, hidden
@@ -332,19 +335,15 @@ impl Intent {
             Self::Projection(_) => 7,
             Self::Layout(_) => 8,
             Self::Help(_) => 9,
-            Self::Panel(PanelIntent::FlyToIssue(_)) => 10,
+            Self::Panel(PanelIntent::FlyToIssue { .. }) => 10,
             Self::Panel(PanelIntent::ClearHdri) => 11,
             Self::Panel(PanelIntent::LoadHdri) => 12,
-            // The viewport's right-click menu shares this key with the
-            // Outliner deliberately: they raise the same kind of object
-            // action, and two of the menu's arms delegate to the Outliner's
-            // own handler.
-            Self::Viewport(_) | Self::Panel(PanelIntent::Outliner(_)) => 13,
+            Self::Viewport(_) => 13,
             // The two graph surfaces share a key: they raise the same
             // kind of change to the same document, and only one of them
             // can be under the pointer in a frame.
             Self::Panel(
-                PanelIntent::NodeTree(_) | PanelIntent::Canvas(_) | PanelIntent::ResetParams(..),
+                PanelIntent::Tree(_) | PanelIntent::Canvas(_) | PanelIntent::ResetParams(..),
             ) => 14,
             Self::Cook(_) => 15,
             Self::Panel(PanelIntent::InvokeAction { .. } | PanelIntent::ChooseAsset { .. }) => 16,
@@ -401,7 +400,7 @@ mod tests {
     #[test]
     fn the_drain_order_is_the_documented_sequence() {
         let mut intents = Intents::default();
-        intents.panel(PanelIntent::NodeTree(NodeTreeAction::Select(
+        intents.panel(PanelIntent::Tree(TreeAction::Select(
             GraphContext::Root,
             NodeId(1),
         )));
@@ -409,12 +408,16 @@ mod tests {
             GraphContext::Root,
             vec![(NodeId(1), [1.0, 1.0])],
         )));
-        intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleObject(
+        intents.raise(Intent::Viewport(ViewportAction::ToggleVisible(
             solarxy_core::scene::SceneObjectId(1),
         )));
         intents.panel(PanelIntent::LoadHdri);
         intents.panel(PanelIntent::ClearHdri);
-        intents.panel(PanelIntent::FlyToIssue(3));
+        intents.panel(PanelIntent::FlyToIssue {
+            ctx: GraphContext::Root,
+            node: NodeId(1),
+            index: 3,
+        });
         intents.raise(Intent::LookThrough {
             pane: 0,
             change: LookThroughChange::Free,
@@ -446,7 +449,7 @@ mod tests {
 
         let mut intents = Intents::default();
         for object in [7_u64, 2, 5] {
-            intents.panel(PanelIntent::Outliner(OutlinerAction::ToggleObject(
+            intents.raise(Intent::Viewport(ViewportAction::ToggleVisible(
                 SceneObjectId(object),
             )));
         }
@@ -455,7 +458,7 @@ mod tests {
             .take_ordered()
             .into_iter()
             .map(|i| match i {
-                Intent::Panel(PanelIntent::Outliner(OutlinerAction::ToggleObject(id))) => id.0,
+                Intent::Viewport(ViewportAction::ToggleVisible(id)) => id.0,
                 other => panic!("unexpected intent {other:?}"),
             })
             .collect();

@@ -44,6 +44,8 @@ pub(crate) struct ParamScene<'a> {
     /// Errors and warnings from the whole report, which is a
     /// different number from the rows a list can show.
     pub counts: (u32, u32),
+    /// The report itself, for the Validation tab's rows.
+    pub report: Option<&'a solarxy_core::validation::ValidationReport>,
     /// Every staged asset, as its hash and the name it was staged under,
     /// so a file reference reads as a file name. The engine holds the
     /// names and a panel cannot reach the engine.
@@ -237,6 +239,7 @@ pub(crate) fn draw_params_content(
         stats,
         has_report,
         counts,
+        report,
         assets,
         lanes,
         error,
@@ -362,17 +365,7 @@ pub(crate) fn draw_params_content(
             let candidates = node_path_candidates(doc, registry, &desc.params);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 if active == VALIDATION_TAB {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} error(s), {} warning(s)",
-                            counts.0, counts.1
-                        ))
-                        .color(if counts.0 > 0 {
-                            theme.severity_error
-                        } else {
-                            theme.muted
-                        }),
-                    );
+                    draw_validation_tab(ui, report, counts, ctx, node, intents, theme);
                     return;
                 }
                 for section in params::param_sections(&desc.params) {
@@ -593,6 +586,78 @@ fn placeholder(ui: &mut Ui, message: &str, theme: Theme) {
     });
 }
 
+/// The Validation tab: the counts, then one row per issue, each a click
+/// away from the geometry it names.
+///
+/// The rows fly through the node's own report rather than through a
+/// scene-wide merged list, because this panel is about one node; the
+/// object the camera frames is the one the node's network belongs to.
+fn draw_validation_tab(
+    ui: &mut Ui,
+    report: Option<&solarxy_core::validation::ValidationReport>,
+    counts: (u32, u32),
+    ctx: GraphContext,
+    node: NodeId,
+    intents: &mut Intents,
+    theme: Theme,
+) {
+    let Some(report) = report else {
+        ui.label(egui::RichText::new("No report yet.").color(theme.muted));
+        return;
+    };
+    if report.is_clean() {
+        ui.label("No issues found.");
+        return;
+    }
+    ui.label(
+        egui::RichText::new(format!("{} error(s), {} warning(s)", counts.0, counts.1)).color(
+            if counts.0 > 0 {
+                theme.severity_error
+            } else {
+                theme.muted
+            },
+        ),
+    );
+    ui.add_space(2.0);
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let text_color = ui.visuals().text_color();
+    for (index, issue) in report.issues.iter().enumerate() {
+        let c = solarxy_renderer::validation::issue_category(issue).color();
+        let dot = egui::Color32::from_rgb(
+            (c[0] * 255.0) as u8,
+            (c[1] * 255.0) as u8,
+            (c[2] * 255.0) as u8,
+        );
+        let mut job = egui::text::LayoutJob::default();
+        job.append(
+            "\u{25cf}  ",
+            0.0,
+            egui::TextFormat {
+                color: dot,
+                font_id: font.clone(),
+                ..Default::default()
+            },
+        );
+        job.append(
+            &format!("{}: {}", issue.scope, issue.message),
+            0.0,
+            egui::TextFormat {
+                color: text_color,
+                font_id: font.clone(),
+                ..Default::default()
+            },
+        );
+        job.wrap.max_width = ui.available_width();
+        if ui
+            .selectable_label(false, job)
+            .on_hover_text("Click to frame this issue in the active viewport")
+            .clicked()
+        {
+            intents.panel(crate::gui::PanelIntent::FlyToIssue { ctx, node, index });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,6 +727,7 @@ mod tests {
                         ctx,
                         stats: None,
                         has_report: false,
+                        report: None,
                         counts: (0, 0),
                         assets: &[],
                         lanes: &[],
@@ -942,6 +1008,7 @@ mod tests {
                             ctx,
                             stats: None,
                             has_report: false,
+                            report: None,
                             counts: (0, 0),
                             assets: &[],
                             lanes: &[],

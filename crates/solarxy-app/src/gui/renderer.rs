@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use solarxy_renderer::resources::ModelStats;
 use crate::console::{ConsoleState, LogBuffer};
 use crate::state::hdri_info::HdriInfo;
 use solarxy_core::preferences::PaneMode;
@@ -10,7 +9,7 @@ use super::modals::about::draw_about_modal;
 use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
-use super::panels::node_tree::NodeTreeState;
+use super::panels::tree::TreeState;
 use super::chrome::menu::{MenuContext, draw_menu_bar};
 use super::chrome::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::chrome::status_bar::{self, StatusBarData};
@@ -20,10 +19,10 @@ use super::panels::review::panel::draw_delete_confirm_modal;
 use super::panels::review::popup::draw_review_popup;
 use super::modals::screenshot::{ScreenshotModal, draw_screenshot_modal};
 use super::modals::still::{StillRenderModal, draw_still_modal};
-use super::panels::properties::ModelInfo;
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
 use super::modals::recovery::{RecoveryChoice, RecoveryModalState, draw_recovery_modal};
 use super::modals::unsaved::{DiscardWhat, UnsavedChoice, UnsavedModalState, draw_unsaved_modal};
+use super::modals::environment::draw_environment_modal;
 use super::modals::update::{UpdateModalState, draw_update_modal};
 use egui_dock::{DockArea, DockState};
 use solarxy_core::preferences::{Preferences, ThemeChoice};
@@ -43,9 +42,10 @@ pub struct EguiRenderer {
     shortcuts_modal: KeyboardShortcutsModalState,
     unsaved_modal: UnsavedModalState,
     recovery_modal: RecoveryModalState,
+    environment_open: bool,
     screenshot_modal: ScreenshotModal,
     still_modal: StillRenderModal,
-    node_tree: NodeTreeState,
+    tree: TreeState,
     canvas: super::panels::nodes::CanvasState,
     params: super::panels::params::ParamPanelState,
     /// The node canvas's rect as the last frame drew it, so a key claim
@@ -60,7 +60,6 @@ pub struct EguiRenderer {
     next_toast_id: u64,
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
-    model_info: Option<ModelInfo>,
     hdri_info: Option<HdriInfo>,
     backend_info: String,
     pub(super) dock_state: DockState<SolarxyTab>,
@@ -119,9 +118,10 @@ impl EguiRenderer {
             shortcuts_modal: KeyboardShortcutsModalState::default(),
             unsaved_modal: UnsavedModalState::default(),
             recovery_modal: RecoveryModalState::default(),
+            environment_open: false,
             screenshot_modal: ScreenshotModal::default(),
             still_modal: StillRenderModal::default(),
-            node_tree: NodeTreeState::default(),
+            tree: TreeState::default(),
             canvas: super::panels::nodes::CanvasState::default(),
             params: super::panels::params::ParamPanelState::default(),
             canvas_rect: None,
@@ -130,7 +130,6 @@ impl EguiRenderer {
             next_toast_id: 0,
             loading_message: None,
             frame_times: VecDeque::with_capacity(30),
-            model_info: None,
             hdri_info: None,
             backend_info: String::new(),
             dock_state: default_dock_state(),
@@ -148,16 +147,14 @@ impl EguiRenderer {
         apply_theme(&self.ctx, &self.theme);
     }
 
-    /// Drop the cached document info on close. Panel visibility is left
-    /// untouched: panels are user-controlled, with no auto open or close. The
-    /// HDRI is independent of the document, so `hdri_info` is kept.
-    pub fn clear_model_info(&mut self) {
-        self.model_info = None;
-    }
-
     /// Cache the loaded HDRI's metadata for the Properties panel.
     pub(crate) fn update_hdri_info(&mut self, info: HdriInfo) {
         self.hdri_info = Some(info);
+    }
+
+    /// Show the Environment dialog.
+    pub(crate) fn open_environment_modal(&mut self) {
+        self.environment_open = true;
     }
 
     /// Drop the cached HDRI metadata when the HDRI is cleared.
@@ -295,8 +292,8 @@ impl EguiRenderer {
     /// from the Window menu populates it on the following frame — a
     /// latency no one can see.
     #[must_use]
-    pub fn node_tree_tab_present(&self) -> bool {
-        self.tab_present(SolarxyTab::NodeTree)
+    pub fn tree_tab_present(&self) -> bool {
+        self.tab_present(SolarxyTab::Tree)
     }
 
     /// `true` iff the node canvas tab is currently mounted in the dock.
@@ -310,8 +307,8 @@ impl EguiRenderer {
     /// `true` iff the parameter panel is mounted, so the state layer can
     /// skip gathering what it would draw.
     #[must_use]
-    pub fn params_tab_present(&self) -> bool {
-        self.tab_present(SolarxyTab::Parameters)
+    pub fn properties_tab_present(&self) -> bool {
+        self.tab_present(SolarxyTab::Properties)
     }
 
     /// The node the parameter panel is pinned to, if any.
@@ -337,7 +334,7 @@ impl EguiRenderer {
     /// addresses nodes the new document need not contain.
     pub fn reset_graph_surfaces(&mut self) {
         self.graph_ctx = solarxy_graph::document::GraphContext::Root;
-        self.node_tree.reset();
+        self.tree.reset();
         self.canvas.reset();
         // The pin especially: node ids are minted per document, so one
         // carried across an open would point at whatever holds that id in
@@ -363,7 +360,13 @@ impl EguiRenderer {
     /// layout is preserved and a debug line is logged.
     pub fn apply_layout_json(&mut self, json: &str) -> bool {
         match serde_json::from_str::<DockState<SolarxyTab>>(json) {
-            Ok(state) => {
+            Ok(mut state) => {
+                // A saved name for a panel this build no longer has parses
+                // as `Retired`; dropping only those keeps the rest.
+                let dropped = super::dock::sweep_retired(&mut state);
+                if dropped > 0 {
+                    tracing::debug!("dock layout named {dropped} retired panel(s), dropped");
+                }
                 self.dock_state = state;
                 true
             }
@@ -404,6 +407,7 @@ impl EguiRenderer {
             || self.shortcuts_modal.open
             || self.unsaved_modal.open
             || self.recovery_modal.open
+            || self.environment_open
             || review.delete_confirm.is_some()
             || review.editing.is_some()
     }
@@ -430,72 +434,6 @@ impl EguiRenderer {
 
     pub fn set_backend_info(&mut self, info: String) {
         self.backend_info = info;
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn update_model_info(
-        &mut self,
-        filename: &str,
-        file_path: &str,
-        file_size: u64,
-        mesh_count: usize,
-        material_count: usize,
-        stats: &ModelStats,
-        bounds_size: [f32; 3],
-        has_uvs: bool,
-    ) {
-        let format = std::path::Path::new(file_path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("unknown")
-            .to_uppercase();
-        self.model_info = Some(ModelInfo {
-            filename: filename.to_string(),
-            file_path: file_path.to_string(),
-            file_size,
-            format,
-            mesh_count,
-            material_count,
-            stats: *stats,
-            bounds_size,
-            has_uvs,
-            scene: None,
-        });
-    }
-
-    /// The scene equivalent of [`Self::update_model_info`]: the same panel
-    /// slot, filled from summed object counters rather than from one
-    /// loaded file.
-    ///
-    /// Called on every drained scene delta, not once at open, because a
-    /// cook changes the counts.
-    pub(crate) fn update_scene_info(
-        &mut self,
-        filename: &str,
-        path: &str,
-        file_size: u64,
-        counts: crate::state::engine_scene::SceneGeometryCounts,
-        bounds_size: [f32; 3],
-    ) {
-        self.model_info = Some(ModelInfo {
-            filename: filename.to_string(),
-            file_path: path.to_string(),
-            file_size,
-            format: "SLXY".to_string(),
-            mesh_count: counts.meshes,
-            material_count: counts.materials,
-            // Drawn totals. `polys` has no meaning for cooked geometry, so
-            // it stays zero and the panel drops its row rather than
-            // printing the triangle count twice.
-            stats: ModelStats {
-                polys: 0,
-                tris: counts.drawn_tris,
-                verts: counts.drawn_verts,
-            },
-            bounds_size,
-            has_uvs: counts.has_uvs,
-            scene: Some(counts),
-        });
     }
 
     /// Draw one interface pass.
@@ -530,10 +468,7 @@ impl EguiRenderer {
         } else {
             0
         };
-        let validation_counts = sources
-            .validation
-            .report
-            .map_or((0, 0), |r| (r.error_count(), r.warning_count()));
+        let validation_counts = sources.validation_counts;
 
         // The review panel's open flag is written by the state layer when
         // review mode starts, so it is reconciled into the dock before the
@@ -551,8 +486,8 @@ impl EguiRenderer {
         let menu_cx = MenuContext {
             // The still renders either root: an open scene, or an open model
             // through the synthesized document.
-            has_model: self.model_info.is_some() || self.scene_open,
-            still_renderable: self.scene_open || self.model_info.is_some(),
+            has_model: self.scene_open,
+            still_renderable: self.scene_open,
             recent_files: sources.recent_files,
             hdri_available: chrome.toolbars.hdri_available,
             customs: chrome.toolbars.customs,
@@ -599,10 +534,7 @@ impl EguiRenderer {
                 let status = status_bar::draw(
                     ctx,
                     &StatusBarData {
-                        model: self
-                            .model_info
-                            .as_ref()
-                            .map(|m| (m.filename.as_str(), m.format.as_str())),
+                        model: sources.document,
                         validation: validation_counts,
                         review_active: review.active,
                         pane_label: &sources.hud.pane_label,
@@ -622,13 +554,9 @@ impl EguiRenderer {
 
             let mut tab_viewer = SolarxyTabViewer {
                 sources,
-                open_file: super::pass::OpenFile {
-                    model_info: self.model_info.as_ref(),
-                    hdri_info: self.hdri_info.as_ref(),
-                },
                 panels: super::pass::PanelState {
                     console: &mut self.console,
-                    node_tree: &mut self.node_tree,
+                    tree: &mut self.tree,
                     canvas: &mut self.canvas,
                     params: &mut self.params,
                     graph_ctx: &mut self.graph_ctx,
@@ -656,6 +584,7 @@ impl EguiRenderer {
                 || self.shortcuts_modal.open
                 || self.unsaved_modal.open
                 || self.recovery_modal.open
+                || self.environment_open
                 || screenshot_drawn
                 || review.delete_confirm.is_some()
                 || review.editing.is_some();
@@ -685,6 +614,14 @@ impl EguiRenderer {
             // question is up, Escape answers it.
             draw_unsaved_modal(ctx, &mut self.unsaved_modal, &self.theme);
             draw_recovery_modal(ctx, &mut self.recovery_modal);
+            draw_environment_modal(
+                ctx,
+                &mut self.environment_open,
+                sources.settings,
+                self.hdri_info.as_ref(),
+                intents,
+                &self.theme,
+            );
 
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);

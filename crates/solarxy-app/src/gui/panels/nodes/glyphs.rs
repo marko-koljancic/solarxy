@@ -325,7 +325,13 @@ pub(in crate::gui::panels) fn art(key: &str) -> Option<&'static str> {
 }
 
 /// Stroke a glyph into `rect`, scaled from its authored box and centred.
-pub(super) fn paint(painter: &Painter, key: &str, rect: Rect, color: Color32, width: f32) {
+pub(in crate::gui::panels) fn paint(
+    painter: &Painter,
+    key: &str,
+    rect: Rect,
+    color: Color32,
+    width: f32,
+) {
     let Some(path) = art(key) else {
         return;
     };

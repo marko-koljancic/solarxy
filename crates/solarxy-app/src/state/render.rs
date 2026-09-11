@@ -455,31 +455,29 @@ impl State {
             overdraw_active: active_inspection == InspectionMode::Overdraw
                 && active_pane_mode == PaneMode::Scene3D,
         };
-        let validation = match &self.engine_scene {
-            Some(info) => crate::gui::ValidationView {
-                report: Some(&info.validation.report),
-                owners: &info.validation.labels,
-            },
-            None => crate::gui::ValidationView::default(),
-        };
-        let outliner_source = match &self.engine_scene {
-            Some(info) => crate::gui::OutlinerSource::Scene {
-                objects: self.raster.scene(),
-                names: &info.object_names,
-            },
-            None => crate::gui::OutlinerSource::Empty,
-        };
+        // The document's name and format, for the status bar's readout.
+        let document_format = self.engine_scene.as_ref().map(|info| {
+            std::path::Path::new(&info.filename)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map_or_else(|| "SLXY".to_string(), str::to_uppercase)
+        });
+        let document = self
+            .engine_scene
+            .as_ref()
+            .zip(document_format.as_deref())
+            .map(|(info, format)| (info.filename.as_str(), format));
         // Folded fresh each frame rather than cached on a delta, because
         // selection is part of what the tree draws and selection changes
         // without a delta. Skipped outright when the tab is closed, which
         // is the only case where the cost would be paid for nothing.
-        let node_tree_source = match &self.engine {
-            _ if !self.gui.node_tree_tab_present() => crate::gui::NodeTreeSource::Empty,
-            Some(engine) => crate::gui::NodeTreeSource::Scene {
+        let tree_source = match &self.engine {
+            _ if !self.gui.tree_tab_present() => crate::gui::TreeSource::Empty,
+            Some(engine) => crate::gui::TreeSource::Scene {
                 doc: engine.document(),
                 registry: engine.registry(),
             },
-            None => crate::gui::NodeTreeSource::Empty,
+            None => crate::gui::TreeSource::Empty,
         };
         // The canvas seeds from the revision rather than from a delta,
         // because it draws things no delta carries: edges, positions and
@@ -522,12 +520,12 @@ impl State {
         let staged: Vec<(String, String)> = self
             .engine
             .as_deref()
-            .filter(|_| self.gui.params_tab_present())
+            .filter(|_| self.gui.properties_tab_present())
             .map(solarxy_graph::Engine::asset_manifest)
             .unwrap_or_default();
         let params_subject = params_subject(
             self.engine.as_deref(),
-            self.gui.params_tab_present(),
+            self.gui.properties_tab_present(),
             self.gui.graph_ctx(),
             self.gui.params_pin(),
         );
@@ -549,7 +547,7 @@ impl State {
             .unwrap_or_default();
         let params_scene = params_source(
             self.engine.as_deref(),
-            self.gui.params_tab_present(),
+            self.gui.properties_tab_present(),
             self.gui.graph_ctx(),
             self.gui.params_pin(),
             &staged,
@@ -565,38 +563,6 @@ impl State {
             crate::gui::CanvasSource::Empty,
             crate::gui::CanvasSource::Scene,
         );
-
-        // The Actions section's subject: the node selected in the Node Tree's
-        // context, read from the document each frame rather than mirrored,
-        // because selection is engine state.
-        let selected = self
-            .engine
-            .as_deref()
-            .and_then(|engine| selected_node(engine.document(), self.gui.graph_ctx()));
-        let selected_name = match (&self.engine, selected) {
-            (Some(engine), Some((ctx, id))) => engine
-                .document()
-                .graph(ctx)
-                .ok()
-                .and_then(|g| g.node(id))
-                .map(|n| solarxy_graph::naming::node_name(n, engine.registry()))
-                .unwrap_or_default(),
-            _ => String::new(),
-        };
-        let actions_source = match (&self.engine, selected) {
-            (Some(engine), Some((ctx, id))) => {
-                let data = engine.document().graph(ctx).ok().and_then(|g| g.node(id));
-                let descriptor = data.and_then(|n| engine.registry().get(&n.type_id));
-                crate::gui::NodeActionsView {
-                    node: Some((ctx, id)),
-                    name: &selected_name,
-                    type_name: descriptor.map_or("", |d| d.display_name),
-                    params: descriptor.map_or(&[], |d| d.params.as_slice()),
-                    stored: data.map(|n| &n.params),
-                }
-            }
-            _ => crate::gui::NodeActionsView::default(),
-        };
 
         let recent_files = self.preferences.history.recent_files.clone();
         // `PaneToolbarData` is passed by value — `render_ui` consumes it,
@@ -665,12 +631,16 @@ impl State {
             crate::gui::PanelSources {
                 settings,
                 hud: &hud,
-                validation,
-                outliner: outliner_source,
-                node_tree: node_tree_source,
+                document,
+                validation_counts: self.engine_scene.as_ref().map_or((0, 0), |info| {
+                    (
+                        info.validation.report.error_count(),
+                        info.validation.report.warning_count(),
+                    )
+                }),
+                tree: tree_source,
                 canvas: canvas_source,
                 params: params_source,
-                actions: actions_source,
                 recent_files: &recent_files,
             },
             &mut self.review,
@@ -837,23 +807,6 @@ impl State {
     }
 }
 
-fn selected_node(
-    doc: &solarxy_graph::document::Document,
-    prefer: solarxy_graph::document::GraphContext,
-) -> Option<(
-    solarxy_graph::document::GraphContext,
-    solarxy_graph::document::NodeId,
-)> {
-    use solarxy_graph::document::GraphContext;
-    std::iter::once(prefer)
-        .chain(std::iter::once(GraphContext::Root))
-        .chain(doc.subflow_owners().map(GraphContext::Subflow))
-        .find_map(|ctx| {
-            let id = doc.graph(ctx).ok()?.selection.last().copied()?;
-            Some((ctx, id))
-        })
-}
-
 /// What the parameter panel edits, and what its last cook said.
 ///
 /// A free function rather than a method, because the source borrows the
@@ -886,6 +839,7 @@ fn params_source<'a>(
         // Presence, not cleanliness: a clean validate cook still stores a
         // report, and the tab that says so is the point of it.
         has_report: validation.is_some(),
+        report: validation.map(|v| &v.report),
         #[allow(clippy::cast_possible_truncation)]
         counts: validation.map_or((0, 0), |v| {
             (
@@ -993,7 +947,7 @@ fn upstream_lanes(
 
 #[cfg(test)]
 mod tests {
-    use super::{resolved_expressions, selected_node};
+    use super::resolved_expressions;
     use solarxy_graph::document::{GraphContext, NodeId};
     use solarxy_graph::{Command, Engine, EngineEvent};
 
@@ -1087,38 +1041,5 @@ mod tests {
                 _ => None,
             })
             .expect("a node was added")
-    }
-
-    /// Selection is read off the document, preferring the context the Node
-    /// Tree is showing, so a dive changes what the section is about.
-    #[test]
-    fn the_selected_node_is_read_from_the_document_preferring_the_tree_context() {
-        let mut engine = Engine::new().expect("engine");
-        assert_eq!(selected_node(engine.document(), GraphContext::Root), None);
-
-        let container = add(&mut engine, GraphContext::Root, "sopnet");
-        let inner = GraphContext::Subflow(container);
-        let inner_box = add(&mut engine, inner, "box");
-        engine
-            .apply(Command::SetSelection {
-                ctx: inner,
-                ids: vec![inner_box],
-            })
-            .expect("selects");
-        engine
-            .apply(Command::SetSelection {
-                ctx: GraphContext::Root,
-                ids: vec![container],
-            })
-            .expect("selects");
-
-        assert_eq!(
-            selected_node(engine.document(), inner),
-            Some((inner, inner_box))
-        );
-        assert_eq!(
-            selected_node(engine.document(), GraphContext::Root),
-            Some((GraphContext::Root, container))
-        );
     }
 }

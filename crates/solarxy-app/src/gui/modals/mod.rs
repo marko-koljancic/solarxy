@@ -6,6 +6,7 @@
 //! be indirection with no criterion behind it.
 
 pub(in crate::gui) mod about;
+pub(in crate::gui) mod environment;
 pub(in crate::gui) mod preferences;
 pub(crate) mod recovery;
 pub(in crate::gui) mod screenshot;

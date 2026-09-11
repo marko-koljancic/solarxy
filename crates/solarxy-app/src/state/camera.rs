@@ -107,34 +107,43 @@ impl State {
     /// Fly the active pane's camera to frame the mesh a validation issue
     /// lives on (Properties → Validation row click) and enable that
     /// pane's per-face validation overlay so the defect is visible.
-    pub(super) fn fly_to_validation_issue(&mut self, idx: usize) {
-        let Some(aabb) = self.scene_issue_aabb(idx) else {
+    pub(super) fn fly_to_node_issue(
+        &mut self,
+        ctx: solarxy_graph::document::GraphContext,
+        node: solarxy_graph::document::NodeId,
+        index: usize,
+    ) {
+        let Some(aabb) = self.node_issue_aabb(ctx, node, index) else {
             return;
         };
         self.view.pane_settings[self.view.active_pane].show_validation = true;
         self.frame_active_pane(aabb);
     }
 
-    /// World-space bounds of the geometry behind one row of the **merged**
-    /// validation list.
+    /// World-space bounds of the geometry behind one row of a node's own
+    /// validation report.
     ///
-    /// The list is N objects' reports concatenated, so the row index alone
-    /// is ambiguous and has to be resolved through the owner recorded when
-    /// they were merged. Re-deriving that owner here would create a second
-    /// ordering that must agree with the first forever, and a disagreement
-    /// would fly the camera to a different object's mesh, which looks
-    /// entirely plausible on screen and so would not be caught by looking.
-    fn scene_issue_aabb(&self, idx: usize) -> Option<solarxy_core::AABB> {
-        let info = self.engine_scene.as_ref()?;
-        let (id, local) = info.validation.owners.get(idx).copied()?;
+    /// The object the camera frames is the one the node's network belongs
+    /// to: a node inside a container names that container's scene object,
+    /// and a container at the root names its own. The issue's scope is
+    /// resolved against that object's uploaded model, as the browser does,
+    /// so a node that is not the network's display node frames the object
+    /// the network shows rather than geometry nobody can see.
+    fn node_issue_aabb(
+        &self,
+        ctx: solarxy_graph::document::GraphContext,
+        node: solarxy_graph::document::NodeId,
+        index: usize,
+    ) -> Option<solarxy_core::AABB> {
+        let owner = match ctx {
+            solarxy_graph::document::GraphContext::Subflow(owner) => owner,
+            solarxy_graph::document::GraphContext::Root => node,
+        };
+        let id = solarxy_core::scene::SceneObjectId(owner.0);
+        let engine = self.engine.as_ref()?;
+        let result = engine.validation(node)?;
+        let issue = result.report.issues.get(index)?;
         let object = self.raster.scene().get(id)?;
-        let issue = self
-            .raster
-            .scene()
-            .validation(id)?
-            .report
-            .issues
-            .get(local)?;
         let raw_to_gpu = self.raster.scene().raw_to_gpu(id)?;
         resolve_issue_aabb(&issue.scope, &object.model, raw_to_gpu)
             .map(|b| b.transformed(&object.transform))

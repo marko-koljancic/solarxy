@@ -36,10 +36,6 @@ const SECTIONS: &[Section] = &[
                 action: "Save scene as\u{2026}",
             },
             Entry {
-                keys: "__MOD__+Shift+O",
-                action: "Import HDRI",
-            },
-            Entry {
                 keys: "__MOD__+Enter",
                 action: "Cook now, in manual cook mode",
             },

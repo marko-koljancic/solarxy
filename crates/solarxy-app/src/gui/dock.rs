@@ -1,9 +1,10 @@
 //! `egui_dock` integration — the unified panel + viewport docking layer.
 //!
-//! All nine user-facing panels (Sidebar, Review Panel, Console, Material
-//! Inspector, Properties, Parameters, Outliner, Node Tree, Nodes) plus the
-//! 3D Viewport live as tabs inside a single [`egui_dock::DockState`], ten
-//! variants in all.
+//! The user-facing panels (Sidebar, Review Panel, Console, Material
+//! Inspector, Properties, Tree, Nodes) plus the 3D Viewport live as tabs
+//! inside a single [`egui_dock::DockState`], and one more variant,
+//! `Retired`, is what a saved layout's name for a panel that no longer
+//! exists deserializes to, so the arrangement survives with that tab gone.
 //! Users drag tab titles between leaves to dock left/right/bottom/top; drag
 //! outside the dock area to tear out into a floating window. The Viewport tab is **closeable but
 //! non-floatable and transparent** — `egui_dock` never paints over the
@@ -29,21 +30,24 @@
 use egui_dock::{DockState, NodeIndex, TabViewer};
 
 use super::intent::Intents;
-use super::pass::{OpenFile, PanelSources, PanelState};
+use super::pass::{PanelSources, PanelState};
 use super::theme::Theme;
 
-/// The ten tab variants in the Solarxy dock. The `Viewport` variant is
+/// The tab variants in the Solarxy dock. The `Viewport` variant is
 /// special-cased throughout: it never floats and never paints a background
-/// (so the wgpu surface shows through). It *can* be closed — the Window
+/// (so the wgpu surface shows through). It *can* be closed; the Window
 /// menu restores it via [`toggle_tab`].
 ///
-/// **Adding a variant is safe for persisted layouts, but only because
-/// these are unit variants**, which serde writes as bare strings: a blob
-/// saved before the variant existed names only tabs that still exist and
-/// parses unchanged. Renaming one is the dangerous edit, since the silent
-/// fallback is the default layout and the user loses their arrangement
-/// without being told. `layout_saved_before_the_node_tree_still_restores`
-/// pins this against a real pre-`NodeTree` blob.
+/// **The variant names are serialized into every user's saved arrangement**,
+/// as bare strings, so adding one is safe and renaming or removing one is
+/// not, on its own: a blob naming a variant serde cannot match fails as a
+/// whole and the silent fallback is the default layout. Two rules close
+/// that. A renamed variant keeps its wire name (`Tree` is written as
+/// `NodeTree`, the name it had when the blobs were saved), and an unknown
+/// name deserializes to `Retired`, which [`sweep_retired`] removes after the
+/// parse, so a layout that named a panel this build no longer has restores
+/// with only that panel gone. `layout_saved_before_the_tree_still_restores`
+/// pins both against a real blob written by 0.8.1, which names `Outliner`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum SolarxyTab {
     Viewport,
@@ -51,11 +55,17 @@ pub(crate) enum SolarxyTab {
     ReviewPanel,
     Console,
     MaterialInspector,
+    /// Hosts the parameter panel, under the name the browser's panel has.
     Properties,
-    Outliner,
-    NodeTree,
+    /// The scene tree. Written as `NodeTree`, the name every saved
+    /// arrangement knows it by.
+    #[serde(rename = "NodeTree")]
+    Tree,
     Nodes,
-    Parameters,
+    /// A tab a saved arrangement named that this build does not have.
+    /// Never drawn: [`sweep_retired`] removes every one after a restore.
+    #[serde(other)]
+    Retired,
 }
 
 impl SolarxyTab {
@@ -68,38 +78,24 @@ impl SolarxyTab {
             Self::Console => "console",
             Self::MaterialInspector => "material-inspector",
             Self::Properties => "properties",
-            Self::Outliner => "outliner",
-            Self::NodeTree => "node-tree",
+            Self::Tree => "tree",
             Self::Nodes => "nodes",
-            Self::Parameters => "parameters",
+            Self::Retired => "retired",
         }
     }
 }
 
-/// Build the default dock layout: Viewport central, Outliner (tabbed with
-/// Node Tree) top-left with Sidebar below it, Properties top-right with
-/// `ReviewPanel` below it, and the node canvas tabbed with Console and
-/// Material Inspector along the bottom, active of the three. Every panel ships in the default tree —
-/// discoverability is the layout itself (no panel auto-opens on model
-/// load).
-///
-/// Node Tree shares the Outliner's leaf because they answer the same
-/// question from the two sides of the document: what the scene *contains*
-/// versus what *produced* it.
+/// Build the default dock layout: Viewport central, the Tree top-left with
+/// the Sidebar below it, Properties top-right with `ReviewPanel` below it,
+/// and the node canvas tabbed with Console and Material Inspector along the
+/// bottom, active of the three. Every panel ships in the default tree:
+/// discoverability is the layout itself (no panel auto-opens on load).
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let mut state = DockState::new(vec![SolarxyTab::Viewport]);
     let surface = state.main_surface_mut();
-    let [center_etc, left] = surface.split_left(
-        NodeIndex::root(),
-        0.18,
-        vec![SolarxyTab::Outliner, SolarxyTab::NodeTree],
-    );
-    let [_outliner, _sidebar] = surface.split_below(left, 0.5, vec![SolarxyTab::Sidebar]);
-    let [center, right] = surface.split_right(
-        center_etc,
-        0.78,
-        vec![SolarxyTab::Parameters, SolarxyTab::Properties],
-    );
+    let [center_etc, left] = surface.split_left(NodeIndex::root(), 0.18, vec![SolarxyTab::Tree]);
+    let [_tree, _sidebar] = surface.split_below(left, 0.5, vec![SolarxyTab::Sidebar]);
+    let [center, right] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::Properties]);
     let [_props, _review] = surface.split_below(right, 0.5, vec![SolarxyTab::ReviewPanel]);
     let [_main, _bottom] = surface.split_below(
         center,
@@ -122,7 +118,6 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
 /// [`PanelState`]. Neither this struct nor the entry point's signature moves.
 pub(super) struct SolarxyTabViewer<'a> {
     pub sources: PanelSources<'a>,
-    pub open_file: OpenFile<'a>,
     pub panels: PanelState<'a>,
     pub review: &'a mut crate::state::review::ReviewState,
     pub intents: &'a mut Intents,
@@ -145,10 +140,9 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Console => "Console".into(),
             SolarxyTab::MaterialInspector => "Material Inspector".into(),
             SolarxyTab::Properties => "Properties".into(),
-            SolarxyTab::Outliner => "Outliner".into(),
-            SolarxyTab::NodeTree => "Node Tree".into(),
+            SolarxyTab::Tree => "Tree".into(),
             SolarxyTab::Nodes => "Nodes".into(),
-            SolarxyTab::Parameters => "Parameters".into(),
+            SolarxyTab::Retired => String::new().into(),
         }
     }
 
@@ -186,41 +180,13 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::MaterialInspector => {
                 super::panels::material_inspector::draw_material_inspector_content(
                     ui,
-                    matches!(
-                        self.sources.outliner,
-                        super::panels::outliner::OutlinerSource::Scene { .. }
-                    ),
+                    self.sources.settings.cook.open,
                 );
             }
+            // Properties hosts the parameter panel, under the name the
+            // browser's panel has and the name every saved arrangement
+            // knows this tab by.
             SolarxyTab::Properties => {
-                super::panels::properties::draw_properties_content(
-                    ui,
-                    self.open_file.model_info,
-                    self.open_file.hdri_info,
-                    self.sources.validation,
-                    self.sources.actions,
-                    self.sources.settings,
-                    self.intents,
-                );
-            }
-            SolarxyTab::Outliner => {
-                super::panels::outliner::draw_outliner_content(
-                    ui,
-                    self.sources.outliner,
-                    self.intents,
-                );
-            }
-            SolarxyTab::NodeTree => {
-                super::panels::node_tree::draw_node_tree_content(
-                    ui,
-                    self.sources.node_tree,
-                    self.panels.node_tree,
-                    self.panels.graph_ctx,
-                    self.intents,
-                    self.theme,
-                );
-            }
-            SolarxyTab::Parameters => {
                 super::panels::params::draw_params_content(
                     ui,
                     self.sources.params,
@@ -229,6 +195,18 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.theme,
                 );
             }
+            SolarxyTab::Tree => {
+                super::panels::tree::draw_tree_content(
+                    ui,
+                    self.sources.tree,
+                    self.panels.tree,
+                    self.panels.graph_ctx,
+                    self.intents,
+                    self.theme,
+                );
+            }
+            // Never present after a restore; drawn as nothing if one is.
+            SolarxyTab::Retired => {}
             SolarxyTab::Nodes => {
                 *self.canvas_rect_out = Some(ui.max_rect());
                 super::panels::nodes::draw_nodes_content(
@@ -297,6 +275,18 @@ pub(super) fn tab_present(dock: &DockState<SolarxyTab>, tab: SolarxyTab) -> bool
     dock.iter_all_tabs().any(|(_, t)| *t == tab)
 }
 
+/// Remove every tab a saved arrangement named that this build does not
+/// have, and say how many went. Run once after a restore, so a user whose
+/// blob names a retired panel keeps the rest of their arrangement.
+pub(super) fn sweep_retired(dock: &mut DockState<SolarxyTab>) -> usize {
+    let mut removed = 0;
+    while let Some(locator) = dock.find_tab(&SolarxyTab::Retired) {
+        dock.remove_tab(locator);
+        removed += 1;
+    }
+    removed
+}
+
 /// Add `tab` to the first main-surface leaf if absent; remove all
 /// occurrences if present. Window-menu toggles route through this.
 pub(super) fn toggle_tab(dock: &mut DockState<SolarxyTab>, tab: SolarxyTab) {
@@ -330,18 +320,16 @@ mod tests {
             SolarxyTab::ReviewPanel,
             SolarxyTab::Console,
             SolarxyTab::Properties,
-            SolarxyTab::Outliner,
             SolarxyTab::MaterialInspector,
-            SolarxyTab::NodeTree,
+            SolarxyTab::Tree,
             SolarxyTab::Nodes,
-            SolarxyTab::Parameters,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }
     }
 
     /// A **real** `last_layout_json`, lifted verbatim from a `config.toml`
-    /// written by the shipped app before `SolarxyTab::NodeTree` existed:
+    /// written by the shipped app before `SolarxyTab::Tree` existed:
     /// a working arrangement with most panels closed, laid-out rects and
     /// all. Blobs of exactly this shape are sitting in users' configs now.
     ///
@@ -353,42 +341,72 @@ mod tests {
     const LAYOUT_BEFORE_NODE_TREE: &str =
         include_str!("../../tests/fixtures/dock-layout-0.8.1.json");
 
-    /// The persistence half of the Node Tree work, and it asserts
-    /// **membership**, not merely that the parse succeeded.
+    /// The persistence half, and it asserts **membership**, not merely that
+    /// the parse succeeded.
     ///
     /// `EguiRenderer::apply_layout_json` falls back to the default layout
     /// silently when deserialization fails. So `is_ok()` alone cannot tell
-    /// a real restore from a fallback wearing its clothes; the three tabs
-    /// this fixture actually carries can, because the default layout
-    /// carries ten. What a user would lose if this broke is their whole
+    /// a real restore from a fallback wearing its clothes; the tabs this
+    /// fixture actually carries can, because the default layout carries
+    /// seven. What a user would lose if this broke is their whole
     /// arrangement, with no error to explain where it went.
+    ///
+    /// The fixture names `Outliner`, a panel this build no longer has. It
+    /// must parse anyway, and the sweep must remove exactly that tab and
+    /// nothing else: that is the whole guarantee a retired panel makes.
     #[test]
-    fn layout_saved_before_the_node_tree_still_restores() {
-        let dock: DockState<SolarxyTab> = serde_json::from_str(LAYOUT_BEFORE_NODE_TREE)
-            .expect("a pre-NodeTree blob must still deserialize");
+    fn layout_saved_before_the_tree_still_restores() {
+        let mut dock: DockState<SolarxyTab> = serde_json::from_str(LAYOUT_BEFORE_NODE_TREE)
+            .expect("a blob naming a retired panel must still deserialize");
+        assert!(
+            tab_present(&dock, SolarxyTab::Retired),
+            "Outliner parses as Retired"
+        );
 
+        assert_eq!(sweep_retired(&mut dock), 1, "one retired tab, swept once");
         assert_eq!(
             membership(&dock),
-            HashSet::from([
-                SolarxyTab::Viewport,
-                SolarxyTab::Console,
-                SolarxyTab::Outliner,
-            ]),
-            "the restored layout must be the three saved tabs, not the default"
+            HashSet::from([SolarxyTab::Viewport, SolarxyTab::Console]),
+            "the restored layout must be the saved tabs minus the retired one, not the default"
         );
+    }
+
+    /// The same guarantee for a name this build has never heard of, so the
+    /// mechanism is generic rather than a list of the names retired so far.
+    #[test]
+    fn a_layout_naming_a_tab_that_never_existed_restores_without_it() {
+        let blob = LAYOUT_BEFORE_NODE_TREE.replace("\"Console\"", "\"Bogus\"");
+        assert_ne!(blob, LAYOUT_BEFORE_NODE_TREE, "the fixture names Console");
+        let mut dock: DockState<SolarxyTab> =
+            serde_json::from_str(&blob).expect("an unknown tab name must not reject the layout");
+        assert_eq!(sweep_retired(&mut dock), 2, "Bogus and Outliner both go");
+        assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
+        assert_eq!(sweep_retired(&mut dock), 0, "a second sweep finds nothing");
+    }
+
+    /// The wire name of the tree is the one every saved arrangement knows,
+    /// so a rename in the code costs nobody their layout.
+    #[test]
+    fn the_tree_keeps_its_saved_name_on_the_wire() {
+        assert_eq!(
+            serde_json::to_string(&SolarxyTab::Tree).expect("serializes"),
+            "\"NodeTree\""
+        );
+        let back: SolarxyTab = serde_json::from_str("\"NodeTree\"").expect("deserializes");
+        assert_eq!(back, SolarxyTab::Tree);
     }
 
     /// The recovery path for the layout above: a user whose blob predates
     /// the tab reaches it through the Window menu, exactly as they would
     /// any panel they had closed.
     #[test]
-    fn the_node_tree_is_reachable_from_a_layout_that_never_had_it() {
+    fn the_tree_is_reachable_from_a_layout_that_never_had_it() {
         let mut dock: DockState<SolarxyTab> =
             serde_json::from_str(LAYOUT_BEFORE_NODE_TREE).expect("fixture deserializes");
-        assert!(!tab_present(&dock, SolarxyTab::NodeTree));
+        assert!(!tab_present(&dock, SolarxyTab::Tree));
 
-        toggle_tab(&mut dock, SolarxyTab::NodeTree);
-        assert!(tab_present(&dock, SolarxyTab::NodeTree));
+        toggle_tab(&mut dock, SolarxyTab::Tree);
+        assert!(tab_present(&dock, SolarxyTab::Tree));
     }
 
     #[test]

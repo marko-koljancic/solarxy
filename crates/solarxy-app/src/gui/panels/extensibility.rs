@@ -533,6 +533,7 @@ fn a_novel_node_draws_in_both_surfaces_and_asks_for_nothing() {
                         ctx: inside,
                         stats: None,
                         has_report: false,
+                        report: None,
                         counts: (0, 0),
                         assets: &[],
                         lanes: &[],

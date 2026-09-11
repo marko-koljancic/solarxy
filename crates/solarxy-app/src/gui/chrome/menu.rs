@@ -308,10 +308,11 @@ fn draw_file_menu(
         }
         ui.separator();
         if ui
-            .add(egui::Button::new("Import HDRI\u{2026}").shortcut_text(format!("{MOD}+Shift+O")))
+            .add_enabled(has_model, egui::Button::new("Environment\u{2026}"))
+            .on_hover_text("The HDRI, its lighting mode, rotation and intensity")
             .clicked()
         {
-            intents.raise(Intent::File(FileIntent::OpenHdri));
+            intents.raise(Intent::File(FileIntent::OpenEnvironment));
             ui.close();
         }
         if !recent_files.is_empty() {
@@ -783,26 +784,14 @@ const PANEL_ROWS: &[PanelRow] = &[
         needs_model: false,
     },
     PanelRow {
-        tab: SolarxyTab::Outliner,
-        label: "Outliner",
-        accel: Accel::None,
-        needs_model: false,
-    },
-    PanelRow {
-        tab: SolarxyTab::NodeTree,
-        label: "Node Tree",
+        tab: SolarxyTab::Tree,
+        label: "Tree",
         accel: Accel::None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Nodes,
         label: "Nodes",
-        accel: Accel::None,
-        needs_model: false,
-    },
-    PanelRow {
-        tab: SolarxyTab::Parameters,
-        label: "Parameters",
         accel: Accel::None,
         needs_model: false,
     },

@@ -66,12 +66,10 @@ pub(crate) use intent::{
     CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
     LayoutIntent, PaneChange, PanelIntent, PostChange, ReviewIntent,
 };
-pub(crate) use panels::node_tree::{NodeTreeAction, NodeTreeSource};
+pub(crate) use panels::tree::{TreeAction, TreeSource};
 pub(crate) use panels::nodes::{CanvasAction, CanvasScene, CanvasSource, CanvasToggle, NodeCook};
 pub(crate) use panels::params::{ParamPanelSource, ParamScene, ResolvedParams};
-pub(crate) use panels::outliner::{OutlinerAction, OutlinerSource};
 pub(crate) use chrome::pane_toolbar::{LookThroughChange, PaneToolbarData, PaneView};
-pub(crate) use panels::properties::{NodeActionsView, ValidationView};
 pub(crate) use panels::review::overlay::ReviewPaneOverlay;
 pub(crate) use chrome::overlays::HudInfo;
 pub(crate) use chrome::viewport_context_menu::{ContextTarget, ViewportAction, ViewportContextMenu};

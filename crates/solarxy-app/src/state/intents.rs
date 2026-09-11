@@ -16,7 +16,7 @@ use super::BackgroundModeExt;
 use super::State;
 use crate::gui::{
     CanvasAction, CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent,
-    Intent, Intents, LayoutIntent, LookThroughChange, NodeTreeAction, PaneChange, PanelIntent,
+    Intent, Intents, LayoutIntent, LookThroughChange, TreeAction, PaneChange, PanelIntent,
     PaneView, PostChange, ReviewIntent, ToastSeverity,
 };
 
@@ -125,16 +125,13 @@ impl State {
                 Intent::Review(intent) => self.apply_review_intent(intent),
                 Intent::Layout(intent) => self.apply_layout_intent(intent),
                 Intent::Help(intent) => self.apply_help_intent(intent),
-                Intent::Panel(PanelIntent::FlyToIssue(idx)) => {
-                    self.fly_to_validation_issue(idx);
+                Intent::Panel(PanelIntent::FlyToIssue { ctx, node, index }) => {
+                    self.fly_to_node_issue(ctx, node, index);
                 }
                 Intent::Panel(PanelIntent::ClearHdri) => self.clear_hdri(),
                 Intent::Panel(PanelIntent::LoadHdri) => self.open_hdri_dialog(),
-                Intent::Panel(PanelIntent::Outliner(action)) => {
-                    self.handle_outliner_action(action);
-                }
-                Intent::Panel(PanelIntent::NodeTree(action)) => {
-                    self.handle_node_tree_action(action);
+                Intent::Panel(PanelIntent::Tree(action)) => {
+                    self.handle_tree_action(action);
                 }
                 Intent::Panel(PanelIntent::Canvas(action)) => {
                     self.handle_canvas_action(action);
@@ -339,7 +336,7 @@ impl State {
         match intent {
             FileIntent::NewScene => self.new_scene(),
             FileIntent::OpenModel => self.open_model_dialog(),
-            FileIntent::OpenHdri => self.open_hdri_dialog(),
+            FileIntent::OpenEnvironment => self.gui.open_environment_modal(),
             FileIntent::Save => {
                 self.save_document();
             }
@@ -548,8 +545,8 @@ impl State {
     /// Unlike [`Self::toggle_scene_object`], no delta is taken: selection
     /// is neither a render flag nor a cook input, and the engine emits no
     /// scene ops for it.
-    pub(super) fn handle_node_tree_action(&mut self, action: NodeTreeAction) {
-        let NodeTreeAction::Select(ctx, node) = action;
+    pub(super) fn handle_tree_action(&mut self, action: TreeAction) {
+        let TreeAction::Select(ctx, node) = action;
         self.handle_selection(ctx, vec![node]);
     }
 

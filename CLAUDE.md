@@ -189,8 +189,8 @@ step any more.
   - `panels/` - one module per dock tab. The Node Tree and the canvas share one graph
     context and one descent: `solarxy_studio::tree::subtree` folds the path and the rows
     together, so a breadcrumb in either cannot disagree with the other about who owns what.
-    The modules are: `sidebar`, `outliner`, `node_tree`, `properties`,
-    `console`, `material_inspector`, `nodes/` (the node canvas: `mod` the panel, `seed` the
+    The modules are: `sidebar`, `tree` (the scene tree, with search, fold-all and
+    reveal, which replaced the Outliner and the Node Tree), `console`, `material_inspector`, `nodes/` (the node canvas: `mod` the panel, `seed` the
     mirror-to-substrate seed and the position read-back, `viewer` the substrate's view of one
     graph, `layout` the hand-rolled layered tidy raising one move command, `list` the same graph read
     as rows with the same selection and the same six operations, `chrome` the toolbar, the
