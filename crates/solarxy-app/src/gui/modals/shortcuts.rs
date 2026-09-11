@@ -20,8 +20,20 @@ const SECTIONS: &[Section] = &[
         title: "File",
         entries: &[
             Entry {
+                keys: "__MOD__+N",
+                action: "New scene",
+            },
+            Entry {
                 keys: "__MOD__+O",
-                action: "Open model",
+                action: "Open scene or model",
+            },
+            Entry {
+                keys: "__MOD__+S",
+                action: "Save scene",
+            },
+            Entry {
+                keys: "__MOD__+Shift+S",
+                action: "Save scene as\u{2026}",
             },
             Entry {
                 keys: "__MOD__+Shift+O",

@@ -263,12 +263,41 @@ fn draw_file_menu(
 ) {
     ui.menu_button("File", |ui| {
         if ui
+            .add(egui::Button::new("New Scene").shortcut_text(format!("{MOD}+N")))
+            .clicked()
+        {
+            intents.raise(Intent::File(FileIntent::NewScene));
+            ui.close();
+        }
+        if ui
             .add(egui::Button::new("Open\u{2026}").shortcut_text(format!("{MOD}+O")))
             .clicked()
         {
             intents.raise(Intent::File(FileIntent::OpenModel));
             ui.close();
         }
+        ui.separator();
+        if ui
+            .add_enabled(
+                has_model,
+                egui::Button::new("Save Scene").shortcut_text(format!("{MOD}+S")),
+            )
+            .clicked()
+        {
+            intents.raise(Intent::File(FileIntent::Save));
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                has_model,
+                egui::Button::new("Save Scene As\u{2026}").shortcut_text(format!("{MOD}+Shift+S")),
+            )
+            .clicked()
+        {
+            intents.raise(Intent::File(FileIntent::SaveAs));
+            ui.close();
+        }
+        ui.separator();
         if ui
             .add(egui::Button::new("Import HDRI\u{2026}").shortcut_text(format!("{MOD}+Shift+O")))
             .clicked()

@@ -152,8 +152,15 @@ impl ApplicationHandler<State> for App {
                         state.gui.menu_bar_visible = !state.gui.menu_bar_visible;
                     }
                     ShellKey::ToggleFullscreen => state.toggle_fullscreen(),
+                    ShellKey::NewScene => state.new_scene(),
                     ShellKey::OpenModel => state.open_model_dialog(),
                     ShellKey::OpenHdri => state.open_hdri_dialog(),
+                    ShellKey::Save => {
+                        state.save_document();
+                    }
+                    ShellKey::SaveAs => {
+                        state.save_document_as();
+                    }
                     ShellKey::ToggleConsole => {
                         state.gui.toggle_tab(crate::gui::SolarxyTab::Console);
                     }

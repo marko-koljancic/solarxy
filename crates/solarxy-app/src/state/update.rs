@@ -468,6 +468,7 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        self.refresh_title();
         // Uncaptured GPU faults recorded since the last frame. The hook
         // already logged each full message on the `solarxy::gpu` target,
         // which the console captures; the toast is the short pointer, and
@@ -498,6 +499,8 @@ impl State {
         let hdri_poll = self.pending_hdri.as_ref().map(|p| p.receiver.try_recv());
         match hdri_poll {
             Some(Ok(Ok(new_ibl))) => {
+                // A new file replaces whatever hash a save had staged.
+                self.hdri_hash = None;
                 if let Some(pending) = self.pending_hdri.take() {
                     let filename = pending
                         .path

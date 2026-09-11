@@ -32,6 +32,10 @@ pub(crate) struct EngineSceneInfo {
     /// Every object's issues merged into the single report the Properties
     /// panel already renders.
     pub validation: MergedValidation,
+    /// When the document was first written, as the file's metadata records
+    /// it. Empty for a document that has never been saved; a save keeps it
+    /// and stamps only `modified`.
+    pub created: String,
 }
 
 impl EngineSceneInfo {
@@ -44,6 +48,7 @@ impl EngineSceneInfo {
             object_names: Vec::new(),
             counts: SceneGeometryCounts::default(),
             validation: MergedValidation::default(),
+            created: String::new(),
         }
     }
 }

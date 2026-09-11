@@ -332,8 +332,15 @@ fn apply_post_change(post: &mut solarxy_renderer::frame::PostProcessing, change:
 impl State {
     fn apply_file_intent(&mut self, intent: FileIntent) {
         match intent {
+            FileIntent::NewScene => self.new_scene(),
             FileIntent::OpenModel => self.open_model_dialog(),
             FileIntent::OpenHdri => self.open_hdri_dialog(),
+            FileIntent::Save => {
+                self.save_document();
+            }
+            FileIntent::SaveAs => {
+                self.save_document_as();
+            }
             // Through the router rather than the model loader: the one list
             // holds scenes and models, and the routing on extension exists
             // once.
@@ -501,6 +508,7 @@ impl State {
     /// and the skybox is released (`rebuild_light_bind_group` rebuilds it
     /// as `None`).
     pub(super) fn clear_hdri(&mut self) {
+        self.hdri_hash = None;
         for pds in &mut self.view.pane_settings {
             if pds.background_mode.is_hdri_sky() {
                 pds.background_mode = BackgroundMode::GRADIENT;

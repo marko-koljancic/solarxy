@@ -39,6 +39,7 @@ mod cook;
 pub(crate) mod cook_health;
 #[cfg(debug_assertions)]
 mod dev;
+mod document;
 mod drop;
 pub(crate) mod engine_scene;
 pub(crate) mod hdri_info;
@@ -287,6 +288,17 @@ pub struct State {
     /// checkbox on a re-capture.
     pub(super) screenshot_expand_review: bool,
     pub(super) quit_requested: bool,
+    /// The engine revision the open document was last written at, or
+    /// opened at. Dirty is `engine.revision() != saved_revision`, which is
+    /// what keeps the answer the engine's rather than a flag's.
+    pub(super) saved_revision: u64,
+    /// The content hash of the HDRI staged in the engine for the save, once
+    /// one is. `None` until a save stages the loaded file, or a scene opens
+    /// carrying one; cleared when the HDRI is replaced or cleared.
+    pub(super) hdri_hash: Option<String>,
+    /// The window title as last written, so the per-frame refresh writes
+    /// the window only when the text moved.
+    pub(super) last_title: String,
     pub(super) last_frame_time: Instant,
     pub(super) dt: f32,
     /// The uncaptured-error queue the shared device hook fills; drained

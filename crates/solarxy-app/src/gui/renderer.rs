@@ -159,6 +159,11 @@ impl EguiRenderer {
         self.hdri_info = None;
     }
 
+    /// The loaded HDRI's metadata, when one is loaded.
+    pub(crate) fn hdri_info(&self) -> Option<&HdriInfo> {
+        self.hdri_info.as_ref()
+    }
+
     pub fn on_window_event(
         &mut self,
         window: &winit::window::Window,

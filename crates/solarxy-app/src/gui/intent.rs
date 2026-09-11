@@ -163,8 +163,14 @@ pub(crate) enum PostChange {
 /// The File menu.
 #[derive(Debug, Clone)]
 pub(crate) enum FileIntent {
+    /// Replace the document with an empty one.
+    NewScene,
     OpenModel,
     OpenHdri,
+    /// Write the document to its own path, or ask for one.
+    Save,
+    /// Ask for a path, then write there.
+    SaveAs,
     /// One entry from the recent list. Routed through the file router
     /// rather than the model loader, because the one list holds scenes and
     /// models and the routing on extension exists once.

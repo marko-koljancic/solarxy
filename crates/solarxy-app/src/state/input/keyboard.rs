@@ -61,8 +61,15 @@ pub(crate) enum ShellKey {
     ToggleSidebar,
     ToggleMenuBar,
     ToggleFullscreen,
+    /// Replace the document with an empty one. A chord, so a text field
+    /// keeps its bare `N`.
+    NewScene,
     OpenModel,
     OpenHdri,
+    /// Write the document to its own path, or ask for one.
+    Save,
+    /// Ask for a path, then write there.
+    SaveAs,
     ToggleConsole,
     ToggleViewport,
     /// Cook what is stale now, in manual cook mode. A chord, so it stays
@@ -95,8 +102,11 @@ pub(crate) fn shell_key(
         KeyCode::Tab if !wants_text && !over_canvas => Some(ShellKey::ToggleSidebar),
         KeyCode::F10 => Some(ShellKey::ToggleMenuBar),
         KeyCode::F11 => Some(ShellKey::ToggleFullscreen),
+        KeyCode::KeyN if cmd_or_ctrl => Some(ShellKey::NewScene),
         KeyCode::KeyO if cmd_or_ctrl && shift => Some(ShellKey::OpenHdri),
         KeyCode::KeyO if cmd_or_ctrl => Some(ShellKey::OpenModel),
+        KeyCode::KeyS if cmd_or_ctrl && shift => Some(ShellKey::SaveAs),
+        KeyCode::KeyS if cmd_or_ctrl => Some(ShellKey::Save),
         KeyCode::Backquote if !wants_text => Some(ShellKey::ToggleConsole),
         KeyCode::Digit1 if cmd_or_ctrl && !wants_text => Some(ShellKey::ToggleViewport),
         KeyCode::Enter | KeyCode::NumpadEnter if cmd_or_ctrl => Some(ShellKey::CookNow),
@@ -264,17 +274,12 @@ impl State {
                 }
             }
             KeyCode::KeyS => {
-                // `Shift+S` (save preferences) was retired in the 0.5.0 release candidates — view
-                // settings now persist via Edit → Save View Settings as
-                // Default. `Cmd/Ctrl+S` still saves the review sidecar.
-                let cmd_or_ctrl = if cfg!(target_os = "macos") {
-                    self.input.modifiers.super_key()
-                } else {
-                    self.input.modifiers.control_key()
-                };
-                if cmd_or_ctrl && self.review.active {
-                    self.save_review_sidecar();
-                } else if !self.input.modifiers.shift_key() {
+                // The bare key only: the save chords are the window's, claimed
+                // in `shell_key` before this map sees the press. `Shift+S`
+                // (save preferences) was retired in the 0.5.0 release
+                // candidates; view settings persist via Edit, Save View
+                // Settings as Default.
+                if !self.input.modifiers.shift_key() {
                     self.view.pane_settings[self.view.active_pane].view_mode = ViewMode::Shaded;
                 }
             }
@@ -591,6 +596,13 @@ mod tests {
             ),
             (KeyCode::KeyO, true, false, Some(ShellKey::OpenModel)),
             (KeyCode::KeyO, true, true, Some(ShellKey::OpenHdri)),
+            (KeyCode::KeyN, true, false, Some(ShellKey::NewScene)),
+            (KeyCode::KeyS, true, false, Some(ShellKey::Save)),
+            (KeyCode::KeyS, true, true, Some(ShellKey::SaveAs)),
+            // Bare N cycles normals and bare S sets shaded, both the map's.
+            (KeyCode::KeyN, false, false, None),
+            (KeyCode::KeyS, false, false, None),
+            (KeyCode::KeyS, false, true, None),
             (KeyCode::Digit1, true, false, Some(ShellKey::ToggleViewport)),
             // The bare keys belong to the map: projection, overlap, shaded.
             (KeyCode::KeyO, false, false, None),

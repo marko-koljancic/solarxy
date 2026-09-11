@@ -108,7 +108,7 @@ fn build_model_document(path: &Path, cancel: &Arc<AtomicBool>) -> Result<OpenedM
 /// have to know both the scene format and the renderer, and no crate beneath
 /// the two shells knows either, so it stays doubled rather than dragging the
 /// format into the renderer.
-fn apply_camera_json(
+pub(super) fn apply_camera_json(
     cam: &mut solarxy_renderer::camera::Camera,
     json: &solarxy_scenefile::CameraJson,
 ) {
@@ -343,6 +343,7 @@ impl State {
         let warnings = loaded.warnings.len();
         let view = loaded.sidecar.view.clone();
         let environment = loaded.sidecar.environment.clone();
+        let created = loaded.sidecar.meta.created.clone();
 
         let display_path = path.canonicalize().map_or_else(
             |_| path.display().to_string(),
@@ -350,6 +351,9 @@ impl State {
         );
         let file_size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         self.adopt_document(engine, &filename, &display_path, file_size);
+        if let Some(scene) = &mut self.engine_scene {
+            scene.created = created;
+        }
 
         self.apply_scene_view(&view);
         self.restore_scene_environment(&environment);
@@ -453,7 +457,7 @@ impl State {
         let Some(hash) = env.hdri_asset.clone() else {
             return;
         };
-        let id = solarxy_graph::params::AssetId(hash);
+        let id = solarxy_graph::params::AssetId(hash.clone());
         let Some(bytes) = self
             .engine
             .as_ref()
@@ -474,6 +478,7 @@ impl State {
         match ibl {
             Ok(ibl) => {
                 self.renderer.ibl_res.ibl = ibl;
+                self.hdri_hash = Some(hash);
                 self.environment.invalidate();
                 self.rebuild_light_bind_group();
             }
@@ -594,7 +599,7 @@ impl State {
     /// Called only on success, so a failed open never reaches it. Recent
     /// Files is the caller's business, because a document that came from no
     /// file has nothing to record there.
-    fn install_engine(&mut self, engine: Box<Engine>, info: EngineSceneInfo, title: &str) {
+    fn install_engine(&mut self, engine: Box<Engine>, info: EngineSceneInfo) {
         self.clear_scene_objects();
         self.environment.invalidate();
         self.look_through = [None; 4];
@@ -612,6 +617,10 @@ impl State {
             self.pending_scene_deltas.push(delta);
         }
 
+        // What the engine holds now is what the file holds, so the document
+        // opens clean and the first command dirties it.
+        self.saved_revision = engine.revision();
+        self.hdri_hash = None;
         self.engine = Some(engine);
         // Identity now; the counters and the merged report fill in as the
         // delta drains.
@@ -619,7 +628,7 @@ impl State {
         self.gui.reset_graph_surfaces();
         self.selected_object = None;
 
-        self.window.set_title(title);
+        self.refresh_title();
 
         // Applied here rather than left to the top of the next frame, so what
         // follows an open reads the document rather than the one before it. A
@@ -634,7 +643,6 @@ impl State {
         self.install_engine(
             engine,
             EngineSceneInfo::new(filename.to_string(), path.to_string(), file_size),
-            &format!("Solarxy - {filename}"),
         );
         preferences::add_recent_file(&mut self.preferences, path);
     }
@@ -648,7 +656,6 @@ impl State {
                 self.install_engine(
                     Box::new(engine),
                     EngineSceneInfo::new("Untitled".to_string(), String::new(), 0),
-                    "Solarxy - Untitled",
                 );
                 self.pending_frame = [true; 4];
                 true
@@ -668,7 +675,7 @@ impl State {
     ///
     /// A scene file overrides these from its own saved view; a model file has
     /// none to override them with, so this is what it opens as.
-    fn reset_pane_zero_for_new_document(&mut self) {
+    pub(super) fn reset_pane_zero_for_new_document(&mut self) {
         use solarxy_core::preferences::{InspectionMode, PaneMode, UvMapBackground, ViewMode};
 
         let pane = &mut self.view.pane_settings[0];
@@ -705,7 +712,8 @@ impl State {
         self.gui.clear_model_info();
         self.gui.reset_graph_surfaces();
         self.selected_object = None;
-        self.window.set_title("Solarxy");
+        self.hdri_hash = None;
+        self.refresh_title();
         self.renderer.uv_overlap.overlap_pct = None;
         self.renderer.uv_overlap.stats_dirty = false;
     }

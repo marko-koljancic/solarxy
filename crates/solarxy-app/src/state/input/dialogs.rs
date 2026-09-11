@@ -30,6 +30,17 @@ impl State {
         }
     }
 
+    /// Where to write the scene, or `None` when the user backed out.
+    ///
+    /// The extension is not enforced here: what a picker produces is a
+    /// path, and `state::document` decides what a path becomes.
+    pub(in crate::state) fn save_scene_dialog(suggested: &str) -> Option<std::path::PathBuf> {
+        rfd::FileDialog::new()
+            .add_filter("Solarxy Scenes", &["slxy"])
+            .set_file_name(suggested)
+            .save_file()
+    }
+
     pub fn open_hdri_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("HDRI", &["hdr", "exr"])
