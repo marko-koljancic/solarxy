@@ -242,6 +242,18 @@ impl UndoStack {
             self.undo.push(txn);
         }
     }
+
+    /// Committed steps undo can take back. An open transaction is not one
+    /// until it closes; `pop_undo` flushes it first, so an undo during a
+    /// drag ends the drag and takes it back.
+    pub(super) fn undo_depth(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Steps redo can restore.
+    pub(super) fn redo_depth(&self) -> usize {
+        self.redo.len()
+    }
 }
 
 /// The `PreserveIds` insert mode is what undo always uses.

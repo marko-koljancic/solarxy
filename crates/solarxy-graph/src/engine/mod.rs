@@ -3761,6 +3761,20 @@ impl Engine {
         self.revision
     }
 
+    /// How many steps undo can take back. What a shell reads to enable
+    /// its undo control, and the count a mirror of the stack keeps in
+    /// step with.
+    #[must_use]
+    pub fn undo_depth(&self) -> usize {
+        self.undo.undo_depth()
+    }
+
+    /// How many steps redo can restore.
+    #[must_use]
+    pub fn redo_depth(&self) -> usize {
+        self.undo.redo_depth()
+    }
+
     /// Whether the root graph holds an `environment` node.
     ///
     /// The host asks on load to settle which environment wins: a node

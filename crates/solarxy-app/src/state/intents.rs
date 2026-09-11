@@ -100,6 +100,8 @@ impl State {
                     self.for_each_target_cam(|cam| cam.set_projection(mode));
                 }
                 Intent::File(intent) => self.apply_file_intent(intent),
+                Intent::Edit(EditIntent::Undo) => self.undo(),
+                Intent::Edit(EditIntent::Redo) => self.redo(),
                 Intent::Edit(EditIntent::OpenPreferences) => {
                     self.gui.open_preferences(self.preferences.clone());
                 }

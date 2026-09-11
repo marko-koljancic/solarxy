@@ -182,6 +182,8 @@ pub(crate) enum FileIntent {
 /// The Edit menu.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum EditIntent {
+    Undo,
+    Redo,
     OpenPreferences,
     /// Persist the current display, rendering and lighting settings.
     SaveViewDefaults,

@@ -438,6 +438,7 @@ impl State {
             is_split,
             projection_mode,
             cook: self.cook_readout,
+            history: self.history_readout(),
             canvas: self.preferences.canvas,
         };
         let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;

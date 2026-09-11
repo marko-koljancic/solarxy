@@ -67,7 +67,7 @@ pub(in crate::gui) fn draw_menu_bar(
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
             draw_file_menu(ui, intents, cx.has_model, cx.recent_files);
-            draw_edit_menu(ui, intents);
+            draw_edit_menu(ui, settings, intents);
             draw_render_menu(ui, settings, intents, cx);
             // Review is a viewport mode, so it belongs between Render and
             // View rather than stranded out past Help.
@@ -76,6 +76,7 @@ pub(in crate::gui) fn draw_menu_bar(
             draw_layout_menu(ui, intents, cx.has_saved_layout);
             draw_window_menu(ui, intents, present, cx);
             draw_help_menu(ui, intents);
+            draw_history_strip(ui, settings.history, intents);
             draw_cook_strip(ui, settings.cook, intents);
         });
     });
@@ -342,8 +343,55 @@ fn draw_file_menu(
     });
 }
 
-fn draw_edit_menu(ui: &mut egui::Ui, intents: &mut Intents) {
+/// The undo and redo buttons beside the cook strip: the header controls
+/// the browser carries, enabled from the engine's depths.
+fn draw_history_strip(
+    ui: &mut egui::Ui,
+    history: crate::gui::HistoryReadout,
+    intents: &mut Intents,
+) {
+    if !history.open {
+        return;
+    }
+    if ui
+        .add_enabled(history.can_undo, egui::Button::new("Undo"))
+        .on_hover_text(format!("Undo ({MOD}+Z)"))
+        .clicked()
+    {
+        intents.raise(Intent::Edit(EditIntent::Undo));
+    }
+    if ui
+        .add_enabled(history.can_redo, egui::Button::new("Redo"))
+        .on_hover_text(format!("Redo ({MOD}+Shift+Z)"))
+        .clicked()
+    {
+        intents.raise(Intent::Edit(EditIntent::Redo));
+    }
+}
+
+fn draw_edit_menu(ui: &mut egui::Ui, settings: PanelSettings<'_>, intents: &mut Intents) {
     ui.menu_button("Edit", |ui| {
+        if ui
+            .add_enabled(
+                settings.history.can_undo,
+                egui::Button::new("Undo").shortcut_text(format!("{MOD}+Z")),
+            )
+            .clicked()
+        {
+            intents.raise(Intent::Edit(EditIntent::Undo));
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                settings.history.can_redo,
+                egui::Button::new("Redo").shortcut_text(format!("{MOD}+Shift+Z")),
+            )
+            .clicked()
+        {
+            intents.raise(Intent::Edit(EditIntent::Redo));
+            ui.close();
+        }
+        ui.separator();
         if ui
             .add(egui::Button::new("Preferences\u{2026}").shortcut_text(format!("{MOD}+,")))
             .clicked()

@@ -54,6 +54,23 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Edit",
+        entries: &[
+            Entry {
+                keys: "__MOD__+Z",
+                action: "Undo",
+            },
+            Entry {
+                keys: "__MOD__+Shift+Z",
+                action: "Redo",
+            },
+            Entry {
+                keys: "__MOD__+Y",
+                action: "Redo (alternate)",
+            },
+        ],
+    },
+    Section {
         title: "Window & Layout",
         entries: &[
             Entry {

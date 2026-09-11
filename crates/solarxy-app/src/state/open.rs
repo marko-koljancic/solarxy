@@ -656,6 +656,7 @@ impl State {
         // opens clean and the first command dirties it.
         self.saved_revision = engine.revision();
         self.autosave.reset(engine.revision());
+        self.history = super::history::UndoContexts::default();
         self.hdri_hash = None;
         self.engine = Some(engine);
         // Identity now; the counters and the merged report fill in as the

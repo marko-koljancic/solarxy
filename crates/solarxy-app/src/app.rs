@@ -161,6 +161,8 @@ impl ApplicationHandler<State> for App {
                     ShellKey::SaveAs => {
                         state.save_document_as();
                     }
+                    ShellKey::Undo => state.undo(),
+                    ShellKey::Redo => state.redo(),
                     ShellKey::ToggleConsole => {
                         state.gui.toggle_tab(crate::gui::SolarxyTab::Console);
                     }

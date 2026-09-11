@@ -57,6 +57,15 @@ impl CookReadout {
     }
 }
 
+/// What the undo and redo controls show, read from the engine each frame.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct HistoryReadout {
+    /// Whether a document is open at all. The controls draw nothing otherwise.
+    pub open: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
+}
+
 /// The display state the panels draw from, borrowed rather than copied.
 #[derive(Clone, Copy)]
 pub(crate) struct PanelSettings<'a> {
@@ -76,6 +85,8 @@ pub(crate) struct PanelSettings<'a> {
     pub projection_mode: ProjectionMode,
     /// The header strip's cook readout, refreshed from the engine each frame.
     pub cook: CookReadout,
+    /// The undo and redo controls' readout, likewise.
+    pub history: HistoryReadout,
     /// How the node canvas draws: the wire routing, the grid, the snap,
     /// the overview inset and the zoom readout. Reading preferences
     /// rather than anything about the document, which is why they sit

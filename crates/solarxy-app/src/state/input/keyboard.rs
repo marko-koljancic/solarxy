@@ -70,6 +70,10 @@ pub(crate) enum ShellKey {
     Save,
     /// Ask for a path, then write there.
     SaveAs,
+    /// Take back the last step. Not claimed while a text field has focus,
+    /// whose own undo the field keeps.
+    Undo,
+    Redo,
     ToggleConsole,
     ToggleViewport,
     /// Cook what is stale now, in manual cook mode. A chord, so it stays
@@ -107,6 +111,9 @@ pub(crate) fn shell_key(
         KeyCode::KeyO if cmd_or_ctrl => Some(ShellKey::OpenModel),
         KeyCode::KeyS if cmd_or_ctrl && shift => Some(ShellKey::SaveAs),
         KeyCode::KeyS if cmd_or_ctrl => Some(ShellKey::Save),
+        KeyCode::KeyZ if cmd_or_ctrl && shift && !wants_text => Some(ShellKey::Redo),
+        KeyCode::KeyZ if cmd_or_ctrl && !wants_text => Some(ShellKey::Undo),
+        KeyCode::KeyY if cmd_or_ctrl && !wants_text => Some(ShellKey::Redo),
         KeyCode::Backquote if !wants_text => Some(ShellKey::ToggleConsole),
         KeyCode::Digit1 if cmd_or_ctrl && !wants_text => Some(ShellKey::ToggleViewport),
         KeyCode::Enter | KeyCode::NumpadEnter if cmd_or_ctrl => Some(ShellKey::CookNow),
@@ -599,6 +606,11 @@ mod tests {
             (KeyCode::KeyN, true, false, Some(ShellKey::NewScene)),
             (KeyCode::KeyS, true, false, Some(ShellKey::Save)),
             (KeyCode::KeyS, true, true, Some(ShellKey::SaveAs)),
+            (KeyCode::KeyZ, true, false, Some(ShellKey::Undo)),
+            (KeyCode::KeyZ, true, true, Some(ShellKey::Redo)),
+            (KeyCode::KeyY, true, false, Some(ShellKey::Redo)),
+            (KeyCode::KeyZ, false, false, None),
+            (KeyCode::KeyY, false, false, None),
             // Bare N cycles normals and bare S sets shaded, both the map's.
             (KeyCode::KeyN, false, false, None),
             (KeyCode::KeyS, false, false, None),
@@ -646,6 +658,10 @@ mod tests {
         );
         // And a focused field still keeps it, wherever the pointer is.
         assert_eq!(shell_key(KeyCode::Tab, false, false, true, false), None);
+        // A focused field also keeps its own undo and redo.
+        assert_eq!(shell_key(KeyCode::KeyZ, true, false, true, false), None);
+        assert_eq!(shell_key(KeyCode::KeyZ, true, true, true, false), None);
+        assert_eq!(shell_key(KeyCode::KeyY, true, false, true, false), None);
         assert_eq!(shell_key(KeyCode::Tab, false, false, true, true), None);
 
         // Nothing else changes with the pointer.

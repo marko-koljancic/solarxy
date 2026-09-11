@@ -45,6 +45,7 @@ mod document;
 mod drop;
 pub(crate) mod engine_scene;
 pub(crate) mod hdri_info;
+mod history;
 mod init;
 mod input;
 pub(crate) use input::{ShellKey, shell_key};
@@ -294,6 +295,9 @@ pub struct State {
     pub(super) pending_discard: Option<discard::DiscardAction>,
     /// The autosave ring and its timing.
     pub(super) autosave: autosave::AutosaveState,
+    /// One graph context per undo step, so an undo shows where the change
+    /// was made.
+    pub(super) history: history::UndoContexts,
     /// The engine revision the open document was last written at, or
     /// opened at. Dirty is `engine.revision() != saved_revision`, which is
     /// what keeps the answer the engine's rather than a flag's.

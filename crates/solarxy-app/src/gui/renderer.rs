@@ -351,6 +351,13 @@ impl EguiRenderer {
         self.graph_ctx
     }
 
+    /// Look at another graph: where an undo puts the user back, so the
+    /// change taken back is the one on screen. A context the document no
+    /// longer has falls back to the root in the surfaces themselves.
+    pub fn set_graph_ctx(&mut self, ctx: solarxy_graph::document::GraphContext) {
+        self.graph_ctx = ctx;
+    }
+
     /// Apply a JSON-serialized dock layout. Returns `true` if the JSON
     /// deserialized into a valid `DockState`; on failure, the existing
     /// layout is preserved and a debug line is logged.

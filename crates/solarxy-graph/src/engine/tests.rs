@@ -9545,3 +9545,84 @@ fn a_second_container_opening_the_same_kind_behaves_as_the_first() {
         Some(twin_node)
     );
 }
+
+/// The depths a shell reads to enable its undo and redo controls, and the
+/// step boundaries they count: a transaction is one step however many
+/// commands it holds, a multi-node move is one step, and a new command
+/// clears the redo side.
+#[test]
+fn undo_and_redo_depths_count_steps_not_commands() {
+    let (mut e, ctx) = subflow_engine();
+    assert_eq!((e.undo_depth(), e.redo_depth()), (0, 0));
+
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let c = add(&mut e, ctx, "box");
+    assert_eq!(e.undo_depth(), 3, "three adds are three steps");
+
+    e.apply(Command::MoveNodes {
+        ctx,
+        moves: vec![(a, [1.0, 1.0]), (b, [2.0, 2.0]), (c, [3.0, 3.0])],
+    })
+    .unwrap();
+    assert_eq!(e.undo_depth(), 4, "moving three nodes is one step");
+
+    e.apply(Command::BeginTransaction {
+        label: "edit".to_string(),
+    })
+    .unwrap();
+    for (key, value) in [("width", 3.0), ("height", 4.0), ("depth", 5.0)] {
+        e.apply(Command::SetParam {
+            ctx,
+            node: a,
+            key: key.to_string(),
+            value: ParamSource::Literal(ParamValue::Float(value)),
+        })
+        .unwrap();
+    }
+    assert_eq!(e.undo_depth(), 4, "an open transaction is not a step yet");
+    e.apply(Command::EndTransaction).unwrap();
+    assert_eq!(
+        e.undo_depth(),
+        5,
+        "three writes in a transaction are one step"
+    );
+
+    e.apply(Command::Undo).unwrap();
+    assert_eq!((e.undo_depth(), e.redo_depth()), (4, 1));
+    let width = e
+        .doc
+        .graph(ctx)
+        .unwrap()
+        .node(a)
+        .unwrap()
+        .params
+        .get("width")
+        .cloned();
+    assert_ne!(
+        width,
+        Some(ParamSource::Literal(ParamValue::Float(3.0))),
+        "one undo took back every write in the transaction"
+    );
+
+    e.apply(Command::Redo).unwrap();
+    assert_eq!((e.undo_depth(), e.redo_depth()), (5, 0));
+    e.apply(Command::Undo).unwrap();
+    e.apply(Command::Undo).unwrap();
+    assert_eq!((e.undo_depth(), e.redo_depth()), (3, 2));
+
+    add(&mut e, ctx, "sphere");
+    assert_eq!(
+        (e.undo_depth(), e.redo_depth()),
+        (4, 0),
+        "a new step clears the redo side"
+    );
+
+    e.apply(Command::Undo).unwrap();
+    e.apply(Command::Undo).unwrap();
+    e.apply(Command::Undo).unwrap();
+    e.apply(Command::Undo).unwrap();
+    assert_eq!((e.undo_depth(), e.redo_depth()), (0, 4));
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(e.undo_depth(), 0, "an undo with nothing to undo is a no-op");
+}
