@@ -162,6 +162,7 @@ pub mod headless;
 pub mod lighting;
 pub mod pane;
 pub mod passes;
+pub mod preview;
 pub mod raster;
 pub mod still;
 pub mod view;

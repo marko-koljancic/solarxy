@@ -137,6 +137,9 @@ pub(super) struct SolarxyTabViewer<'a> {
     /// Where the node canvas drew, recorded for the one key claim that
     /// asks where the pointer is rather than what is focused.
     pub canvas_rect_out: &'a mut Option<egui::Rect>,
+    /// The size the preview tab drew its model at, in physical pixels, so
+    /// the state layer can render the preview at that size.
+    pub preview_size_out: &'a mut Option<(u32, u32)>,
     pub theme: Theme,
 }
 
@@ -235,9 +238,14 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 );
             }
             SolarxyTab::AssetPreview => {
-                super::panels::assets::draw_asset_preview_content(
+                super::panels::asset_preview::draw_asset_preview_content(
                     ui,
                     self.panels.asset_preview,
+                    self.sources.assets,
+                    self.sources.preview,
+                    self.panels.preview,
+                    self.preview_size_out,
+                    self.intents,
                     self.theme,
                 );
             }

@@ -242,6 +242,7 @@ impl State {
             autosave: autosave::AutosaveState::new(),
             history: history::UndoContexts::default(),
             clipboard: None,
+            preview: preview::PreviewState::default(),
             saved_revision: 0,
             hdri_hash: None,
             last_title: String::new(),

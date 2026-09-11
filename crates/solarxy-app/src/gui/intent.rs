@@ -284,6 +284,8 @@ pub(crate) enum PanelIntent {
     Tree(TreeAction),
     /// An Assets tile was double-clicked: preview it.
     PreviewAsset { hash: String, name: String },
+    /// An orbit or a dolly on the model preview.
+    Preview(crate::state::preview::PreviewGesture),
     /// The node canvas.
     Canvas(CanvasAction),
     /// The parameter panel's tab reset: every key in a group, hidden
@@ -351,7 +353,8 @@ impl Intent {
             Self::Panel(
                 PanelIntent::InvokeAction { .. }
                 | PanelIntent::ChooseAsset { .. }
-                | PanelIntent::PreviewAsset { .. },
+                | PanelIntent::PreviewAsset { .. }
+                | PanelIntent::Preview(_),
             ) => 16,
         }
     }

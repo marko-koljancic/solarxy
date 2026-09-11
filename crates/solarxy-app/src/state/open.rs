@@ -642,6 +642,8 @@ impl State {
         self.cook_health.clear();
         self.cancel_still_render();
         self.still_target = None;
+        // The preview held a model from the outgoing document's table.
+        self.close_model_preview();
 
         let mut engine = engine;
         // Queued behind the `Clear` above, so the outgoing document leaves and

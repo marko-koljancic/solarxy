@@ -857,8 +857,7 @@ struct PendingHdriJob {
 struct PreviewState {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    objects: SceneObjects,
-    camera: CameraState,
+    scene: solarxy_host::preview::PreviewScene,
 }
 
 fn map_button(button: u32) -> Option<PointerButton> {
@@ -868,16 +867,6 @@ fn map_button(button: u32) -> Option<PointerButton> {
         2 => Some(PointerButton::Right),
         _ => None,
     }
-}
-
-/// Orbits a camera's eye around its target about the world-up (Y) axis by
-/// `yaw` radians: the turntable rotation for a deterministic export sweep.
-fn orbit_camera_yaw(cam: &mut Camera, yaw: f32) {
-    let offset = cam.eye - cam.target;
-    let (s, c) = yaw.sin_cos();
-    let x = offset.x * c + offset.z * s;
-    let z = -offset.x * s + offset.z * c;
-    cam.eye = cam.target + Vector3::new(x, offset.y, z);
 }
 
 fn projection_name(mode: ProjectionMode) -> &'static str {

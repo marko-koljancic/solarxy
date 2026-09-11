@@ -336,30 +336,6 @@ fn draw_empty(ui: &mut egui::Ui, theme: Theme) {
     });
 }
 
-/// The preview tab before the preview exists: what the browser's shows
-/// with nothing chosen, and the chosen asset's name once one is.
-pub(in crate::gui) fn draw_asset_preview_content(
-    ui: &mut egui::Ui,
-    preview: Option<&(String, String)>,
-    theme: Theme,
-) {
-    ui.add_space(20.0);
-    ui.vertical_centered(|ui| match preview {
-        None => {
-            ui.label(egui::RichText::new("Double-click an asset in the Assets panel.").weak());
-        }
-        Some((_, name)) => {
-            ui.label(egui::RichText::new(name).color(theme.fg));
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(format!("No preview for this file type ({name})."))
-                    .color(theme.muted)
-                    .size(10.0),
-            );
-        }
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

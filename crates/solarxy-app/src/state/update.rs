@@ -463,6 +463,7 @@ impl State {
         }
         self.poll_autosave();
         self.reconcile_history();
+        self.poll_preview();
         // Uncaptured GPU faults recorded since the last frame. The hook
         // already logged each full message on the `solarxy::gpu` target,
         // which the console captures; the toast is the short pointer, and

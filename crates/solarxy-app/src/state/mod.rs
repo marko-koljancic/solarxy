@@ -55,6 +55,7 @@ mod open;
 mod overlap;
 mod panes;
 mod persist;
+pub(crate) mod preview;
 pub(crate) use solarxy_core::raycast;
 mod render;
 pub(crate) mod review;
@@ -302,6 +303,8 @@ pub struct State {
     pub(super) history: history::UndoContexts,
     /// The copied fragment, in memory, as the browser keeps it.
     pub(super) clipboard: Option<solarxy_graph::document::GraphFragment>,
+    /// The model preview's scene, texture and parse, when one is up.
+    pub(super) preview: preview::PreviewState,
     /// The engine revision the open document was last written at, or
     /// opened at. Dirty is `engine.revision() != saved_revision`, which is
     /// what keeps the answer the engine's rather than a flag's.

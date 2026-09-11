@@ -372,7 +372,7 @@ impl SolarxyApp {
         let Some(mut cam) = self.render_through_camera(pane) else {
             return;
         };
-        orbit_camera_yaw(&mut cam, azimuth_deg.to_radians());
+        solarxy_host::preview::orbit_yaw(&mut cam, azimuth_deg.to_radians());
         let saved = self.view.cameras[pane].as_ref().map(|c| c.camera);
         if let Some(cs) = self.view.cameras[pane].as_mut() {
             cs.camera = cam;

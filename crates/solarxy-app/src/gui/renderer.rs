@@ -9,6 +9,7 @@ use super::modals::about::draw_about_modal;
 use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
+use super::panels::asset_preview::AssetPreviewState;
 use super::panels::assets::AssetsState;
 use super::panels::tree::TreeState;
 use super::chrome::menu::{MenuContext, draw_menu_bar};
@@ -50,6 +51,9 @@ pub struct EguiRenderer {
     assets: AssetsState,
     /// The asset the preview tab shows, by hash and name.
     asset_preview: Option<(String, String)>,
+    asset_preview_state: AssetPreviewState,
+    /// The size the preview tab last drew at, read by the state layer.
+    preview_size_seen: Option<(u32, u32)>,
     canvas: super::panels::nodes::CanvasState,
     params: super::panels::params::ParamPanelState,
     /// The node canvas's rect as the last frame drew it, so a key claim
@@ -128,6 +132,8 @@ impl EguiRenderer {
             tree: TreeState::default(),
             assets: AssetsState::default(),
             asset_preview: None,
+            asset_preview_state: AssetPreviewState::default(),
+            preview_size_seen: None,
             canvas: super::panels::nodes::CanvasState::default(),
             params: super::panels::params::ParamPanelState::default(),
             canvas_rect: None,
@@ -174,6 +180,49 @@ impl EguiRenderer {
     #[must_use]
     pub fn assets_tab_present(&self) -> bool {
         self.tab_present(SolarxyTab::Assets)
+    }
+
+    /// `true` iff the preview tab is mounted.
+    #[must_use]
+    pub fn asset_preview_tab_present(&self) -> bool {
+        self.tab_present(SolarxyTab::AssetPreview)
+    }
+
+    /// The size the preview tab last drew its model at, in physical pixels.
+    #[must_use]
+    pub fn preview_size(&self) -> Option<(u32, u32)> {
+        self.preview_size_seen
+    }
+
+    /// Hand egui a texture this shell rendered, and get the handle to draw
+    /// it with.
+    pub fn register_native_texture(
+        &mut self,
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+    ) -> egui::TextureId {
+        self.renderer
+            .register_native_texture(device, view, wgpu::FilterMode::Linear)
+    }
+
+    /// Point an existing handle at a new texture, after a resize.
+    pub fn update_native_texture(
+        &mut self,
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+        id: egui::TextureId,
+    ) {
+        self.renderer.update_egui_texture_from_wgpu_texture(
+            device,
+            view,
+            wgpu::FilterMode::Linear,
+            id,
+        );
+    }
+
+    /// Release a handle and what it held.
+    pub fn free_native_texture(&mut self, id: egui::TextureId) {
+        self.renderer.free_texture(&id);
     }
 
     /// Show the Environment dialog.
@@ -534,6 +583,7 @@ impl EguiRenderer {
         };
         let mut viewport_rect_logical: Option<egui::Rect> = None;
         let mut canvas_rect_seen: Option<egui::Rect> = None;
+        let mut preview_size_seen: Option<(u32, u32)> = None;
         let mut dismissed_toast_id: Option<u64> = None;
 
         // Cloned so the closure below can borrow the renderer mutably: the
@@ -584,6 +634,7 @@ impl EguiRenderer {
                     tree: &mut self.tree,
                     assets: &mut self.assets,
                     asset_preview: self.asset_preview.as_ref(),
+                    preview: &mut self.asset_preview_state,
                     canvas: &mut self.canvas,
                     params: &mut self.params,
                     graph_ctx: &mut self.graph_ctx,
@@ -595,6 +646,7 @@ impl EguiRenderer {
                 toolbars: &chrome.toolbars,
                 viewport_rect_out: &mut viewport_rect_logical,
                 canvas_rect_out: &mut canvas_rect_seen,
+                preview_size_out: &mut preview_size_seen,
                 theme: self.theme,
             };
             DockArea::new(&mut self.dock_state)
@@ -832,6 +884,7 @@ impl EguiRenderer {
         // Cleared as well as set, so a closed or undocked canvas stops
         // claiming the key it took while it was on screen.
         self.canvas_rect = canvas_rect_seen;
+        self.preview_size_seen = preview_size_seen;
         if let Some(rect) = viewport_rect_logical {
             self.last_viewport_rect = Some(CachedViewportRect {
                 rect,

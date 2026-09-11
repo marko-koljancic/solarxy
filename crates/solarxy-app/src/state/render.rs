@@ -640,12 +640,20 @@ impl State {
                 }),
                 tree: tree_source,
                 assets: match &self.engine {
-                    Some(engine) if self.gui.assets_tab_present() => {
+                    Some(engine)
+                        if self.gui.assets_tab_present()
+                            || self.gui.asset_preview_tab_present() =>
+                    {
                         crate::gui::AssetsSource::Scene {
                             table: engine.asset_table(),
                         }
                     }
                     _ => crate::gui::AssetsSource::Empty,
+                },
+                preview: crate::gui::PreviewView {
+                    texture: self.preview.texture(),
+                    loading: self.preview.loading(),
+                    error: self.preview.error(),
                 },
                 canvas: canvas_source,
                 params: params_source,
