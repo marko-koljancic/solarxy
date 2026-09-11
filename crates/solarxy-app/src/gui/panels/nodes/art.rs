@@ -58,7 +58,7 @@ const LOD_DESCRIPTION: f32 = 0.9;
 /// A body is never larger than the box, and the difference is even on
 /// both axes so the centring lands on whole pixels.
 #[must_use]
-pub(super) fn body_size(role: NodeRole) -> Vec2 {
+pub(in crate::gui::panels) fn body_size(role: NodeRole) -> Vec2 {
     match role {
         // The three root-placeable roles are fixture pills, told apart by
         // pastel, glyph and label rather than by outline.
@@ -85,7 +85,7 @@ pub(super) fn body_size(role: NodeRole) -> Vec2 {
 /// it, because an asymmetric one reads as a mistake rather than as a
 /// direction.
 #[must_use]
-pub(super) fn silhouette(role: NodeRole) -> Option<Vec<Pos2>> {
+pub(in crate::gui::panels) fn silhouette(role: NodeRole) -> Option<Vec<Pos2>> {
     let points: &[vector::RoundedVertex] = match role {
         // The two-way junction: a symmetric hexagon.
         NodeRole::Branch => &[

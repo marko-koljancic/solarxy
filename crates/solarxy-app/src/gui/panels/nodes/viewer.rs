@@ -886,7 +886,7 @@ fn art_fill(desc: Option<&NodeTypeDescriptor>, theme: &Theme) -> egui::Color32 {
 
 /// The declared glyph key, falling back to the category's family through
 /// the shared rule when this shell has no art for it.
-fn glyph_key(desc: Option<&NodeTypeDescriptor>) -> String {
+pub(in crate::gui::panels) fn glyph_key(desc: Option<&NodeTypeDescriptor>) -> String {
     let Some(desc) = desc else {
         return super::glyphs::FALLBACK_GLYPH.to_string();
     };

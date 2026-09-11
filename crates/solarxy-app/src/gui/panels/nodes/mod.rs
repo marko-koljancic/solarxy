@@ -46,6 +46,17 @@ use solarxy_graph::document::{EdgeId, GraphContext, NodeId};
 use solarxy_graph::engine::PortRefDto;
 
 pub(crate) use chrome::Toggle as CanvasToggle;
+/// Re-exported for the interpretability twin, which lives beside the
+/// panels rather than inside one because the contract it asserts spans
+/// the canvas and the parameter panel together.
+#[cfg(test)]
+pub(in crate::gui::panels) use art::{body_size, silhouette};
+#[cfg(test)]
+pub(in crate::gui::panels) use glyphs::art as glyph_art;
+#[cfg(test)]
+pub(in crate::gui::panels) use palette::candidates;
+#[cfg(test)]
+pub(in crate::gui::panels) use viewer::glyph_key;
 pub(crate) use seed::{CanvasScene, CanvasSource, CanvasState, NodeCook};
 
 use crate::gui::intent::{Intents, PanelIntent};

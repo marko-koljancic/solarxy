@@ -7,6 +7,9 @@
 //! [`PanelSources`]: crate::gui::pass::PanelSources
 //! [`Intent`]: crate::gui::intent::Intent
 
+#[cfg(test)]
+mod extensibility;
+
 pub(in crate::gui) mod console;
 pub(in crate::gui) mod material_inspector;
 pub(in crate::gui) mod node_tree;

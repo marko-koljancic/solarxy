@@ -10,6 +10,7 @@ use solarxy_graph::registry::visibility::param_visible;
 use solarxy_studio::params::{self, VALIDATION_TAB};
 
 use super::controls::{self, ControlEdit, ControlEnv};
+use super::expression::{self, Toggle};
 use crate::gui::intent::Intents;
 use crate::gui::panels::nodes::CanvasAction;
 use crate::gui::theme::Theme;
@@ -56,6 +57,13 @@ pub(crate) struct ParamScene<'a> {
     /// line comes from: a wrangle parse error is a cook error, not a
     /// second channel.
     pub error: Option<&'a str>,
+    /// What each expression-driven parameter currently resolves to.
+    ///
+    /// **Pulled once a frame, for the driven rows only.** An expression's
+    /// value moves whenever what it reads moves, which is every applied
+    /// command, so pushing it as an event would be one event per
+    /// expression per frame under a playing runtime.
+    pub resolved: &'a super::expression::Resolved,
 }
 
 /// What the panel draws, or nothing.
@@ -79,6 +87,11 @@ pub(crate) struct ParamPanelState {
     /// the widget for the same reason the draft is, and additionally
     /// because a gesture that outlives its row has a preview to drop.
     drag: Option<super::drag::NumericDrag>,
+    /// Expression text switched off and not yet discarded, so the same
+    /// click brings it back. Interface memory rather than document state:
+    /// the scene schema is frozen and a per-session convenience is not
+    /// worth a schema version.
+    parked: super::expression::Parked,
     /// The tab last chosen, by name. Asked of the shared resolver every
     /// frame rather than trusted, because a group whose parameters all
     /// hide stops being a tab and the stored name then names nothing.
@@ -98,6 +111,7 @@ impl ParamPanelState {
         self.tab.clear();
         self.draft = None;
         self.drag = None;
+        self.parked.clear();
     }
 
     pub(crate) fn pinned(&self) -> Option<NodeId> {
@@ -192,7 +206,7 @@ pub(super) fn reset_keys<'a>(specs: &'a [ParamSpec], tab: &str) -> Option<Vec<&'
 /// A driven parameter is dimmed rather than hidden or reset: the stored
 /// value survives so it comes back when the map disconnects.
 #[must_use]
-pub(super) fn driven(
+pub(in crate::gui::panels) fn driven(
     spec: &ParamSpec,
     graph: &solarxy_graph::document::Graph,
     node: NodeId,
@@ -226,6 +240,7 @@ pub(crate) fn draw_params_content(
         assets,
         lanes,
         error,
+        resolved,
     } = scene;
     let Ok(graph) = doc.graph(ctx) else {
         return placeholder(ui, "No document open", theme);
@@ -379,6 +394,39 @@ pub(crate) fn draw_params_content(
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new(&spec.label).size(11.0))
                                 .on_hover_text(&spec.doc);
+                            let expr = expression::driving(data.params.get(&spec.key))
+                                .map(ToString::to_string);
+                            let park = expression::park_key(ctx, node, &spec.key);
+                            if expression::offers_toggle(spec)
+                                && let Some(toggle) =
+                                    expression::draw_toggle(ui, expr.is_some(), theme)
+                            {
+                                let write = match toggle {
+                                    Toggle::On => expression::switch_on(
+                                        state.parked.get(&park).map(String::as_str),
+                                        &controls::shown_value(spec, data.params.get(&spec.key)),
+                                    ),
+                                    Toggle::Off => {
+                                        // Parked on the way out, so the
+                                        // same click brings it back. The
+                                        // field's clear control is the one
+                                        // that discards.
+                                        if let Some(text) = expr.clone() {
+                                            state.parked.insert(park.clone(), text);
+                                        }
+                                        solarxy_graph::params::ParamSource::Literal(
+                                            expression::switch_off(resolved.get(&spec.key), spec),
+                                        )
+                                    }
+                                };
+                                intents.panel(crate::gui::PanelIntent::Canvas(
+                                    CanvasAction::SetParams(
+                                        ctx,
+                                        node,
+                                        vec![(spec.key.clone(), write)],
+                                    ),
+                                ));
+                            }
                             // A driven row draws its control disabled
                             // rather than omitting it: the stored value is
                             // still what the node falls back to when the
@@ -394,8 +442,17 @@ pub(crate) fn draw_params_content(
                                 theme,
                             };
                             let edit = ui
-                                .add_enabled_ui(!is_driven, |ui| {
-                                    controls::draw(
+                                .add_enabled_ui(!is_driven, |ui| match expr.as_deref() {
+                                    Some(text) => expression::draw_row(
+                                        ui,
+                                        spec,
+                                        text,
+                                        resolved.get(&spec.key),
+                                        &env,
+                                        &mut state.draft,
+                                        theme,
+                                    ),
+                                    None => controls::draw(
                                         ui,
                                         spec,
                                         data.params.get(&spec.key),
@@ -405,27 +462,13 @@ pub(crate) fn draw_params_content(
                                             drag: &mut state.drag,
                                             ctx,
                                         },
-                                    )
+                                    ),
                                 })
                                 .inner;
                             match edit {
                                 Some(ControlEdit::Write(writes)) => {
                                     intents.panel(crate::gui::PanelIntent::Canvas(
-                                        CanvasAction::SetParams(
-                                            ctx,
-                                            node,
-                                            writes
-                                                .into_iter()
-                                                .map(|(key, value)| {
-                                                    (
-                                                        key,
-                                                        solarxy_graph::params::ParamSource::Literal(
-                                                            value,
-                                                        ),
-                                                    )
-                                                })
-                                                .collect(),
-                                        ),
+                                        CanvasAction::SetParams(ctx, node, writes),
                                     ));
                                 }
                                 Some(ControlEdit::Preview(values)) => {
@@ -447,10 +490,36 @@ pub(crate) fn draw_params_content(
                                         ),
                                     ));
                                 }
+                                // On a literal row this drops an
+                                // abandoned preview; on an expression row
+                                // it is the destructive control, which
+                                // discards the parked text as well as the
+                                // expression. Two meanings for one shape
+                                // because the row it came from is what
+                                // decides, and the row is right here.
                                 Some(ControlEdit::Clear(keys)) => {
-                                    intents.panel(crate::gui::PanelIntent::Canvas(
-                                        CanvasAction::ClearPreviews(ctx, node, keys),
-                                    ));
+                                    if expr.is_some() {
+                                        state.parked.remove(&park);
+                                        intents.panel(crate::gui::PanelIntent::Canvas(
+                                            CanvasAction::SetParams(
+                                                ctx,
+                                                node,
+                                                vec![(
+                                                    spec.key.clone(),
+                                                    solarxy_graph::params::ParamSource::Literal(
+                                                        expression::switch_off(
+                                                            resolved.get(&spec.key),
+                                                            spec,
+                                                        ),
+                                                    ),
+                                                )],
+                                            ),
+                                        ));
+                                    } else {
+                                        intents.panel(crate::gui::PanelIntent::Canvas(
+                                            CanvasAction::ClearPreviews(ctx, node, keys),
+                                        ));
+                                    }
                                 }
                                 Some(ControlEdit::Invoke) => {
                                     intents.panel(crate::gui::PanelIntent::InvokeAction {
@@ -597,6 +666,7 @@ mod tests {
                         assets: &[],
                         lanes: &[],
                         error: None,
+                        resolved: &super::expression::Resolved::new(),
                     }),
                     state,
                     intents,
@@ -819,6 +889,132 @@ mod tests {
             "a gesture stranded by a selection change must be cleared, not committed"
         );
         assert!(state.drag.is_none());
+    }
+
+    /// An expression row draws, says what it resolves to, and asks for
+    /// nothing until someone touches it.
+    ///
+    /// Two passes for the reason the idle guard runs two: egui runs a pass
+    /// twice on any frame a layout is still settling, and the readout is
+    /// pulled every pass.
+    #[test]
+    fn an_expression_row_is_quiet_until_it_is_touched() {
+        let (mut engine, ctx, node) = scene();
+        engine
+            .apply(Command::SetParam {
+                ctx,
+                node,
+                key: "width".to_string(),
+                value: solarxy_graph::params::ParamSource::Expression {
+                    expr: "2 + 3".to_string(),
+                },
+            })
+            .expect("a float takes an expression");
+
+        // The readout the panel would draw, pulled the way the shell
+        // pulls it.
+        let resolved: super::super::expression::Resolved = [(
+            "width".to_string(),
+            engine.resolved_param(ctx, node, "width"),
+        )]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            resolved.get("width"),
+            Some(&Ok(solarxy_graph::params::ParamValue::Float(5.0))),
+            "the readout comes from the engine, not from the text"
+        );
+
+        let mut state = ParamPanelState {
+            tab: "geometry".to_string(),
+            ..Default::default()
+        };
+        let mut intents = Intents::default();
+        let egui_ctx = egui::Context::default();
+        for _ in 0..2 {
+            let _ = egui_ctx.run(egui::RawInput::default(), |c| {
+                egui::CentralPanel::default().show(c, |ui| {
+                    draw_params_content(
+                        ui,
+                        ParamPanelSource::Scene(&ParamScene {
+                            doc: engine.document(),
+                            registry: engine.registry(),
+                            ctx,
+                            stats: None,
+                            has_report: false,
+                            counts: (0, 0),
+                            assets: &[],
+                            lanes: &[],
+                            error: None,
+                            resolved: &resolved,
+                        }),
+                        &mut state,
+                        &mut intents,
+                        theme(),
+                    );
+                });
+            });
+        }
+        assert!(
+            intents.take_ordered().is_empty(),
+            "an expression row nobody touched must ask for nothing"
+        );
+    }
+
+    /// Switching off and back on in one sitting returns the text
+    /// verbatim, through the store the panel actually keeps.
+    ///
+    /// The two halves are written and read under one key function, so the
+    /// failure this closes is not a wrong lookup but a second spelling of
+    /// the key appearing later.
+    #[test]
+    fn a_parked_expression_survives_the_round_trip() {
+        use super::super::expression;
+        let (engine, ctx, node) = scene();
+        let desc = engine
+            .registry()
+            .get("box")
+            .expect("the box type is registered");
+        let spec = desc.param("width").expect("the box has a width");
+
+        let mut parked = expression::Parked::new();
+        let key = expression::park_key(ctx, node, "width");
+
+        // Off: the text is parked and the value written back is what the
+        // expression resolved to, not the declared default.
+        parked.insert(key.clone(), "$F * 2".to_string());
+        let kept = expression::switch_off(
+            Some(&Ok(solarxy_graph::params::ParamValue::Float(8.0))),
+            spec,
+        );
+        assert_eq!(kept, solarxy_graph::params::ParamValue::Float(8.0));
+        assert_ne!(
+            kept, spec.default,
+            "switching off must not restore the default"
+        );
+
+        // On again: the same key finds the same text.
+        let solarxy_graph::params::ParamSource::Expression { expr } = expression::switch_on(
+            parked
+                .get(&expression::park_key(ctx, node, "width"))
+                .map(String::as_str),
+            &kept,
+        ) else {
+            panic!("switching on must write an expression");
+        };
+        assert_eq!(expr, "$F * 2");
+
+        // Discarded, and the same click now seeds from the value instead.
+        parked.remove(&key);
+        let solarxy_graph::params::ParamSource::Expression { expr } = expression::switch_on(
+            parked
+                .get(&expression::park_key(ctx, node, "width"))
+                .map(String::as_str),
+            &kept,
+        ) else {
+            panic!("switching on must write an expression");
+        };
+        assert_eq!(expr, "8");
     }
 
     fn stats(points: u64, image: Option<(u32, u32)>) -> NodeCookStats {

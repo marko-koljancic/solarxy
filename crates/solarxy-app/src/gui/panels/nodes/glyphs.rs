@@ -317,7 +317,7 @@ const GLYPH_PATHS: &[(&str, &str)] = &[
 /// The caller falls back through `category_glyph`, which is the shared
 /// rule, rather than this deciding a family for itself.
 #[must_use]
-pub(super) fn art(key: &str) -> Option<&'static str> {
+pub(in crate::gui::panels) fn art(key: &str) -> Option<&'static str> {
     GLYPH_PATHS
         .binary_search_by_key(&key, |(k, _)| *k)
         .ok()

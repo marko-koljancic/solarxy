@@ -90,7 +90,7 @@ pub(super) enum PaletteAction {
 /// here, which is what makes a node type added in Rust appear with no
 /// change to this file.
 #[must_use]
-pub(super) fn candidates<'a>(
+pub(in crate::gui::panels) fn candidates<'a>(
     registry: &'a Registry,
     kind: ContextKind,
     category: Option<Category>,

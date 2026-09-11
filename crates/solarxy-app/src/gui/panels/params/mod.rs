@@ -21,6 +21,16 @@
 mod controls;
 mod draft;
 mod drag;
+mod expression;
 mod frame;
 
+pub(crate) use expression::Resolved as ResolvedParams;
+/// Re-exported for the interpretability twin. See `nodes` for why it does
+/// not live inside either panel.
+#[cfg(test)]
+pub(in crate::gui::panels) use controls::{ControlKind, control_kind};
+#[cfg(test)]
+pub(in crate::gui::panels) use expression::offers_toggle;
+#[cfg(test)]
+pub(in crate::gui::panels) use frame::driven;
 pub(crate) use frame::{ParamPanelSource, ParamPanelState, ParamScene, draw_params_content};

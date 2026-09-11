@@ -536,6 +536,15 @@ impl State {
             .and_then(|node| upstream_lanes(self.engine.as_deref()?, self.gui.graph_ctx(), node))
             .unwrap_or_default();
         let node_error = params_subject.and_then(|node| self.cook_health.failure(node));
+        // Pulled once a frame, for the driven rows only. An expression's
+        // value moves whenever what it reads moves, which is every applied
+        // command, so pushing it would be one event per expression per
+        // frame under a playing runtime.
+        let resolved = params_subject
+            .and_then(|node| {
+                resolved_expressions(self.engine.as_deref()?, self.gui.graph_ctx(), node)
+            })
+            .unwrap_or_default();
         let params_scene = params_source(
             self.engine.as_deref(),
             self.gui.params_tab_present(),
@@ -544,6 +553,7 @@ impl State {
             &staged,
             &lanes,
             node_error,
+            &resolved,
         );
         let params_source = params_scene.as_ref().map_or(
             crate::gui::ParamPanelSource::Empty,
@@ -861,6 +871,7 @@ fn params_source<'a>(
     assets: &'a [(String, String)],
     lanes: &'a [(String, String)],
     error: Option<&'a str>,
+    resolved: &'a crate::gui::ResolvedParams,
 ) -> Option<crate::gui::ParamScene<'a>> {
     let engine = engine.filter(|_| tab_present)?;
     let subject = params_subject(Some(engine), tab_present, ctx, pin);
@@ -883,7 +894,41 @@ fn params_source<'a>(
         assets,
         lanes,
         error,
+        resolved,
     })
+}
+
+/// What each expression-driven parameter on a node currently resolves to.
+///
+/// **The driven rows only.** Resolving every parameter would run the
+/// evaluator over a node's whole schema once a frame to answer a question
+/// no row is asking; the literal rows already know their own value.
+fn resolved_expressions(
+    engine: &solarxy_graph::Engine,
+    ctx: GraphContext,
+    node: NodeId,
+) -> Option<crate::gui::ResolvedParams> {
+    let data = engine.document().graph(ctx).ok()?.node(node)?;
+    let driven: Vec<&String> = data
+        .params
+        .iter()
+        .filter(|(_, source)| {
+            matches!(
+                source,
+                solarxy_graph::params::ParamSource::Expression { .. }
+            )
+        })
+        .map(|(key, _)| key)
+        .collect();
+    if driven.is_empty() {
+        return None;
+    }
+    Some(
+        driven
+            .into_iter()
+            .map(|key| (key.clone(), engine.resolved_param(ctx, node, key)))
+            .collect(),
+    )
 }
 
 /// Which node the parameter panel will draw.
@@ -946,9 +991,83 @@ fn upstream_lanes(
 
 #[cfg(test)]
 mod tests {
-    use super::selected_node;
+    use super::{resolved_expressions, selected_node};
     use solarxy_graph::document::{GraphContext, NodeId};
     use solarxy_graph::{Command, Engine, EngineEvent};
+
+    /// The readout is pulled for the driven rows and for nothing else.
+    ///
+    /// Resolving a node's whole schema once a frame would run the
+    /// evaluator over parameters no row is asking about, and the literal
+    /// rows already know their own value.
+    #[test]
+    fn only_the_expression_driven_rows_are_resolved() {
+        let mut engine = Engine::new().expect("registry builds");
+        let geo = add(&mut engine, GraphContext::Root, "sopnet");
+        let ctx = GraphContext::Subflow(geo);
+        let node = add(&mut engine, ctx, "box");
+
+        // Nothing is driven yet, so there is nothing to pull.
+        assert!(
+            resolved_expressions(&engine, ctx, node).is_none(),
+            "a node with no expression must cost no evaluation"
+        );
+
+        // A literal write is still not a driven row.
+        engine
+            .apply(Command::SetParam {
+                ctx,
+                node,
+                key: "height".to_string(),
+                value: solarxy_graph::params::ParamSource::Literal(
+                    solarxy_graph::params::ParamValue::Float(3.0),
+                ),
+            })
+            .expect("a literal write");
+        assert!(
+            resolved_expressions(&engine, ctx, node).is_none(),
+            "a literal row knows its own value and must not be resolved"
+        );
+
+        engine
+            .apply(Command::SetParam {
+                ctx,
+                node,
+                key: "width".to_string(),
+                value: solarxy_graph::params::ParamSource::Expression {
+                    expr: "2 + 3".to_string(),
+                },
+            })
+            .expect("a float takes an expression");
+        let resolved = resolved_expressions(&engine, ctx, node).expect("one driven row");
+        assert_eq!(
+            resolved.keys().collect::<Vec<_>>(),
+            vec!["width"],
+            "only the driven row is resolved"
+        );
+        assert_eq!(
+            resolved.get("width"),
+            Some(&Ok(solarxy_graph::params::ParamValue::Float(5.0)))
+        );
+
+        // A broken one resolves to the parser's complaint rather than to
+        // nothing, which is what the row prints under the field.
+        engine
+            .apply(Command::SetParam {
+                ctx,
+                node,
+                key: "width".to_string(),
+                value: solarxy_graph::params::ParamSource::Expression {
+                    expr: "2 +".to_string(),
+                },
+            })
+            .expect("the engine stores a broken expression rather than refusing it");
+        let resolved = resolved_expressions(&engine, ctx, node).expect("one driven row");
+        assert!(
+            resolved.get("width").is_some_and(Result::is_err),
+            "a broken expression must resolve to a message, not to a value"
+        );
+    }
 
     fn add(engine: &mut Engine, ctx: GraphContext, ty: &str) -> NodeId {
         let batch = engine

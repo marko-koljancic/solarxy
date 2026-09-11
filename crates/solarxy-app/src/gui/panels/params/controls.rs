@@ -45,7 +45,7 @@ use crate::gui::theme::Theme;
 /// frame: every type resolves to a family, and the resolution is
 /// exhaustive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ControlKind {
+pub(in crate::gui::panels) enum ControlKind {
     /// A field, with a slider beside it where a soft range is declared.
     Number,
     Toggle,
@@ -74,7 +74,7 @@ pub(super) enum ControlKind {
 /// compiling, which is the criterion: a parameter type with no control is
 /// a build failure rather than a blank row.
 #[must_use]
-pub(super) fn control_kind(ty: &ParamType) -> ControlKind {
+pub(in crate::gui::panels) fn control_kind(ty: &ParamType) -> ControlKind {
     match ty {
         ParamType::Float | ParamType::Int => ControlKind::Number,
         ParamType::Bool => ControlKind::Toggle,
@@ -161,7 +161,7 @@ pub(super) enum ControlEdit {
     Preview(Vec<(String, ParamValue)>),
     /// A gesture was abandoned, so its preview has to be dropped.
     Clear(Vec<String>),
-    /// Parameters to write together.
+    /// Sources to write together.
     ///
     /// Usually one. It is a list because a single pick can decide two: an
     /// attribute name picked from the offered lanes also retypes the
@@ -169,7 +169,7 @@ pub(super) enum ControlEdit {
     /// that one undo step. The browser writes those as two commands, and
     /// says so, because it has no batched parameter write; this shell has
     /// one.
-    Write(Vec<(String, ParamValue)>),
+    Write(Vec<(String, ParamSource)>),
     /// An action parameter was pressed.
     Invoke,
     /// The asset control wants a file chooser.
@@ -202,9 +202,9 @@ pub(super) struct ControlEnv<'a> {
     pub theme: Theme,
 }
 
-/// One parameter to write.
-fn one(spec: &ParamSpec, value: ParamValue) -> ControlEdit {
-    ControlEdit::Write(vec![(spec.key.clone(), value)])
+/// One parameter to write, as a literal.
+pub(super) fn one(spec: &ParamSpec, value: ParamValue) -> ControlEdit {
+    ControlEdit::Write(vec![(spec.key.clone(), ParamSource::Literal(value))])
 }
 
 /// The gesture bundle a numeric control drives.
@@ -820,11 +820,17 @@ fn lane_menu(ui: &mut Ui, spec: &ParamSpec, env: &ControlEnv<'_>) -> Option<Cont
     .response
     .on_hover_text("Attribute lanes on this node's input");
     let (name, ty) = picked?;
-    let mut writes = vec![(spec.key.clone(), ParamValue::Text(name))];
+    let mut writes = vec![(
+        spec.key.clone(),
+        ParamSource::Literal(ParamValue::Text(name)),
+    )];
     // A pick keeps the lane's type without a second edit, and both writes
     // travel together so the pick is one undo step.
     if let Some(sibling) = sibling_type_param(env.specs, spec, &ty) {
-        writes.push((sibling.key.clone(), ParamValue::Enum(ty)));
+        writes.push((
+            sibling.key.clone(),
+            ParamSource::Literal(ParamValue::Enum(ty)),
+        ));
     }
     Some(ControlEdit::Write(writes))
 }
