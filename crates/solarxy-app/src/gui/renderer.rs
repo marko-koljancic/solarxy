@@ -437,6 +437,23 @@ impl EguiRenderer {
             .is_some_and(|(rect, at)| rect.contains(at))
     }
 
+    /// Whether the pointer is over the 3D viewport, and the viewport is
+    /// actually mounted.
+    ///
+    /// Stricter than [`Self::cursor_in_viewport`], which answers `true` when
+    /// no rect has been recorded so the camera keeps working on the first
+    /// frame. A key scope must not guess: an unknown rect means the pointer
+    /// is over nothing, so the press falls through to the canvas and then to
+    /// the global scope.
+    #[must_use]
+    pub fn pointer_over_viewport(&self) -> bool {
+        self.viewport_tab_present()
+            && self
+                .last_viewport_rect
+                .zip(self.ctx.pointer_latest_pos())
+                .is_some_and(|(cached, at)| cached.rect.contains(at))
+    }
+
     /// Return every graph surface to the root context, unfolded and
     /// unseeded. Called whenever the open document is replaced: all of it
     /// addresses nodes the new document need not contain.

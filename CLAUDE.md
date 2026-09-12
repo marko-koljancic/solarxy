@@ -114,10 +114,10 @@ views and raises an [`Intent`]; one drain applies the whole queue after the inte
 is what keeps the engine the single writer, and it is why there is no mirror struct to keep in
 step any more.
 
-- `app.rs` - `ApplicationHandler`, the event loop, and the handful of window bindings claimed
-  before egui sees them, through the pure `shell_key` claims in `state/input/keyboard.rs`; a
-  claimed press never reaches the key map, which is what stops one press from running two
-  handlers. Panel shortcuts route through `EguiRenderer::toggle_tab`, the one add-or-remove
+- `app.rs` - `ApplicationHandler`, the event loop, and the window's key pre-pass, which resolves
+  the scope from where the pointer is, looks the chord up in `state/input/keymap.rs` and runs the
+  binding when its `Claim` says the window takes it; a claimed press never reaches the map, which
+  is what stops one press from running two handlers. Panel shortcuts route through `EguiRenderer::toggle_tab`, the one add-or-remove
   helper the Window menu and every shortcut share. Dropped paths are collected and handled
   once per frame. Fires `flush_dock_layout_on_exit` and `flush_review_on_exit` from
   `ApplicationHandler::exiting` so the arrangement survives a quit.

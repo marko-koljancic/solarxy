@@ -17,10 +17,12 @@
 //! compared literally: lowercase, `"+"`-joined, modifiers in the order `mod`,
 //! `shift`, `alt`, where `mod` is the platform's command or control key.
 
-// The table lands before the dispatcher that reads it, so that the rewiring
-// commit is a change of behaviour with no new data in it and this one is data
-// with no change of behaviour. `the_table_agrees_with_the_window_claim_list`
-// is what makes that split safe. The allow goes when the dispatcher lands.
+// The dispatcher reads the table; the reference and the menus do not yet.
+// Waiting on a consumer, and nothing else is: `KeyGroup` and its ordering,
+// `Action::id`, the `group`, `description`, `note` and `listed` columns, and
+// the three display helpers `binding_for`, `hint` and `format_keys`. The
+// generated shortcuts reference takes the first set and the menu bars take
+// the second; this allow goes with them.
 #![allow(dead_code)]
 
 use winit::keyboard::KeyCode;
@@ -99,6 +101,7 @@ pub(crate) enum Action {
     CookNow,
     // Chrome
     ToggleSidebar,
+    OpenNodePalette,
     ToggleMenuBar,
     ToggleFullscreen,
     ToggleConsole,
@@ -136,6 +139,7 @@ pub(crate) enum Action {
     ToggleMaterialOverride,
     NextMaterialOverride,
     ToggleIbl,
+    CycleIblMode,
     LockLights,
     ToggleToneMode,
     ToggleBloom,
@@ -177,6 +181,7 @@ impl Action {
             Self::Duplicate => "duplicate",
             Self::CookNow => "cook",
             Self::ToggleSidebar => "toggle-sidebar",
+            Self::OpenNodePalette => "palette",
             Self::ToggleMenuBar => "toggle-menu-bar",
             Self::ToggleFullscreen => "toggle-fullscreen",
             Self::ToggleConsole => "toggle-console",
@@ -210,6 +215,7 @@ impl Action {
             Self::ToggleMaterialOverride => "material-override",
             Self::NextMaterialOverride => "material-override-next",
             Self::ToggleIbl => "ibl",
+            Self::CycleIblMode => "ibl-mode-cycle",
             Self::LockLights => "lock-lights",
             Self::ToggleToneMode => "tone-mode",
             Self::ToggleBloom => "bloom",
@@ -248,6 +254,11 @@ pub(crate) enum Claim {
     /// The window claims it unless a text field has focus, which keeps the
     /// field's own undo and clipboard.
     UnlessTyping,
+    /// A panel consumes it during the interface pass, and neither dispatcher
+    /// runs it. The surface that owns the key is the one that knows where
+    /// the pointer is inside itself and what to open, which a dispatcher
+    /// outside the pass does not.
+    Panel,
 }
 
 /// One declared binding.
@@ -415,6 +426,21 @@ pub(crate) static BINDINGS: &[Binding] = &[
             Claim::UnlessTyping,
         ),
         "Over the node canvas, Tab opens the node palette",
+    ),
+    // Declared in the canvas scope so the sidebar's global Tab does not
+    // shadow it. The node panel consumes the key itself during the pass.
+    with_note(
+        Binding {
+            claim: Claim::Panel,
+            ..b(
+                Action::OpenNodePalette,
+                "tab",
+                KeyScope::Canvas,
+                KeyGroup::NodeCanvas,
+                "Open the node palette",
+            )
+        },
+        "Away from the canvas, Tab shows or hides the sidebar",
     ),
     claimed(
         Action::ToggleMenuBar,
@@ -658,7 +684,14 @@ pub(crate) static BINDINGS: &[Binding] = &[
         "i",
         KeyScope::Global,
         KeyGroup::Inspection,
-        "Cycle the image-based lighting mode",
+        "Image-based lighting on or off",
+    ),
+    b(
+        Action::CycleIblMode,
+        "shift+i",
+        KeyScope::Global,
+        KeyGroup::Inspection,
+        "Switch between diffuse and full image-based lighting",
     ),
     b(
         Action::LockLights,
@@ -961,7 +994,6 @@ const ALT: &str = "Alt";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::input::shell_key;
     use std::collections::HashSet;
 
     #[test]
@@ -1009,52 +1041,29 @@ mod tests {
         }
     }
 
-    /// The table says the same thing the window's claim list does.
+    /// Tab is the sidebar's away from the canvas and the palette's over it.
     ///
-    /// This is what makes the table trustworthy before the dispatcher reads
-    /// it: the two are still separate here, so the only thing holding them
-    /// together is this comparison.
+    /// This is the one binding the shell already resolved by pointer
+    /// position, and the scope column is what generalizes it. Without the
+    /// canvas entry the global one shadows it through the fallback and the
+    /// palette stops opening, which is a regression the scope rewrite
+    /// introduced and this pins.
     #[test]
-    fn the_table_agrees_with_the_window_claim_list() {
-        for binding in BINDINGS {
-            let chord = Chord::parse(binding.keys).expect("parses");
-            let claimed = |typing: bool| {
-                shell_key(chord.code, chord.cmd, chord.shift, typing, false).is_some()
-            };
-            match binding.claim {
-                Claim::Always => {
-                    assert!(
-                        claimed(false) && claimed(true),
-                        "{} is not claimed",
-                        binding.action.id()
-                    );
-                }
-                Claim::UnlessTyping => {
-                    assert!(claimed(false), "{} is not claimed", binding.action.id());
-                    assert!(
-                        !claimed(true),
-                        "{} is claimed while a text field has focus",
-                        binding.action.id()
-                    );
-                }
-                Claim::Never => {
-                    assert!(
-                        !claimed(false) && !claimed(true),
-                        "{} is claimed by the window but the table says otherwise",
-                        binding.action.id()
-                    );
-                }
-            }
-        }
-    }
-
-    /// Tab is the sidebar's everywhere and the palette's over the canvas,
-    /// which is the one place the shell already resolves a binding by where
-    /// the pointer is. The scope column is what generalizes it.
-    #[test]
-    fn tab_over_the_canvas_is_not_the_sidebars() {
-        assert!(shell_key(KeyCode::Tab, false, false, false, false).is_some());
-        assert!(shell_key(KeyCode::Tab, false, false, false, true).is_none());
+    fn tab_over_the_canvas_is_the_palette_and_not_the_sidebar() {
+        let tab = Chord::parse("tab").expect("parses");
+        assert_eq!(
+            lookup(tab, KeyScope::Canvas).map(|b| b.action),
+            Some(Action::OpenNodePalette)
+        );
+        assert_eq!(
+            lookup(tab, KeyScope::Global).map(|b| b.action),
+            Some(Action::ToggleSidebar)
+        );
+        assert_eq!(
+            lookup(tab, KeyScope::Viewport).map(|b| b.action),
+            Some(Action::ToggleSidebar),
+            "the viewport has no Tab of its own, so it falls back to the global one"
+        );
     }
 
     #[test]

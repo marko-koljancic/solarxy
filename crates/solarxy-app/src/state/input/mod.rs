@@ -16,4 +16,4 @@ mod keyboard;
 pub(crate) mod keymap;
 mod pointer;
 
-pub(crate) use keyboard::{ShellKey, shell_key};
+pub(crate) use keyboard::{key_scope, window_claims};

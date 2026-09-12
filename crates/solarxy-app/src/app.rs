@@ -15,7 +15,8 @@ use winit::{
 
 use crate::console::LogBuffer;
 use solarxy_core::preferences::Preferences;
-use crate::state::{ShellKey, State, shell_key};
+use crate::state::keymap::{self, Chord};
+use crate::state::{State, key_scope, window_claims};
 
 /// Returns `true` when a pointer/mouse event should drive the 3D camera
 /// (orbit / pan / zoom) — i.e., the cursor is inside the Viewport tab's
@@ -134,47 +135,14 @@ impl ApplicationHandler<State> for App {
             && let PhysicalKey::Code(code) = event.physical_key
         {
             let mods = state.input.modifiers;
-            let cmd_or_ctrl = if cfg!(target_os = "macos") {
-                mods.super_key()
-            } else {
-                mods.control_key()
-            };
+            let chord = Chord::new(code, state.cmd_or_ctrl(), mods.shift_key(), mods.alt_key());
             let wants_text = state.gui.wants_keyboard_input();
-            let over_canvas = state.gui.pointer_over_canvas();
-            if let Some(key) =
-                shell_key(code, cmd_or_ctrl, mods.shift_key(), wants_text, over_canvas)
+            if let Some(binding) = keymap::lookup(chord, key_scope(&state.gui))
+                && window_claims(binding, wants_text)
             {
-                match key {
-                    ShellKey::ToggleSidebar => {
-                        state.gui.toggle_tab(crate::gui::SolarxyTab::Sidebar);
-                    }
-                    ShellKey::ToggleMenuBar => {
-                        state.gui.menu_bar_visible = !state.gui.menu_bar_visible;
-                    }
-                    ShellKey::ToggleFullscreen => state.toggle_fullscreen(),
-                    ShellKey::NewScene => state.new_scene(),
-                    ShellKey::OpenModel => state.open_model_dialog(),
-                    ShellKey::Save => {
-                        state.save_document();
-                    }
-                    ShellKey::SaveAs => {
-                        state.save_document_as();
-                    }
-                    ShellKey::Undo => state.undo(),
-                    ShellKey::Redo => state.redo(),
-                    ShellKey::Copy => state.copy_selection(),
-                    ShellKey::Paste => state.paste_clipboard(),
-                    ShellKey::Duplicate => state.duplicate_selection(),
-                    ShellKey::ToggleConsole => {
-                        state.gui.toggle_tab(crate::gui::SolarxyTab::Console);
-                    }
-                    ShellKey::ToggleViewport => {
-                        state.gui.toggle_tab(crate::gui::SolarxyTab::Viewport);
-                    }
-                    // Outside the interface pass, so it calls the state
-                    // directly rather than raising an intent.
-                    ShellKey::CookNow => state.cook_now(),
-                }
+                // Outside the interface pass, so the action runs against the
+                // state directly rather than raising an intent.
+                state.run_action(binding.action);
                 pre_handled = true;
             }
         }
@@ -269,7 +237,7 @@ impl ApplicationHandler<State> for App {
                 if !pre_handled && !egui_consumed && !state.gui.wants_keyboard_input() =>
             {
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    state.handle_key(event_loop, code, event.state.is_pressed());
+                    state.handle_key(code, event.state.is_pressed());
                 }
                 if event.state.is_pressed()
                     && let Key::Character(ref ch) = event.logical_key

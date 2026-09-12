@@ -1,27 +1,27 @@
-//! The keyboard map, and the toggles it drives.
+//! What a binding does, and the toggles it drives.
 //!
-//! Adding a binding means a match arm here **and** an entry in the shortcuts
-//! modal, which is the drift this shell has not closed yet: they are two
-//! hand-maintained lists of the same thing and the modal already omits four
-//! bindings this file has.
+//! The bindings themselves are declared in [`super::keymap`]; this module is
+//! the other half, one arm per [`Action`]. The match is exhaustive, so a
+//! binding added to the table does not compile until something here runs it,
+//! which is the drift these two files replaced: the shell used to declare the
+//! same fact in the window's claim list, in a key match, in the shortcuts
+//! reference and in the menus, and the four disagreed.
 //!
-//! Two dispatchers see a press, in order. The window claims a handful of
-//! bindings first, through [`shell_key`], before the interface pass sees the
-//! key; the map in `handle_key` runs only for a press the window did not
-//! claim. That order is what keeps one press from running twice: the window
-//! used to handle its keys and fall through, so a chord such as the open
-//! dialog's also ran the bare key's arm here.
+//! A key *release* is not a binding. The arrow keys nudge the camera while
+//! held, so they are handled on press and release by [`State::handle_key`]
+//! directly and never reach the table.
 
-use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::KeyCode;
 
 use crate::gui::ToastSeverity;
+use solarxy_host::cameras::StandardView;
 use solarxy_renderer::input::CameraKey;
 use solarxy_core::preferences::{
     BackgroundMode, BuiltinBg, CustomBackground, IblMode, InspectionMode, MaterialOverride,
     NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
 };
 
+use super::keymap::{self, Action, Binding, Chord, Claim, KeyScope};
 use crate::state::{BoundsMode, CompositeLook, State, ViewLayout};
 
 /// winit-to-renderer input mapping: the renderer is windowing-agnostic and
@@ -49,81 +49,45 @@ fn background_cycle_options(customs: &[CustomBackground], has_hdri: bool) -> Vec
     options
 }
 
-/// A binding the window handles before the interface sees the key.
+/// Which scope a press resolves in, decided by where the pointer is.
 ///
-/// These are the bindings that have to work whatever has focus: the ones
-/// that show and hide chrome, and the file dialogs. A press one of these
-/// claims never reaches the key map, which is the rule the collision this
-/// replaced had broken: every window arm fell through, so a claimed key ran
-/// its window action and then the map's arm for the same key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShellKey {
-    ToggleSidebar,
-    ToggleMenuBar,
-    ToggleFullscreen,
-    /// Replace the document with an empty one. A chord, so a text field
-    /// keeps its bare `N`.
-    NewScene,
-    OpenModel,
-    /// Write the document to its own path, or ask for one.
-    Save,
-    /// Ask for a path, then write there.
-    SaveAs,
-    /// Take back the last step. Not claimed while a text field has focus,
-    /// whose own undo the field keeps.
-    Undo,
-    Redo,
-    /// The clipboard, likewise left to a focused text field.
-    Copy,
-    Paste,
-    Duplicate,
-    ToggleConsole,
-    ToggleViewport,
-    /// Cook what is stale now, in manual cook mode. A chord, so it stays
-    /// global even with a text field focused.
-    CookNow,
+/// The viewport first, then the node canvas, then everything else, which is
+/// the model the browser's keymap describes: it is what lets a letter mean
+/// one thing over a graph and another over a 3D view without either meaning
+/// being modal.
+pub(crate) fn key_scope(gui: &crate::gui::EguiRenderer) -> KeyScope {
+    if gui.pointer_over_viewport() {
+        KeyScope::Viewport
+    } else if gui.pointer_over_canvas() {
+        KeyScope::Canvas
+    } else {
+        KeyScope::Global
+    }
 }
 
-/// What the window claims for a pressed key, if anything.
+/// Whether the window takes this press out from under the interface.
 ///
-/// `cmd_or_ctrl` is resolved by the caller, because which key it is depends
-/// on the platform. `wants_text` says a text field has focus, which keeps
-/// the bare keys typeable there while the function keys and the chords stay
-/// global.
-///
-/// `over_canvas` is the one place a claim is decided by where the pointer
-/// is rather than by what is focused, and it exists for one key. Tab is
-/// the sidebar's everywhere and the node palette's over the canvas, which
-/// is the arrangement the browser's own keymap describes even though its
-/// implementation does not honour it. Without this the window claims Tab
-/// first and the palette never opens; with it the sidebar keeps the key
-/// everywhere a user is not looking at a graph.
-pub(crate) fn shell_key(
-    code: KeyCode,
-    cmd_or_ctrl: bool,
-    shift: bool,
-    wants_text: bool,
-    over_canvas: bool,
-) -> Option<ShellKey> {
-    match code {
-        KeyCode::Tab if !wants_text && !over_canvas => Some(ShellKey::ToggleSidebar),
-        KeyCode::F10 => Some(ShellKey::ToggleMenuBar),
-        KeyCode::F11 => Some(ShellKey::ToggleFullscreen),
-        KeyCode::KeyN if cmd_or_ctrl => Some(ShellKey::NewScene),
-        KeyCode::KeyO if cmd_or_ctrl && !shift => Some(ShellKey::OpenModel),
-        KeyCode::KeyS if cmd_or_ctrl && shift => Some(ShellKey::SaveAs),
-        KeyCode::KeyS if cmd_or_ctrl => Some(ShellKey::Save),
-        KeyCode::KeyZ if cmd_or_ctrl && shift && !wants_text => Some(ShellKey::Redo),
-        KeyCode::KeyZ if cmd_or_ctrl && !wants_text => Some(ShellKey::Undo),
-        KeyCode::KeyY if cmd_or_ctrl && !wants_text => Some(ShellKey::Redo),
-        KeyCode::KeyC if cmd_or_ctrl && !wants_text => Some(ShellKey::Copy),
-        KeyCode::KeyV if cmd_or_ctrl && !wants_text => Some(ShellKey::Paste),
-        KeyCode::KeyD if cmd_or_ctrl && !wants_text => Some(ShellKey::Duplicate),
-        KeyCode::Backquote if !wants_text => Some(ShellKey::ToggleConsole),
-        KeyCode::Digit1 if cmd_or_ctrl && !wants_text => Some(ShellKey::ToggleViewport),
-        KeyCode::Enter | KeyCode::NumpadEnter if cmd_or_ctrl => Some(ShellKey::CookNow),
-        _ => None,
+/// The interface still sees every event, because its key state is built from
+/// press and release pairs and a release with no press is a no-op there. What
+/// a claim buys is that the press does not *also* run the map's arm, which is
+/// the collision this replaced.
+pub(crate) fn window_claims(binding: &Binding, wants_text: bool) -> bool {
+    match binding.claim {
+        Claim::Always => true,
+        Claim::UnlessTyping => !wants_text,
+        Claim::Never | Claim::Panel => false,
     }
+}
+
+/// Whether the map runs this binding: a press the window never takes and no
+/// panel owns.
+///
+/// A function rather than a comparison written at the one call site, because
+/// `exactly_one_dispatcher_runs_each_binding` has to ask the same question
+/// the dispatcher does. A test that re-states the rule instead of calling it
+/// passes while the rule is broken.
+pub(crate) fn map_runs(binding: &Binding) -> bool {
+    !window_claims(binding, false) && binding.claim != Claim::Panel
 }
 
 impl State {
@@ -131,227 +95,152 @@ impl State {
         self.input.modifiers = modifiers;
     }
 
-    pub fn handle_key(&mut self, _event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        if !is_pressed {
-            if let Some(key) = to_camera_key(code) {
-                self.for_each_target_cam(|cam| {
-                    cam.handle_key(key, is_pressed);
-                });
+    /// A key press or release from the window, after the interface has had
+    /// its say.
+    ///
+    /// Only bindings the window did not claim reach here, so this runs
+    /// [`Claim::Never`] and nothing else; a claimed press already ran in the
+    /// pre-pass and running it again would be the double dispatch the two
+    /// dispatchers used to produce.
+    pub fn handle_key(&mut self, code: KeyCode, is_pressed: bool) {
+        // A held arrow nudges the camera and needs both edges, which is why
+        // it is not in the table.
+        if let Some(key) = to_camera_key(code) {
+            if is_pressed {
+                self.release_look_through_for_gesture();
             }
+            self.for_each_target_cam(|cam| {
+                cam.handle_key(key, is_pressed);
+            });
             return;
         }
-        match code {
-            KeyCode::KeyH => {
+        if !is_pressed {
+            return;
+        }
+        let chord = Chord::new(
+            code,
+            self.cmd_or_ctrl(),
+            self.input.modifiers.shift_key(),
+            self.input.modifiers.alt_key(),
+        );
+        if let Some(binding) = keymap::lookup(chord, key_scope(&self.gui))
+            && map_runs(binding)
+        {
+            self.run_action(binding.action);
+        }
+    }
+
+    /// The platform's command modifier, resolved once rather than at every
+    /// arm that used to ask.
+    pub(crate) fn cmd_or_ctrl(&self) -> bool {
+        if cfg!(target_os = "macos") {
+            self.input.modifiers.super_key()
+        } else {
+            self.input.modifiers.control_key()
+        }
+    }
+
+    /// What a binding does.
+    ///
+    /// Exhaustive with no catch-all, so a binding added to the table fails
+    /// the build until it is wired. Every arm is one action: the modifier
+    /// branching that used to live inside these bodies is now the difference
+    /// between two table entries, which is what makes the reference able to
+    /// name both.
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn run_action(&mut self, action: Action) {
+        match action {
+            // File and edit, which the window claims.
+            Action::NewScene => self.new_scene(),
+            Action::OpenScene => self.open_model_dialog(),
+            Action::Save => {
+                self.save_document();
+            }
+            Action::SaveAs => {
+                self.save_document_as();
+            }
+            Action::Undo => self.undo(),
+            Action::Redo | Action::RedoAlt => self.redo(),
+            Action::Copy => self.copy_selection(),
+            Action::Paste => self.paste_clipboard(),
+            Action::Duplicate => self.duplicate_selection(),
+            Action::CookNow => self.cook_now(),
+
+            // Chrome.
+            Action::ToggleSidebar => self.gui.toggle_tab(crate::gui::SolarxyTab::Sidebar),
+            // Claimed by no dispatcher: the node panel consumes Tab during
+            // the interface pass, where the pointer position inside the
+            // canvas is known. Declared so the sidebar's global Tab does not
+            // shadow it, and so the Add menu can show the key.
+            Action::OpenNodePalette => {}
+            Action::ToggleMenuBar => self.gui.menu_bar_visible = !self.gui.menu_bar_visible,
+            Action::ToggleFullscreen => self.toggle_fullscreen(),
+            Action::ToggleConsole => self.gui.toggle_tab(crate::gui::SolarxyTab::Console),
+            Action::ToggleViewportPanel => self.gui.toggle_tab(crate::gui::SolarxyTab::Viewport),
+
+            // Framing and views.
+            Action::FitView => {
                 let bounds = self.scene_bounds();
                 self.release_look_through_for_gesture();
                 self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
             }
-            KeyCode::KeyT => {
-                if self.input.modifiers.shift_key() {
-                    self.toggle_tone_mode();
-                } else {
-                    let bounds = self.scene_bounds();
-                    self.release_look_through_for_gesture();
-                    self.for_each_target_cam(|cam| {
-                        solarxy_host::cameras::reset_to_view(
-                            cam,
-                            &bounds,
-                            solarxy_host::cameras::StandardView::Top,
-                        );
-                    });
-                }
-            }
-            KeyCode::KeyF => {
-                let bounds = self.scene_bounds();
+            Action::ViewTop => self.frame_standard_view(StandardView::Top),
+            Action::ViewFront => self.frame_standard_view(StandardView::Front),
+            Action::ViewLeft => self.frame_standard_view(StandardView::Left),
+            Action::ViewRight => self.frame_standard_view(StandardView::Right),
+            Action::ProjectionPerspective => {
                 self.release_look_through_for_gesture();
-                self.for_each_target_cam(|cam| {
-                    solarxy_host::cameras::reset_to_view(
-                        cam,
-                        &bounds,
-                        solarxy_host::cameras::StandardView::Front,
-                    );
-                });
+                self.for_each_target_cam(|cam| cam.set_projection(ProjectionMode::Perspective));
             }
-            KeyCode::KeyL => {
-                let cmd_or_ctrl = if cfg!(target_os = "macos") {
-                    self.input.modifiers.super_key()
-                } else {
-                    self.input.modifiers.control_key()
-                };
-                if cmd_or_ctrl {
-                    if self.view.display.layout != ViewLayout::Single {
-                        self.view.cameras_linked = !self.view.cameras_linked;
-                        let msg = if self.view.cameras_linked {
-                            "Cameras linked"
-                        } else {
-                            "Cameras independent"
-                        };
-                        self.gui.set_toast(msg, ToastSeverity::Success);
-                    }
-                } else if self.input.modifiers.shift_key() {
-                    self.view.display.lights_locked = !self.view.display.lights_locked;
-                    let msg = if self.view.display.lights_locked {
-                        "Lights locked"
-                    } else {
-                        "Lights unlocked"
-                    };
-                    self.gui.set_toast(msg, ToastSeverity::Success);
-                } else {
-                    let bounds = self.scene_bounds();
-                    self.release_look_through_for_gesture();
-                    self.for_each_target_cam(|cam| {
-                        solarxy_host::cameras::reset_to_view(
-                            cam,
-                            &bounds,
-                            solarxy_host::cameras::StandardView::Left,
-                        );
-                    });
-                }
-            }
-            KeyCode::KeyR => {
-                if self.input.modifiers.shift_key() {
-                    self.toggle_review_mode();
-                } else {
-                    let bounds = self.scene_bounds();
-                    self.release_look_through_for_gesture();
-                    self.for_each_target_cam(|cam| {
-                        solarxy_host::cameras::reset_to_view(
-                            cam,
-                            &bounds,
-                            solarxy_host::cameras::StandardView::Right,
-                        );
-                    });
-                }
-            }
-            KeyCode::KeyP => {
-                self.release_look_through_for_gesture();
-                self.for_each_target_cam(|cam| {
-                    cam.set_projection(ProjectionMode::Perspective);
-                });
-            }
-            KeyCode::KeyO => {
-                if self.view.pane_settings[self.view.active_pane].pane_mode == PaneMode::UvMap {
-                    let pds = &mut self.view.pane_settings[self.view.active_pane];
-                    pds.show_uv_overlap = !pds.show_uv_overlap;
-                    if pds.show_uv_overlap {
-                        self.renderer.uv_overlap.stats_dirty = true;
-                    }
-                    let msg = if pds.show_uv_overlap {
-                        "Overlap: On"
-                    } else {
-                        "Overlap: Off"
-                    };
-                    self.gui.set_toast(msg, ToastSeverity::Success);
-                } else if self.input.modifiers.shift_key() {
-                    self.toggle_ssao();
-                } else {
+            Action::ProjectionOrthographic => {
+                if !self.toggle_uv_overlap_in_a_uv_pane() {
                     self.release_look_through_for_gesture();
                     self.for_each_target_cam(|cam| {
                         cam.set_projection(ProjectionMode::Orthographic);
                     });
                 }
             }
-            KeyCode::KeyW => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                if self.input.modifiers.shift_key() {
-                    pds.line_weight = pds.line_weight.next();
-                    self.gui.set_toast(
-                        &format!(
-                            "Line Weight: {}",
-                            self.view.pane_settings[self.view.active_pane].line_weight
-                        ),
-                        ToastSeverity::Success,
-                    );
-                } else if pds.view_mode == ViewMode::Ghosted {
-                    pds.ghosted_wireframe = !pds.ghosted_wireframe;
-                } else {
-                    pds.view_mode = match pds.view_mode {
-                        ViewMode::Shaded => ViewMode::ShadedWireframe,
-                        ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
-                        ViewMode::WireframeOnly | ViewMode::Ghosted => ViewMode::Shaded,
-                    };
-                }
-            }
-            KeyCode::KeyX => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                if pds.view_mode == ViewMode::Ghosted {
-                    pds.view_mode = pds.prev_non_ghosted_mode;
-                } else {
-                    pds.prev_non_ghosted_mode = pds.view_mode;
-                    pds.ghosted_wireframe = matches!(
-                        pds.view_mode,
-                        ViewMode::ShadedWireframe | ViewMode::WireframeOnly
-                    );
-                    pds.view_mode = ViewMode::Ghosted;
-                }
-            }
-            KeyCode::KeyS => {
-                // The bare key only: the save chords are the window's, claimed
-                // in `shell_key` before this map sees the press. `Shift+S`
-                // (save preferences) was retired in the 0.5.0 release
-                // candidates; view settings persist via Edit, Save View
-                // Settings as Default.
-                if !self.input.modifiers.shift_key() {
-                    self.view.pane_settings[self.view.active_pane].view_mode = ViewMode::Shaded;
-                }
-            }
-            KeyCode::KeyC => {
-                self.capture_requested = true;
-                self.screenshot_expand_review = false;
-            }
-            KeyCode::KeyA => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                if self.input.modifiers.shift_key() {
-                    pds.show_local_axes = !pds.show_local_axes;
-                    let msg = if pds.show_local_axes {
-                        "Local Axes: On"
+            Action::LinkCameras => {
+                if self.view.display.layout != ViewLayout::Single {
+                    self.view.cameras_linked = !self.view.cameras_linked;
+                    let msg = if self.view.cameras_linked {
+                        "Cameras linked"
                     } else {
-                        "Local Axes: Off"
+                        "Cameras independent"
                     };
                     self.gui.set_toast(msg, ToastSeverity::Success);
-                } else {
-                    pds.show_axis_gizmo = !pds.show_axis_gizmo;
                 }
             }
-            KeyCode::KeyG => {
+
+            // Pane layouts.
+            Action::LayoutSingle => self.set_view_layout(ViewLayout::Single),
+            Action::LayoutSplitVertical => self.set_view_layout(ViewLayout::SplitVertical),
+            Action::LayoutSplitHorizontal => self.set_view_layout(ViewLayout::SplitHorizontal),
+            Action::LayoutQuad => self.set_view_layout(ViewLayout::Quad),
+            Action::LayoutThreeLeftBig => self.set_view_layout(ViewLayout::ThreeLeftBig),
+
+            // Display and overlays.
+            Action::ToggleGrid => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.show_grid = !pds.show_grid;
             }
-            KeyCode::KeyI => self.toggle_ibl(),
-            KeyCode::KeyB => {
-                if self.input.modifiers.shift_key() {
-                    self.cycle_bounds_mode();
-                } else {
-                    self.cycle_background();
-                }
-            }
-            KeyCode::KeyM => {
+            Action::ToggleAxisGizmo => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
-                if self.input.modifiers.shift_key() {
-                    pds.material_override = pds.material_override.next();
+                pds.show_axis_gizmo = !pds.show_axis_gizmo;
+            }
+            Action::ToggleLocalAxes => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                pds.show_local_axes = !pds.show_local_axes;
+                let msg = if pds.show_local_axes {
+                    "Local Axes: On"
                 } else {
-                    pds.material_override = if pds.material_override == MaterialOverride::None {
-                        MaterialOverride::Clay
-                    } else {
-                        MaterialOverride::None
-                    };
-                }
-                let msg = format!("Material: {}", pds.material_override);
-                self.gui.set_toast(&msg, ToastSeverity::Success);
+                    "Local Axes: Off"
+                };
+                self.gui.set_toast(msg, ToastSeverity::Success);
             }
-            KeyCode::KeyD => {
-                if self.input.modifiers.shift_key() {
-                    self.toggle_bloom();
-                }
-            }
-            KeyCode::KeyE => {
-                if self.input.modifiers.shift_key() {
-                    self.adjust_exposure(false);
-                } else {
-                    self.adjust_exposure(true);
-                }
-            }
-            KeyCode::KeyN => {
+            Action::CycleBackground => self.cycle_background(),
+            Action::CycleBounds => self.cycle_bounds_mode(),
+            Action::CycleNormals => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.normals_mode = match pds.normals_mode {
                     NormalsMode::Off => NormalsMode::Face,
@@ -360,21 +249,7 @@ impl State {
                     NormalsMode::FaceAndVertex => NormalsMode::Off,
                 };
             }
-            KeyCode::KeyV => {
-                if self.input.modifiers.shift_key() {
-                    let pds = &mut self.view.pane_settings[self.view.active_pane];
-                    pds.show_validation = !pds.show_validation;
-                    let msg = if pds.show_validation {
-                        "Validation on"
-                    } else {
-                        "Validation off"
-                    };
-                    self.gui.set_toast(msg, ToastSeverity::Success);
-                } else {
-                    self.view.display.turntable_active = !self.view.display.turntable_active;
-                }
-            }
-            KeyCode::KeyU => {
+            Action::CycleUvMode => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
                 if pds.pane_mode == PaneMode::UvMap {
                     pds.uv_bg = pds.uv_bg.next();
@@ -390,21 +265,99 @@ impl State {
                     };
                 }
             }
-            KeyCode::Digit1 => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.pane_mode = PaneMode::Scene3D;
-                pds.inspection_mode = InspectionMode::Shaded;
-                self.gui
-                    .set_toast("Inspection: Shaded", ToastSeverity::Success);
+            Action::ToggleTurntable => {
+                self.view.display.turntable_active = !self.view.display.turntable_active;
             }
-            KeyCode::Digit2 => {
+            Action::ToggleValidationOverlay => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.pane_mode = PaneMode::Scene3D;
-                pds.inspection_mode = InspectionMode::MaterialId;
-                self.gui
-                    .set_toast("Inspection: Material ID", ToastSeverity::Success);
+                pds.show_validation = !pds.show_validation;
+                let msg = if pds.show_validation {
+                    "Validation on"
+                } else {
+                    "Validation off"
+                };
+                self.gui.set_toast(msg, ToastSeverity::Success);
             }
-            KeyCode::Digit3 => {
+
+            // Shading and post.
+            Action::CycleViewMode => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                if pds.view_mode == ViewMode::Ghosted {
+                    pds.ghosted_wireframe = !pds.ghosted_wireframe;
+                } else {
+                    pds.view_mode = match pds.view_mode {
+                        ViewMode::Shaded => ViewMode::ShadedWireframe,
+                        ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
+                        ViewMode::WireframeOnly | ViewMode::Ghosted => ViewMode::Shaded,
+                    };
+                }
+            }
+            Action::CycleLineWeight => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                pds.line_weight = pds.line_weight.next();
+                let weight = pds.line_weight;
+                self.gui
+                    .set_toast(&format!("Line Weight: {weight}"), ToastSeverity::Success);
+            }
+            Action::ToggleGhosted => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                if pds.view_mode == ViewMode::Ghosted {
+                    pds.view_mode = pds.prev_non_ghosted_mode;
+                } else {
+                    pds.prev_non_ghosted_mode = pds.view_mode;
+                    pds.ghosted_wireframe = matches!(
+                        pds.view_mode,
+                        ViewMode::ShadedWireframe | ViewMode::WireframeOnly
+                    );
+                    pds.view_mode = ViewMode::Ghosted;
+                }
+            }
+            Action::SetShaded => {
+                self.view.pane_settings[self.view.active_pane].view_mode = ViewMode::Shaded;
+            }
+            Action::ToggleMaterialOverride => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                pds.material_override = if pds.material_override == MaterialOverride::None {
+                    MaterialOverride::Clay
+                } else {
+                    MaterialOverride::None
+                };
+                let msg = format!("Material: {}", pds.material_override);
+                self.gui.set_toast(&msg, ToastSeverity::Success);
+            }
+            Action::NextMaterialOverride => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                pds.material_override = pds.material_override.next();
+                let msg = format!("Material: {}", pds.material_override);
+                self.gui.set_toast(&msg, ToastSeverity::Success);
+            }
+            Action::ToggleIbl => self.set_ibl(false),
+            Action::CycleIblMode => self.set_ibl(true),
+            Action::LockLights => {
+                self.view.display.lights_locked = !self.view.display.lights_locked;
+                let msg = if self.view.display.lights_locked {
+                    "Lights locked"
+                } else {
+                    "Lights unlocked"
+                };
+                self.gui.set_toast(msg, ToastSeverity::Success);
+            }
+            Action::ToggleToneMode => self.toggle_tone_mode(),
+            Action::ToggleBloom => self.toggle_bloom(),
+            Action::ToggleSsao => {
+                if !self.toggle_uv_overlap_in_a_uv_pane() {
+                    self.toggle_ssao();
+                }
+            }
+            Action::ExposureUp => self.adjust_exposure(true),
+            Action::ExposureDown => self.adjust_exposure(false),
+
+            // Inspection modes.
+            Action::InspectShaded => self.set_inspection(InspectionMode::Shaded, "Shaded"),
+            Action::InspectMaterialId => {
+                self.set_inspection(InspectionMode::MaterialId, "Material ID");
+            }
+            Action::InspectUvMap => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
                 if pds.pane_mode == PaneMode::UvMap {
                     pds.pane_mode = PaneMode::Scene3D;
@@ -416,57 +369,64 @@ impl State {
                     self.gui.set_toast("UV Map", ToastSeverity::Success);
                 }
             }
-            KeyCode::Digit4 => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.pane_mode = PaneMode::Scene3D;
-                pds.inspection_mode = InspectionMode::TexelDensity;
-                self.gui
-                    .set_toast("Inspection: Texel Density", ToastSeverity::Success);
+            Action::InspectTexelDensity => {
+                self.set_inspection(InspectionMode::TexelDensity, "Texel Density");
             }
-            KeyCode::Digit5 => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.pane_mode = PaneMode::Scene3D;
-                pds.inspection_mode = InspectionMode::Depth;
-                self.gui
-                    .set_toast("Inspection: Depth", ToastSeverity::Success);
+            Action::InspectDepth => self.set_inspection(InspectionMode::Depth, "Depth"),
+            Action::InspectOverdraw => self.set_inspection(InspectionMode::Overdraw, "Overdraw"),
+            Action::InspectAoPreview => {
+                self.set_inspection(InspectionMode::AoPreview, "AO Preview");
             }
-            KeyCode::Digit6 => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.pane_mode = PaneMode::Scene3D;
-                pds.inspection_mode = InspectionMode::Overdraw;
-                self.gui
-                    .set_toast("Inspection: Overdraw", ToastSeverity::Success);
+
+            // Capture and review.
+            Action::Screenshot => {
+                self.capture_requested = true;
+                self.screenshot_expand_review = false;
             }
-            KeyCode::Digit7 => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.pane_mode = PaneMode::Scene3D;
-                pds.inspection_mode = InspectionMode::AoPreview;
-                self.gui
-                    .set_toast("Inspection: AO Preview", ToastSeverity::Success);
-            }
-            KeyCode::F1 => self.set_view_layout(ViewLayout::Single),
-            KeyCode::F2 => self.set_view_layout(ViewLayout::SplitVertical),
-            KeyCode::F3 => self.set_view_layout(ViewLayout::SplitHorizontal),
-            KeyCode::F4 => self.set_view_layout(ViewLayout::Quad),
-            KeyCode::F5 => self.set_view_layout(ViewLayout::ThreeLeftBig),
-            // Debug-build-only: toggle the two multi-object dev cubes
-            // (the multi-object render harness; see state/dev.rs).
+            Action::ToggleReviewMode => self.toggle_review_mode(),
+
             #[cfg(debug_assertions)]
-            KeyCode::F9 => self.toggle_dev_objects(),
-            // Debug-build-only: toggle a synthesized environment through
-            // the real SetEnvironment op with no document open. F8 rather
-            // than F10, which the window claims for the menu bar.
+            Action::DevObjects => self.toggle_dev_objects(),
             #[cfg(debug_assertions)]
-            KeyCode::F8 => self.toggle_dev_environment(),
-            _ => {
-                if let Some(key) = to_camera_key(code) {
-                    self.release_look_through_for_gesture();
-                    self.for_each_target_cam(|cam| {
-                        cam.handle_key(key, is_pressed);
-                    });
-                }
-            }
+            Action::DevEnvironment => self.toggle_dev_environment(),
         }
+    }
+
+    fn frame_standard_view(&mut self, view: StandardView) {
+        let bounds = self.scene_bounds();
+        self.release_look_through_for_gesture();
+        self.for_each_target_cam(|cam| {
+            solarxy_host::cameras::reset_to_view(cam, &bounds, view);
+        });
+    }
+
+    fn set_inspection(&mut self, mode: InspectionMode, label: &str) {
+        let pds = &mut self.view.pane_settings[self.view.active_pane];
+        pds.pane_mode = PaneMode::Scene3D;
+        pds.inspection_mode = mode;
+        self.gui
+            .set_toast(&format!("Inspection: {label}"), ToastSeverity::Success);
+    }
+
+    /// The UV pane's overlap toggle, which sits on the projection keys.
+    ///
+    /// `O` and `Shift+O` both land here first and neither reaches its own
+    /// meaning inside a UV pane, which is what the shell has always done.
+    /// Section 4.4 moves the toggle onto the pane's Display menu, and that
+    /// is where this goes.
+    fn toggle_uv_overlap_in_a_uv_pane(&mut self) -> bool {
+        let pds = &mut self.view.pane_settings[self.view.active_pane];
+        if pds.pane_mode != PaneMode::UvMap {
+            return false;
+        }
+        pds.show_uv_overlap = !pds.show_uv_overlap;
+        let on = pds.show_uv_overlap;
+        if on {
+            self.renderer.uv_overlap.stats_dirty = true;
+        }
+        let msg = if on { "Overlap: On" } else { "Overlap: Off" };
+        self.gui.set_toast(msg, ToastSeverity::Success);
+        true
     }
 
     pub(in crate::state) fn write_composite_params(&self) {
@@ -523,8 +483,13 @@ impl State {
         );
     }
 
-    fn toggle_ibl(&mut self) {
-        if self.input.modifiers.shift_key() {
+    /// Image-based lighting: `cycle` switches between diffuse and full,
+    /// where the plain form turns it off and on.
+    ///
+    /// This used to read the shift modifier itself, which is how `Shift+I`
+    /// stayed a real binding while appearing in no list of them.
+    fn set_ibl(&mut self, cycle: bool) {
+        if cycle {
             if self.renderer.ibl_res.ibl_mode != IblMode::Off {
                 self.renderer.ibl_res.ibl_mode = match self.renderer.ibl_res.ibl_mode {
                     IblMode::Diffuse => IblMode::Full,
@@ -589,130 +554,63 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::input::keymap::BINDINGS;
 
-    /// The window's claims, in full, beside the bare keys the map keeps.
-    /// Cmd+O and Cmd+1 used to run both dispatchers in every build, and
-    /// F10 both in a debug build, because the window never said it had
-    /// handled a press.
+    /// Exactly one thing runs a binding.
+    ///
+    /// The window's pre-pass, the map after the interface pass, or a panel
+    /// inside it. Two of them running one press is the collision the two
+    /// dispatch sites produced, and a binding none of them runs is a key
+    /// that silently does nothing. Asked through the real predicates, not
+    /// through the enum: a test that re-states the rule passes while the
+    /// rule is broken.
     #[test]
-    fn the_window_claims_these_keys_and_leaves_the_rest_to_the_map() {
-        let cases = [
-            (KeyCode::F10, false, false, Some(ShellKey::ToggleMenuBar)),
-            (KeyCode::F11, false, false, Some(ShellKey::ToggleFullscreen)),
-            (KeyCode::Tab, false, false, Some(ShellKey::ToggleSidebar)),
-            (
-                KeyCode::Backquote,
-                false,
-                false,
-                Some(ShellKey::ToggleConsole),
-            ),
-            (KeyCode::KeyO, true, false, Some(ShellKey::OpenModel)),
-            // Import HDRI's chord went with the Environment dialog.
-            (KeyCode::KeyO, true, true, None),
-            (KeyCode::KeyN, true, false, Some(ShellKey::NewScene)),
-            (KeyCode::KeyS, true, false, Some(ShellKey::Save)),
-            (KeyCode::KeyS, true, true, Some(ShellKey::SaveAs)),
-            (KeyCode::KeyZ, true, false, Some(ShellKey::Undo)),
-            (KeyCode::KeyZ, true, true, Some(ShellKey::Redo)),
-            (KeyCode::KeyY, true, false, Some(ShellKey::Redo)),
-            (KeyCode::KeyZ, false, false, None),
-            (KeyCode::KeyY, false, false, None),
-            (KeyCode::KeyC, true, false, Some(ShellKey::Copy)),
-            (KeyCode::KeyV, true, false, Some(ShellKey::Paste)),
-            (KeyCode::KeyD, true, false, Some(ShellKey::Duplicate)),
-            // Bare C screenshots, bare V spins the turntable, Shift+D is
-            // bloom: all the map's.
-            (KeyCode::KeyC, false, false, None),
-            (KeyCode::KeyV, false, false, None),
-            (KeyCode::KeyD, false, true, None),
-            // Bare N cycles normals and bare S sets shaded, both the map's.
-            (KeyCode::KeyN, false, false, None),
-            (KeyCode::KeyS, false, false, None),
-            (KeyCode::KeyS, false, true, None),
-            (KeyCode::Digit1, true, false, Some(ShellKey::ToggleViewport)),
-            // The bare keys belong to the map: projection, overlap, shaded.
-            (KeyCode::KeyO, false, false, None),
-            (KeyCode::KeyO, false, true, None),
-            (KeyCode::Digit1, false, false, None),
-            // The developer harness keys are the map's, debug builds only.
-            (KeyCode::F8, false, false, None),
-            (KeyCode::F9, false, false, None),
-            // The explicit cook is a chord; bare Enter belongs to whatever
-            // has focus.
-            (KeyCode::Enter, true, false, Some(ShellKey::CookNow)),
-            (KeyCode::NumpadEnter, true, false, Some(ShellKey::CookNow)),
-            (KeyCode::Enter, false, false, None),
-        ];
-        for (code, cmd, shift, expected) in cases {
+    fn exactly_one_dispatcher_runs_each_binding() {
+        for binding in BINDINGS {
+            let runs = u8::from(window_claims(binding, false))
+                + u8::from(map_runs(binding))
+                + u8::from(binding.claim == Claim::Panel);
             assert_eq!(
-                shell_key(code, cmd, shift, false, false),
-                expected,
-                "{code:?} cmd={cmd} shift={shift}"
+                runs,
+                1,
+                "{} is run by {runs} dispatchers",
+                binding.action.id()
             );
         }
     }
 
-    /// Tab belongs to the sidebar everywhere except over the node
-    /// canvas, where it belongs to the palette.
+    /// Every binding the table declares has an arm that runs it.
     ///
-    /// The one claim decided by where the pointer is rather than by what
-    /// is focused. Without it the window takes Tab before egui sees the
-    /// press and the palette never opens; with it the sidebar keeps the
-    /// key everywhere a user is not looking at a graph.
+    /// The match in `run_action` is exhaustive, so this cannot fail at
+    /// runtime; it is here because the *reverse* can, and did: a binding
+    /// whose behaviour hid inside a helper reading a modifier appeared in no
+    /// list of bindings at all. The count is what a reader checks against the
+    /// reference.
     #[test]
-    fn tab_is_the_sidebars_until_the_pointer_is_over_the_canvas() {
-        assert_eq!(
-            shell_key(KeyCode::Tab, false, false, false, false),
-            Some(ShellKey::ToggleSidebar)
-        );
-        assert_eq!(
-            shell_key(KeyCode::Tab, false, false, false, true),
-            None,
-            "over the canvas the window must not claim it"
-        );
-        // And a focused field still keeps it, wherever the pointer is.
-        assert_eq!(shell_key(KeyCode::Tab, false, false, true, false), None);
-        // A focused field also keeps its own undo and redo.
-        assert_eq!(shell_key(KeyCode::KeyZ, true, false, true, false), None);
-        assert_eq!(shell_key(KeyCode::KeyZ, true, true, true, false), None);
-        assert_eq!(shell_key(KeyCode::KeyY, true, false, true, false), None);
-        assert_eq!(shell_key(KeyCode::KeyC, true, false, true, false), None);
-        assert_eq!(shell_key(KeyCode::KeyV, true, false, true, false), None);
-        assert_eq!(shell_key(KeyCode::KeyD, true, false, true, false), None);
-        assert_eq!(shell_key(KeyCode::Tab, false, false, true, true), None);
-
-        // Nothing else changes with the pointer.
-        assert_eq!(
-            shell_key(KeyCode::F10, false, false, false, true),
-            Some(ShellKey::ToggleMenuBar)
-        );
-        assert_eq!(
-            shell_key(KeyCode::Backquote, false, false, false, true),
-            Some(ShellKey::ToggleConsole)
-        );
+    fn every_declared_binding_is_distinct_from_the_camera_keys() {
+        for binding in BINDINGS {
+            let chord = Chord::parse(binding.keys).expect("parses");
+            assert!(
+                to_camera_key(chord.code).is_none(),
+                "{} is bound to an arrow, which is a held gesture rather than a command",
+                binding.action.id()
+            );
+        }
     }
 
-    /// A focused text field keeps the keys it could be typing into, and the
-    /// function keys and chords stay global.
     #[test]
-    fn a_focused_text_field_keeps_its_typeable_keys() {
-        assert_eq!(shell_key(KeyCode::Tab, false, false, true, false), None);
-        assert_eq!(
-            shell_key(KeyCode::Backquote, false, false, true, false),
-            None
-        );
-        assert_eq!(shell_key(KeyCode::Digit1, true, false, true, false), None);
-        assert_eq!(
-            shell_key(KeyCode::F10, false, false, true, false),
-            Some(ShellKey::ToggleMenuBar)
-        );
-        assert_eq!(
-            shell_key(KeyCode::F11, false, false, true, false),
-            Some(ShellKey::ToggleFullscreen)
-        );
-        assert_eq!(
-            shell_key(KeyCode::KeyO, true, false, true, false),
-            Some(ShellKey::OpenModel)
-        );
+    fn a_claim_is_suppressed_while_typing_only_when_the_table_says_so() {
+        let claim_of = |keys: &str| {
+            BINDINGS
+                .iter()
+                .find(|b| b.keys == keys)
+                .map(|b| (window_claims(b, false), window_claims(b, true)))
+        };
+        // A chord a focused field has no use for stays global.
+        assert_eq!(claim_of("mod+s"), Some((true, true)));
+        // The field keeps its own undo.
+        assert_eq!(claim_of("mod+z"), Some((true, false)));
+        // The interface sees a bare key first, whatever has focus.
+        assert_eq!(claim_of("g"), Some((false, false)));
     }
 }
