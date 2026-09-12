@@ -48,10 +48,13 @@ mod settings;
 mod theme;
 mod widgets;
 
+/// The platform's command modifier, as a reader sees it. Read by the binding
+/// table's display formatter as well as the menus, so the two cannot spell it
+/// differently.
 #[cfg(target_os = "macos")]
-const MOD: &str = "\u{2318}";
+pub(crate) const MOD: &str = "\u{2318}";
 #[cfg(not(target_os = "macos"))]
-const MOD: &str = "Ctrl";
+pub(crate) const MOD: &str = "Ctrl";
 
 pub use chrome::overlays::ToastSeverity;
 pub use renderer::EguiRenderer;

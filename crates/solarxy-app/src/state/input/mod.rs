@@ -13,6 +13,7 @@
 
 mod dialogs;
 mod keyboard;
+pub(crate) mod keymap;
 mod pointer;
 
 pub(crate) use keyboard::{ShellKey, shell_key};
