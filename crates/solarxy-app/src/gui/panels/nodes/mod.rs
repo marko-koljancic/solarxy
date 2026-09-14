@@ -284,30 +284,7 @@ pub(in crate::gui) fn draw_nodes_content(
         state.reset();
     }
 
-    // Cycling the routing is a canvas-scoped binding rather than a global
-    // one: the same key types an `s` anywhere a field has focus, so it is
-    // claimed only while the pointer is over this panel and nothing is
-    // taking text.
-    if over
-        && ui
-            .ctx()
-            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::S))
-    {
-        intents.panel(PanelIntent::Canvas(CanvasAction::CycleRouting));
-    }
-
-    // The info card, from the toolbar's button and from `I` over the
-    // canvas, opens on the selection's last node; the radial opens it on
-    // the node under the pointer.
-    if over
-        && state.info.is_none()
-        && ui
-            .ctx()
-            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::I))
-        && let Ok(graph) = doc.graph(*ctx)
-    {
-        state.info = graph.selection.last().copied();
-    }
+    drive_canvas_keys(ui, doc, registry, ctx, state, over, intents);
     apply_note(note, *ctx, doc, state, intents);
     draw_note_editor(ui, doc, *ctx, state, to_screen, intents, theme);
     draw_rename(ui, doc, registry, *ctx, state, to_screen, intents, theme);
@@ -460,6 +437,88 @@ fn apply_chrome_request(
         state.info = graph.selection.last().copied();
     }
     state.request_view(request.zoom, request.fit);
+}
+
+/// The canvas-scoped bindings, claimed here rather than by a dispatcher.
+///
+/// Every one of them is declared in `state/input/keymap.rs` with the canvas
+/// scope, and every one is claimed only while the pointer is over this panel
+/// and nothing is taking text, which is that scope enforced at the one place
+/// that knows where the pointer is inside the canvas. The same keys type
+/// letters anywhere a field has focus.
+///
+/// They dispatch through the ring's operations and the toolbar's request
+/// rather than through their own arms, so a key and the control beside it
+/// cannot come to mean different things.
+fn drive_canvas_keys(
+    ui: &egui::Ui,
+    doc: &solarxy_graph::document::Document,
+    registry: &solarxy_graph::registry::Registry,
+    ctx: &mut GraphContext,
+    state: &mut CanvasState,
+    over: bool,
+    intents: &mut Intents,
+) {
+    if !over {
+        return;
+    }
+    let pressed = |key: egui::Key| {
+        ui.ctx()
+            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, key))
+    };
+
+    if pressed(egui::Key::S) {
+        intents.panel(PanelIntent::Canvas(CanvasAction::CycleRouting));
+    }
+
+    // The toolbar's own request, so a key and its button are one path.
+    let mut request = chrome::ChromeRequest::default();
+    if pressed(egui::Key::G) {
+        request.toggled = Some(chrome::Toggle::Grid);
+    }
+    if pressed(egui::Key::M) {
+        request.toggled = Some(chrome::Toggle::Minimap);
+    }
+    if pressed(egui::Key::C) {
+        request.toggled = Some(chrome::Toggle::Controls);
+    }
+    request.layout = pressed(egui::Key::L);
+    request.fit = pressed(egui::Key::F);
+    if request != chrome::ChromeRequest::default() {
+        apply_chrome_request(request, doc, registry, *ctx, state, intents);
+    }
+
+    // The ring's operations, on the selection's last node. The ring itself
+    // acts on the node under the pointer, which is why this resolves its own
+    // target rather than borrowing one.
+    let Some(node) = doc
+        .graph(*ctx)
+        .ok()
+        .and_then(|g| g.selection.last().copied())
+    else {
+        return;
+    };
+    let wedge = if pressed(egui::Key::B) {
+        Some(radial::Wedge::Bypass)
+    } else if pressed(egui::Key::E) {
+        Some(radial::Wedge::DisplayOrVisibility)
+    } else if pressed(egui::Key::F2) {
+        Some(radial::Wedge::Rename)
+    } else if state.info.is_none() && pressed(egui::Key::I) {
+        Some(radial::Wedge::Info)
+    } else {
+        None
+    };
+    let ctx_now = *ctx;
+    apply_wedge(
+        wedge.map(|w| (w, node)),
+        doc,
+        registry,
+        ctx_now,
+        state,
+        ctx,
+        intents,
+    );
 }
 
 /// Turn a list row's action into the same thing the ring would do.

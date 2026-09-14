@@ -91,6 +91,8 @@ pub(crate) enum Action {
     OpenScene,
     Save,
     SaveAs,
+    ShowShortcuts,
+    OpenPreferences,
     // Edit
     Undo,
     Redo,
@@ -99,64 +101,44 @@ pub(crate) enum Action {
     Paste,
     Duplicate,
     CookNow,
-    // Chrome
-    ToggleSidebar,
+    // The node canvas, every one of them consumed by the node panel.
+    Bypass,
     OpenNodePalette,
-    ToggleMenuBar,
-    ToggleFullscreen,
-    ToggleConsole,
-    ToggleViewportPanel,
-    // Framing and views
-    FitView,
-    ViewTop,
-    ViewFront,
-    ViewLeft,
-    ViewRight,
-    ProjectionPerspective,
-    ProjectionOrthographic,
-    LinkCameras,
-    // Pane layouts
+    DisplayFlag,
+    Rename,
+    NodeInfo,
+    CanvasGrid,
+    CanvasMinimap,
+    CanvasControls,
+    AutoLayout,
+    EdgeStyle,
+    CanvasFit,
+    // Inspection
+    InspectShaded,
+    InspectMaterialId,
+    ToggleUvPane,
+    InspectTexelDensity,
+    InspectDepth,
+    InspectOverdraw,
+    InspectAoPreview,
+    // Viewport and layout
     LayoutSingle,
     LayoutSplitVertical,
     LayoutSplitHorizontal,
     LayoutQuad,
     LayoutThreeLeftBig,
-    // Display and overlays
-    ToggleGrid,
-    ToggleAxisGizmo,
-    ToggleLocalAxes,
-    CycleBackground,
-    CycleBounds,
-    CycleNormals,
-    CycleUvMode,
-    ToggleTurntable,
-    ToggleValidationOverlay,
-    // Shading and post
-    CycleViewMode,
-    CycleLineWeight,
-    ToggleGhosted,
-    SetShaded,
-    ToggleMaterialOverride,
-    NextMaterialOverride,
-    ToggleIbl,
-    CycleIblMode,
-    LockLights,
-    ToggleToneMode,
-    ToggleBloom,
-    ToggleSsao,
-    ExposureUp,
-    ExposureDown,
-    // Inspection modes
-    InspectShaded,
-    InspectMaterialId,
-    InspectUvMap,
-    InspectTexelDensity,
-    InspectDepth,
-    InspectOverdraw,
-    InspectAoPreview,
-    // Capture and review
+    FitView,
     Screenshot,
+    ViewTop,
+    ViewFront,
+    ViewLeft,
+    ViewBottom,
+    ProjectionPerspective,
+    ProjectionOrthographic,
+    // Review
     ToggleReviewMode,
+    ToggleReviewPanel,
+    ReviewCancel,
     // Debug harness, debug builds only
     #[cfg(debug_assertions)]
     DevObjects,
@@ -173,6 +155,8 @@ impl Action {
             Self::OpenScene => "open-scene",
             Self::Save => "save",
             Self::SaveAs => "save-as",
+            Self::ShowShortcuts => "shortcuts",
+            Self::OpenPreferences => "preferences",
             Self::Undo => "undo",
             Self::Redo => "redo",
             Self::RedoAlt => "redo-alt",
@@ -180,57 +164,40 @@ impl Action {
             Self::Paste => "paste",
             Self::Duplicate => "duplicate",
             Self::CookNow => "cook",
-            Self::ToggleSidebar => "toggle-sidebar",
+            Self::Bypass => "bypass",
             Self::OpenNodePalette => "palette",
-            Self::ToggleMenuBar => "toggle-menu-bar",
-            Self::ToggleFullscreen => "toggle-fullscreen",
-            Self::ToggleConsole => "toggle-console",
-            Self::ToggleViewportPanel => "toggle-viewport-panel",
-            Self::FitView => "fit-view",
+            Self::DisplayFlag => "display-flag",
+            Self::Rename => "rename",
+            Self::NodeInfo => "node-info",
+            Self::CanvasGrid => "flow-grid",
+            Self::CanvasMinimap => "flow-minimap",
+            Self::CanvasControls => "flow-controls",
+            Self::AutoLayout => "layout-cycle",
+            Self::EdgeStyle => "edge-style-cycle",
+            Self::CanvasFit => "canvas-fit",
+            Self::InspectShaded => "inspect-shaded",
+            Self::InspectMaterialId => "inspect-material",
+            Self::ToggleUvPane => "uv-pane-toggle",
+            Self::InspectTexelDensity => "inspect-texel",
+            Self::InspectDepth => "inspect-depth",
+            Self::InspectOverdraw => "inspect-overdraw",
+            Self::InspectAoPreview => "inspect-ao",
+            Self::LayoutSingle => "layout-single",
+            Self::LayoutSplitVertical => "layout-split-v",
+            Self::LayoutSplitHorizontal => "layout-split-h",
+            Self::LayoutQuad => "layout-quad",
+            Self::LayoutThreeLeftBig => "layout-three",
+            Self::FitView => "fit",
+            Self::Screenshot => "screenshot",
             Self::ViewTop => "view-top",
             Self::ViewFront => "view-front",
             Self::ViewLeft => "view-left",
-            Self::ViewRight => "view-right",
-            Self::ProjectionPerspective => "perspective",
-            Self::ProjectionOrthographic => "orthographic",
-            Self::LinkCameras => "link-cameras",
-            Self::LayoutSingle => "layout-single",
-            Self::LayoutSplitVertical => "layout-split-vertical",
-            Self::LayoutSplitHorizontal => "layout-split-horizontal",
-            Self::LayoutQuad => "layout-quad",
-            Self::LayoutThreeLeftBig => "layout-three-left-big",
-            Self::ToggleGrid => "grid",
-            Self::ToggleAxisGizmo => "axis-gizmo",
-            Self::ToggleLocalAxes => "local-axes",
-            Self::CycleBackground => "background-cycle",
-            Self::CycleBounds => "bounds-cycle",
-            Self::CycleNormals => "normals-cycle",
-            Self::CycleUvMode => "uv-mode-cycle",
-            Self::ToggleTurntable => "turntable",
-            Self::ToggleValidationOverlay => "validation-overlay",
-            Self::CycleViewMode => "view-mode-cycle",
-            Self::CycleLineWeight => "line-weight-cycle",
-            Self::ToggleGhosted => "ghosted",
-            Self::SetShaded => "shaded",
-            Self::ToggleMaterialOverride => "material-override",
-            Self::NextMaterialOverride => "material-override-next",
-            Self::ToggleIbl => "ibl",
-            Self::CycleIblMode => "ibl-mode-cycle",
-            Self::LockLights => "lock-lights",
-            Self::ToggleToneMode => "tone-mode",
-            Self::ToggleBloom => "bloom",
-            Self::ToggleSsao => "ssao",
-            Self::ExposureUp => "exposure-up",
-            Self::ExposureDown => "exposure-down",
-            Self::InspectShaded => "inspect-shaded",
-            Self::InspectMaterialId => "inspect-material-id",
-            Self::InspectUvMap => "inspect-uv-map",
-            Self::InspectTexelDensity => "inspect-texel-density",
-            Self::InspectDepth => "inspect-depth",
-            Self::InspectOverdraw => "inspect-overdraw",
-            Self::InspectAoPreview => "inspect-ao-preview",
-            Self::Screenshot => "screenshot",
+            Self::ViewBottom => "view-bottom",
+            Self::ProjectionPerspective => "view-perspective",
+            Self::ProjectionOrthographic => "view-ortho",
             Self::ToggleReviewMode => "review-mode",
+            Self::ToggleReviewPanel => "review-panel",
+            Self::ReviewCancel => "review-cancel",
             #[cfg(debug_assertions)]
             Self::DevObjects => "dev-objects",
             #[cfg(debug_assertions)]
@@ -239,6 +206,7 @@ impl Action {
     }
 }
 
+/// A pressed key with its modifiers resolved for this platform.
 /// When the window takes a press out from under the interface.
 ///
 /// This is what the split between the window's pre-pass and the key map used
@@ -312,14 +280,22 @@ const fn claimed(
     claim: Claim,
 ) -> Binding {
     Binding {
-        action,
-        keys,
-        scope: KeyScope::Global,
-        group,
-        description,
-        note: None,
         claim,
-        listed: true,
+        ..b(action, keys, KeyScope::Global, group, description)
+    }
+}
+
+/// A binding a panel consumes during the interface pass.
+const fn panel(
+    action: Action,
+    keys: &'static str,
+    scope: KeyScope,
+    group: KeyGroup,
+    description: &'static str,
+) -> Binding {
+    Binding {
+        claim: Claim::Panel,
+        ..b(action, keys, scope, group, description)
     }
 }
 
@@ -330,11 +306,18 @@ const fn with_note(mut binding: Binding, note: &'static str) -> Binding {
 
 /// Every binding the shell dispatches.
 ///
-/// These are the desktop's bindings as they stand. Adopting the browser's set
-/// is a change to this data and nothing else, which is the point of having it
-/// in one place.
+/// This is the browser's table entry for entry, minus the eleven bindings
+/// whose capability the desktop has not built yet, and plus the four file
+/// chords the browser advertises in its menus without binding at all. Both
+/// sets are named in the drift test with their reason, so the list of
+/// differences shrinks to nothing as the release proceeds.
+///
+/// Descriptions are the browser's verbatim wherever both shells have the
+/// binding, because the drift test compares them. Notes are not compared: a
+/// note says what a key means *elsewhere*, and elsewhere differs.
 pub(crate) static BINDINGS: &[Binding] = &[
-    // File
+    // File. The first four have no counterpart in the browser's table,
+    // which advertises their hints in its menus and binds none of them.
     claimed(
         Action::NewScene,
         "mod+n",
@@ -353,7 +336,7 @@ pub(crate) static BINDINGS: &[Binding] = &[
         Action::Save,
         "mod+s",
         KeyGroup::File,
-        "Save the scene",
+        "Save the scene (.slxy)",
         Claim::Always,
     ),
     claimed(
@@ -363,7 +346,23 @@ pub(crate) static BINDINGS: &[Binding] = &[
         "Save the scene as\u{2026}",
         Claim::Always,
     ),
-    // Edit
+    b(
+        Action::ShowShortcuts,
+        "?",
+        KeyScope::Global,
+        KeyGroup::File,
+        "Show keyboard shortcuts",
+    ),
+    // The preferences modal claims its own chord during the pass, where
+    // the dialog state lives.
+    panel(
+        Action::OpenPreferences,
+        "mod+,",
+        KeyScope::Global,
+        KeyGroup::File,
+        "Open preferences",
+    ),
+    // Edit.
     claimed(
         Action::Undo,
         "mod+z",
@@ -378,138 +377,266 @@ pub(crate) static BINDINGS: &[Binding] = &[
         "Redo",
         Claim::UnlessTyping,
     ),
-    with_note(
-        claimed(
-            Action::RedoAlt,
-            "mod+y",
-            KeyGroup::Edit,
-            "Redo",
-            Claim::UnlessTyping,
-        ),
-        "The alternate redo chord",
+    claimed(
+        Action::RedoAlt,
+        "mod+y",
+        KeyGroup::Edit,
+        "Redo",
+        Claim::UnlessTyping,
     ),
     claimed(
         Action::Copy,
         "mod+c",
         KeyGroup::Edit,
-        "Copy the selected nodes",
+        "Copy selection",
         Claim::UnlessTyping,
     ),
     claimed(
         Action::Paste,
         "mod+v",
         KeyGroup::Edit,
-        "Paste nodes",
+        "Paste",
         Claim::UnlessTyping,
     ),
     claimed(
         Action::Duplicate,
         "mod+d",
         KeyGroup::Edit,
-        "Duplicate the selected nodes",
+        "Duplicate selection",
         Claim::UnlessTyping,
     ),
     claimed(
         Action::CookNow,
         "mod+enter",
         KeyGroup::Edit,
-        "Cook now, in manual cook mode",
+        "Cook now (manual mode)",
         Claim::Always,
     ),
-    // Chrome
+    // The node canvas. Every one is consumed by the node panel, which is
+    // the surface that knows where the pointer is inside itself.
     with_note(
-        claimed(
-            Action::ToggleSidebar,
-            "tab",
-            KeyGroup::ViewportAndLayout,
-            "Show or hide the sidebar",
-            Claim::UnlessTyping,
+        panel(
+            Action::Bypass,
+            "b",
+            KeyScope::Canvas,
+            KeyGroup::NodeCanvas,
+            "Toggle bypass on selection",
         ),
-        "Over the node canvas, Tab opens the node palette",
+        "Over the viewport, B is the Bottom view",
     ),
-    // Declared in the canvas scope so the sidebar's global Tab does not
-    // shadow it. The node panel consumes the key itself during the pass.
     with_note(
-        Binding {
-            claim: Claim::Panel,
-            ..b(
-                Action::OpenNodePalette,
-                "tab",
-                KeyScope::Canvas,
-                KeyGroup::NodeCanvas,
-                "Open the node palette",
-            )
-        },
-        "Away from the canvas, Tab shows or hides the sidebar",
+        panel(
+            Action::OpenNodePalette,
+            "tab",
+            KeyScope::Global,
+            KeyGroup::NodeCanvas,
+            "Open the node palette",
+        ),
+        "When the canvas has focus",
     ),
-    claimed(
-        Action::ToggleMenuBar,
-        "f10",
-        KeyGroup::ViewportAndLayout,
-        "Show or hide the menu bar",
-        Claim::Always,
+    panel(
+        Action::DisplayFlag,
+        "e",
+        KeyScope::Canvas,
+        KeyGroup::NodeCanvas,
+        "Set the display flag on the selection (subflow)",
     ),
-    claimed(
-        Action::ToggleFullscreen,
-        "f11",
-        KeyGroup::ViewportAndLayout,
-        "Full screen",
-        Claim::Always,
+    panel(
+        Action::Rename,
+        "f2",
+        KeyScope::Canvas,
+        KeyGroup::NodeCanvas,
+        "Rename the first selected node (inline)",
     ),
-    claimed(
-        Action::ToggleConsole,
-        "`",
-        KeyGroup::ViewportAndLayout,
-        "Show or hide the console",
-        Claim::UnlessTyping,
+    with_note(
+        panel(
+            Action::NodeInfo,
+            "i",
+            KeyScope::Canvas,
+            KeyGroup::NodeCanvas,
+            "Show info for the selected node",
+        ),
+        "Ports, parameters and cook status; also on the hover radial",
     ),
-    claimed(
-        Action::ToggleViewportPanel,
-        "mod+1",
-        KeyGroup::ViewportAndLayout,
-        "Show or hide the viewport",
-        Claim::UnlessTyping,
+    panel(
+        Action::CanvasGrid,
+        "g",
+        KeyScope::Canvas,
+        KeyGroup::NodeCanvas,
+        "Toggle the canvas grid",
     ),
-    // Framing and views
+    panel(
+        Action::CanvasMinimap,
+        "m",
+        KeyScope::Canvas,
+        KeyGroup::NodeCanvas,
+        "Toggle the minimap",
+    ),
+    panel(
+        Action::CanvasControls,
+        "c",
+        KeyScope::Canvas,
+        KeyGroup::NodeCanvas,
+        "Toggle the zoom controls",
+    ),
+    // One layout engine here rather than the browser's two, which is a
+    // decision about payload budget and not about the key.
+    panel(
+        Action::AutoLayout,
+        "l",
+        KeyScope::Canvas,
+        KeyGroup::NodeCanvas,
+        "Auto-layout the graph",
+    ),
+    panel(
+        Action::EdgeStyle,
+        "s",
+        KeyScope::Canvas,
+        KeyGroup::NodeCanvas,
+        "Cycle the connection style",
+    ),
+    panel(
+        Action::CanvasFit,
+        "f",
+        KeyScope::Canvas,
+        KeyGroup::NodeCanvas,
+        "Fit the node graph in the pane",
+    ),
+    // Inspection.
     b(
-        Action::FitView,
-        "h",
-        KeyScope::Global,
+        Action::InspectShaded,
+        "1",
+        KeyScope::Viewport,
+        KeyGroup::Inspection,
+        "Inspection: Shaded",
+    ),
+    b(
+        Action::InspectMaterialId,
+        "2",
+        KeyScope::Viewport,
+        KeyGroup::Inspection,
+        "Inspection: Material ID",
+    ),
+    b(
+        Action::ToggleUvPane,
+        "3",
+        KeyScope::Viewport,
+        KeyGroup::Inspection,
+        "Toggle the UV pane",
+    ),
+    b(
+        Action::InspectTexelDensity,
+        "4",
+        KeyScope::Viewport,
+        KeyGroup::Inspection,
+        "Inspection: Texel Density",
+    ),
+    b(
+        Action::InspectDepth,
+        "5",
+        KeyScope::Viewport,
+        KeyGroup::Inspection,
+        "Inspection: Depth",
+    ),
+    b(
+        Action::InspectOverdraw,
+        "6",
+        KeyScope::Viewport,
+        KeyGroup::Inspection,
+        "Inspection: Overdraw",
+    ),
+    b(
+        Action::InspectAoPreview,
+        "7",
+        KeyScope::Viewport,
+        KeyGroup::Inspection,
+        "Inspection: AO Preview",
+    ),
+    // Viewport and layout.
+    b(
+        Action::LayoutSingle,
+        "f1",
+        KeyScope::Viewport,
         KeyGroup::ViewportAndLayout,
-        "Frame the scene",
+        "Layout: Single",
+    ),
+    b(
+        Action::LayoutSplitVertical,
+        "f2",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Layout: Split Vertical",
+    ),
+    b(
+        Action::LayoutSplitHorizontal,
+        "f3",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Layout: Split Horizontal",
+    ),
+    b(
+        Action::LayoutQuad,
+        "f4",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Layout: Quad",
+    ),
+    b(
+        Action::LayoutThreeLeftBig,
+        "f5",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Layout: Three Left Big",
+    ),
+    with_note(
+        b(
+            Action::FitView,
+            "z",
+            KeyScope::Viewport,
+            KeyGroup::ViewportAndLayout,
+            "Fit view to the scene",
+        ),
+        "Moved from H; F is now the Front view",
+    ),
+    b(
+        Action::Screenshot,
+        "c",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Screenshot the active pane",
     ),
     b(
         Action::ViewTop,
         "t",
-        KeyScope::Global,
+        KeyScope::Viewport,
         KeyGroup::ViewportAndLayout,
-        "View from the top",
+        "View: Top",
     ),
     b(
         Action::ViewFront,
         "f",
-        KeyScope::Global,
+        KeyScope::Viewport,
         KeyGroup::ViewportAndLayout,
-        "View from the front",
+        "View: Front",
     ),
     b(
         Action::ViewLeft,
         "l",
-        KeyScope::Global,
+        KeyScope::Viewport,
         KeyGroup::ViewportAndLayout,
-        "View from the left",
+        "View: Left",
     ),
     b(
-        Action::ViewRight,
-        "r",
-        KeyScope::Global,
+        Action::ViewBottom,
+        "b",
+        KeyScope::Viewport,
         KeyGroup::ViewportAndLayout,
-        "View from the right",
+        "View: Bottom",
     ),
     b(
         Action::ProjectionPerspective,
         "p",
-        KeyScope::Global,
+        KeyScope::Viewport,
         KeyGroup::ViewportAndLayout,
         "Perspective projection",
     ),
@@ -517,288 +644,35 @@ pub(crate) static BINDINGS: &[Binding] = &[
         b(
             Action::ProjectionOrthographic,
             "o",
-            KeyScope::Global,
+            KeyScope::Viewport,
             KeyGroup::ViewportAndLayout,
             "Orthographic projection",
         ),
-        "In a UV pane, O toggles the overlap overlay",
+        "In a UV pane, O toggles the overlap display instead",
     ),
-    b(
-        Action::LinkCameras,
-        "mod+l",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Link the pane cameras, in a split layout",
-    ),
-    // Pane layouts
-    b(
-        Action::LayoutSingle,
-        "f1",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Single pane",
-    ),
-    b(
-        Action::LayoutSplitVertical,
-        "f2",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Split vertically",
-    ),
-    b(
-        Action::LayoutSplitHorizontal,
-        "f3",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Split horizontally",
-    ),
-    b(
-        Action::LayoutQuad,
-        "f4",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Four panes",
-    ),
-    b(
-        Action::LayoutThreeLeftBig,
-        "f5",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Three panes, one large",
-    ),
-    // Display and overlays
-    b(
-        Action::ToggleGrid,
-        "g",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Show or hide the grid",
-    ),
-    b(
-        Action::ToggleAxisGizmo,
-        "a",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Show or hide the axis gizmo",
-    ),
-    b(
-        Action::ToggleLocalAxes,
-        "shift+a",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Show or hide the local axes",
-    ),
-    b(
-        Action::CycleBackground,
-        "b",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Cycle the background",
-    ),
-    b(
-        Action::CycleBounds,
-        "shift+b",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Cycle the bounds display",
-    ),
-    b(
-        Action::CycleNormals,
-        "n",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Cycle the normals display",
-    ),
-    with_note(
-        b(
-            Action::CycleUvMode,
-            "u",
-            KeyScope::Global,
-            KeyGroup::Inspection,
-            "Cycle the UV overlay",
-        ),
-        "In a UV pane, U cycles the UV background",
-    ),
-    b(
-        Action::ToggleTurntable,
-        "v",
-        KeyScope::Global,
-        KeyGroup::Playback,
-        "Spin the turntable",
-    ),
-    b(
-        Action::ToggleValidationOverlay,
-        "shift+v",
-        KeyScope::Global,
-        KeyGroup::Review,
-        "Show or hide the validation overlay",
-    ),
-    // Shading and post
-    with_note(
-        b(
-            Action::CycleViewMode,
-            "w",
-            KeyScope::Global,
-            KeyGroup::Inspection,
-            "Cycle the shading mode",
-        ),
-        "In a ghosted pane, W toggles the ghosted wireframe",
-    ),
-    b(
-        Action::CycleLineWeight,
-        "shift+w",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Cycle the wireframe weight",
-    ),
-    b(
-        Action::ToggleGhosted,
-        "x",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Ghosted shading",
-    ),
-    b(
-        Action::SetShaded,
-        "s",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Shaded",
-    ),
-    b(
-        Action::ToggleMaterialOverride,
-        "m",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Clay override on or off",
-    ),
-    b(
-        Action::NextMaterialOverride,
-        "shift+m",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Next material override",
-    ),
-    b(
-        Action::ToggleIbl,
-        "i",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Image-based lighting on or off",
-    ),
-    b(
-        Action::CycleIblMode,
-        "shift+i",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Switch between diffuse and full image-based lighting",
-    ),
-    b(
-        Action::LockLights,
-        "shift+l",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Lock the lights to the scene",
-    ),
-    b(
-        Action::ToggleToneMode,
-        "shift+t",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Cycle the tone mapping",
-    ),
-    b(
-        Action::ToggleBloom,
-        "shift+d",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Bloom on or off",
-    ),
-    b(
-        Action::ToggleSsao,
-        "shift+o",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Ambient occlusion on or off",
-    ),
-    b(
-        Action::ExposureUp,
-        "e",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Exposure up",
-    ),
-    b(
-        Action::ExposureDown,
-        "shift+e",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Exposure down",
-    ),
-    // Inspection modes
-    b(
-        Action::InspectShaded,
-        "1",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Shaded",
-    ),
-    b(
-        Action::InspectMaterialId,
-        "2",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Material ID",
-    ),
-    b(
-        Action::InspectUvMap,
-        "3",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "UV map pane, on or off",
-    ),
-    b(
-        Action::InspectTexelDensity,
-        "4",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Texel density",
-    ),
-    b(
-        Action::InspectDepth,
-        "5",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Depth",
-    ),
-    b(
-        Action::InspectOverdraw,
-        "6",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Overdraw",
-    ),
-    b(
-        Action::InspectAoPreview,
-        "7",
-        KeyScope::Global,
-        KeyGroup::Inspection,
-        "Ambient occlusion preview",
-    ),
-    // Capture and review
-    b(
-        Action::Screenshot,
-        "c",
-        KeyScope::Global,
-        KeyGroup::ViewportAndLayout,
-        "Save a screenshot\u{2026}",
-    ),
+    // Review.
     b(
         Action::ToggleReviewMode,
         "shift+r",
+        KeyScope::Viewport,
+        KeyGroup::Review,
+        "Toggle review mode (click geometry to pin a note)",
+    ),
+    b(
+        Action::ToggleReviewPanel,
+        "n",
         KeyScope::Global,
         KeyGroup::Review,
-        "Review mode on or off",
+        "Toggle the review panel",
+    ),
+    // The escape ladder runs inside the interface pass, where the state
+    // each rung cancels lives.
+    panel(
+        Action::ReviewCancel,
+        "escape",
+        KeyScope::Global,
+        KeyGroup::Review,
+        "Cancel the note editor, the re-anchor, or review mode",
     ),
     // The debug harness. Dispatched, so it is declared, but not a user
     // binding and therefore not in the reference.
@@ -826,7 +700,6 @@ pub(crate) static BINDINGS: &[Binding] = &[
     },
 ];
 
-/// A pressed key with its modifiers resolved for this platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Chord {
     pub code: KeyCode,
@@ -1041,56 +914,74 @@ mod tests {
         }
     }
 
-    /// Tab is the sidebar's away from the canvas and the palette's over it.
+    /// A letter can mean one thing over the canvas and another over the
+    /// viewport, and that is what makes the map fit in one keyboard.
     ///
-    /// This is the one binding the shell already resolved by pointer
-    /// position, and the scope column is what generalizes it. Without the
-    /// canvas entry the global one shadows it through the fallback and the
-    /// palette stops opening, which is a regression the scope rewrite
-    /// introduced and this pins.
+    /// Each of these resolved to a single global meaning before the browser's
+    /// table was adopted, so this is the shape of the change rather than a
+    /// detail of it.
     #[test]
-    fn tab_over_the_canvas_is_the_palette_and_not_the_sidebar() {
+    fn a_letter_can_mean_two_things_in_two_scopes() {
+        let both = [
+            ("b", Action::Bypass, Action::ViewBottom),
+            ("c", Action::CanvasControls, Action::Screenshot),
+            ("f", Action::CanvasFit, Action::ViewFront),
+            ("l", Action::AutoLayout, Action::ViewLeft),
+        ];
+        for (keys, canvas, viewport) in both {
+            let chord = Chord::parse(keys).expect("parses");
+            assert_eq!(
+                lookup(chord, KeyScope::Canvas).map(|b| b.action),
+                Some(canvas),
+                "{keys} over the canvas"
+            );
+            assert_eq!(
+                lookup(chord, KeyScope::Viewport).map(|b| b.action),
+                Some(viewport),
+                "{keys} over the viewport"
+            );
+        }
+    }
+
+    /// Two of the browser's double-bound letters have only one half here,
+    /// because the other half is a capability this release builds later.
+    ///
+    /// A scope with no binding resolves to nothing rather than falling back,
+    /// which is what stops a canvas key firing over the viewport by accident
+    /// once the second half arrives.
+    #[test]
+    fn a_letter_whose_other_half_is_unbuilt_resolves_in_one_scope_only() {
+        let rotate_tool = Chord::parse("e").expect("parses");
+        assert_eq!(
+            lookup(rotate_tool, KeyScope::Canvas).map(|b| b.action),
+            Some(Action::DisplayFlag)
+        );
+        assert_eq!(
+            lookup(rotate_tool, KeyScope::Viewport).map(|b| b.action),
+            None
+        );
+
+        let floating_properties = Chord::parse("p").expect("parses");
+        assert_eq!(
+            lookup(floating_properties, KeyScope::Viewport).map(|b| b.action),
+            Some(Action::ProjectionPerspective)
+        );
+        assert_eq!(
+            lookup(floating_properties, KeyScope::Canvas).map(|b| b.action),
+            None
+        );
+    }
+
+    /// Tab is the palette's, declared globally with a note, as the browser
+    /// declares it. The sidebar's Tab is gone with the browser's map.
+    #[test]
+    fn tab_is_the_palette_in_every_scope() {
         let tab = Chord::parse("tab").expect("parses");
-        assert_eq!(
-            lookup(tab, KeyScope::Canvas).map(|b| b.action),
-            Some(Action::OpenNodePalette)
-        );
-        assert_eq!(
-            lookup(tab, KeyScope::Global).map(|b| b.action),
-            Some(Action::ToggleSidebar)
-        );
-        assert_eq!(
-            lookup(tab, KeyScope::Viewport).map(|b| b.action),
-            Some(Action::ToggleSidebar),
-            "the viewport has no Tab of its own, so it falls back to the global one"
-        );
-    }
-
-    #[test]
-    fn a_scoped_lookup_falls_back_to_the_global_scope() {
-        let grid = Chord::parse("g").expect("parses");
-        assert_eq!(
-            lookup(grid, KeyScope::Global).map(|b| b.action),
-            Some(Action::ToggleGrid)
-        );
-        assert_eq!(
-            lookup(grid, KeyScope::Canvas).map(|b| b.action),
-            Some(Action::ToggleGrid)
-        );
-        assert_eq!(
-            lookup(grid, KeyScope::Viewport).map(|b| b.action),
-            Some(Action::ToggleGrid)
-        );
-    }
-
-    #[test]
-    fn a_menu_reads_its_hint_from_the_table() {
-        let save = hint(Action::Save).expect("save is bound");
-        assert!(
-            save.ends_with("+S"),
-            "{save} does not look like the save chord"
-        );
-        assert_eq!(hint(Action::ToggleGrid).as_deref(), Some("G"));
+        for scope in [KeyScope::Global, KeyScope::Canvas, KeyScope::Viewport] {
+            let found = lookup(tab, scope).expect("tab is bound");
+            assert_eq!(found.action, Action::OpenNodePalette);
+            assert_eq!(found.claim, Claim::Panel);
+        }
     }
 
     /// The debug harness is dispatched, so it is declared, but a user-facing

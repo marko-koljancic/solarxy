@@ -16,13 +16,10 @@ use winit::keyboard::KeyCode;
 use crate::gui::ToastSeverity;
 use solarxy_host::cameras::StandardView;
 use solarxy_renderer::input::CameraKey;
-use solarxy_core::preferences::{
-    BackgroundMode, BuiltinBg, CustomBackground, IblMode, InspectionMode, MaterialOverride,
-    NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
-};
+use solarxy_core::preferences::{InspectionMode, PaneMode, ProjectionMode};
 
 use super::keymap::{self, Action, Binding, Chord, Claim, KeyScope};
-use crate::state::{BoundsMode, CompositeLook, State, ViewLayout};
+use crate::state::{CompositeLook, State, ViewLayout};
 
 /// winit-to-renderer input mapping: the renderer is windowing-agnostic and
 /// consumes its own [`CameraKey`] / [`PointerButton`] enums.
@@ -34,19 +31,6 @@ fn to_camera_key(code: KeyCode) -> Option<CameraKey> {
         KeyCode::ArrowRight => Some(CameraKey::ArrowRight),
         _ => None,
     }
-}
-
-/// The ordered background list the `B` key cycles through: every builtin
-/// (skipping `HDRI Sky` until an HDRI is loaded) followed by every user
-/// custom background.
-fn background_cycle_options(customs: &[CustomBackground], has_hdri: bool) -> Vec<BackgroundMode> {
-    let mut options: Vec<BackgroundMode> = BuiltinBg::ALL
-        .iter()
-        .filter(|b| has_hdri || **b != BuiltinBg::HdriSky)
-        .map(|b| BackgroundMode::Builtin(*b))
-        .collect();
-    options.extend(customs.iter().map(|c| BackgroundMode::Custom(c.id)));
-    options
 }
 
 /// Which scope a press resolves in, decided by where the pointer is.
@@ -159,6 +143,7 @@ impl State {
             Action::SaveAs => {
                 self.save_document_as();
             }
+            Action::ShowShortcuts => self.gui.open_shortcuts_modal(),
             Action::Undo => self.undo(),
             Action::Redo | Action::RedoAlt => self.redo(),
             Action::Copy => self.copy_selection(),
@@ -166,198 +151,31 @@ impl State {
             Action::Duplicate => self.duplicate_selection(),
             Action::CookNow => self.cook_now(),
 
-            // Chrome.
-            Action::ToggleSidebar => self.gui.toggle_tab(crate::gui::SolarxyTab::Sidebar),
-            // Claimed by no dispatcher: the node panel consumes Tab during
-            // the interface pass, where the pointer position inside the
-            // canvas is known. Declared so the sidebar's global Tab does not
-            // shadow it, and so the Add menu can show the key.
-            Action::OpenNodePalette => {}
-            Action::ToggleMenuBar => self.gui.menu_bar_visible = !self.gui.menu_bar_visible,
-            Action::ToggleFullscreen => self.toggle_fullscreen(),
-            Action::ToggleConsole => self.gui.toggle_tab(crate::gui::SolarxyTab::Console),
-            Action::ToggleViewportPanel => self.gui.toggle_tab(crate::gui::SolarxyTab::Viewport),
+            // Consumed by a panel during the interface pass, so no dispatcher
+            // reaches this. They are declared as actions because the
+            // reference lists them and the menus read their keys from here,
+            // and they are grouped rather than spelled out one empty arm at
+            // a time because they share one reason.
+            Action::OpenPreferences
+            | Action::OpenNodePalette
+            | Action::Bypass
+            | Action::DisplayFlag
+            | Action::Rename
+            | Action::NodeInfo
+            | Action::CanvasGrid
+            | Action::CanvasMinimap
+            | Action::CanvasControls
+            | Action::AutoLayout
+            | Action::EdgeStyle
+            | Action::CanvasFit
+            | Action::ReviewCancel => {}
 
-            // Framing and views.
-            Action::FitView => {
-                let bounds = self.scene_bounds();
-                self.release_look_through_for_gesture();
-                self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
-            }
-            Action::ViewTop => self.frame_standard_view(StandardView::Top),
-            Action::ViewFront => self.frame_standard_view(StandardView::Front),
-            Action::ViewLeft => self.frame_standard_view(StandardView::Left),
-            Action::ViewRight => self.frame_standard_view(StandardView::Right),
-            Action::ProjectionPerspective => {
-                self.release_look_through_for_gesture();
-                self.for_each_target_cam(|cam| cam.set_projection(ProjectionMode::Perspective));
-            }
-            Action::ProjectionOrthographic => {
-                if !self.toggle_uv_overlap_in_a_uv_pane() {
-                    self.release_look_through_for_gesture();
-                    self.for_each_target_cam(|cam| {
-                        cam.set_projection(ProjectionMode::Orthographic);
-                    });
-                }
-            }
-            Action::LinkCameras => {
-                if self.view.display.layout != ViewLayout::Single {
-                    self.view.cameras_linked = !self.view.cameras_linked;
-                    let msg = if self.view.cameras_linked {
-                        "Cameras linked"
-                    } else {
-                        "Cameras independent"
-                    };
-                    self.gui.set_toast(msg, ToastSeverity::Success);
-                }
-            }
-
-            // Pane layouts.
-            Action::LayoutSingle => self.set_view_layout(ViewLayout::Single),
-            Action::LayoutSplitVertical => self.set_view_layout(ViewLayout::SplitVertical),
-            Action::LayoutSplitHorizontal => self.set_view_layout(ViewLayout::SplitHorizontal),
-            Action::LayoutQuad => self.set_view_layout(ViewLayout::Quad),
-            Action::LayoutThreeLeftBig => self.set_view_layout(ViewLayout::ThreeLeftBig),
-
-            // Display and overlays.
-            Action::ToggleGrid => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.show_grid = !pds.show_grid;
-            }
-            Action::ToggleAxisGizmo => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.show_axis_gizmo = !pds.show_axis_gizmo;
-            }
-            Action::ToggleLocalAxes => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.show_local_axes = !pds.show_local_axes;
-                let msg = if pds.show_local_axes {
-                    "Local Axes: On"
-                } else {
-                    "Local Axes: Off"
-                };
-                self.gui.set_toast(msg, ToastSeverity::Success);
-            }
-            Action::CycleBackground => self.cycle_background(),
-            Action::CycleBounds => self.cycle_bounds_mode(),
-            Action::CycleNormals => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.normals_mode = match pds.normals_mode {
-                    NormalsMode::Off => NormalsMode::Face,
-                    NormalsMode::Face => NormalsMode::Vertex,
-                    NormalsMode::Vertex => NormalsMode::FaceAndVertex,
-                    NormalsMode::FaceAndVertex => NormalsMode::Off,
-                };
-            }
-            Action::CycleUvMode => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                if pds.pane_mode == PaneMode::UvMap {
-                    pds.uv_bg = pds.uv_bg.next();
-                    self.gui.set_toast(
-                        &format!("UV Background: {}", pds.uv_bg),
-                        ToastSeverity::Success,
-                    );
-                } else {
-                    pds.uv_mode = match pds.uv_mode {
-                        UvMode::Off => UvMode::Gradient,
-                        UvMode::Gradient => UvMode::Checker,
-                        UvMode::Checker => UvMode::Off,
-                    };
-                }
-            }
-            Action::ToggleTurntable => {
-                self.view.display.turntable_active = !self.view.display.turntable_active;
-            }
-            Action::ToggleValidationOverlay => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.show_validation = !pds.show_validation;
-                let msg = if pds.show_validation {
-                    "Validation on"
-                } else {
-                    "Validation off"
-                };
-                self.gui.set_toast(msg, ToastSeverity::Success);
-            }
-
-            // Shading and post.
-            Action::CycleViewMode => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                if pds.view_mode == ViewMode::Ghosted {
-                    pds.ghosted_wireframe = !pds.ghosted_wireframe;
-                } else {
-                    pds.view_mode = match pds.view_mode {
-                        ViewMode::Shaded => ViewMode::ShadedWireframe,
-                        ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
-                        ViewMode::WireframeOnly | ViewMode::Ghosted => ViewMode::Shaded,
-                    };
-                }
-            }
-            Action::CycleLineWeight => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.line_weight = pds.line_weight.next();
-                let weight = pds.line_weight;
-                self.gui
-                    .set_toast(&format!("Line Weight: {weight}"), ToastSeverity::Success);
-            }
-            Action::ToggleGhosted => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                if pds.view_mode == ViewMode::Ghosted {
-                    pds.view_mode = pds.prev_non_ghosted_mode;
-                } else {
-                    pds.prev_non_ghosted_mode = pds.view_mode;
-                    pds.ghosted_wireframe = matches!(
-                        pds.view_mode,
-                        ViewMode::ShadedWireframe | ViewMode::WireframeOnly
-                    );
-                    pds.view_mode = ViewMode::Ghosted;
-                }
-            }
-            Action::SetShaded => {
-                self.view.pane_settings[self.view.active_pane].view_mode = ViewMode::Shaded;
-            }
-            Action::ToggleMaterialOverride => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.material_override = if pds.material_override == MaterialOverride::None {
-                    MaterialOverride::Clay
-                } else {
-                    MaterialOverride::None
-                };
-                let msg = format!("Material: {}", pds.material_override);
-                self.gui.set_toast(&msg, ToastSeverity::Success);
-            }
-            Action::NextMaterialOverride => {
-                let pds = &mut self.view.pane_settings[self.view.active_pane];
-                pds.material_override = pds.material_override.next();
-                let msg = format!("Material: {}", pds.material_override);
-                self.gui.set_toast(&msg, ToastSeverity::Success);
-            }
-            Action::ToggleIbl => self.set_ibl(false),
-            Action::CycleIblMode => self.set_ibl(true),
-            Action::LockLights => {
-                self.view.display.lights_locked = !self.view.display.lights_locked;
-                let msg = if self.view.display.lights_locked {
-                    "Lights locked"
-                } else {
-                    "Lights unlocked"
-                };
-                self.gui.set_toast(msg, ToastSeverity::Success);
-            }
-            Action::ToggleToneMode => self.toggle_tone_mode(),
-            Action::ToggleBloom => self.toggle_bloom(),
-            Action::ToggleSsao => {
-                if !self.toggle_uv_overlap_in_a_uv_pane() {
-                    self.toggle_ssao();
-                }
-            }
-            Action::ExposureUp => self.adjust_exposure(true),
-            Action::ExposureDown => self.adjust_exposure(false),
-
-            // Inspection modes.
+            // Inspection.
             Action::InspectShaded => self.set_inspection(InspectionMode::Shaded, "Shaded"),
             Action::InspectMaterialId => {
                 self.set_inspection(InspectionMode::MaterialId, "Material ID");
             }
-            Action::InspectUvMap => {
+            Action::ToggleUvPane => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
                 if pds.pane_mode == PaneMode::UvMap {
                     pds.pane_mode = PaneMode::Scene3D;
@@ -378,12 +196,43 @@ impl State {
                 self.set_inspection(InspectionMode::AoPreview, "AO Preview");
             }
 
-            // Capture and review.
+            // Viewport and layout.
+            Action::LayoutSingle => self.set_view_layout(ViewLayout::Single),
+            Action::LayoutSplitVertical => self.set_view_layout(ViewLayout::SplitVertical),
+            Action::LayoutSplitHorizontal => self.set_view_layout(ViewLayout::SplitHorizontal),
+            Action::LayoutQuad => self.set_view_layout(ViewLayout::Quad),
+            Action::LayoutThreeLeftBig => self.set_view_layout(ViewLayout::ThreeLeftBig),
+            Action::FitView => {
+                let bounds = self.scene_bounds();
+                self.release_look_through_for_gesture();
+                self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
+            }
             Action::Screenshot => {
                 self.capture_requested = true;
                 self.screenshot_expand_review = false;
             }
+            Action::ViewTop => self.frame_standard_view(StandardView::Top),
+            Action::ViewFront => self.frame_standard_view(StandardView::Front),
+            Action::ViewLeft => self.frame_standard_view(StandardView::Left),
+            Action::ViewBottom => self.frame_standard_view(StandardView::Bottom),
+            Action::ProjectionPerspective => {
+                self.release_look_through_for_gesture();
+                self.for_each_target_cam(|cam| cam.set_projection(ProjectionMode::Perspective));
+            }
+            Action::ProjectionOrthographic => {
+                if !self.toggle_uv_overlap_in_a_uv_pane() {
+                    self.release_look_through_for_gesture();
+                    self.for_each_target_cam(|cam| {
+                        cam.set_projection(ProjectionMode::Orthographic);
+                    });
+                }
+            }
+
+            // Review.
             Action::ToggleReviewMode => self.toggle_review_mode(),
+            Action::ToggleReviewPanel => {
+                self.gui.toggle_tab(crate::gui::SolarxyTab::ReviewPanel);
+            }
 
             #[cfg(debug_assertions)]
             Action::DevObjects => self.toggle_dev_objects(),
@@ -440,114 +289,6 @@ impl State {
             active_inspection,
             false,
         );
-    }
-
-    fn toggle_tone_mode(&mut self) {
-        self.renderer.post.tone_mode = self.renderer.post.tone_mode.next();
-        self.write_composite_params();
-        self.gui.set_toast(
-            &format!("Tone: {}", self.renderer.post.tone_mode),
-            ToastSeverity::Success,
-        );
-    }
-
-    fn toggle_ssao(&mut self) {
-        self.renderer.post.ssao_enabled = !self.renderer.post.ssao_enabled;
-        self.write_composite_params();
-        let msg = if self.renderer.post.ssao_enabled {
-            "SSAO: On"
-        } else {
-            "SSAO: Off"
-        };
-        self.gui.set_toast(msg, ToastSeverity::Success);
-    }
-
-    fn toggle_bloom(&mut self) {
-        self.renderer.post.bloom_enabled = !self.renderer.post.bloom_enabled;
-        self.write_composite_params();
-        let msg = if self.renderer.post.bloom_enabled {
-            "Bloom: On"
-        } else {
-            "Bloom: Off"
-        };
-        self.gui.set_toast(msg, ToastSeverity::Success);
-    }
-
-    fn adjust_exposure(&mut self, increase: bool) {
-        let step = if increase { 0.5 } else { -0.5 };
-        self.renderer.post.exposure = (self.renderer.post.exposure + step).clamp(0.1, 10.0);
-        self.write_composite_params();
-        self.gui.set_toast(
-            &format!("Exposure: {:.1}", self.renderer.post.exposure),
-            ToastSeverity::Success,
-        );
-    }
-
-    /// Image-based lighting: `cycle` switches between diffuse and full,
-    /// where the plain form turns it off and on.
-    ///
-    /// This used to read the shift modifier itself, which is how `Shift+I`
-    /// stayed a real binding while appearing in no list of them.
-    fn set_ibl(&mut self, cycle: bool) {
-        if cycle {
-            if self.renderer.ibl_res.ibl_mode != IblMode::Off {
-                self.renderer.ibl_res.ibl_mode = match self.renderer.ibl_res.ibl_mode {
-                    IblMode::Diffuse => IblMode::Full,
-                    IblMode::Full | IblMode::Off => IblMode::Diffuse,
-                };
-                self.renderer.ibl_res.last_active_ibl_mode = self.renderer.ibl_res.ibl_mode;
-            }
-        } else if self.renderer.ibl_res.ibl_mode == IblMode::Off {
-            self.renderer.ibl_res.ibl_mode = self.renderer.ibl_res.last_active_ibl_mode;
-        } else {
-            self.renderer.ibl_res.last_active_ibl_mode = self.renderer.ibl_res.ibl_mode;
-            self.renderer.ibl_res.ibl_mode = IblMode::Off;
-        }
-        self.rebuild_light_bind_group();
-        let msg = match self.renderer.ibl_res.ibl_mode {
-            IblMode::Off => "IBL: Off",
-            IblMode::Diffuse => "IBL: Diffuse",
-            IblMode::Full => "IBL: Full",
-        };
-        self.gui.set_toast(msg, ToastSeverity::Success);
-    }
-
-    fn cycle_background(&mut self) {
-        // `B` walks every builtin (skipping `HDRI Sky` until an HDRI is
-        // loaded) then every user custom background.
-        let has_hdri = self.renderer.ibl_res.ibl.equirect.is_some();
-        let options = background_cycle_options(&self.preferences.view.custom_backgrounds, has_hdri);
-        let pds = &mut self.view.pane_settings[self.view.active_pane];
-        let i = options
-            .iter()
-            .position(|m| *m == pds.background_mode)
-            .unwrap_or(0);
-        pds.background_mode = options[(i + 1) % options.len()];
-        self.apply_background_change();
-    }
-
-    fn cycle_bounds_mode(&mut self) {
-        // Per-mesh bounds are only a distinct picture when there is more than
-        // one mesh to tell apart, so the mode is skipped over otherwise.
-        let is_multi = self
-            .raster
-            .scene()
-            .iter()
-            .map(|(_, o)| o.model.meshes.len())
-            .sum::<usize>()
-            > 1;
-        let pds = &mut self.view.pane_settings[self.view.active_pane];
-        pds.bounds_mode = match pds.bounds_mode {
-            BoundsMode::Off => BoundsMode::WholeModel,
-            BoundsMode::WholeModel if is_multi => BoundsMode::PerMesh,
-            BoundsMode::WholeModel | BoundsMode::PerMesh => BoundsMode::Off,
-        };
-        let msg = match pds.bounds_mode {
-            BoundsMode::Off => "Bounds: Off",
-            BoundsMode::WholeModel => "Bounds: Whole Model",
-            BoundsMode::PerMesh => "Bounds: Per Mesh",
-        };
-        self.gui.set_toast(msg, ToastSeverity::Success);
     }
 }
 

@@ -75,14 +75,4 @@ impl State {
             self.gui.set_toast(msg, ToastSeverity::Success);
         }
     }
-
-    pub fn toggle_fullscreen(&mut self) {
-        use winit::window::Fullscreen;
-        let new = if self.window.fullscreen().is_some() {
-            None
-        } else {
-            Some(Fullscreen::Borderless(None))
-        };
-        self.window.set_fullscreen(new);
-    }
 }

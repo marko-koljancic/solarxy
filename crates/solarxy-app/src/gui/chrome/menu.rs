@@ -20,6 +20,7 @@ use crate::state::view_state::{BoundsMode, ViewLayout};
 
 use crate::gui::MOD;
 use crate::gui::dock::SolarxyTab;
+use crate::state::keymap::{Action, hint};
 use crate::gui::intent::{
     CaptureIntent, EditIntent, FileIntent, HelpIntent, Intent, Intents, LayoutIntent, ReviewIntent,
 };
@@ -747,100 +748,85 @@ fn draw_layout_menu(ui: &mut egui::Ui, intents: &mut Intents, has_saved_layout: 
 struct PanelRow {
     tab: SolarxyTab,
     label: &'static str,
-    accel: Accel,
+    /// The binding that opens this panel, where one exists. Read from the
+    /// table rather than written here, so a rebinding cannot leave the menu
+    /// describing a key that does something else.
+    action: Option<Action>,
     /// Panels that inspect an imported file are disabled without one.
     needs_model: bool,
-}
-
-/// A row's accelerator. `Mod` is separate because the platform key is a
-/// runtime string, so the label cannot be a plain constant.
-enum Accel {
-    None,
-    Key(&'static str),
-    Mod(&'static str),
-}
-
-impl Accel {
-    fn label(&self) -> Option<String> {
-        match self {
-            Self::None => None,
-            Self::Key(k) => Some((*k).to_string()),
-            Self::Mod(k) => Some(format!("{MOD}+{k}")),
-        }
-    }
 }
 
 const PANEL_ROWS: &[PanelRow] = &[
     PanelRow {
         tab: SolarxyTab::Viewport,
         label: "Viewport",
-        accel: Accel::Mod("1"),
+        action: None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Sidebar,
         label: "Sidebar",
-        accel: Accel::Key("Tab"),
+        action: None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Tree,
         label: "Tree",
-        accel: Accel::None,
+        action: None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Nodes,
         label: "Nodes",
-        accel: Accel::None,
+        action: None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Assets,
         label: "Assets",
-        accel: Accel::None,
+        action: None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Texture,
         label: "Texture Viewer",
-        accel: Accel::None,
+        action: None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Attributes,
         label: "Attributes",
-        accel: Accel::None,
+        action: None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Text,
         label: "Text",
-        accel: Accel::None,
+        action: None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Properties,
         label: "Properties",
-        accel: Accel::None,
+        action: None,
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::ReviewPanel,
         label: "Review Panel",
-        accel: Accel::None,
+        action: Some(Action::ToggleReviewPanel),
         needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::MaterialInspector,
         label: "Material Inspector",
-        accel: Accel::None,
+        action: None,
         needs_model: true,
     },
     PanelRow {
         tab: SolarxyTab::Console,
         label: "Console",
-        accel: Accel::Key("`"),
+        action: None,
         needs_model: false,
     },
 ];
@@ -854,8 +840,8 @@ fn draw_window_menu(
     ui.menu_button("Window", |ui| {
         for row in PANEL_ROWS {
             let mut button = egui::Button::new(row.label).selected(present(row.tab));
-            if let Some(accel) = row.accel.label() {
-                button = button.shortcut_text(accel);
+            if let Some(keys) = row.action.and_then(hint) {
+                button = button.shortcut_text(keys);
             }
             if ui
                 .add_enabled(!row.needs_model || cx.has_model, button)
