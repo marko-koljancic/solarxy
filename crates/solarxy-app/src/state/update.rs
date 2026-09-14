@@ -476,19 +476,19 @@ impl State {
         self.poll_preview();
         // Uncaptured GPU faults recorded since the last frame. The hook
         // already logged each full message on the `solarxy::gpu` target,
-        // which the console captures; the toast is the short pointer, and
+        // which reaches the terminal; the toast is the short pointer, and
         // its wording does not promise the picture is right afterwards.
         for fault in self.gpu_faults.drain() {
             use solarxy_renderer::faults::GpuFaultKind;
             let what = match fault.kind {
                 GpuFaultKind::Validation => {
-                    "Graphics validation error; the view may be wrong. Details in the Console."
+                    "Graphics validation error; the view may be wrong. Details in the terminal log."
                 }
                 GpuFaultKind::OutOfMemory => {
-                    "The GPU ran out of memory; the view may be incomplete. Details in the Console."
+                    "The GPU ran out of memory; the view may be incomplete. Details in the terminal log."
                 }
                 GpuFaultKind::Internal => {
-                    "Graphics driver error; the view may be wrong. Details in the Console."
+                    "Graphics driver error; the view may be wrong. Details in the terminal log."
                 }
             };
             if fault.count > 1 {

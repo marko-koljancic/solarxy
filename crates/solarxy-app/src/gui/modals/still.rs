@@ -283,15 +283,6 @@ impl StillRenderModal {
         }
     }
 
-    pub fn is_running(&self) -> bool {
-        self.open && self.phase == StillPhase::Running
-    }
-
-    /// The running job's progress for the status bar, `None` when idle.
-    pub fn running_progress(&self) -> Option<(u32, u32, u32, u32)> {
-        self.is_running().then_some(self.progress)
-    }
-
     pub fn take_cancel_request(&mut self) -> bool {
         std::mem::take(&mut self.cancel_request)
     }

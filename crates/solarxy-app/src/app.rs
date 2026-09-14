@@ -13,7 +13,6 @@ use winit::{
     window::Window,
 };
 
-use crate::console::LogBuffer;
 use solarxy_core::preferences::Preferences;
 use crate::state::keymap::{self, Chord};
 use crate::state::{State, key_scope, window_claims};
@@ -46,21 +45,15 @@ pub struct App {
     state: Option<State>,
     model_path: Option<String>,
     preferences: Preferences,
-    console_buffer: LogBuffer,
     frame_count: u64,
 }
 
 impl App {
-    pub fn new(
-        model_path: Option<String>,
-        preferences: Preferences,
-        console_buffer: LogBuffer,
-    ) -> Self {
+    pub fn new(model_path: Option<String>, preferences: Preferences) -> Self {
         Self {
             state: None,
             model_path,
             preferences,
-            console_buffer,
             frame_count: 0,
         }
     }
@@ -99,7 +92,6 @@ impl ApplicationHandler<State> for App {
             window,
             self.model_path.clone(),
             self.preferences.clone(),
-            self.console_buffer.clone(),
         )) {
             Ok(state) => self.state = Some(state),
             Err(e) => {
@@ -263,13 +255,9 @@ impl ApplicationHandler<State> for App {
     }
 }
 
-pub fn run_viewer(
-    model_path: Option<String>,
-    preferences: Preferences,
-    console_buffer: LogBuffer,
-) -> anyhow::Result<()> {
+pub fn run_viewer(model_path: Option<String>, preferences: Preferences) -> anyhow::Result<()> {
     let event_loop = EventLoop::with_user_event().build()?;
-    let mut app = App::new(model_path, preferences, console_buffer);
+    let mut app = App::new(model_path, preferences);
     event_loop.run_app(&mut app)?;
     Ok(())
 }

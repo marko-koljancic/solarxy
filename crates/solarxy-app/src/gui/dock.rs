@@ -1,7 +1,7 @@
 //! `egui_dock` integration — the unified panel + viewport docking layer.
 //!
-//! The user-facing panels (Sidebar, Review Panel, Console, Material
-//! Inspector, Properties, Tree, Nodes) plus the 3D Viewport live as tabs
+//! The user-facing panels (Sidebar, Review Panel, Material Inspector,
+//! Properties, Tree, Nodes and the rest) plus the 3D Viewport live as tabs
 //! inside a single [`egui_dock::DockState`], and one more variant,
 //! `Retired`, is what a saved layout's name for a panel that no longer
 //! exists deserializes to, so the arrangement survives with that tab gone.
@@ -53,7 +53,6 @@ pub(crate) enum SolarxyTab {
     Viewport,
     Sidebar,
     ReviewPanel,
-    Console,
     MaterialInspector,
     /// Hosts the parameter panel, under the name the browser's panel has.
     Properties,
@@ -86,7 +85,6 @@ impl SolarxyTab {
             Self::Viewport => "viewport",
             Self::Sidebar => "sidebar",
             Self::ReviewPanel => "review-panel",
-            Self::Console => "console",
             Self::MaterialInspector => "material-inspector",
             Self::Properties => "properties",
             Self::Tree => "tree",
@@ -103,8 +101,8 @@ impl SolarxyTab {
 
 /// Build the default dock layout: Viewport central, the Tree top-left with
 /// the Sidebar below it, Properties top-right with `ReviewPanel` below it,
-/// and the node canvas tabbed with Console and Material Inspector along the
-/// bottom, active of the three. Every panel ships in the default tree:
+/// and the node canvas tabbed with the Material Inspector along the
+/// bottom, active of the two. Every panel ships in the default tree:
 /// discoverability is the layout itself (no panel auto-opens on load).
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let mut state = DockState::new(vec![SolarxyTab::Viewport]);
@@ -128,7 +126,6 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
             SolarxyTab::Nodes,
             SolarxyTab::Attributes,
             SolarxyTab::Text,
-            SolarxyTab::Console,
             SolarxyTab::MaterialInspector,
         ],
     );
@@ -166,7 +163,6 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Viewport => "Viewport".into(),
             SolarxyTab::Sidebar => "Sidebar".into(),
             SolarxyTab::ReviewPanel => format!("Review ({})", self.review.annotations.len()).into(),
-            SolarxyTab::Console => "Console".into(),
             SolarxyTab::MaterialInspector => "Material Inspector".into(),
             SolarxyTab::Properties => "Properties".into(),
             SolarxyTab::Tree => "Tree".into(),
@@ -214,9 +210,6 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.intents,
                     self.theme,
                 );
-            }
-            SolarxyTab::Console => {
-                super::panels::console::draw_console_content(ui, self.panels.console, &self.theme);
             }
             SolarxyTab::MaterialInspector => {
                 super::panels::material_inspector::draw_material_inspector_content(
@@ -428,7 +421,6 @@ mod tests {
             SolarxyTab::Viewport,
             SolarxyTab::Sidebar,
             SolarxyTab::ReviewPanel,
-            SolarxyTab::Console,
             SolarxyTab::Properties,
             SolarxyTab::MaterialInspector,
             SolarxyTab::Tree,
@@ -462,26 +454,31 @@ mod tests {
     /// silently when deserialization fails. So `is_ok()` alone cannot tell
     /// a real restore from a fallback wearing its clothes; the tabs this
     /// fixture actually carries can, because the default layout carries
-    /// seven. What a user would lose if this broke is their whole
+    /// every panel. What a user would lose if this broke is their whole
     /// arrangement, with no error to explain where it went.
     ///
-    /// The fixture names `Outliner`, a panel this build no longer has. It
-    /// must parse anyway, and the sweep must remove exactly that tab and
-    /// nothing else: that is the whole guarantee a retired panel makes.
+    /// The fixture names `Outliner` and `Console`, two panels this build no
+    /// longer has. It must parse anyway, and the sweep must remove exactly
+    /// those tabs and nothing else: that is the whole guarantee a retired
+    /// panel makes.
     #[test]
     fn layout_saved_before_the_tree_still_restores() {
         let mut dock: DockState<SolarxyTab> = serde_json::from_str(LAYOUT_BEFORE_NODE_TREE)
             .expect("a blob naming a retired panel must still deserialize");
         assert!(
             tab_present(&dock, SolarxyTab::Retired),
-            "Outliner parses as Retired"
+            "Outliner and Console parse as Retired"
         );
 
-        assert_eq!(sweep_retired(&mut dock), 1, "one retired tab, swept once");
+        assert_eq!(
+            sweep_retired(&mut dock),
+            2,
+            "two retired tabs, each swept once"
+        );
         assert_eq!(
             membership(&dock),
-            HashSet::from([SolarxyTab::Viewport, SolarxyTab::Console]),
-            "the restored layout must be the saved tabs minus the retired one, not the default"
+            HashSet::from([SolarxyTab::Viewport]),
+            "the restored layout must be the saved tabs minus the retired ones, not the default"
         );
     }
 
@@ -489,11 +486,11 @@ mod tests {
     /// mechanism is generic rather than a list of the names retired so far.
     #[test]
     fn a_layout_naming_a_tab_that_never_existed_restores_without_it() {
-        let blob = LAYOUT_BEFORE_NODE_TREE.replace("\"Console\"", "\"Bogus\"");
-        assert_ne!(blob, LAYOUT_BEFORE_NODE_TREE, "the fixture names Console");
+        let blob = LAYOUT_BEFORE_NODE_TREE.replace("\"Outliner\"", "\"Bogus\"");
+        assert_ne!(blob, LAYOUT_BEFORE_NODE_TREE, "the fixture names Outliner");
         let mut dock: DockState<SolarxyTab> =
             serde_json::from_str(&blob).expect("an unknown tab name must not reject the layout");
-        assert_eq!(sweep_retired(&mut dock), 2, "Bogus and Outliner both go");
+        assert_eq!(sweep_retired(&mut dock), 2, "Bogus and Console both go");
         assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
         assert_eq!(sweep_retired(&mut dock), 0, "a second sweep finds nothing");
     }

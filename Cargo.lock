@@ -4087,7 +4087,6 @@ dependencies = [
  "clap",
  "solarxy-app",
  "solarxy-core",
- "time",
  "tracing-subscriber",
 ]
 
@@ -4119,7 +4118,6 @@ dependencies = [
  "solarxy-studio",
  "time",
  "tracing",
- "tracing-subscriber",
  "ulid",
  "wgpu",
  "winit",

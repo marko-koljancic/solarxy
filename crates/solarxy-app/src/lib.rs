@@ -31,7 +31,6 @@
 )]
 
 mod app;
-pub mod console;
 pub mod gui;
 mod state;
 

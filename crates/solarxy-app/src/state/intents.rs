@@ -384,9 +384,6 @@ impl State {
             LayoutIntent::ToggleMenuBar => {
                 self.gui.menu_bar_visible = !self.gui.menu_bar_visible;
             }
-            LayoutIntent::ToggleStatusBar => {
-                self.gui.status_bar_visible = !self.gui.status_bar_visible;
-            }
             LayoutIntent::SetLayout(layout) => self.set_view_layout(layout),
             LayoutIntent::SetSplitRatio(ratio) => {
                 self.view.display.split_ratio =

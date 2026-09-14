@@ -53,7 +53,6 @@ pub(in crate::gui) struct MenuContext<'a> {
     pub review_markers_hidden: bool,
     pub review_dirty: bool,
     pub menu_bar_visible: bool,
-    pub status_bar_visible: bool,
     pub has_saved_layout: bool,
     pub theme: Theme,
 }
@@ -84,9 +83,9 @@ pub(in crate::gui) fn draw_menu_bar(
 }
 
 /// The cook strip at the right end of the bar: the mode toggle, and in manual
-/// mode the stale count and the Cook button. It lives here rather than in the
-/// status bar because the status bar retires this release and the header is
-/// where the browser keeps the same three controls.
+/// mode the stale count and the Cook button. It lives here because the header
+/// is where the browser keeps the same three controls, and the status bar that
+/// once might have held it was withdrawn in 0.10.0.
 ///
 /// Widgets are added right to left, so the first one added is the rightmost.
 fn draw_cook_strip(ui: &mut egui::Ui, cook: crate::gui::CookReadout, intents: &mut Intents) {
@@ -823,12 +822,6 @@ const PANEL_ROWS: &[PanelRow] = &[
         action: None,
         needs_model: true,
     },
-    PanelRow {
-        tab: SolarxyTab::Console,
-        label: "Console",
-        action: None,
-        needs_model: false,
-    },
 ];
 
 fn draw_window_menu(
@@ -854,16 +847,9 @@ fn draw_window_menu(
 
         ui.separator();
 
-        // The status bar and the menu bar are chrome the shell owns rather
-        // than panels the dock holds, so they are written out rather than
-        // squeezed into the table above.
-        if ui
-            .add(egui::Button::new("Status Bar").selected(cx.status_bar_visible))
-            .clicked()
-        {
-            intents.raise(Intent::Layout(LayoutIntent::ToggleStatusBar));
-            ui.close();
-        }
+        // The menu bar is chrome the shell owns rather than a panel the dock
+        // holds, so it is written out rather than squeezed into the table
+        // above.
         if ui
             .add(
                 egui::Button::new("Menu Bar")

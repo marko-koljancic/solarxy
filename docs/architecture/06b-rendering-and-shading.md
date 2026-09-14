@@ -1164,9 +1164,10 @@ Does not exist, at all. Every render-pass descriptor in both crates sets no time
 and timestamp queries, query sets and query types appear nowhere in the workspace. No timestamp
 GPU feature is requested, so it could not work if attempted.
 
-What exists instead: a whole-frame CPU wall-clock number shown in the desktop status bar, and
-one deliberately ignored ray-throughput measurement in
-`crates/solarxy-renderer/tests/pathtrace_perf.rs`, run by hand, whose header records the
+What exists instead: a whole-frame CPU wall-clock delta the desktop keeps for camera motion
+and shows nowhere since the status bar was withdrawn in 0.10.0, and one deliberately ignored
+ray-throughput measurement in `crates/solarxy-renderer/tests/pathtrace_perf.rs`, run by hand,
+whose header records the
 reference-machine figures. It is a measurement rather than a regression gate and is not in
 continuous integration because runner GPUs are software rasterizers.
 

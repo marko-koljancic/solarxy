@@ -45,9 +45,6 @@ struct GuiArgs {
 fn main() -> anyhow::Result<()> {
     let args = GuiArgs::parse();
 
-    let console_buffer = solarxy_app::console::new_log_buffer();
-    let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
-
     let stderr_filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
             let directive = args.log_level.clone().unwrap_or_else(|| {
@@ -60,19 +57,15 @@ fn main() -> anyhow::Result<()> {
             directive.into()
         });
 
-    let console_layer = solarxy_app::console::ConsoleLayer::new(console_buffer.clone(), offset)
-        .with_filter(
-            tracing_subscriber::EnvFilter::try_from_env("SOLARXY_CONSOLE_LOG")
-                .unwrap_or_else(|_| "solarxy=trace,wgpu_hal=warn,wgpu_core=warn".into()),
-        );
-
+    // One layer, to standard error. The in-app log panel and the layer that
+    // fed it were withdrawn in 0.10.0, so the terminal is the shell's whole
+    // diagnostic surface, as it was before the panel existed.
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
                 .with_writer(std::io::stderr)
                 .with_filter(stderr_filter),
         )
-        .with(console_layer)
         .init();
 
     let model_path = args
@@ -85,5 +78,5 @@ fn main() -> anyhow::Result<()> {
 
     let preferences = solarxy_core::preferences::load();
 
-    solarxy_app::run_viewer(model_path, preferences, console_buffer)
+    solarxy_app::run_viewer(model_path, preferences)
 }

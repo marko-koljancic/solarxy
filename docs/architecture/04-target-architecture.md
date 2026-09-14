@@ -299,7 +299,7 @@ and they are the fields to read first.
 |---|---|
 | Name | `crates/solarxy-app` |
 | Purpose | The desktop shell: a winit event loop, an egui view layer, and a wgpu surface, rendering a `solarxy-studio` session. |
-| Owns | Window and surface lifecycle; the egui widget tree, docking, menus, modals and the status bar; native file dialogs; desktop preference storage as a TOML file; the desktop's own capture and screenshot flow; and the translation of keyboard and pointer events into application intents. |
+| Owns | Window and surface lifecycle; the egui widget tree, docking, menus and modals; native file dialogs; desktop preference storage as a TOML file; the desktop's own capture and screenshot flow; and the translation of keyboard and pointer events into application intents. |
 | Does not own | Any document behaviour. Today it dispatches two of the engine's 35 commands directly, holds two mutually exclusive scene representations, hand-rolls a screenshot readback the renderer already exports, and carries its own copy of the still pump, the pane driver and the render-settings resolver. All of that is target-removed: after the migration the shell holds a session, not an engine. |
 | Public surface | `run_viewer` and the theme adapter. Private otherwise. |
 | May depend on | `solarxy-studio`, `solarxy-core`, `winit`, `egui`, `wgpu`, `rfd`. |

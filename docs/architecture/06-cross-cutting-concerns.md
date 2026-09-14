@@ -587,19 +587,13 @@ nothing about cross-device reproduction.
 
 ## 6. Logging and diagnostics
 
-**The desktop** builds a two-layer `tracing_subscriber` registry in `src/main.rs:69-76`: a
-formatting layer writing to standard error, and a `ConsoleLayer` feeding the in-app console.
-Each has its own filter. Standard error takes `RUST_LOG` if set, otherwise
-`solarxy=info,wgpu_hal=error,wgpu_core=error`, or the debug variant under `--verbose`
-(`main.rs:52-61`). The console layer takes `SOLARXY_CONSOLE_LOG` if set, otherwise
-`solarxy=trace,wgpu_hal=warn,wgpu_core=warn` (`main.rs:64-67`), so the in-app console is
-deliberately more verbose than the terminal.
-
-**The console buffer** is a bounded ring: `LogBuffer` is
-`Arc<Mutex<VecDeque<LogEntry>>>` with `MAX_ENTRIES: usize = 500`
-(`crates/solarxy-app/src/console.rs:10-22`). Entries carry level, message and a local-offset
-timestamp. Oldest entries drop. That is the one diagnostic structure in the workspace with a
-ceiling.
+**The desktop** builds a one-layer `tracing_subscriber` registry in `src/main.rs`: a
+formatting layer writing to standard error. It takes `RUST_LOG` if set, otherwise
+`solarxy=info,wgpu_hal=error,wgpu_core=error`, or the debug variant under `--verbose`. The
+terminal is the desktop's whole diagnostic surface. Until 0.10.0 a second layer fed an in-app
+log panel through a bounded ring of 500 entries, the one diagnostic structure in the workspace
+with a ceiling; the panel had no browser counterpart and was withdrawn with its layer and its
+ring under the 0.10.0 parity rule (milestone section 4.6, decision 22).
 
 **The CLI** installs a single `tracing_subscriber::fmt` subscriber
 (`crates/solarxy-cli/src/bin/solarxy-cli.rs:24-27`). The terminal surfaces take the screen by
@@ -611,14 +605,14 @@ error so it coexists with JSON output.
 (`crates/solarxy-app/src/gui/renderer.rs:177-188`) emits a `tracing` event on
 `target: "solarxy::toast"` for every toast, at the level matching the severity. The rule
 recorded at `crates/solarxy-app/src/gui/mod.rs:21` is that callers must not also emit their own
-log for the same message, or the console records it twice.
+log for the same message, or the log records it twice.
 
 There is exactly one violation, and it is real.
 `crates/solarxy-app/src/state/review/sidecar.rs:92-102` emits
 `tracing::info!(target: "solarxy::toast", "Saved {} annotations to {}", count, path.display())`
 and then calls `self.gui.set_toast(&format!("Saved {count} annotations"), ...)`. `set_toast`
 (`gui/renderer.rs:202-204`) routes straight through `push_toast`. Saving review notes therefore
-writes two console lines with different text for one event. Nothing enforces the rule
+writes two log lines with different text for one event. Nothing enforces the rule
 mechanically; a lint or a source-scan test in the style of the existing drift tests would.
 
 **The browser** has the opposite coupling. `pushToast` (`web/src/store/toasts.ts`) writes to a

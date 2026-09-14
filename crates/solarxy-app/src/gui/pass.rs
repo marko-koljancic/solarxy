@@ -13,8 +13,6 @@
 
 use egui_wgpu::ScreenDescriptor;
 
-use crate::console::ConsoleState;
-
 use super::chrome::divider::DividerInfo;
 use super::chrome::overlays::HudInfo;
 use super::panels::asset_preview::{AssetPreviewState, PreviewView};
@@ -36,8 +34,6 @@ pub(crate) struct FramePaint<'a> {
     pub window: &'a winit::window::Window,
     pub surface_texture: &'a wgpu::Texture,
     pub screen: ScreenDescriptor,
-    /// This frame's duration, which feeds the status bar's rolling average.
-    pub frame_ms: f32,
 }
 
 /// The viewport's own geometry: where the panes are, what sits between them,
@@ -61,10 +57,6 @@ pub(crate) struct PanelSources<'a> {
     /// one is an intent, so this is read-only like everything else here.
     pub settings: PanelSettings<'a>,
     pub hud: &'a HudInfo,
-    /// The open document's file name and format, for the status bar.
-    pub document: Option<(&'a str, &'a str)>,
-    /// Errors and warnings across every object, for the status bar.
-    pub validation_counts: (usize, usize),
     /// The open document, when the Tree tab is mounted. The state layer
     /// passes `Empty` for a closed tab so the fold is skipped.
     pub tree: TreeSource<'a>,
@@ -94,7 +86,6 @@ pub(crate) struct PanelSources<'a> {
 /// The per-panel interface state the dock's tabs write directly: folds,
 /// selections, filters. Never document state, which the engine owns.
 pub(crate) struct PanelState<'a> {
-    pub console: &'a mut ConsoleState,
     pub tree: &'a mut TreeState,
     pub assets: &'a mut AssetsState,
     /// The asset the preview tab shows, as its hash and name.

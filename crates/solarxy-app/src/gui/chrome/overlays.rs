@@ -20,8 +20,9 @@ pub(in crate::gui) struct Toast {
 }
 
 /// Context for the always-on viewport overlays (toasts, loading
-/// indicator, overdraw legend). The frame-time / validation / pane
-/// readout moved to the bottom status bar (`gui::status_bar`).
+/// indicator, overdraw legend). The frame-time, validation and pane
+/// readouts are shown nowhere: the status bar that carried them was
+/// withdrawn in 0.10.0, and the browser shows none of them either.
 pub(in crate::gui) struct HudCtx<'a> {
     pub toasts: &'a VecDeque<Toast>,
     pub loading_message: Option<&'a String>,
@@ -171,12 +172,10 @@ fn draw_overdraw_legend(ctx: &egui::Context) {
         });
 }
 
-/// What the status bar and the viewport overlays need to say about the frame,
-/// assembled by the state layer once per frame.
+/// What the viewport overlays need to say about the frame, assembled by the
+/// state layer once per frame.
 #[derive(Debug)]
 pub(crate) struct HudInfo {
-    pub pane_label: String,
-    pub cameras_linked: Option<bool>,
     pub has_uvs: bool,
     pub overdraw_active: bool,
 }

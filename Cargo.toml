@@ -72,7 +72,6 @@ solarxy-app = { path = "crates/solarxy-app" }
 clap = { version = "4.5.53", features = ["derive"] }
 anyhow = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
-time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
 
 [package.metadata.bundle]
 name = "Solarxy"

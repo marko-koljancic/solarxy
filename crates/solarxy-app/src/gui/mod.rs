@@ -9,9 +9,9 @@
 //!
 //! - `panels/` is one module per dock tab, with a folder where a panel is
 //!   several files. A panel reads through `PanelSources` and writes nothing.
-//! - `chrome/` is the shell's own furniture: the menu bar, the status bar, the
-//!   per-pane toolbars, the floating overlays, the split divider and the
-//!   viewport context menu. What separates it from `panels/` is that nothing
+//! - `chrome/` is the shell's own furniture: the menu bar, the per-pane
+//!   toolbars, the floating overlays, the split divider and the viewport
+//!   context menu. What separates it from `panels/` is that nothing
 //!   here owns a dock tab.
 //! - `modals/` is the dialogs. Each owns state on the renderer and is drained
 //!   through a `take_*` accessor rather than the intent queue.

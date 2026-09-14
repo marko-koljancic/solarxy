@@ -93,7 +93,6 @@ impl PreferencesModal {
             }
             PrefsTab::Interface => {
                 self.draft.ui.max_recent_files = defaults.ui.max_recent_files;
-                self.draft.ui.status_bar_visible = defaults.ui.status_bar_visible;
                 self.draft.autosave = defaults.autosave;
             }
             PrefsTab::Updater => {
@@ -483,10 +482,6 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("Status bar visible at launch");
-            ui.checkbox(&mut draft.ui.status_bar_visible, "");
-            ui.end_row();
-
             ui.label("Recent files capacity");
             ui.add(
                 egui::Slider::new(&mut draft.ui.max_recent_files, 1..=MAX_RECENT_FILES_CAP)

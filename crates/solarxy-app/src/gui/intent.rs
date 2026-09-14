@@ -100,7 +100,7 @@ pub(crate) enum Intent {
     Edit(EditIntent),
     /// The Render menu's two image-producing actions.
     Capture(CaptureIntent),
-    /// The Review menu, the status bar's review badge, and the escape chain.
+    /// The Review menu and the escape chain.
     Review(ReviewIntent),
     /// The Layout and Window menus, and the split divider.
     Layout(LayoutIntent),
@@ -225,7 +225,6 @@ pub(crate) enum LayoutIntent {
     /// panel is a row in one table rather than a field on a shared struct.
     ToggleTab(SolarxyTab),
     ToggleMenuBar,
-    ToggleStatusBar,
     SetLayout(ViewLayout),
     SetSplitRatio(f32),
     SaveDock,

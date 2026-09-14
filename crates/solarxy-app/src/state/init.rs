@@ -15,7 +15,6 @@ impl State {
         window: Arc<Window>,
         model_path: Option<String>,
         preferences: Preferences,
-        console_buffer: crate::console::LogBuffer,
     ) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -85,10 +84,8 @@ impl State {
         };
         let msaa_sample_count = preferences.rendering.msaa_sample_count;
 
-        let mut gui = EguiRenderer::new(&device, surface_format, &window, console_buffer);
-        gui.set_backend_info(backend_info.clone());
+        let mut gui = EguiRenderer::new(&device, surface_format, &window);
         gui.apply_theme_choice(preferences.ui.theme);
-        gui.status_bar_visible = preferences.ui.status_bar_visible;
         if let Some(json) = preferences.dock.last_layout_json.as_deref() {
             gui.apply_layout_json(json);
         }

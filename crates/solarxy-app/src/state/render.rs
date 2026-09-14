@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, ResolvedBackground};
+use solarxy_core::preferences::{InspectionMode, PaneMode, ResolvedBackground};
 use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_host::EncodedPane;
 use solarxy_renderer::backend::{FrameCtx, PaneContent, RenderBackend, UvSource};
@@ -32,7 +32,7 @@ impl State {
 
     /// Per-frame render entry point. Computes pane rectangles, dispatches
     /// per-pane scene/UV passes, paints the egui overlay (sidebar, menu,
-    /// HUD, console, modals, toasts), and presents the swapchain frame.
+    /// HUD, modals, toasts), and presents the swapchain frame.
     ///
     ///
     /// # Errors
@@ -44,7 +44,6 @@ impl State {
             return Ok(());
         }
 
-        let frame_ms = self.dt * 1000.0;
         self.gui.clear_expired_toasts();
         // A running still owns the shared render targets; resizing them
         // back to the panes every frame would fight its per-tile sizing.
@@ -68,7 +67,7 @@ impl State {
         if self.still.is_some() {
             self.pump_still_render();
             self.clear_surface(&surface_view);
-            self.render_gui_overlay(&output, &[], false, frame_ms);
+            self.render_gui_overlay(&output, &[], false);
             output.present();
             return Ok(());
         }
@@ -76,7 +75,7 @@ impl State {
         let viewport_present = self.gui.viewport_tab_present();
         if !viewport_present {
             self.clear_surface(&surface_view);
-            self.render_gui_overlay(&output, &[], false, frame_ms);
+            self.render_gui_overlay(&output, &[], false);
             output.present();
             return Ok(());
         }
@@ -88,7 +87,7 @@ impl State {
             self.render_pane(i, pane, &surface_view, is_split);
         }
 
-        self.render_gui_overlay(&output, &panes, is_split, frame_ms);
+        self.render_gui_overlay(&output, &panes, is_split);
         output.present();
         Ok(())
     }
@@ -341,7 +340,6 @@ impl State {
         output: &wgpu::SurfaceTexture,
         panes: &[Pane],
         is_split: bool,
-        frame_ms: f32,
     ) {
         use crate::gui::{HudInfo, PanelSettings};
 
@@ -399,27 +397,6 @@ impl State {
         let mut intents = crate::gui::Intents::default();
 
         let ap = self.view.active_pane;
-        let pds = &self.view.pane_settings[ap];
-
-        let pane_label = {
-            let pane_mode_str = pds.pane_mode.to_string();
-            let mut label = if is_split {
-                let mode_detail = if pds.pane_mode == PaneMode::Scene3D {
-                    format!("{} \u{00b7} {}", pane_mode_str, pds.view_mode)
-                } else {
-                    pane_mode_str
-                };
-                format!("Pane {} \u{00b7} {}", ap + 1, mode_detail)
-            } else if pds.pane_mode == PaneMode::Scene3D {
-                format!("{} \u{00b7} {}", pane_mode_str, pds.view_mode)
-            } else {
-                pane_mode_str
-            };
-            if pds.material_override != MaterialOverride::None {
-                label = format!("{} \u{00b7} {}", label, pds.material_override);
-            }
-            label
-        };
 
         let projection_mode = self.view.cameras[ap]
             .as_ref()
@@ -445,28 +422,10 @@ impl State {
         let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
         let active_pane_mode = self.view.pane_settings[self.view.active_pane].pane_mode;
         let hud = HudInfo {
-            pane_label,
-            cameras_linked: if is_split {
-                Some(self.view.cameras_linked)
-            } else {
-                None
-            },
             has_uvs: self.raster.scene().iter().any(|(_, o)| o.model.has_uvs),
             overdraw_active: active_inspection == InspectionMode::Overdraw
                 && active_pane_mode == PaneMode::Scene3D,
         };
-        // The document's name and format, for the status bar's readout.
-        let document_format = self.engine_scene.as_ref().map(|info| {
-            std::path::Path::new(&info.filename)
-                .extension()
-                .and_then(|e| e.to_str())
-                .map_or_else(|| "SLXY".to_string(), str::to_uppercase)
-        });
-        let document = self
-            .engine_scene
-            .as_ref()
-            .zip(document_format.as_deref())
-            .map(|(info, format)| (info.filename.as_str(), format));
         // Folded fresh each frame rather than cached on a delta, because
         // selection is part of what the tree draws and selection changes
         // without a delta. Skipped outright when the tab is closed, which
@@ -675,7 +634,6 @@ impl State {
                 window: &self.window,
                 surface_texture: &output.texture,
                 screen,
-                frame_ms,
             },
             crate::gui::ViewportChrome {
                 divider,
@@ -687,13 +645,6 @@ impl State {
             &crate::gui::PanelSources {
                 settings,
                 hud: &hud,
-                document,
-                validation_counts: self.engine_scene.as_ref().map_or((0, 0), |info| {
-                    (
-                        info.validation.report.error_count(),
-                        info.validation.report.warning_count(),
-                    )
-                }),
                 tree: tree_source,
                 assets: match &self.engine {
                     Some(engine)

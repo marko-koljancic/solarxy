@@ -61,7 +61,6 @@ pub(super) struct Theme {
     /// Mapped for completeness; not yet read by any widget.
     #[allow(dead_code)]
     pub severity_info: egui::Color32,
-    pub severity_success: egui::Color32,
     pub review: ReviewColors,
 }
 
@@ -99,7 +98,6 @@ impl Theme {
             // Warn rides the attention hue, always paired with a shape.
             severity_warn: rgb(r.state_attention.rgb),
             severity_info: rgb(r.display.rgb),
-            severity_success: rgb(r.status_success.rgb),
             review: ReviewColors {
                 info: rgb(palette.review.info),
                 warning: rgb(palette.review.warning),
@@ -293,7 +291,8 @@ mod tests {
     use super::*;
 
     /// Ink that names a colour instead of reading the theme is the bug class
-    /// that made the console log invisible: `Color32::from_white_alpha` is
+    /// that made the log panel this shell once had invisible:
+    /// `Color32::from_white_alpha` is
     /// white, which only resolves on a dark ground, and the light theme is
     /// warm cream paper.
     ///

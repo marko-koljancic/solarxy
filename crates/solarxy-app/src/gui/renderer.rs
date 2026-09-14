@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use crate::console::{ConsoleState, LogBuffer};
 use crate::state::hdri_info::HdriInfo;
 use solarxy_core::preferences::PaneMode;
 
@@ -17,7 +16,6 @@ use super::panels::texture::TextureState;
 use super::panels::tree::TreeState;
 use super::chrome::menu::{MenuContext, draw_menu_bar};
 use super::chrome::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
-use super::chrome::status_bar::{self, StatusBarData};
 use super::chrome::viewport_context_menu::{ViewportContextMenu, draw_viewport_context_menu};
 use super::modals::preferences::{PreferencesModal, draw_preferences_modal};
 use super::panels::review::panel::draw_delete_confirm_modal;
@@ -40,8 +38,6 @@ pub struct EguiRenderer {
     egui_format: wgpu::TextureFormat,
     theme: Theme,
     pub menu_bar_visible: bool,
-    pub status_bar_visible: bool,
-    pub console: ConsoleState,
     about_open: bool,
     update_modal: UpdateModalState,
     preferences_modal: PreferencesModal,
@@ -75,9 +71,7 @@ pub struct EguiRenderer {
     toasts: VecDeque<Toast>,
     next_toast_id: u64,
     loading_message: Option<String>,
-    frame_times: VecDeque<f32>,
     hdri_info: Option<HdriInfo>,
-    backend_info: String,
     pub(super) dock_state: DockState<SolarxyTab>,
     pub last_viewport_rect: Option<CachedViewportRect>,
     pub(super) has_saved_layout: bool,
@@ -101,7 +95,6 @@ impl EguiRenderer {
         device: &wgpu::Device,
         surface_format: wgpu::TextureFormat,
         window: &winit::window::Window,
-        console_buffer: LogBuffer,
     ) -> Self {
         let egui_format = surface_format.remove_srgb_suffix();
         let ctx = egui::Context::default();
@@ -126,8 +119,6 @@ impl EguiRenderer {
             egui_format,
             theme,
             menu_bar_visible: true,
-            status_bar_visible: true,
-            console: ConsoleState::new(console_buffer),
             about_open: false,
             update_modal: UpdateModalState::new(),
             preferences_modal: PreferencesModal::default(),
@@ -153,9 +144,7 @@ impl EguiRenderer {
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             next_toast_id: 0,
             loading_message: None,
-            frame_times: VecDeque::with_capacity(30),
             hdri_info: None,
-            backend_info: String::new(),
             dock_state: default_dock_state(),
             last_viewport_rect: None,
             has_saved_layout: false,
@@ -577,10 +566,6 @@ impl EguiRenderer {
         self.unsaved_modal.take_choice()
     }
 
-    pub fn set_backend_info(&mut self, info: String) {
-        self.backend_info = info;
-    }
-
     /// Draw one interface pass.
     ///
     /// The context handle is cloned before the pass so the closure can borrow
@@ -601,19 +586,7 @@ impl EguiRenderer {
         viewport_context_menu: &mut Option<ViewportContextMenu>,
         capture: super::pass::CaptureFrame,
     ) {
-        if self.frame_times.len() >= 30 {
-            self.frame_times.pop_front();
-        }
-        self.frame_times.push_back(frame.frame_ms);
-
         let raw_input = self.winit_state.take_egui_input(frame.window);
-        let avg_ms = self.frame_times.iter().sum::<f32>() / self.frame_times.len().max(1) as f32;
-        let fps = if avg_ms > 0.0 {
-            (1000.0 / avg_ms) as u32
-        } else {
-            0
-        };
-        let validation_counts = sources.validation_counts;
 
         // The review panel's open flag is written by the state layer when
         // review mode starts, so it is reconciled into the dock before the
@@ -648,7 +621,6 @@ impl EguiRenderer {
             review_markers_hidden: review.markers_hidden,
             review_dirty: review.dirty,
             menu_bar_visible: self.menu_bar_visible,
-            status_bar_visible: self.status_bar_visible,
             has_saved_layout: self.has_saved_layout,
             theme: self.theme,
         };
@@ -676,32 +648,9 @@ impl EguiRenderer {
                 );
             }
 
-            if self.status_bar_visible {
-                let status = status_bar::draw(
-                    ctx,
-                    &StatusBarData {
-                        model: sources.document,
-                        validation: validation_counts,
-                        review_active: review.active,
-                        pane_label: &sources.hud.pane_label,
-                        cameras_linked: sources.hud.cameras_linked,
-                        avg_ms,
-                        fps,
-                        backend: &self.backend_info,
-                        still: self.still_modal.running_progress(),
-                    },
-                    self.theme,
-                );
-                if status.review_badge_clicked {
-                    review.toggle_active();
-                    intents.raise(Intent::Review(ReviewIntent::Exited));
-                }
-            }
-
             let mut tab_viewer = SolarxyTabViewer {
                 sources: *sources,
                 panels: super::pass::PanelState {
-                    console: &mut self.console,
                     tree: &mut self.tree,
                     assets: &mut self.assets,
                     asset_preview: self.asset_preview.as_ref(),
