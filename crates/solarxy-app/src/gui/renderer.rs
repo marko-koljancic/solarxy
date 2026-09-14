@@ -25,6 +25,7 @@ use super::panels::review::popup::draw_review_popup;
 use super::modals::screenshot::{ScreenshotModal, draw_screenshot_modal};
 use super::modals::still::{StillRenderModal, draw_still_modal};
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
+use super::modals::keymap_change::{KeymapNoticeState, draw_keymap_notice};
 use super::modals::recovery::{RecoveryChoice, RecoveryModalState, draw_recovery_modal};
 use super::modals::unsaved::{DiscardWhat, UnsavedChoice, UnsavedModalState, draw_unsaved_modal};
 use super::modals::environment::draw_environment_modal;
@@ -47,6 +48,7 @@ pub struct EguiRenderer {
     shortcuts_modal: KeyboardShortcutsModalState,
     unsaved_modal: UnsavedModalState,
     recovery_modal: RecoveryModalState,
+    keymap_notice: KeymapNoticeState,
     environment_open: bool,
     screenshot_modal: ScreenshotModal,
     still_modal: StillRenderModal,
@@ -132,6 +134,7 @@ impl EguiRenderer {
             shortcuts_modal: KeyboardShortcutsModalState::default(),
             unsaved_modal: UnsavedModalState::default(),
             recovery_modal: RecoveryModalState::default(),
+            keymap_notice: KeymapNoticeState::default(),
             environment_open: false,
             screenshot_modal: ScreenshotModal::default(),
             still_modal: StillRenderModal::default(),
@@ -534,12 +537,27 @@ impl EguiRenderer {
             || self.shortcuts_modal.open
             || self.unsaved_modal.open
             || self.recovery_modal.open
+            || self.keymap_notice.open
             || self.environment_open
             || review.delete_confirm.is_some()
             || review.editing.is_some()
     }
 
     /// Offer the autosave a launch found.
+    /// Tell this installation, once, that the keyboard map changed.
+    pub(crate) fn open_keymap_notice(&mut self) {
+        self.keymap_notice.open();
+    }
+
+    /// Whether the reader asked for the full reference, and whether the
+    /// notice was answered. Both are true once, on the frame it happened.
+    pub(crate) fn take_keymap_notice_answer(&mut self) -> (bool, bool) {
+        (
+            self.keymap_notice.take_show_reference(),
+            self.keymap_notice.take_dismissed(),
+        )
+    }
+
     pub(crate) fn open_recovery_prompt(&mut self, name: &str, when: &str) {
         self.recovery_modal.open(name, when);
     }
@@ -719,6 +737,7 @@ impl EguiRenderer {
                 || self.shortcuts_modal.open
                 || self.unsaved_modal.open
                 || self.recovery_modal.open
+            || self.keymap_notice.open
                 || self.environment_open
                 || screenshot_drawn
                 || review.delete_confirm.is_some()
@@ -749,6 +768,7 @@ impl EguiRenderer {
             // question is up, Escape answers it.
             draw_unsaved_modal(ctx, &mut self.unsaved_modal, &self.theme);
             draw_recovery_modal(ctx, &mut self.recovery_modal);
+            draw_keymap_notice(ctx, &mut self.keymap_notice);
             draw_environment_modal(
                 ctx,
                 &mut self.environment_open,

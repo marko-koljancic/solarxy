@@ -880,6 +880,14 @@ pub struct UiPrefs {
     pub status_bar_visible: bool,
     #[serde(default)]
     pub theme: ThemeChoice,
+    /// Whether this installation has been told that the keyboard map
+    /// changed.
+    ///
+    /// Absent in every configuration file written before the two shells
+    /// shared one map, which is exactly the population the notice is for. A
+    /// fresh installation writes it set, because there is nothing to be told.
+    #[serde(default)]
+    pub keymap_notice_seen: bool,
 }
 
 fn default_max_recent_files() -> usize {
@@ -892,6 +900,7 @@ impl Default for UiPrefs {
             max_recent_files: default_max_recent_files(),
             status_bar_visible: true,
             theme: ThemeChoice::default(),
+            keymap_notice_seen: false,
         }
     }
 }
@@ -1183,6 +1192,7 @@ mod tests {
                 max_recent_files: 10,
                 status_bar_visible: false,
                 theme: ThemeChoice::Light,
+                keymap_notice_seen: true,
             },
             updater: UpdaterPrefs {
                 check_on_launch: true,
@@ -1375,6 +1385,27 @@ mod tests {
         let ui = UiPrefs::default();
         assert!(ui.status_bar_visible);
         assert_eq!(ui.max_recent_files, 20);
+    }
+
+    /// A configuration file written before the two shells shared a keyboard
+    /// map carries no flag, and that absence is what marks an installation
+    /// as one that should be told the map changed.
+    ///
+    /// The distinction is load-bearing rather than cosmetic: read the other
+    /// way round, every existing user would be told nothing, or every new
+    /// one would be told about keys they never had.
+    #[test]
+    fn a_configuration_written_before_the_shared_keymap_has_not_been_told() {
+        let older = r#"
+            config_version = 1
+
+            [ui]
+            max_recent_files = 12
+            status_bar_visible = false
+        "#;
+        let prefs: Preferences = toml::from_str(older).expect("an older file still loads");
+        assert!(!prefs.ui.keymap_notice_seen);
+        assert_eq!(prefs.ui.max_recent_files, 12);
     }
 
     #[test]

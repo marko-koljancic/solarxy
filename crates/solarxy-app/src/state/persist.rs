@@ -80,3 +80,25 @@ impl State {
         }
     }
 }
+
+impl State {
+    /// Tell an existing installation, once, that the keyboard map changed.
+    ///
+    /// The flag distinguishes the two populations, and a configuration file
+    /// on disk distinguishes them again: a file written before the two shells
+    /// shared a map carries no flag, while a fresh installation has no file
+    /// at all and is set without being told, because there is nothing it
+    /// knew that changed.
+    pub(crate) fn check_keymap_notice_on_launch(&mut self) {
+        if self.preferences.ui.keymap_notice_seen {
+            return;
+        }
+        let upgraded = solarxy_core::preferences::config_path()
+            .is_some_and(|path| std::fs::metadata(path).is_ok());
+        if upgraded {
+            self.gui.open_keymap_notice();
+        } else {
+            self.preferences.ui.keymap_notice_seen = true;
+        }
+    }
+}
