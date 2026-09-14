@@ -17,14 +17,6 @@
 //! compared literally: lowercase, `"+"`-joined, modifiers in the order `mod`,
 //! `shift`, `alt`, where `mod` is the platform's command or control key.
 
-// The dispatcher reads the table; the reference and the menus do not yet.
-// Waiting on a consumer, and nothing else is: `KeyGroup` and its ordering,
-// `Action::id`, the `group`, `description`, `note` and `listed` columns, and
-// the three display helpers `binding_for`, `hint` and `format_keys`. The
-// generated shortcuts reference takes the first set and the menu bars take
-// the second; this allow goes with them.
-#![allow(dead_code)]
-
 use winit::keyboard::KeyCode;
 
 /// Which surface a binding belongs to, resolved by what the pointer is over.
@@ -149,6 +141,11 @@ pub(crate) enum Action {
 impl Action {
     /// The stable string the shells compare by. Matches
     /// `web/src/input/keymap.ts` wherever both shells have the binding.
+    ///
+    /// Read only by `the_two_shells_declare_the_same_bindings`, which is the
+    /// whole reason it exists: the dispatcher matches on the variant, and a
+    /// string would let a binding with no handler compile.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) const fn id(self) -> &'static str {
         match self {
             Self::NewScene => "new-scene",
@@ -993,6 +990,213 @@ mod tests {
                 binding.keys == "f8" || binding.keys == "f9",
                 "{} is hidden from the reference for no stated reason",
                 binding.action.id()
+            );
+        }
+    }
+}
+
+/// The drift test: the two shells' tables, compared entry by entry.
+///
+/// It reads `web/src/input/keymap.ts` as source text, which is how
+/// `solarxy-core`'s token drift test already reads TypeScript, because
+/// the alternative is a build step that produces a file to review.
+#[cfg(test)]
+mod drift {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// A binding the browser has and this shell does not, with the reason.
+    ///
+    /// Every one is a capability this release builds later, so the list
+    /// empties as the release proceeds and an empty list at release is
+    /// itself the proof that the two maps agree.
+    const UNBUILT: &[(&str, &str)] = &[
+        ("tool-select", "the transform tools"),
+        ("tool-move", "the transform tools"),
+        ("tool-rotate", "the transform tools"),
+        ("tool-scale", "the transform tools"),
+        ("gizmo-orientation", "the transform tools"),
+        ("play-pause", "the transport bar"),
+        ("step-back", "the transport bar"),
+        ("step-forward", "the transport bar"),
+        ("go-to-start", "the transport bar"),
+        ("panel-maximize", "maximizing a panel"),
+        ("floating-props", "the floating properties panel"),
+    ];
+
+    /// A binding this shell has and the browser does not, with the reason.
+    const DESKTOP_ONLY: &[(&str, &str)] = &[
+        (
+            "new-scene",
+            "the browser shows the hint in its menu and binds no key",
+        ),
+        (
+            "open-scene",
+            "the browser shows the hint in its menu and binds no key",
+        ),
+        (
+            "save-as",
+            "a native document knows its own path, so Save and Save As are two things",
+        ),
+        ("dev-objects", "a debug harness, not a user binding"),
+        ("dev-environment", "a debug harness, not a user binding"),
+    ];
+
+    /// A description that differs, with the reason it does.
+    const WORDED_DIFFERENTLY: &[(&str, &str)] = &[
+        (
+            "layout-cycle",
+            "one layout engine here rather than two, so there is nothing to cycle",
+        ),
+        (
+            "review-cancel",
+            "the escape ladder has no maximized panel to restore yet",
+        ),
+    ];
+
+    struct Declared {
+        keys: String,
+        context: String,
+        group: String,
+        description: String,
+    }
+
+    fn field(line: &str, name: &str) -> Option<String> {
+        let at = line.find(&format!("{name}: \""))? + name.len() + 3;
+        let rest = &line[at..];
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
+    }
+
+    /// Every binding the browser's table declares.
+    fn browser_table() -> BTreeMap<String, Declared> {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("workspace root")
+            .to_path_buf();
+        let source = std::fs::read_to_string(root.join("web/src/input/keymap.ts"))
+            .expect("the browser's keymap is readable");
+        let table: BTreeMap<String, Declared> = source
+            .lines()
+            .filter(|line| line.trim_start().starts_with("{ id: \""))
+            .filter_map(|line| {
+                Some((
+                    field(line, "id")?,
+                    Declared {
+                        keys: field(line, "keys")?,
+                        context: field(line, "context")?,
+                        group: field(line, "group")?,
+                        description: field(line, "description")?,
+                    },
+                ))
+            })
+            .collect();
+        assert!(
+            table.len() >= 50,
+            "only {} bindings parsed out of the browser's table, so the shape it is written in has changed",
+            table.len()
+        );
+        table
+    }
+
+    fn scope_name(scope: KeyScope) -> &'static str {
+        match scope {
+            KeyScope::Global => "global",
+            KeyScope::Canvas => "canvas",
+            KeyScope::Viewport => "viewport",
+        }
+    }
+
+    #[test]
+    fn the_two_shells_declare_the_same_bindings() {
+        let browser = browser_table();
+        let here: BTreeMap<&str, &Binding> = BINDINGS.iter().map(|b| (b.action.id(), b)).collect();
+
+        let allowed_missing: BTreeSet<&str> = UNBUILT.iter().map(|(id, _)| *id).collect();
+        let allowed_extra: BTreeSet<&str> = DESKTOP_ONLY.iter().map(|(id, _)| *id).collect();
+
+        let missing: Vec<&str> = browser
+            .keys()
+            .map(String::as_str)
+            .filter(|id| !here.contains_key(id) && !allowed_missing.contains(id))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "the browser binds these and this shell does not: {missing:?}. \
+             Add them, or name each in UNBUILT with the capability it waits for."
+        );
+
+        let extra: Vec<&str> = here
+            .keys()
+            .copied()
+            .filter(|id| !browser.contains_key(*id) && !allowed_extra.contains(id))
+            .collect();
+        assert!(
+            extra.is_empty(),
+            "this shell binds these and the browser does not: {extra:?}. \
+             Remove them, or name each in DESKTOP_ONLY with the reason."
+        );
+
+        // A name in an allowlist that no longer applies is drift of its own:
+        // it would hide a binding that has since arrived on both sides.
+        for (id, _) in UNBUILT {
+            assert!(
+                browser.contains_key(*id) && !here.contains_key(id),
+                "{id} is in UNBUILT but is no longer missing here; delete the row"
+            );
+        }
+        for (id, _) in DESKTOP_ONLY {
+            assert!(
+                here.contains_key(id) && !browser.contains_key(*id),
+                "{id} is in DESKTOP_ONLY but the browser binds it too; delete the row"
+            );
+        }
+    }
+
+    #[test]
+    fn a_binding_both_shells_have_is_declared_the_same_way() {
+        let browser = browser_table();
+        let reworded: BTreeSet<&str> = WORDED_DIFFERENTLY.iter().map(|(id, _)| *id).collect();
+        let mut compared = 0usize;
+        for binding in BINDINGS {
+            let id = binding.action.id();
+            let Some(theirs) = browser.get(id) else {
+                continue;
+            };
+            compared += 1;
+            assert_eq!(binding.keys, theirs.keys, "{id} is on a different key");
+            assert_eq!(
+                scope_name(binding.scope),
+                theirs.context,
+                "{id} is in a different scope"
+            );
+            assert_eq!(
+                binding.group.label(),
+                theirs.group,
+                "{id} is in a different group"
+            );
+            if !reworded.contains(id) {
+                assert_eq!(
+                    binding.description, theirs.description,
+                    "{id} is described differently; name it in WORDED_DIFFERENTLY with the reason"
+                );
+            }
+        }
+        assert!(
+            compared > 40,
+            "only {compared} bindings were compared, so the two tables have stopped overlapping"
+        );
+
+        for (id, _) in WORDED_DIFFERENTLY {
+            let ours = BINDINGS
+                .iter()
+                .find(|b| b.action.id() == *id)
+                .expect("a reworded binding exists here");
+            let theirs = browser.get(*id).expect("and there");
+            assert_ne!(
+                ours.description, theirs.description,
+                "{id} is in WORDED_DIFFERENTLY but the wording now matches; delete the row"
             );
         }
     }
