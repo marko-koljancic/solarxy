@@ -378,9 +378,25 @@ impl State {
         }
     }
 
+    /// Apply a named arrangement.
+    ///
+    /// Three writes, and none of them reaches the engine: the panel layout,
+    /// three of the canvas's reading preferences, and how the viewport is
+    /// split. That the document is untouched is a property of what this
+    /// function can see rather than of what it is careful about.
+    fn apply_arrangement(&mut self, id: crate::gui::ArrangementId) {
+        let Some(arrangement) = id.resolve() else {
+            return;
+        };
+        self.gui.apply_arrangement_layout(arrangement);
+        arrangement.apply_chrome(&mut self.preferences.canvas);
+        self.set_view_layout(arrangement.view_layout);
+    }
+
     fn apply_layout_intent(&mut self, intent: LayoutIntent) {
         match intent {
             LayoutIntent::ToggleTab(tab) => self.gui.toggle_tab(tab),
+            LayoutIntent::ApplyArrangement(id) => self.apply_arrangement(id),
             LayoutIntent::SetLayout(layout) => self.set_view_layout(layout),
             LayoutIntent::SetSplitRatio(ratio) => {
                 self.view.display.split_ratio =

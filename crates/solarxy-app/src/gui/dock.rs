@@ -27,7 +27,7 @@
 //! frame for its checkmarks, so the dock tree is the one source of a
 //! panel's open state and nothing mirrors it.
 
-use egui_dock::{DockState, NodeIndex, TabViewer};
+use egui_dock::{DockState, TabViewer};
 
 use super::intent::Intents;
 use super::pass::{PanelSources, PanelState};
@@ -99,34 +99,16 @@ impl SolarxyTab {
     }
 }
 
-/// Build the default dock layout: Viewport central, the Tree top-left with
-/// the Sidebar below it, Properties top-right with `ReviewPanel` below it,
-/// and the node canvas along the bottom, tabbed with Attributes and Text
-/// and active of the three. Every panel ships in the default tree except
-/// the asset preview, which opens from Assets: discoverability is the
-/// layout itself (no panel auto-opens on load).
+/// The layout a new installation opens in, and what a layout that cannot be
+/// restored falls back to: the `Default` arrangement, which is the
+/// browser's. Three panels and the Sidebar; every other panel is one toggle
+/// away and reopens beside its natural neighbour (see [`toggle_tab`]).
+///
+/// Until 0.10.0 this mounted every panel, on the principle that the layout
+/// itself was how a panel got discovered. A new desktop now opens looking
+/// like the browser, which is most of what makes moving between them free.
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
-    let mut state = DockState::new(vec![SolarxyTab::Viewport]);
-    let surface = state.main_surface_mut();
-    let [center_etc, left] = surface.split_left(
-        NodeIndex::root(),
-        0.18,
-        vec![SolarxyTab::Tree, SolarxyTab::Assets],
-    );
-    let [_tree, _sidebar] = surface.split_below(left, 0.5, vec![SolarxyTab::Sidebar]);
-    let [center, right] = surface.split_right(
-        center_etc,
-        0.78,
-        vec![SolarxyTab::Properties, SolarxyTab::Texture],
-    );
-    let [_props, _review] = surface.split_below(right, 0.5, vec![SolarxyTab::ReviewPanel]);
-    let [_main, _bottom] = surface.split_below(
-        center,
-        0.72,
-        vec![SolarxyTab::Nodes, SolarxyTab::Attributes, SolarxyTab::Text],
-    );
-
-    state
+    super::arrangement::default_arrangement().recipe.build()
 }
 
 /// Per-frame `TabViewer`, constructed fresh inside the interface pass.
@@ -379,8 +361,18 @@ pub(super) fn show_tab_beside(
     }
 }
 
-/// Add `tab` to the first main-surface leaf if absent; remove all
-/// occurrences if present. Window-menu toggles route through this.
+/// Share of the width a reopened node canvas leaves the viewport, and of
+/// the height a reopened parameter panel leaves the canvas.
+const REOPEN_VIEWPORT_SHARE: f32 = 0.55;
+const REOPEN_CANVAS_SHARE: f32 = 0.5;
+
+/// Add `tab` beside its natural neighbour if absent; remove all occurrences
+/// if present. Every panel toggle routes through this.
+///
+/// **A reopened panel never lands on the viewport's leaf**, where it would
+/// cover the scene. The rules are the browser's: the node canvas opens to
+/// the right of the viewport, the parameter panel under the canvas, and
+/// every other panel tabs in behind the parameter panel.
 pub(super) fn toggle_tab(dock: &mut DockState<SolarxyTab>, tab: SolarxyTab) {
     if let Some(locator) = dock.find_tab(&tab) {
         dock.remove_tab(locator);
@@ -389,6 +381,45 @@ pub(super) fn toggle_tab(dock: &mut DockState<SolarxyTab>, tab: SolarxyTab) {
             dock.remove_tab(extra);
         }
     } else {
+        reopen(dock, tab);
+    }
+}
+
+/// Mount `tab` where a user would look for it.
+fn reopen(dock: &mut DockState<SolarxyTab>, tab: SolarxyTab) {
+    match tab {
+        // The viewport goes back where a layout starts, the first leaf.
+        SolarxyTab::Viewport => dock.main_surface_mut().push_to_first_leaf(tab),
+        SolarxyTab::Nodes => beside_the_viewport(dock, tab),
+        SolarxyTab::Properties => {
+            if let Some((surface, node, _)) = dock.find_tab(&SolarxyTab::Nodes) {
+                dock[surface].split_below(node, REOPEN_CANVAS_SHARE, vec![tab]);
+            } else {
+                beside_the_viewport(dock, tab);
+            }
+        }
+        _ => {
+            let neighbour = [SolarxyTab::Properties, SolarxyTab::Nodes]
+                .into_iter()
+                .find_map(|candidate| dock.find_tab(&candidate));
+            if let Some((surface, node, _)) = neighbour {
+                dock[surface][node].append_tab(tab);
+                if let Some(found) = dock.find_tab(&tab) {
+                    dock.set_active_tab(found);
+                }
+            } else {
+                beside_the_viewport(dock, tab);
+            }
+        }
+    }
+}
+
+/// A new leaf to the right of the viewport, or the first leaf when the
+/// viewport itself is closed and there is nothing to stay clear of.
+fn beside_the_viewport(dock: &mut DockState<SolarxyTab>, tab: SolarxyTab) {
+    if let Some((surface, node, _)) = dock.find_tab(&SolarxyTab::Viewport) {
+        dock[surface].split_right(node, REOPEN_VIEWPORT_SHARE, vec![tab]);
+    } else {
         dock.main_surface_mut().push_to_first_leaf(tab);
     }
 }
@@ -396,30 +427,91 @@ pub(super) fn toggle_tab(dock: &mut DockState<SolarxyTab>, tab: SolarxyTab) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_dock::NodeIndex;
     use std::collections::HashSet;
 
     fn membership(dock: &DockState<SolarxyTab>) -> HashSet<SolarxyTab> {
         dock.iter_all_tabs().map(|(_, t)| *t).collect()
     }
 
+    /// The default is the `Default` arrangement, exactly: three panels and
+    /// the Sidebar. Equality rather than containment, so a panel added to
+    /// the fresh-install layout is a decision someone made here.
     #[test]
-    fn default_dock_state_has_core_tabs() {
-        let dock = default_dock_state();
-        let present = membership(&dock);
+    fn the_default_layout_is_the_default_arrangement() {
+        assert_eq!(
+            membership(&default_dock_state()),
+            HashSet::from([
+                SolarxyTab::Viewport,
+                SolarxyTab::Nodes,
+                SolarxyTab::Properties,
+                SolarxyTab::Sidebar,
+            ])
+        );
+    }
+
+    fn leaf_of(dock: &DockState<SolarxyTab>, tab: SolarxyTab) -> Vec<SolarxyTab> {
+        let (surface, node, _) = dock.find_tab(&tab).expect("mounted");
+        dock[surface][node].get_leaf().expect("a leaf").tabs.clone()
+    }
+
+    /// Every panel a user can reopen, reopened from the default layout,
+    /// leaves the viewport alone in its leaf. The first-leaf placement this
+    /// replaced put a reopened panel over the scene.
+    #[test]
+    fn a_reopened_panel_never_covers_the_viewport() {
         for tab in [
-            SolarxyTab::Viewport,
-            SolarxyTab::Sidebar,
-            SolarxyTab::ReviewPanel,
-            SolarxyTab::Properties,
             SolarxyTab::Tree,
-            SolarxyTab::Nodes,
             SolarxyTab::Assets,
             SolarxyTab::Texture,
             SolarxyTab::Attributes,
             SolarxyTab::Text,
+            SolarxyTab::ReviewPanel,
         ] {
-            assert!(present.contains(&tab), "default dock missing tab {tab:?}");
+            let mut dock = default_dock_state();
+            toggle_tab(&mut dock, tab);
+            assert_eq!(
+                leaf_of(&dock, SolarxyTab::Viewport),
+                [SolarxyTab::Viewport],
+                "{tab:?} landed on the viewport"
+            );
+            assert!(
+                leaf_of(&dock, tab).contains(&SolarxyTab::Properties),
+                "{tab:?} tabs in behind the parameter panel"
+            );
         }
+    }
+
+    /// The two core panels have places of their own: the canvas beside the
+    /// viewport, the parameter panel under the canvas.
+    #[test]
+    fn the_core_panels_reopen_in_their_own_leaves() {
+        let mut dock = default_dock_state();
+        toggle_tab(&mut dock, SolarxyTab::Properties);
+        toggle_tab(&mut dock, SolarxyTab::Sidebar);
+        toggle_tab(&mut dock, SolarxyTab::Nodes);
+        assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
+
+        toggle_tab(&mut dock, SolarxyTab::Nodes);
+        assert_eq!(leaf_of(&dock, SolarxyTab::Nodes), [SolarxyTab::Nodes]);
+        assert_eq!(leaf_of(&dock, SolarxyTab::Viewport), [SolarxyTab::Viewport]);
+
+        toggle_tab(&mut dock, SolarxyTab::Properties);
+        assert_eq!(
+            leaf_of(&dock, SolarxyTab::Properties),
+            [SolarxyTab::Properties]
+        );
+        assert_eq!(leaf_of(&dock, SolarxyTab::Nodes), [SolarxyTab::Nodes]);
+    }
+
+    /// With neither core panel up, an auxiliary panel still stays clear of
+    /// the viewport.
+    #[test]
+    fn an_auxiliary_panel_with_no_neighbour_opens_beside_the_viewport() {
+        let mut dock = DockState::new(vec![SolarxyTab::Viewport]);
+        toggle_tab(&mut dock, SolarxyTab::Tree);
+        assert_eq!(leaf_of(&dock, SolarxyTab::Tree), [SolarxyTab::Tree]);
+        assert_eq!(leaf_of(&dock, SolarxyTab::Viewport), [SolarxyTab::Viewport]);
     }
 
     /// A **real** `last_layout_json`, lifted verbatim from a `config.toml`
@@ -598,14 +690,14 @@ mod tests {
     #[test]
     fn tab_present_accuracy_after_sequence() {
         let mut dock = default_dock_state();
-        // Every panel ships in the default tree, so the round-trip starts
-        // from present.
-        assert!(tab_present(&dock, SolarxyTab::Text));
+        // The node canvas is in the default layout, so the round-trip
+        // starts from present.
+        assert!(tab_present(&dock, SolarxyTab::Nodes));
 
-        toggle_tab(&mut dock, SolarxyTab::Text);
-        assert!(!tab_present(&dock, SolarxyTab::Text));
+        toggle_tab(&mut dock, SolarxyTab::Nodes);
+        assert!(!tab_present(&dock, SolarxyTab::Nodes));
 
-        toggle_tab(&mut dock, SolarxyTab::Text);
-        assert!(tab_present(&dock, SolarxyTab::Text));
+        toggle_tab(&mut dock, SolarxyTab::Nodes);
+        assert!(tab_present(&dock, SolarxyTab::Nodes));
     }
 }

@@ -505,6 +505,13 @@ impl EguiRenderer {
         self.dock_state = default_dock_state();
     }
 
+    /// Replace the panel layout with a named arrangement's. The layout is
+    /// all this touches: the canvas preferences and the pane split that an
+    /// arrangement also carries are the state layer's to write.
+    pub(crate) fn apply_arrangement_layout(&mut self, arrangement: &super::Arrangement) {
+        self.dock_state = arrangement.recipe.build();
+    }
+
     pub fn set_scene_open(&mut self, open: bool) {
         self.scene_open = open;
     }

@@ -19,6 +19,7 @@ use solarxy_core::preferences::{
 use crate::state::view_state::{BoundsMode, ViewLayout};
 
 use crate::gui::MOD;
+use crate::gui::arrangement::{ArrangementId, BUILT_IN};
 use crate::gui::dock::SolarxyTab;
 use crate::state::keymap::{Action, hint};
 use crate::gui::intent::{
@@ -703,6 +704,17 @@ fn draw_view_menu(ui: &mut egui::Ui, settings: PanelSettings<'_>, intents: &mut 
 
 fn draw_layout_menu(ui: &mut egui::Ui, intents: &mut Intents, has_saved_layout: bool) {
     ui.menu_button("Layout", |ui| {
+        // The named arrangements, listed here until the bar is restructured
+        // and they take the menu of their own that the browser gives them.
+        for (index, arrangement) in BUILT_IN.iter().enumerate() {
+            if ui.button(arrangement.name).clicked() {
+                intents.raise(Intent::Layout(LayoutIntent::ApplyArrangement(
+                    ArrangementId::BuiltIn(index),
+                )));
+                ui.close();
+            }
+        }
+        ui.separator();
         for (layout, label, shortcut) in [
             (ViewLayout::Single, "Single", "F1"),
             (ViewLayout::SplitVertical, "Split Vertical", "F2"),

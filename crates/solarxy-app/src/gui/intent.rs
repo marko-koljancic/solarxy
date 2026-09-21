@@ -224,6 +224,9 @@ pub(crate) enum LayoutIntent {
     /// and so is the review panel's own close button, which is why adding a
     /// panel is a row in one table rather than a field on a shared struct.
     ToggleTab(SolarxyTab),
+    /// Apply a named arrangement: the panel layout, three canvas
+    /// preferences and the pane split, and never the document.
+    ApplyArrangement(super::ArrangementId),
     SetLayout(ViewLayout),
     SetSplitRatio(f32),
     SaveDock,

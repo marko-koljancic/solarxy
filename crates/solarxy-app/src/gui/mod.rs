@@ -36,6 +36,7 @@
 //! Cross-platform: `MOD` resolves to `⌘` on macOS and `Ctrl` elsewhere,
 //! used in menu shortcut labels.
 
+mod arrangement;
 mod chrome;
 mod code_editor;
 mod dock;
@@ -62,6 +63,7 @@ pub use renderer::EguiRenderer;
 pub(crate) use modals::recovery::RecoveryChoice;
 pub(crate) use modals::unsaved::{DiscardWhat, UnsavedChoice};
 pub(crate) use chrome::divider::DividerInfo;
+pub(crate) use arrangement::{Arrangement, ArrangementId};
 pub(crate) use dock::SolarxyTab;
 pub(crate) use pass::{CaptureFrame, FramePaint, PanelSources, ViewportChrome};
 pub(crate) use settings::{ClipboardReadout, CookReadout, HistoryReadout, PanelSettings};
