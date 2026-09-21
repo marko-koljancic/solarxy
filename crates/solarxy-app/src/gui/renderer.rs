@@ -36,7 +36,6 @@ pub struct EguiRenderer {
     renderer: egui_wgpu::Renderer,
     egui_format: wgpu::TextureFormat,
     theme: Theme,
-    pub menu_bar_visible: bool,
     about_open: bool,
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
@@ -116,7 +115,6 @@ impl EguiRenderer {
             renderer,
             egui_format,
             theme,
-            menu_bar_visible: true,
             about_open: false,
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
@@ -616,7 +614,6 @@ impl EguiRenderer {
             review_active: review.active,
             review_markers_hidden: review.markers_hidden,
             review_dirty: review.dirty,
-            menu_bar_visible: self.menu_bar_visible,
             has_saved_layout: self.has_saved_layout,
             theme: self.theme,
         };
@@ -634,15 +631,16 @@ impl EguiRenderer {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
                 intents.raise(Intent::Edit(super::EditIntent::OpenPreferences));
             }
-            if self.menu_bar_visible {
-                draw_menu_bar(
-                    ctx,
-                    sources.settings,
-                    intents,
-                    &|tab| present_at_start.contains(&tab),
-                    menu_cx,
-                );
-            }
+            // Always drawn. It could be hidden until 0.10.0, from a menu row
+            // whose key had lost its binding, which left no way to bring it
+            // back; the browser's bar cannot be hidden either.
+            draw_menu_bar(
+                ctx,
+                sources.settings,
+                intents,
+                &|tab| present_at_start.contains(&tab),
+                menu_cx,
+            );
 
             let mut tab_viewer = SolarxyTabViewer {
                 sources: *sources,

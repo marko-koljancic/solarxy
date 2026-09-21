@@ -52,7 +52,6 @@ pub(in crate::gui) struct MenuContext<'a> {
     pub review_active: bool,
     pub review_markers_hidden: bool,
     pub review_dirty: bool,
-    pub menu_bar_visible: bool,
     pub has_saved_layout: bool,
     pub theme: Theme,
 }
@@ -843,23 +842,6 @@ fn draw_window_menu(
                 intents.raise(Intent::Layout(LayoutIntent::ToggleTab(row.tab)));
                 ui.close();
             }
-        }
-
-        ui.separator();
-
-        // The menu bar is chrome the shell owns rather than a panel the dock
-        // holds, so it is written out rather than squeezed into the table
-        // above.
-        if ui
-            .add(
-                egui::Button::new("Menu Bar")
-                    .selected(cx.menu_bar_visible)
-                    .shortcut_text("F10"),
-            )
-            .clicked()
-        {
-            intents.raise(Intent::Layout(LayoutIntent::ToggleMenuBar));
-            ui.close();
         }
     });
 }

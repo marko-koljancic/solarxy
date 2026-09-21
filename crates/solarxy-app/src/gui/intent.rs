@@ -224,7 +224,6 @@ pub(crate) enum LayoutIntent {
     /// and so is the review panel's own close button, which is why adding a
     /// panel is a row in one table rather than a field on a shared struct.
     ToggleTab(SolarxyTab),
-    ToggleMenuBar,
     SetLayout(ViewLayout),
     SetSplitRatio(f32),
     SaveDock,

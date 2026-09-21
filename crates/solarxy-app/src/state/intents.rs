@@ -381,9 +381,6 @@ impl State {
     fn apply_layout_intent(&mut self, intent: LayoutIntent) {
         match intent {
             LayoutIntent::ToggleTab(tab) => self.gui.toggle_tab(tab),
-            LayoutIntent::ToggleMenuBar => {
-                self.gui.menu_bar_visible = !self.gui.menu_bar_visible;
-            }
             LayoutIntent::SetLayout(layout) => self.set_view_layout(layout),
             LayoutIntent::SetSplitRatio(ratio) => {
                 self.view.display.split_ratio =
