@@ -395,11 +395,6 @@ impl State {
 
         let ap = self.view.active_pane;
 
-        let projection_mode = self.view.cameras[ap]
-            .as_ref()
-            .map_or(self.preferences.display.projection_mode, |c| {
-                c.camera.projection
-            });
         // Borrowed rather than copied: the panels read the real settings and
         // ask for changes, so there is nothing to write back afterwards.
         let settings = PanelSettings {
@@ -408,9 +403,6 @@ impl State {
             display: &self.view.display,
             post: &self.renderer.post,
             ibl_mode: self.renderer.ibl_res.ibl_mode,
-            cameras_linked: self.view.cameras_linked,
-            is_split,
-            projection_mode,
             cook: self.cook_readout,
             history: self.history_readout(),
             clipboard: self.clipboard_readout(),

@@ -357,7 +357,7 @@ impl EguiRenderer {
 
     /// Show a panel if it is hidden, hide it if it is shown.
     ///
-    /// One method rather than one per panel: the Window menu, the panel
+    /// One method rather than one per panel: a menu's panel row, the panel
     /// shortcuts and a panel's own close button all mean the same thing, and
     /// three of these existed with one of them never called.
     pub(crate) fn toggle_tab(&mut self, tab: SolarxyTab) {
@@ -404,7 +404,7 @@ impl EguiRenderer {
     /// `true` iff the Node Tree tab is currently mounted in the dock. The
     /// state layer gates the tree fold on this, so a closed panel costs
     /// nothing per frame. Read before the egui pass, so opening the tab
-    /// from the Window menu populates it on the following frame — a
+    /// from a menu populates it on the following frame — a
     /// latency no one can see.
     #[must_use]
     pub fn tree_tab_present(&self) -> bool {
@@ -664,11 +664,8 @@ impl EguiRenderer {
             // The still renders either root: an open scene, or an open model
             // through the synthesized document.
             has_model: self.scene_open,
-            still_renderable: self.scene_open,
             recent_files: sources.recent_files,
             arrangements: sources.arrangements,
-            hdri_available: chrome.toolbars.hdri_available,
-            customs: chrome.toolbars.customs,
             // **Review is off for this release.** It anchors against a
             // file-loaded model's meshes, and the second root that held one
             // went away with the one-document-root change; repointing it at

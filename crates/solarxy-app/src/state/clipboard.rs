@@ -13,6 +13,10 @@
 //! error, so the only way to tell a user that five nodes became two is to
 //! count what arrived against what was asked for. That is the browser's
 //! rule and its wording.
+//!
+//! The Edit menu's three other selection actions live here too, since this
+//! is the module that knows what the selection is: bypass, the display
+//! flag and delete. Each is one undo step.
 
 use solarxy_graph::Command;
 use solarxy_graph::document::NodeId;
@@ -24,6 +28,37 @@ use crate::gui::{ClipboardReadout, ToastSeverity};
 /// Where a pasted fragment lands relative to where it was copied: the
 /// browser's offset, so a paste over its own source is visibly a copy.
 pub(super) const PASTE_OFFSET: [f32; 2] = [30.0, 30.0];
+
+/// Which nodes a bypass toggle writes, and what it writes to each.
+///
+/// **Every node goes to the opposite of what the first one is**, which is
+/// the browser's rule: a mixed selection ends up uniform rather than each
+/// node flipping on its own, so the entry does one predictable thing. A
+/// type that declares it cannot be bypassed is left out, as the canvas's
+/// own bypass control leaves it out, and is not what decides the target.
+pub(super) fn bypass_plan(
+    graph: &solarxy_graph::document::Graph,
+    registry: &solarxy_graph::registry::Registry,
+    ids: &[NodeId],
+) -> Vec<(NodeId, bool)> {
+    let able: Vec<(NodeId, bool)> = ids
+        .iter()
+        .filter_map(|id| graph.node(*id))
+        .filter(|node| {
+            registry.get(&node.type_id).is_some_and(|desc| {
+                !matches!(
+                    desc.bypass,
+                    solarxy_graph::registry::BypassBehavior::NotBypassable
+                )
+            })
+        })
+        .map(|node| (node.id, node.bypassed))
+        .collect();
+    let Some((_, first)) = able.first().copied() else {
+        return Vec::new();
+    };
+    able.into_iter().map(|(id, _)| (id, !first)).collect()
+}
 
 /// How many of `wanted` nodes a paste did not produce.
 pub(super) fn skipped_on_paste(wanted: usize, batch: &EventBatch) -> usize {
@@ -56,7 +91,72 @@ impl State {
         ClipboardReadout {
             has_selection: !self.current_selection().is_empty(),
             has_clipboard: self.clipboard.is_some(),
+            in_container: self.gui.graph_ctx() != solarxy_graph::document::GraphContext::Root,
         }
+    }
+
+    /// Flip the selection's bypass, as one undo step.
+    pub fn toggle_bypass_selection(&mut self) {
+        let ctx = self.gui.graph_ctx();
+        let ids = self.current_selection();
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        let Ok(graph) = engine.document().graph(ctx) else {
+            return;
+        };
+        let plan = bypass_plan(graph, engine.registry(), &ids);
+        if plan.is_empty() {
+            return;
+        }
+        let grouped = plan.len() > 1;
+        if grouped
+            && engine
+                .apply(Command::BeginTransaction {
+                    label: "bypass".to_string(),
+                })
+                .is_err()
+        {
+            return;
+        }
+        for (node, bypassed) in plan {
+            if let Err(err) = engine.apply(Command::SetBypass {
+                ctx,
+                node,
+                bypassed,
+            }) {
+                if grouped {
+                    let _ = engine.apply(Command::CancelTransaction);
+                }
+                self.gui.set_toast(&format!("{err}"), ToastSeverity::Error);
+                return;
+            }
+        }
+        if grouped {
+            let _ = engine.apply(Command::EndTransaction);
+        }
+    }
+
+    /// Make the first selected node the one its network shows.
+    pub fn set_display_flag_selection(&mut self) {
+        let ctx = self.gui.graph_ctx();
+        let Some(node) = self.current_selection().first().copied() else {
+            return;
+        };
+        self.apply_node_command(Command::SetActiveOutput {
+            ctx,
+            node: Some(node),
+        });
+    }
+
+    /// Remove the selection: one command, so one undo step.
+    pub fn delete_selection(&mut self) {
+        let ctx = self.gui.graph_ctx();
+        let ids = self.current_selection();
+        if ids.is_empty() {
+            return;
+        }
+        self.apply_node_command(Command::RemoveNodes { ctx, ids });
     }
 
     /// Capture the selection. Nothing selected copies nothing and keeps
@@ -162,6 +262,70 @@ mod tests {
     /// and into a sibling of the same kind, wire included, one undo step
     /// each; pasted into a network of another kind they are refused, and
     /// the refusal is counted rather than reported by the engine.
+    /// A mixed selection ends up uniform: every node goes to the opposite
+    /// of what the first one is, rather than each flipping on its own.
+    #[test]
+    fn a_bypass_toggle_makes_a_mixed_selection_uniform() {
+        let mut engine = Engine::new().expect("registry builds");
+        let geo = add(&mut engine, GraphContext::Root, "sopnet");
+        let inside = GraphContext::Subflow(geo);
+        let a = add(&mut engine, inside, "sphere");
+        let b = add(&mut engine, inside, "box");
+        engine
+            .apply(Command::SetBypass {
+                ctx: inside,
+                node: b,
+                bypassed: true,
+            })
+            .expect("bypass b");
+
+        let graph = engine.document().graph(inside).expect("the graph");
+        // The first is live, so both go bypassed, including the one that
+        // already is.
+        assert_eq!(
+            bypass_plan(graph, engine.registry(), &[a, b]),
+            vec![(a, true), (b, true)]
+        );
+        // Led by the bypassed one, both come back.
+        assert_eq!(
+            bypass_plan(graph, engine.registry(), &[b, a]),
+            vec![(b, false), (a, false)]
+        );
+        assert!(bypass_plan(graph, engine.registry(), &[]).is_empty());
+    }
+
+    /// A type that declares it cannot be bypassed is left out of the plan,
+    /// and is not what decides where the others go.
+    #[test]
+    fn a_type_that_cannot_be_bypassed_is_left_out_of_the_toggle() {
+        let mut engine = Engine::new().expect("registry builds");
+        let geo = add(&mut engine, GraphContext::Root, "sopnet");
+        let inside = GraphContext::Subflow(geo);
+        let fixed_type = engine
+            .registry()
+            .descriptors()
+            .find(|d| {
+                matches!(
+                    d.bypass,
+                    solarxy_graph::registry::BypassBehavior::NotBypassable
+                ) && d
+                    .contexts
+                    .contains(solarxy_graph::document::ContextKind::Sop)
+            })
+            .map(|d| d.type_id.to_string())
+            .expect("a geometry type that cannot be bypassed");
+        let fixed = add(&mut engine, inside, &fixed_type);
+        let sphere = add(&mut engine, inside, "sphere");
+
+        let graph = engine.document().graph(inside).expect("the graph");
+        assert_eq!(
+            bypass_plan(graph, engine.registry(), &[fixed, sphere]),
+            vec![(sphere, true)],
+            "{fixed_type} is skipped and does not lead"
+        );
+        assert!(bypass_plan(graph, engine.registry(), &[fixed]).is_empty());
+    }
+
     #[test]
     fn a_fragment_round_trips_within_and_across_networks_of_one_kind_and_is_refused_by_another() {
         let mut engine = Engine::new().expect("engine");

@@ -243,7 +243,7 @@ impl State {
     }
 
     /// Import every model into the open document as one undo step.
-    fn import_models(&mut self, models: &[PathBuf]) {
+    pub(super) fn import_models(&mut self, models: &[PathBuf]) {
         let shown = self.gui.graph_ctx();
         let Some(engine) = self.engine.as_mut() else {
             return;

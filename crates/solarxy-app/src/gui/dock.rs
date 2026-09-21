@@ -8,8 +8,8 @@
 //! Users drag tab titles between leaves to dock left/right/bottom/top; drag
 //! outside the dock area to tear out into a floating window. The Viewport tab is **closeable but
 //! non-floatable and transparent** — `egui_dock` never paints over the
-//! wgpu surface, and the user can recover a closed Viewport via the
-//! Window menu (`Window → Viewport`).
+//! wgpu surface, and the user can recover a closed Viewport from the panel
+//! rows of the Desks menu.
 //!
 //! ## Viewport rect plumbing (one-frame latency)
 //!
@@ -20,11 +20,11 @@
 //! Latency is invisible at steady state; a one-frame stale rect during
 //! resize / dock-rearrangement transients is acceptable.
 //!
-//! ## Toggling tabs from the Window menu
+//! ## Toggling tabs from a menu
 //!
 //! [`tab_present`] / [`toggle_tab`] are the canonical add-or-remove
-//! helpers. The Window menu asks `tab_present` through a closure each
-//! frame for its checkmarks, so the dock tree is the one source of a
+//! helpers. The Desks menu's panel rows and the Review menu ask
+//! `tab_present` through a closure each frame for their ticks, so the dock tree is the one source of a
 //! panel's open state and nothing mirrors it.
 
 use egui_dock::{DockState, TabViewer};

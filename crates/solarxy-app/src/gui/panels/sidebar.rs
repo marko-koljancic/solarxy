@@ -8,22 +8,16 @@ use crate::gui::intent::{DisplayChange, Intent, Intents, PostChange};
 use crate::gui::settings::PanelSettings;
 
 /// A labelled checkbox, returning the new value when the user flipped it.
-fn checkbox_with_tooltip(
-    ui: &mut egui::Ui,
-    value: bool,
-    label: &str,
-    shortcut: &str,
-) -> Option<bool> {
-    let mut flipped = None;
-    ui.horizontal(|ui| {
-        let mut current = value;
-        if ui.checkbox(&mut current, label).changed() {
-            flipped = Some(current);
-        }
-        ui.small(shortcut)
-            .on_hover_text(format!("Shortcut: {shortcut}"));
-    });
-    flipped
+///
+/// It printed a key beside the label until 0.10.0. None of those keys
+/// survived the shared keyboard map, and a key typed beside a label has
+/// nothing holding it to what the key does, so the rows say what they are
+/// and nothing about a key.
+fn labelled_checkbox(ui: &mut egui::Ui, value: bool, label: &str) -> Option<bool> {
+    let mut current = value;
+    ui.checkbox(&mut current, label)
+        .changed()
+        .then_some(current)
 }
 
 /// A slider bound to a copy of `value`, returning the new value when the
@@ -62,14 +56,10 @@ pub(in crate::gui) fn draw_sidebar_content(
         egui::CollapsingHeader::new("Display")
             .default_open(true)
             .show(ui, |ui| {
-                if let Some(v) =
-                    checkbox_with_tooltip(ui, display.lights_locked, "Lock Lights", "Shift+L")
-                {
+                if let Some(v) = labelled_checkbox(ui, display.lights_locked, "Lock Lights") {
                     intents.raise(Intent::Display(DisplayChange::LightsLocked(v)));
                 }
-                if let Some(v) =
-                    checkbox_with_tooltip(ui, display.turntable_active, "Turntable", "V")
-                {
+                if let Some(v) = labelled_checkbox(ui, display.turntable_active, "Turntable") {
                     intents.raise(Intent::Display(DisplayChange::TurntableActive(v)));
                 }
                 if display.turntable_active {
@@ -90,7 +80,7 @@ pub(in crate::gui) fn draw_sidebar_content(
         egui::CollapsingHeader::new("Post-Processing")
             .default_open(true)
             .show(ui, |ui| {
-                if let Some(v) = checkbox_with_tooltip(ui, post.bloom_enabled, "Bloom", "Shift+D") {
+                if let Some(v) = labelled_checkbox(ui, post.bloom_enabled, "Bloom") {
                     intents.raise(Intent::Post(PostChange::Bloom(v)));
                 }
                 ui.add_enabled_ui(post.bloom_enabled, |ui| {
@@ -119,7 +109,7 @@ pub(in crate::gui) fn draw_sidebar_content(
                         intents.raise(Intent::Post(PostChange::Strengths(next)));
                     }
                 });
-                if let Some(v) = checkbox_with_tooltip(ui, post.ssao_enabled, "SSAO", "Shift+O") {
+                if let Some(v) = labelled_checkbox(ui, post.ssao_enabled, "SSAO") {
                     intents.raise(Intent::Post(PostChange::Ssao(v)));
                 }
                 ui.add_enabled_ui(post.ssao_enabled, |ui| {
@@ -145,7 +135,7 @@ pub(in crate::gui) fn draw_sidebar_content(
                 if let Some(mode) = crate::gui::widgets::combo_with_tooltip(
                     ui,
                     "Tone Map",
-                    "Shift+T",
+                    "How highlights are rolled off into what the display can show",
                     post.tone_mode,
                     ToneMode::ALL,
                 ) {
@@ -160,7 +150,8 @@ pub(in crate::gui) fn draw_sidebar_content(
                     )
                     .changed()
                 });
-                row.response.on_hover_text("E / Shift+E");
+                row.response
+                    .on_hover_text("How bright the scene is before it is tone mapped");
                 if row.inner {
                     intents.raise(Intent::Post(PostChange::Exposure(exposure)));
                 }

@@ -80,7 +80,7 @@ pub(in crate::gui) fn draw_review_panel_content(
                 .on_hover_text("Close panel")
                 .clicked()
             {
-                // The same toggle the Window menu raises. Before the intent
+                // The same toggle the Review menu's panel entry raises. Before the intent
                 // queue this wrote an out-parameter the dock declared and
                 // never read back, so the button did nothing.
                 intents.raise(Intent::Layout(LayoutIntent::ToggleTab(

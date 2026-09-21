@@ -2,8 +2,7 @@
 //! and the rotation and intensity of the light it casts.
 //!
 //! It is reached from the Viewport panel's View menu, as the browser's
-//! is. The File menu still has an entry too, until the global bar is
-//! restructured and that one goes. The Properties panel, which used to
+//! is. The Properties panel, which used to
 //! carry these rows, is the parameter panel now. The rows raise the same
 //! intents they always did; only the surface moved.
 

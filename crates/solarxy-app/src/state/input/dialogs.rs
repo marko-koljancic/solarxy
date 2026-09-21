@@ -30,6 +30,30 @@ impl State {
         }
     }
 
+    /// Pick one or more model files and import each into the network being
+    /// looked at. The same path a drop takes, so an import from the menu
+    /// and one from a drag cannot come to behave differently: the models
+    /// are staged, each gets an import node, and the whole is one undo step.
+    /// With no document open there is nothing to import into, so the pick
+    /// opens as a document instead, which is what a drop onto an empty
+    /// window does.
+    pub fn import_model_dialog(&mut self) {
+        let Some(paths) = rfd::FileDialog::new()
+            .add_filter("3D Models", &["obj", "stl", "ply", "gltf", "glb"])
+            .add_filter("All Files", &["*"])
+            .pick_files()
+        else {
+            return;
+        };
+        if self.engine.is_none() {
+            for path in paths {
+                self.drop_path(path);
+            }
+            return;
+        }
+        self.import_models(&paths);
+    }
+
     /// Where to write the scene, or `None` when the user backed out.
     ///
     /// The extension is not enforced here: what a picker produces is a

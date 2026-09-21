@@ -64,7 +64,7 @@ pub struct ReviewState {
 
     /// Whether the side panel is visible. Mirrors
     /// `Preferences::review.panel_open` at startup; toggleable via
-    /// `Window → Review Panel` and auto-opens on Shift+R when off.
+    /// `Review > Review Panel` and auto-opens on Shift+R when off.
     pub panel_open: bool,
 
     /// Per-category filter chips on the panel: index by

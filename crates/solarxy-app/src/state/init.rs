@@ -150,12 +150,18 @@ impl State {
                         ghosted_wireframe: false,
                         normals_mode: preferences.display.normals_mode,
                         background_mode,
-                        uv_mode: preferences.display.uv_mode,
+                        // Off rather than the stored preference: the
+                        // control that set it left with the global View
+                        // menu, and a stored value would strand an overlay
+                        // nobody can turn off. The preference itself stays
+                        // in the file for older configurations.
+                        uv_mode: solarxy_core::preferences::UvMode::Off,
                         bounds_mode: BoundsMode::Off,
                         line_weight,
                         show_grid: preferences.display.grid_visible,
                         show_axis_gizmo: preferences.display.axis_gizmo_visible,
-                        show_local_axes: preferences.display.local_axes_visible,
+                        // Off for the same reason.
+                        show_local_axes: false,
                         inspection_mode: preferences.display.inspection_mode,
                         material_override: MaterialOverride::None,
                         texel_density_target: preferences.display.texel_density_target,
@@ -189,7 +195,12 @@ impl State {
                 },
                 cameras: [None, None, None, None],
                 active_pane: 0,
-                cameras_linked: true,
+                // Unlinked, as the browser starts: each pane navigates on
+                // its own. The shell started linked until 0.10.0, with a
+                // menu entry to unlink; the entry had no browser
+                // counterpart and went, and leaving this true would have
+                // linked every split view for good.
+                cameras_linked: false,
             },
             gui,
             engine: None,

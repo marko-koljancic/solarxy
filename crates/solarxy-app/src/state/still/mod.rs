@@ -1,5 +1,5 @@
-//! The desktop still render: the Render menu's entry into the tiled
-//! still job both shells share.
+//! The desktop still render: the render node's own action opens the tiled
+//! still job both shells share, as it does in the browser.
 //!
 //! The shape mirrors the web shell deliberately, piece for piece: the
 //! render node is the one authority for what renders (engine, size,

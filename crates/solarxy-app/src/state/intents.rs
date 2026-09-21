@@ -44,7 +44,6 @@ impl State {
                 Intent::Display(change) => apply_display_change(&mut self.view.display, change),
                 Intent::Post(change) => apply_post_change(&mut self.renderer.post, change),
                 Intent::Ibl(mode) => self.renderer.ibl_res.ibl_mode = mode,
-                Intent::LinkCameras(linked) => self.view.cameras_linked = linked,
                 Intent::PaneProjection { pane, mode } => {
                     // A projection picked on a bound pane takes the view over;
                     // without the release, the per-frame follow would silently
@@ -93,12 +92,6 @@ impl State {
                         self.unresolved_binding[pane] = false;
                     }
                 }
-                Intent::Projection(mode) => {
-                    // The View menu's projection follows the camera link
-                    // rather than naming a pane, which is why it is not the
-                    // toolbar's arm with a different argument.
-                    self.for_each_target_cam(|cam| cam.set_projection(mode));
-                }
                 Intent::File(intent) => self.apply_file_intent(intent),
                 Intent::Edit(EditIntent::Undo) => self.undo(),
                 Intent::Edit(EditIntent::Redo) => self.redo(),
@@ -108,17 +101,12 @@ impl State {
                 Intent::Edit(EditIntent::OpenPreferences) => {
                     self.gui.open_preferences(self.preferences.clone());
                 }
-                Intent::Edit(EditIntent::SaveViewDefaults) => self.save_preferences(),
+                Intent::Edit(EditIntent::ToggleBypass) => self.toggle_bypass_selection(),
+                Intent::Edit(EditIntent::SetDisplayFlag) => self.set_display_flag_selection(),
+                Intent::Edit(EditIntent::DeleteSelection) => self.delete_selection(),
                 Intent::Capture(CaptureIntent::Screenshot) => {
                     self.capture_requested = true;
                     self.screenshot_expand_review = false;
-                }
-                Intent::Capture(CaptureIntent::Still) => {
-                    // From the menu, the still renders the document's one
-                    // render node; a target left by a node's own action
-                    // must not outlive that press.
-                    self.still_target = None;
-                    self.open_still_dialog();
                 }
                 Intent::Cook(CookIntent::SetMode(mode)) => self.set_cook_mode(mode),
                 Intent::Cook(CookIntent::CookNow) => self.cook_now(),
@@ -248,11 +236,9 @@ impl Recompute {
                 | PaneChange::InspectionMode(_)
                 | PaneChange::MaterialOverride(_)
                 | PaneChange::NormalsMode(_)
-                | PaneChange::UvMode(_)
                 | PaneChange::BoundsMode(_)
                 | PaneChange::ShowGrid(_)
                 | PaneChange::ShowAxisGizmo(_)
-                | PaneChange::ShowLocalAxes(_)
                 | PaneChange::ShowValidation(_)
                 | PaneChange::UvBackground(_)
                 | PaneChange::ShowUvOverlap(_)
@@ -275,13 +261,11 @@ impl Recompute {
                 | DisplayChange::MetallicScale(_)
                 | DisplayChange::HdriRotation(_),
             )
-            | Intent::LinkCameras(_)
             | Intent::PaneProjection { .. }
             | Intent::PaneView { .. }
             | Intent::CreateCameraFromView { .. }
             | Intent::Viewport(_)
             | Intent::LookThrough { .. }
-            | Intent::Projection(_)
             | Intent::File(_)
             | Intent::Edit(_)
             | Intent::Capture(_)
@@ -310,12 +294,10 @@ fn apply_pane_change(pds: &mut crate::state::view_state::PaneDisplaySettings, ch
         PaneChange::MaterialOverride(v) => pds.material_override = v,
         PaneChange::BackgroundMode(v) => pds.background_mode = v,
         PaneChange::NormalsMode(v) => pds.normals_mode = v,
-        PaneChange::UvMode(v) => pds.uv_mode = v,
         PaneChange::BoundsMode(v) => pds.bounds_mode = v,
         PaneChange::LineWeight(v) => pds.line_weight = v,
         PaneChange::ShowGrid(v) => pds.show_grid = v,
         PaneChange::ShowAxisGizmo(v) => pds.show_axis_gizmo = v,
-        PaneChange::ShowLocalAxes(v) => pds.show_local_axes = v,
         PaneChange::ShowValidation(v) => pds.show_validation = v,
         PaneChange::UvBackground(v) => pds.uv_bg = v,
         PaneChange::ShowUvOverlap(v) => pds.show_uv_overlap = v,
@@ -341,6 +323,7 @@ impl State {
         match intent {
             FileIntent::NewScene => self.new_scene(),
             FileIntent::OpenModel => self.open_model_dialog(),
+            FileIntent::ImportModel => self.import_model_dialog(),
             FileIntent::OpenEnvironment => self.gui.open_environment_modal(),
             FileIntent::Save => {
                 self.save_document();
@@ -960,8 +943,7 @@ mod tests {
     #[test]
     fn every_pane_change_writes_only_the_field_it_names() {
         use solarxy_core::preferences::{
-            InspectionMode, MaterialOverride, NormalsMode, PaneMode, UvMapBackground, UvMode,
-            ViewMode,
+            InspectionMode, MaterialOverride, NormalsMode, PaneMode, UvMapBackground, ViewMode,
         };
         use solarxy_core::view_config::PaneDisplaySettings;
 
@@ -994,9 +976,6 @@ mod tests {
             (PaneChange::NormalsMode(NormalsMode::Face), |p, b| {
                 p.normals_mode = b.normals_mode;
             }),
-            (PaneChange::UvMode(UvMode::Checker), |p, b| {
-                p.uv_mode = b.uv_mode;
-            }),
             (
                 PaneChange::BoundsMode(solarxy_core::view_config::BoundsMode::WholeModel),
                 |p, b| {
@@ -1011,9 +990,6 @@ mod tests {
             }),
             (PaneChange::ShowAxisGizmo(true), |p, b| {
                 p.show_axis_gizmo = b.show_axis_gizmo;
-            }),
-            (PaneChange::ShowLocalAxes(true), |p, b| {
-                p.show_local_axes = b.show_local_axes;
             }),
             (PaneChange::ShowValidation(true), |p, b| {
                 p.show_validation = b.show_validation;

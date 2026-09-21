@@ -1,6 +1,6 @@
 //! Still-render modal.
 //!
-//! `Render → Render Still…` starts the tiled still job; this modal shows
+//! A render node's own action starts the tiled still job; this modal shows
 //! tile and sample progress with a live preview assembled from finished
 //! tiles, and offers Cancel while running and `Save As…` when done.
 //! Nothing is written to disk until the user picks a path.

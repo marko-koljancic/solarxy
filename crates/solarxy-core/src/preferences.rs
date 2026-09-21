@@ -585,8 +585,9 @@ impl ThemeChoice {
 /// split):
 /// - GUI **Edit → Preferences…** (`Ctrl/⌘+,`) — startup-only fields
 ///   (window size, MSAA), UI defaults, updater behaviour.
-/// - GUI sidebar + **Edit → Save View Settings as Default** — live
-///   per-session display / rendering / lighting settings.
+/// - GUI sidebar — live per-session display / rendering / lighting
+///   settings. They were written back as defaults by an Edit menu entry
+///   until 0.10.0, which had no browser counterpart and went.
 /// - Direct TOML editing — anything; reload via the modal's
 ///   **Open config file** button.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -946,8 +947,8 @@ pub struct UpdaterPrefs {
 ///
 /// Two slots:
 /// - `last_layout_json` is auto-written on app quit and restored on launch.
-/// - `saved_layout_json` is written only by Window → Save Layout and
-///   replayed by Window → Restore Saved Layout. Independent from auto-save
+/// - `saved_layout_json` is written only by Save Layout and replayed by
+///   Restore Saved Layout, in the Desks menu. Independent from auto-save
 ///   so the user can mess up the live layout without losing their snapshot.
 ///
 /// Deserialization failures (e.g. after a `SolarxyTab` variant bump) fall

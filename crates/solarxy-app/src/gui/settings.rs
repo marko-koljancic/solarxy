@@ -15,7 +15,7 @@
 //! `texel_density_target` round-tripped through it without a single widget
 //! ever writing it, which is a hazard wearing a feature's clothes.
 
-use solarxy_core::preferences::{IblMode, ProjectionMode};
+use solarxy_core::preferences::IblMode;
 use solarxy_graph::engine::CookMode;
 use solarxy_renderer::frame::PostProcessing;
 
@@ -71,6 +71,9 @@ pub(crate) struct HistoryReadout {
 pub(crate) struct ClipboardReadout {
     pub has_selection: bool,
     pub has_clipboard: bool,
+    /// Whether the graph being looked at is inside a container, which is
+    /// the only place a display flag means anything.
+    pub in_container: bool,
 }
 
 /// The display state the panels draw from, borrowed rather than copied.
@@ -83,13 +86,6 @@ pub(crate) struct PanelSettings<'a> {
     pub display: &'a DisplaySettings,
     pub post: &'a PostProcessing,
     pub ibl_mode: IblMode,
-    pub cameras_linked: bool,
-    /// Whether the layout has more than one pane. Read-only: it follows the
-    /// layout rather than being set.
-    pub is_split: bool,
-    /// The active pane camera's projection. Read-only for the same reason:
-    /// changing it is an intent, and the camera is what answers afterwards.
-    pub projection_mode: ProjectionMode,
     /// The header strip's cook readout, refreshed from the engine each frame.
     pub cook: CookReadout,
     /// The undo and redo controls' readout, likewise.

@@ -1,7 +1,6 @@
 //! Writing preferences back to disk, and the two flushes that run on the way
 //! out.
 
-use crate::gui::ToastSeverity;
 use solarxy_core::preferences::{self};
 
 use super::State;
@@ -18,10 +17,8 @@ impl State {
         self.preferences.display.normals_mode = pds.normals_mode;
         self.preferences.display.grid_visible = pds.show_grid;
         self.preferences.display.axis_gizmo_visible = pds.show_axis_gizmo;
-        self.preferences.display.local_axes_visible = pds.show_local_axes;
         self.preferences.display.bloom_enabled = self.renderer.post.bloom_enabled;
         self.preferences.display.ssao_enabled = self.renderer.post.ssao_enabled;
-        self.preferences.display.uv_mode = pds.uv_mode;
         self.preferences.display.turntable_active = self.view.display.turntable_active;
         self.preferences.display.turntable_rpm = self.view.display.turntable_rpm;
         if let Some(cam) = &self.view.cameras[0] {
@@ -38,19 +35,6 @@ impl State {
             .display
             .set_post_strengths(self.renderer.post.strengths());
         preferences::save(&self.preferences)
-    }
-
-    pub(in crate::state) fn save_preferences(&mut self) {
-        match self.persist_preferences() {
-            Ok(()) => {
-                self.gui
-                    .set_toast("Preferences saved", ToastSeverity::Success);
-            }
-            Err(e) => {
-                self.gui
-                    .set_toast(&format!("Save failed: {}", e), ToastSeverity::Error);
-            }
-        }
     }
 
     /// Auto-save the current dock layout into `preferences.dock.last_layout_json`

@@ -118,7 +118,7 @@ step any more.
   the scope from where the pointer is, looks the chord up in `state/input/keymap.rs` and runs the
   binding when its `Claim` says the window takes it; a claimed press never reaches the map, which
   is what stops one press from running two handlers. Panel shortcuts route through `EguiRenderer::toggle_tab`, the one add-or-remove
-  helper the Window menu and every shortcut share. Dropped paths are collected and handled
+  helper every menu's panel row and every shortcut share. Dropped paths are collected and handled
   once per frame. Fires `flush_dock_layout_on_exit` and `flush_review_on_exit` from
   `ApplicationHandler::exiting` so the arrangement survives a quit.
 - `state/` - the app's central `State`:
@@ -254,8 +254,7 @@ step any more.
     `viewport_context_menu`.
   - `modals/` - `about`, `preferences`, `shortcuts`, `screenshot`, `still`, and since the
     authoring and panel epics `environment` (the browser's four rows: HDRI with Load and Clear, IBL
-    mode, rotation, intensity; reached from the viewport's View menu, and still from
-    `File > Environment...` until the global bar's restructure removes that entry), `unsaved` (Save, Discard, Cancel) and `recovery` (Restore
+    mode, rotation, intensity; reached from the viewport's View menu), `unsaved` (Save, Discard, Cancel) and `recovery` (Restore
     or Discard, offered once on launch). Each owns
     state on the renderer and is drained through a `take_*` accessor rather than the queue: a
     single-value handle is already the right shape.
@@ -282,7 +281,7 @@ step any more.
     `tab_present` and `toggle_tab`. **The tab variant names are serialized into user
     preferences**, so renaming one silently costs a reader their arrangement. The Viewport tab is
     special: non-floatable, transparent so the wgpu surface shows through, and closeable but
-    restorable from the Window menu. The `compute_panes` math reads its rect from the **previous**
+    restorable from the panel rows of the Desks menu. The `compute_panes` math reads its rect from the **previous**
     frame, a one-frame latency invisible at steady state.
 
 [`Intent`]: crates/solarxy-app/src/gui/intent.rs
@@ -391,9 +390,9 @@ The app re-exports the few renderer items it reaches for (`CompositeLook`, `Rend
 All eleven tabs (Viewport, Sidebar, Review Panel, Properties, Tree, Nodes, Assets, Asset Preview, Texture, Attributes, Text) live in a single `egui_dock::DockState<SolarxyTab>`, held by `EguiRenderer` inside `dock::Dock`, which also holds the one leaf that may be maximized over it (every question about the arrangement and every change goes to the full layout, a change restores first, and only the draw call sees the maximized copy); the enum has a twelfth variant, `Retired`, that no tab is ever created with (see below). `solarxy_core::preferences::DockPrefs` holds two `Option<String>` JSON blobs that serialize that state via `egui_dock`'s `serde` feature (workspace dep `egui_dock = "0.18"` with `features = ["serde"]`):
 
 - `last_layout_json` — auto-saved on app quit (`State::flush_dock_layout_on_exit` in `state/persist.rs`, called from `ApplicationHandler::exiting` in `app.rs`). Restored on startup in `state/init.rs` so the window comes back exactly how you left it. Write is short-circuited if the JSON hasn't changed.
-- `saved_layout_json` — only ever written by `Window → Save Layout`; never overwritten automatically. `Window → Restore Saved Layout` reads it back; the menu entry stays disabled when it's `None` (driven by `EguiRenderer::has_saved_layout`, mirrored from `Preferences.dock.saved_layout_json.is_some()` at startup).
+- `saved_layout_json` — only ever written by `Desks → Save Layout`; never overwritten automatically. `Desks → Restore Saved Layout` reads it back; the menu entry stays disabled when it's `None` (driven by `EguiRenderer::has_saved_layout`, mirrored from `Preferences.dock.saved_layout_json.is_some()` at startup).
 
-**The tab variant names are serialized into user preferences.** A name a blob carries that this build does not have, whether a tab removed since or one no build has had, deserializes to `Retired` through `#[serde(other)]`, and `sweep_retired` drops every one after a restore, so the reader loses only that tab; before 0.10.0 the whole blob failed to parse and the silent fallback was the default layout. Adding a variant therefore costs nobody their arrangement. Renaming one still does unless the wire name is kept, which is why `Tree` is written as `NodeTree`. `Window > Reset Layout` calls `EguiRenderer::reset_dock_layout` to rebuild from `default_dock_state` in `gui/dock.rs` without touching either persisted blob, the user-facing escape hatch when a layout gets wedged.
+**The tab variant names are serialized into user preferences.** A name a blob carries that this build does not have, whether a tab removed since or one no build has had, deserializes to `Retired` through `#[serde(other)]`, and `sweep_retired` drops every one after a restore, so the reader loses only that tab; before 0.10.0 the whole blob failed to parse and the silent fallback was the default layout. Adding a variant therefore costs nobody their arrangement. Renaming one still does unless the wire name is kept, which is why `Tree` is written as `NodeTree`. `Desks > Reset Layout to Default` calls `EguiRenderer::reset_dock_layout` to rebuild from `default_dock_state` in `gui/dock.rs` without touching either persisted blob, the user-facing escape hatch when a layout gets wedged.
 
 ### Review System click routing
 Review cannot arm in 0.10.0: it anchored against a file-loaded model's meshes, and the one document root supplies none, so entering review mode toasts and returns. The three-step click ladder that lived in `state/input/pointer.rs` (re-anchor completion, then a marker hit-test within about 20 px, then a geometry raycast opening the draft popup) came out with the second root; it returns pointed at the engine's review store, where the browser's already is.
@@ -407,7 +406,7 @@ Review cannot arm in 0.10.0: it anchored against a file-loaded model's meshes, a
 - Resources loaded async with `pollster` blocking.
 - Per-pane rendering with independent command encoders, viewport rects, scissor rects.
 - egui sidebar bidirectionally synced with keyboard shortcuts.
-- Preferences live at `~/.config/solarxy/config.toml` (`dirs::config_dir()` + `solarxy/config.toml`); loaded via `solarxy_core::preferences::load()` on startup. Three edit surfaces, each authoritative for a different slice: **the sidebar** (plus `Edit → Save View Settings as Default`) for live per-session display/rendering/material settings; **`Edit → Preferences…` modal (`Ctrl/⌘+,`)** for startup-only fields (window size, MSAA), the theme choice (`UiPrefs::theme`), custom backgrounds, UI visibility defaults, and recent-files capacity; **direct TOML editing** via the Preferences modal's **Open config file** button (Startup tab). `Preferences::ui` (`UiPrefs`), `Preferences::updater` (`UpdaterPrefs` + `UpdaterChannel`), and `Preferences::view` (`ViewPrefs` — custom backgrounds + default background) all default via `#[serde(default)]` so older `config.toml` files upgrade cleanly. **`Preferences::updater` has no editor since 0.10.0**: the desktop's update dialog and the modal's Updater tab were withdrawn, nothing in the workspace reads the two fields, and they stay only so an older file loads and a commit from the modal carries them through. Use `config_path()` to resolve the platform-specific path.
+- Preferences live at `~/.config/solarxy/config.toml` (`dirs::config_dir()` + `solarxy/config.toml`); loaded via `solarxy_core::preferences::load()` on startup. Three edit surfaces, each authoritative for a different slice: **the sidebar** for live per-session display/rendering/material settings (the `Edit` entry that wrote them back as defaults had no browser counterpart and went in 0.10.0); **`Edit → Preferences…` modal (`Ctrl/⌘+,`)** for startup-only fields (window size, MSAA), the theme choice (`UiPrefs::theme`), custom backgrounds, UI visibility defaults, and recent-files capacity; **direct TOML editing** via the Preferences modal's **Open config file** button (Startup tab). `Preferences::ui` (`UiPrefs`), `Preferences::updater` (`UpdaterPrefs` + `UpdaterChannel`), and `Preferences::view` (`ViewPrefs` — custom backgrounds + default background) all default via `#[serde(default)]` so older `config.toml` files upgrade cleanly. **`Preferences::updater` has no editor since 0.10.0**: the desktop's update dialog and the modal's Updater tab were withdrawn, nothing in the workspace reads the two fields, and they stay only so an older file loads and a commit from the modal carries them through. Use `config_path()` to resolve the platform-specific path.
 
 ## Performance
 

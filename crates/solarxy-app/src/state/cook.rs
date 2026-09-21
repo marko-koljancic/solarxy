@@ -1,5 +1,5 @@
-//! Cook mode and the explicit cook, as the header strip, the Render menu and
-//! the Cmd+Enter chord ask for them.
+//! Cook mode and the explicit cook, as the header strip and the Cmd+Enter
+//! chord ask for them.
 //!
 //! The engine owns both: it holds the mode, keeps the stale set, and decides
 //! when a cook runs. This module only dispatches the two commands and keeps

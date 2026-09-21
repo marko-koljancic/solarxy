@@ -720,7 +720,7 @@ impl State {
         pane.prev_non_ghosted_mode = ViewMode::Shaded;
         pane.ghosted_wireframe = false;
         pane.normals_mode = self.preferences.display.normals_mode;
-        pane.uv_mode = self.preferences.display.uv_mode;
+        pane.uv_mode = solarxy_core::preferences::UvMode::Off;
         pane.inspection_mode = InspectionMode::Shaded;
         pane.texel_density_target = 1.0;
         pane.pane_mode = PaneMode::Scene3D;

@@ -39,7 +39,7 @@
 
 use solarxy_core::preferences::{
     BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
-    ProjectionMode, ToneMode, UvMapBackground, UvMode, ViewMode,
+    ProjectionMode, ToneMode, UvMapBackground, ViewMode,
 };
 use solarxy_core::view_config::PostStrengths;
 
@@ -70,11 +70,8 @@ pub(crate) enum Intent {
     CreateCameraFromView { pane: usize },
     /// The viewport's right-click menu, acting on what the pointer landed on.
     Viewport(ViewportAction),
-    /// A pane's own framing, from that pane's Views menu.
-    ///
-    /// Deliberately not [`Intent::Projection`]'s shape: the View menu's
-    /// framing follows the camera link, and a pane menu writes the pane it
-    /// was drawn on and nothing else.
+    /// A pane's own framing, from that pane's Views menu or the viewport's
+    /// View menu. It writes the pane it names and nothing else.
     PaneView { pane: usize, view: PaneView },
     /// One per-pane display setting, on the pane a widget was drawn for.
     ///
@@ -89,26 +86,21 @@ pub(crate) enum Intent {
     Post(PostChange),
     /// The image-based lighting mode.
     Ibl(IblMode),
-    /// Whether the panes' cameras move together.
-    LinkCameras(bool),
-    /// The View menu's projection, which follows the camera link rather than
-    /// naming a pane.
-    Projection(ProjectionMode),
     /// The File menu.
     File(FileIntent),
     /// The Edit menu.
     Edit(EditIntent),
-    /// The Render menu's two image-producing actions.
+    /// A capture of the viewport, from its own View menu and its key.
     Capture(CaptureIntent),
     /// The Review menu and the escape chain.
     Review(ReviewIntent),
-    /// The Layout and Window menus, and the split divider.
+    /// The Desks menu, a panel's own bar, and the split divider.
     Layout(LayoutIntent),
     /// The Help menu.
     Help(HelpIntent),
     /// A panel asked for something the shell does on its behalf.
     Panel(PanelIntent),
-    /// The header strip and the Render menu: cook mode and the explicit cook.
+    /// The header strip: cook mode and the explicit cook.
     Cook(CookIntent),
 }
 
@@ -121,12 +113,10 @@ pub(crate) enum PaneChange {
     MaterialOverride(MaterialOverride),
     BackgroundMode(BackgroundMode),
     NormalsMode(NormalsMode),
-    UvMode(UvMode),
     BoundsMode(BoundsMode),
     LineWeight(LineWeight),
     ShowGrid(bool),
     ShowAxisGizmo(bool),
-    ShowLocalAxes(bool),
     ShowValidation(bool),
     UvBackground(UvMapBackground),
     ShowUvOverlap(bool),
@@ -178,6 +168,9 @@ pub(crate) enum FileIntent {
     /// rather than the model loader, because the one list holds scenes and
     /// models and the routing on extension exists once.
     OpenRecent(String),
+    /// Ask for one or more model files and import each into the network
+    /// being looked at, which is what dropping them onto the window does.
+    ImportModel,
     Close,
     Quit,
 }
@@ -190,16 +183,21 @@ pub(crate) enum EditIntent {
     Copy,
     Paste,
     Duplicate,
+    /// Flip the selection's bypass, every node to the opposite of what the
+    /// first one is, as one undo step.
+    ToggleBypass,
+    /// Make the first selected node the one its network shows.
+    SetDisplayFlag,
+    /// Remove the selection, as one undo step.
+    DeleteSelection,
     OpenPreferences,
-    /// Persist the current display, rendering and lighting settings.
-    SaveViewDefaults,
 }
 
-/// The two things the Render menu produces a file from.
+/// What the viewport produces a file from. A still is not here: it is
+/// started from the render node's own action, as it is in the browser.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CaptureIntent {
     Screenshot,
-    Still,
 }
 
 /// Review mode and its notes.
@@ -220,7 +218,7 @@ pub(crate) enum ReviewIntent {
 /// is split, and the saved dock layout.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LayoutIntent {
-    /// Show or hide one dock panel. The Window menu's rows are this variant,
+    /// Show or hide one dock panel. A menu's panel rows are this variant,
     /// and so is the review panel's own close button, which is why adding a
     /// panel is a row in one table rather than a field on a shared struct.
     ToggleTab(SolarxyTab),
@@ -253,8 +251,8 @@ pub(crate) enum HelpIntent {
     About,
 }
 
-/// Cook mode and the explicit cook, raised from the header strip and the
-/// Render menu. The engine owns both; the shell only asks.
+/// Cook mode and the explicit cook, raised from the header strip. The engine
+/// owns both; the shell only asks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CookIntent {
     SetMode(solarxy_graph::engine::CookMode),
@@ -342,16 +340,11 @@ impl Intent {
             // applied in field order, and no two of them can be raised in a
             // frame anyway, so a key each would invent an order rather than
             // preserve one.
-            Self::Pane { .. }
-            | Self::Display(_)
-            | Self::Post(_)
-            | Self::Ibl(_)
-            | Self::LinkCameras(_) => 2,
+            Self::Pane { .. } | Self::Display(_) | Self::Post(_) | Self::Ibl(_) => 2,
             Self::File(_) => 3,
             Self::Edit(_) => 4,
             Self::Capture(_) => 5,
             Self::Review(_) => 6,
-            Self::Projection(_) => 7,
             Self::Layout(_) => 8,
             Self::Help(_) => 9,
             Self::Panel(PanelIntent::FlyToIssue { .. }) => 10,

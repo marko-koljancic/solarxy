@@ -1,6 +1,6 @@
 //! Screenshot review modal.
 //!
-//! `C` (or `Render → Save Screenshot…`) captures the active pane's 3D
+//! `C` (or the viewport's `View > Save Screenshot…`) captures the active pane's 3D
 //! content into memory; this modal then shows a downscaled preview and a
 //! `Save As…` button. Nothing is written to disk until the user picks a
 //! path — `Cancel` / `Esc` discards.
