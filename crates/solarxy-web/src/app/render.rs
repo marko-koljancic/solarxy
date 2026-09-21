@@ -331,9 +331,6 @@ impl SolarxyApp {
     /// shell since 0.10.0; what stays here are the two reactions that are
     /// this shell's, which are marking a traced backend's environment copy
     /// stale and telling the frontend the view moved.
-    ///
-    /// The empty custom-background slice is not an oversight: this shell has
-    /// no user-defined background registry.
     pub(super) fn apply_scene_environment(&mut self, delta: &solarxy_core::scene::SceneDelta) {
         let applied = solarxy_host::apply_scene_environment(
             &self.device,
@@ -342,7 +339,6 @@ impl SolarxyApp {
             &mut self.env,
             &mut self.environment,
             &mut self.view,
-            &[],
             delta,
         );
         if applied.tracer_dirty {
@@ -466,7 +462,8 @@ impl SolarxyApp {
     }
 
     pub(super) fn resolve_background(&self, pds: &PaneDisplaySettings) -> ResolvedBackground {
-        // The web has no user custom-background registry yet.
+        // No shell offers a user background, so there is no list to
+        // resolve against.
         pds.background_mode.resolve(&[])
     }
 

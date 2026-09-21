@@ -14,7 +14,7 @@ impl State {
     pub async fn new(
         window: Arc<Window>,
         model_path: Option<String>,
-        preferences: Preferences,
+        mut preferences: Preferences,
     ) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -89,10 +89,25 @@ impl State {
         if let Some(json) = preferences.dock.last_layout_json.as_deref() {
             gui.apply_layout_json(json);
         }
-        gui.set_has_saved_layout(preferences.dock.saved_layout_json.is_some());
+        // The menu that kept a layout by hand is gone, so what it kept
+        // arrives as a saved arrangement. Written at once, because emptying
+        // the slot is what makes this happen one time only; a write that
+        // fails costs nothing, since the next launch finds the slot as it
+        // was and carries it again.
+        if crate::gui::carry_saved_layout(
+            &mut preferences.dock,
+            preferences.canvas,
+            ViewLayout::default(),
+        ) && let Err(e) = solarxy_core::preferences::save(&preferences)
+        {
+            tracing::warn!("Failed to write the carried layout: {e}");
+        }
 
+        // No pane offers a user background, so a stored default that names
+        // one is read as the builtin it would have fallen back to.
+        preferences.display.background = preferences.display.background.without_custom();
         let background_mode = preferences.display.background;
-        let background = background_mode.resolve(&preferences.view.custom_backgrounds);
+        let background = background_mode.resolve(&[]);
         let (ibl_top, ibl_bottom) = background.sky_colors();
         let line_weight = preferences.rendering.wireframe_line_weight;
 

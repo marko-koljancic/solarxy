@@ -171,7 +171,6 @@ pub(crate) enum FileIntent {
     /// Ask for one or more model files and import each into the network
     /// being looked at, which is what dropping them onto the window does.
     ImportModel,
-    Close,
     Quit,
 }
 
@@ -238,9 +237,6 @@ pub(crate) enum LayoutIntent {
     ToggleFloatingProps,
     SetLayout(ViewLayout),
     SetSplitRatio(f32),
-    SaveDock,
-    RestoreDock,
-    ResetDock,
 }
 
 /// The Help menu. Every entry opens something, so a variant names what.
@@ -442,7 +438,7 @@ mod tests {
             pane: 0,
             change: LookThroughChange::Free,
         });
-        intents.raise(Intent::Layout(LayoutIntent::ResetDock));
+        intents.raise(Intent::Layout(LayoutIntent::OpenArrangementSave));
         intents.raise(Intent::File(FileIntent::Quit));
         intents.raise(Intent::Post(PostChange::Bloom(true)));
         intents.raise(Intent::PaneProjection {

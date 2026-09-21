@@ -164,12 +164,16 @@ cycle_enum! {
 cycle_enum! {
     /// The six predefined viewport backgrounds. `HdriSky` renders the
     /// loaded HDRI as a visible sky (gated on an HDRI being present).
+    ///
+    /// The order and the labels are the browser's per-pane list, and the
+    /// desktop holds them to it with a test that reads that list. Files
+    /// store the variant's name, so neither is a compatibility concern.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub enum BuiltinBg {
-        White => "White",
         Gradient => "Gradient",
+        White => "White",
         DarkGray => "Dark",
-        AyuMirage => "Ayu Mirage",
+        AyuMirage => "Ayu",
         Black => "Black",
         HdriSky => "HDRI Sky",
     }
@@ -345,6 +349,22 @@ impl BackgroundMode {
                 || BuiltinBg::Gradient.resolved(),
                 CustomBackground::resolved,
             ),
+        }
+    }
+
+    /// The same choice, with a user custom replaced by the builtin a
+    /// dangling one resolves to.
+    ///
+    /// For a shell that offers no user customs. The desktop withdrew its
+    /// editor in 0.10.0 and the browser never had one, so a stored default
+    /// that names a custom has nothing to choose it from again: it is read
+    /// as the builtin instead, and [`ViewPrefs::custom_backgrounds`] is left
+    /// in the file as it was.
+    #[must_use]
+    pub fn without_custom(self) -> Self {
+        match self {
+            Self::Builtin(_) => self,
+            Self::Custom(_) => Self::GRADIENT,
         }
     }
 
@@ -723,6 +743,10 @@ impl Default for CanvasPrefs {
 pub struct ViewPrefs {
     /// User-defined backgrounds, in display order. Referenced by panes
     /// through [`BackgroundMode::Custom`].
+    ///
+    /// Kept so a file written before 0.10.0 still loads and keeps what it
+    /// held. No shell offers or edits them since, and the desktop reads a
+    /// stored one through [`BackgroundMode::without_custom`].
     #[serde(default)]
     pub custom_backgrounds: Vec<CustomBackground>,
     /// Monotonic id allocator for new customs — never decremented, so a
@@ -947,9 +971,10 @@ pub struct UpdaterPrefs {
 ///
 /// Two slots:
 /// - `last_layout_json` is auto-written on app quit and restored on launch.
-/// - `saved_layout_json` is written only by Save Layout and replayed by
-///   Restore Saved Layout, in the Desks menu. Independent from auto-save
-///   so the user can mess up the live layout without losing their snapshot.
+/// - `saved_layout_json` was written by a menu the desktop withdrew in
+///   0.10.0, when saved arrangements took its job. Nothing writes it now.
+///   It stays so a file that holds one still loads, and the desktop carries
+///   what it finds there into [`DockPrefs::arrangements`] once, on launch.
 ///
 /// Deserialization failures (e.g. after a `SolarxyTab` variant bump) fall
 /// back to the default layout and log a debug line — never panic.
@@ -1828,6 +1853,24 @@ view_layout = "splitVertical"
         // Dangling id falls back to the builtin Gradient.
         let miss = BackgroundMode::Custom(99).resolve(&customs);
         assert_eq!(miss, BuiltinBg::Gradient.resolved());
+    }
+
+    /// A shell with no user customs reads a stored one as the builtin, and
+    /// as the same builtin a dangling id already resolves to, so the pane and
+    /// the label agree with what was being drawn for it anyway.
+    #[test]
+    fn a_custom_background_reads_as_the_builtin_where_none_are_offered() {
+        let stored = BackgroundMode::Custom(3);
+        assert_eq!(stored.without_custom(), BackgroundMode::GRADIENT);
+        assert_eq!(
+            stored.without_custom().resolve(&[]),
+            stored.resolve(&[]),
+            "the fallback is the one resolve already makes"
+        );
+        for &builtin in BuiltinBg::ALL {
+            let mode = BackgroundMode::Builtin(builtin);
+            assert_eq!(mode.without_custom(), mode, "a builtin is left alone");
+        }
     }
 
     /// The two tone enums must stay the same set in the same order.

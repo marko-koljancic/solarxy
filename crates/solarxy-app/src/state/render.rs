@@ -22,12 +22,12 @@ use super::view_state::PaneDisplaySettings;
 use super::{Pane, State};
 
 impl State {
-    /// Resolve a pane's background choice against the user
-    /// custom-background registry into concrete colours for the renderer
-    /// and IBL. A dangling `Custom` id falls back to the builtin Gradient.
-    pub(super) fn resolve_background(&self, pds: &PaneDisplaySettings) -> ResolvedBackground {
-        pds.background_mode
-            .resolve(&self.preferences.view.custom_backgrounds)
+    /// Resolve a pane's background choice into concrete colours for the
+    /// renderer and IBL. There is no list of user backgrounds to resolve
+    /// against: this shell offers none, and a stored default that named one
+    /// was read as the builtin at launch.
+    pub(super) fn resolve_background(pds: &PaneDisplaySettings) -> ResolvedBackground {
+        pds.background_mode.resolve(&[])
     }
 
     /// Per-frame render entry point. Computes pane rectangles, dispatches
@@ -153,7 +153,7 @@ impl State {
             self.setup_pane_lighting(&cam_data);
         }
 
-        let background = self.resolve_background(&pds);
+        let background = Self::resolve_background(&pds);
         let bounds = self.scene_bounds();
         // A pane looking through a camera composites with the shot's look
         // and its grading tables, resolved through the one precedence site;
@@ -622,7 +622,6 @@ impl State {
             active: ap,
             projections: pane_projections,
             hdri_available,
-            customs: &self.preferences.view.custom_backgrounds,
             uv_overlap_pct,
             cameras: &scene_cameras,
             look_through: look_through_mirror,

@@ -65,7 +65,7 @@ pub(crate) use modals::unsaved::{DiscardWhat, UnsavedChoice};
 pub(crate) use chrome::divider::DividerInfo;
 pub(crate) use arrangement::{
     Arrangement, ArrangementId, Resolved as ResolvedArrangement, apply_user_chrome,
-    upsert as upsert_arrangement,
+    carry_saved_layout, upsert as upsert_arrangement,
 };
 pub(crate) use dock::SolarxyTab;
 pub(crate) use pass::{CaptureFrame, FramePaint, PanelSources, ViewportChrome};

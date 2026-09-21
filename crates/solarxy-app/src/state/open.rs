@@ -733,26 +733,6 @@ impl State {
         self.renderer.uv_overlap.stats_dirty = false;
         self.view.display.turntable_active = self.preferences.display.turntable_active;
     }
-
-    /// Close the open document.
-    pub fn close_document(&mut self) {
-        self.engine = None;
-        self.engine_scene = None;
-        self.look_through = [None; 4];
-        self.unresolved_binding = [false; 4];
-        self.cook_health.clear();
-        self.cancel_still_render();
-        self.still_target = None;
-        self.clear_scene_objects();
-        self.environment.invalidate();
-        self.reset_env_for_empty_scene();
-        self.gui.reset_graph_surfaces();
-        self.selected_object = None;
-        self.hdri_hash = None;
-        self.refresh_title();
-        self.renderer.uv_overlap.overlap_pct = None;
-        self.renderer.uv_overlap.stats_dirty = false;
-    }
 }
 
 /// Whether opening `path` replaces the document rather than joining it.

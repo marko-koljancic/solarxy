@@ -46,7 +46,6 @@ pub(in crate::gui) struct MenuContext<'a> {
     pub review_active: bool,
     pub review_markers_hidden: bool,
     pub review_dirty: bool,
-    pub has_saved_layout: bool,
     pub theme: Theme,
 }
 
@@ -68,7 +67,6 @@ enum Entry {
     SaveSceneAs,
     ImportModel,
     RecentFiles,
-    Close,
     Quit,
     // Edit
     Undo,
@@ -102,7 +100,6 @@ impl Entry {
             Self::SaveSceneAs => "Save Scene As\u{2026}",
             Self::ImportModel => "Import Model\u{2026}",
             Self::RecentFiles => "Recent Files",
-            Self::Close => "Close",
             Self::Quit => "Quit",
             Self::Undo => "Undo",
             Self::Redo => "Redo",
@@ -145,7 +142,6 @@ impl Entry {
             Self::SampleScenes
             | Self::ImportModel
             | Self::RecentFiles
-            | Self::Close
             | Self::Quit
             | Self::DeleteSelection
             | Self::ShowMarkers
@@ -169,7 +165,6 @@ const FILE_MENU: &[Row] = &[
     Item(Entry::ImportModel),
     Divider,
     Item(Entry::RecentFiles),
-    Item(Entry::Close),
     Item(Entry::Quit),
 ];
 
@@ -286,7 +281,6 @@ fn draw_entry(
         Entry::SaveScene => Some((cx.has_model, NO_DOCUMENT, Intent::File(FileIntent::Save))),
         Entry::SaveSceneAs => Some((cx.has_model, NO_DOCUMENT, Intent::File(FileIntent::SaveAs))),
         Entry::ImportModel => Some((true, "", Intent::File(FileIntent::ImportModel))),
-        Entry::Close => Some((cx.has_model, NO_DOCUMENT, Intent::File(FileIntent::Close))),
         Entry::Quit => Some((true, "", Intent::File(FileIntent::Quit))),
         Entry::Undo => Some((
             settings.history.can_undo,
@@ -448,10 +442,10 @@ fn draw_recent_files(
 
 /// The arrangements menu: the named arrangements, then the panel toggles.
 ///
-/// One block under it is passing through. The three layout entries are the
-/// old Layout menu's, here until saved arrangements take their job and they
-/// are withdrawn. They sit here rather than in a menu of their own so the
-/// bar is the browser's five.
+/// Nothing here saves, restores or resets a layout by hand. A saved
+/// arrangement is how a layout is kept, the Default one is the way back from
+/// a layout gone wrong, and what was on screen at quit comes back on launch
+/// without being asked for.
 fn draw_desks_menu(
     ui: &mut egui::Ui,
     intents: &mut Intents,
@@ -468,27 +462,6 @@ fn draw_desks_menu(
                 intents.raise(Intent::Layout(LayoutIntent::ToggleTab(*tab)));
                 ui.close();
             }
-        }
-        ui.separator();
-        if entry(ui, "Save Layout", None).clicked() {
-            intents.raise(Intent::Layout(LayoutIntent::SaveDock));
-            ui.close();
-        }
-        if entry_if(
-            ui,
-            cx.has_saved_layout,
-            "Restore Saved Layout",
-            None,
-            "No layout has been saved",
-        )
-        .clicked()
-        {
-            intents.raise(Intent::Layout(LayoutIntent::RestoreDock));
-            ui.close();
-        }
-        if entry(ui, "Reset Layout to Default", None).clicked() {
-            intents.raise(Intent::Layout(LayoutIntent::ResetDock));
-            ui.close();
         }
     });
 }
@@ -573,10 +546,6 @@ const DELETE_DESK: &str = "Delete Desk";
 
 /// The named arrangements, in the browser's order: the built-ins, the
 /// user's own under a divider when there are any, then saving and deleting.
-///
-/// Listed in the Layout menu until the bar is restructured and they take
-/// the menu of their own that the browser gives them, which is why this is
-/// a function of its own rather than part of that menu's body.
 fn draw_arrangement_entries(ui: &mut egui::Ui, intents: &mut Intents, arrangements: &[String]) {
     for (index, arrangement) in BUILT_IN.iter().enumerate() {
         if ui.button(arrangement.name).clicked() {
@@ -658,10 +627,6 @@ mod tests {
         (
             "Recent Files",
             "a native application opens files from disk, and its users expect the list",
-        ),
-        (
-            "Close",
-            "withdrawn with the remaining entries, by the task that owns it",
         ),
         ("Quit", "a native application is quit from its own menu"),
         (

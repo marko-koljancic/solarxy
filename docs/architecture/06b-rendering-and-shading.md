@@ -744,7 +744,9 @@ it is the untested one that gets drawn into the 3D scene.
 as linear RGB at `crates/solarxy-core/src/preferences.rs:213` and the built-in white is
 `[1.0, 1.0, 1.0]` at `preferences.rs:243-245`. Under the default ACES curve linear 1.0 maps to
 roughly 0.80 and encodes to about 232 of 255, so the background named White is not white.
-Custom backgrounds authored through the preferences dialog carry the same ambiguity.
+A background of the user's own, which the desktop's preferences dialog authored until 0.10.0
+withdrew it, carried the same ambiguity; no shell draws one since, so the built-ins are what is
+left to settle.
 
 **Lookup slot A applies a domain remap on top of an already-normalised input.**
 `LutSampling::for_cube` at `crates/solarxy-renderer/src/lut.rs:49-62` folds the table's

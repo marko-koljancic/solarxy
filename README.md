@@ -83,7 +83,7 @@ engineering standards, and the decision record.
 - **Dockable panels** - the viewport and every panel are rearrangeable tabs; layouts persist across launches (`egui_dock` on desktop, `dockview` on web).
 - **Dark and light themes** - a flat interface either way: neutral grey with an amber accent (`#E6B450`), or warm cream with a terracotta one (`#9A4A2E`). Switchable with no restart, bundled Lilex font. One palette in `solarxy-core` drives the desktop GUI, the terminal surfaces, and the web frontend's CSS tokens, with a drift test keeping them in step.
 - **Interactive analysis** - the analyze report as a tiled terminal workspace: a split tree of panels over per-mesh and per-material breakdowns, validation checks, and a braille-rasterized UV view. File-based themes via `--tui-theme`, listed by `--list-tui-themes`.
-- **Persistent preferences** - configure defaults via the GUI **Edit -> Preferences...** dialog (`Ctrl/Cmd+,`) or edit the TOML directly; live viewer changes persist via **Edit -> Save View Settings as Default**.
+- **Persistent preferences** - configure defaults via the GUI **Edit -> Preferences...** dialog (`Ctrl/Cmd+,`) or edit the TOML directly.
 - **Drag-and-drop** - drop model files or HDR/EXR environment maps directly into the viewer.
 
 ## Supported Formats

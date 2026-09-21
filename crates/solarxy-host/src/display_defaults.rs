@@ -38,8 +38,8 @@ pub fn parse_line_weight(s: &str) -> LineWeight {
 }
 
 /// Parses a `BuiltinBg` serde name; anything else falls back to Gradient.
-/// Custom backgrounds are a desktop concept; the web preference only offers
-/// the builtins.
+/// The builtins are the whole vocabulary: a background of the user's own was
+/// a desktop concept, and no shell offers one since 0.10.0.
 #[must_use]
 pub fn parse_background(s: &str) -> BackgroundMode {
     BackgroundMode::Builtin(match s {

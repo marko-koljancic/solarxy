@@ -1,42 +1,15 @@
-//! Writing preferences back to disk, and the two flushes that run on the way
-//! out.
+//! The two flushes that run on the way out, and the one notice an upgraded
+//! installation is given on the way in.
+//!
+//! Nothing here snapshots the live view into the configuration file. That
+//! was the job of an entry the browser never had, and the display defaults
+//! are written from the Preferences dialog alone.
 
 use solarxy_core::preferences::{self};
 
 use super::State;
 
 impl State {
-    /// Snapshot the live view / render / lighting state into
-    /// `self.preferences` and write the config file. Returns the I/O
-    /// result so callers can toast a context-appropriate message —
-    /// [`Self::save_preferences`] is the standard toasting wrapper.
-    pub(in crate::state) fn persist_preferences(&mut self) -> Result<(), String> {
-        let pds = &self.view.pane_settings[0];
-        self.preferences.display.background = pds.background_mode;
-        self.preferences.display.view_mode = pds.view_mode;
-        self.preferences.display.normals_mode = pds.normals_mode;
-        self.preferences.display.grid_visible = pds.show_grid;
-        self.preferences.display.axis_gizmo_visible = pds.show_axis_gizmo;
-        self.preferences.display.bloom_enabled = self.renderer.post.bloom_enabled;
-        self.preferences.display.ssao_enabled = self.renderer.post.ssao_enabled;
-        self.preferences.display.turntable_active = self.view.display.turntable_active;
-        self.preferences.display.turntable_rpm = self.view.display.turntable_rpm;
-        if let Some(cam) = &self.view.cameras[0] {
-            self.preferences.display.projection_mode = cam.camera.projection;
-        }
-        self.preferences.rendering.wireframe_line_weight = pds.line_weight;
-        self.preferences.lighting.lock = self.view.display.lights_locked;
-        self.preferences.display.ibl_mode = self.renderer.ibl_res.ibl_mode;
-        self.preferences.display.tone_mode = self.renderer.post.tone_mode;
-        self.preferences.display.exposure = self.renderer.post.exposure;
-        self.preferences.display.inspection_mode = pds.inspection_mode;
-        self.preferences.display.texel_density_target = pds.texel_density_target;
-        self.preferences
-            .display
-            .set_post_strengths(self.renderer.post.strengths());
-        preferences::save(&self.preferences)
-    }
-
     /// Auto-save the current dock layout into `preferences.dock.last_layout_json`
     /// and flush preferences to disk. Called on app exit so the next launch
     /// restores the layout the user actually left behind. Silent on failure —

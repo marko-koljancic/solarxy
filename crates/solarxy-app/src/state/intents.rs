@@ -336,7 +336,6 @@ impl State {
             // holds scenes and models, and the routing on extension exists
             // once.
             FileIntent::OpenRecent(path) => self.open_file(std::path::PathBuf::from(path)),
-            FileIntent::Close => self.close_document(),
             FileIntent::Quit => self.request_quit(),
         }
     }
@@ -442,9 +441,8 @@ impl State {
         );
     }
 
-    /// Write the configuration file as it stands, which is not the same as
-    /// saving the view settings as defaults: nothing about the live view is
-    /// snapshotted into it on the way.
+    /// Write the configuration file as it stands. Nothing about the live
+    /// view is snapshotted into it on the way.
     fn write_arrangements(&mut self, done: &str) {
         match solarxy_core::preferences::save(&self.preferences) {
             Ok(()) => self.gui.set_toast(done, ToastSeverity::Success),
@@ -467,41 +465,6 @@ impl State {
                 self.view.display.split_ratio =
                     solarxy_core::view_config::DisplaySettings::clamp_split_ratio(ratio);
             }
-            LayoutIntent::SaveDock => self.save_dock_layout(),
-            LayoutIntent::RestoreDock => {
-                if let Some(json) = self.preferences.dock.saved_layout_json.clone()
-                    && self.gui.apply_layout_json(&json)
-                {
-                    self.gui.set_toast("Layout restored.", ToastSeverity::Info);
-                } else {
-                    self.gui
-                        .set_toast("No valid saved layout to restore.", ToastSeverity::Warning);
-                }
-            }
-            LayoutIntent::ResetDock => {
-                self.gui.reset_dock_layout();
-                self.gui
-                    .set_toast("Layout reset to default.", ToastSeverity::Info);
-            }
-        }
-    }
-
-    /// Serialize the arrangement into preferences and persist it silently, so
-    /// the click yields one layout-specific toast rather than a generic
-    /// "Preferences saved" stacked on top of it.
-    fn save_dock_layout(&mut self) {
-        let Some(json) = self.gui.serialize_layout() else {
-            self.gui
-                .set_toast("Failed to save layout.", ToastSeverity::Warning);
-            return;
-        };
-        self.preferences.dock.saved_layout_json = Some(json);
-        self.gui.set_has_saved_layout(true);
-        match self.persist_preferences() {
-            Ok(()) => self.gui.set_toast("Layout saved.", ToastSeverity::Success),
-            Err(e) => self
-                .gui
-                .set_toast(&format!("Save failed: {e}"), ToastSeverity::Error),
         }
     }
 
@@ -536,9 +499,8 @@ impl State {
         if bg.is_hdri_sky() || self.renderer.ibl_res.ibl.equirect.is_some() {
             return;
         }
-        let (top, bottom) = bg
-            .resolve(&self.preferences.view.custom_backgrounds)
-            .sky_colors();
+        let (top, bottom) =
+            Self::resolve_background(&self.view.pane_settings[self.view.active_pane]).sky_colors();
         self.renderer.ibl_res.ibl =
             IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
         self.environment.invalidate();
@@ -595,9 +557,7 @@ impl State {
                 pds.background_mode = BackgroundMode::GRADIENT;
             }
         }
-        let (top, bottom) = self
-            .resolve_background(&self.view.pane_settings[0])
-            .sky_colors();
+        let (top, bottom) = Self::resolve_background(&self.view.pane_settings[0]).sky_colors();
         self.renderer.ibl_res.ibl =
             IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
         // The IBL just moved without the scene contract knowing, so forget

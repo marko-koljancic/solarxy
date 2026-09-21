@@ -1,7 +1,7 @@
 //! The single IBL and lighting chokepoint, and the one place a scene's
 //! environment reaches it.
 
-use solarxy_core::preferences::{BackgroundMode, CustomBackground, IblMode};
+use solarxy_core::preferences::{BackgroundMode, IblMode};
 use solarxy_core::scene::{BackgroundKind, SceneDelta, SceneOp};
 use solarxy_renderer::environment::{EnvironmentOutcome, EnvironmentTracker, SceneEnvironment};
 use solarxy_renderer::frame::Renderer;
@@ -123,11 +123,6 @@ pub struct EnvironmentApplied {
 /// only in a comment, the order of one assignment, and the two per-shell
 /// reactions that are now the return value. It is one function as of 0.10.0.
 ///
-/// `custom_backgrounds` is the shell's user-defined background registry, used
-/// only when the environment clears and the fallback sky has to be resolved.
-/// The browser has none and passes an empty slice; when the desktop's are
-/// retired the parameter goes with them.
-///
 /// # Why the headless renderer does not call this
 ///
 /// `crate::headless` has its own environment application and keeps it. It has
@@ -143,7 +138,6 @@ pub fn apply_scene_environment(
     env: &mut SceneEnvironment,
     tracker: &mut EnvironmentTracker,
     view: &mut HostViewState,
-    custom_backgrounds: &[CustomBackground],
     delta: &SceneDelta,
 ) -> EnvironmentApplied {
     let mut result = EnvironmentApplied::default();
@@ -178,12 +172,14 @@ pub fn apply_scene_environment(
             }
             // "No environment" is not "a black environment": fall back to the
             // procedural sky the pane's own background derives, which is what
-            // clearing the environment by hand does on either shell.
+            // clearing the environment by hand does on either shell. Neither
+            // shell offers user backgrounds, so there is no list to resolve
+            // against.
             EnvironmentOutcome::Cleared => {
                 result.tracer_dirty = true;
                 let (top, bottom) = view.pane_settings[0]
                     .background_mode
-                    .resolve(custom_backgrounds)
+                    .resolve(&[])
                     .sky_colors();
                 renderer.ibl_res.ibl = IblState::from_sky_colors(device, queue, top, bottom);
             }

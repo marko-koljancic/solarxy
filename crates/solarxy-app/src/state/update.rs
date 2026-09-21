@@ -69,9 +69,7 @@ impl State {
         // The fresh environment's visualization half is bounds-only, so
         // whatever per-mesh overlays were baked into the old one are gone.
         self.viz_dirty = true;
-        let grid_color = self
-            .resolve_background(&self.view.pane_settings[0])
-            .grid_color();
+        let grid_color = Self::resolve_background(&self.view.pane_settings[0]).grid_color();
         let carried = self
             .view
             .display
@@ -99,28 +97,6 @@ impl State {
         self.rebuild_light_bind_group();
     }
 
-    /// Swap the file model's environment for a bounds-only one, keeping
-    /// whatever the multi-object scene still holds in frame.
-    ///
-    /// Called when the model closes. That environment's visualization half
-    /// was built from the model - per-mesh bounds, per-mesh normal arrows -
-    /// and the normal-arrow segments are drawn zipped against the frame's
-    /// draw list, so leaving it installed would paint the closed model's
-    /// arrows over whatever geometry remains.
-    ///
-    /// The ground keeps the box it already had when nothing is left to fit
-    /// to. The pane cameras deliberately survive a close, so they are still
-    /// framing what was just closed; snapping the floor and the grid to a
-    /// fixed placeholder underneath them would read as the ground jumping.
-    pub(super) fn reset_env_for_empty_scene(&mut self) {
-        let bounds = self
-            .raster
-            .scene()
-            .visible_bounds()
-            .unwrap_or(self.env_bounds);
-        self.rebuild_env(bounds);
-    }
-
     /// Refit the environment, meaning grid, floor and shadow frustum, when
     /// the scene's bounds move.
     ///
@@ -131,11 +107,12 @@ impl State {
     /// environment to protect, and the overlay buffers are rebuilt on their
     /// own schedule instead.
     pub(super) fn sync_env_bounds(&mut self) {
-        // Nothing to fit to leaves the ground where it is, for the reason
-        // stated on `reset_env_for_empty_scene`: refitting an emptied scene
-        // to a placeholder moves the floor and the grid under a camera that
-        // has not moved. Framing and sizing do not read the environment for
-        // this, they ask `scene_bounds`, which answers with the placeholder.
+        // Nothing to fit to leaves the ground where it is: the pane cameras
+        // survive a scene emptying, so they are still framing what was there,
+        // and refitting to a placeholder would move the floor and the grid
+        // under a camera that has not moved. Framing and sizing do not read
+        // the environment for this, they ask `scene_bounds`, which answers
+        // with the placeholder.
         let Some(bounds) = self.raster.scene().visible_bounds() else {
             return;
         };
@@ -174,9 +151,7 @@ impl State {
         self.viz_dirty = false;
         let (mesh_bounds, normals) =
             solarxy_host::visualization::build_aggregate(self.raster.scene());
-        let grid_color = self
-            .resolve_background(&self.view.pane_settings[0])
-            .grid_color();
+        let grid_color = Self::resolve_background(&self.view.pane_settings[0]).grid_color();
         self.env.vis = solarxy_renderer::visualization::VisualizationState::new_from_parts(
             &self.device,
             &self.renderer.layouts,
@@ -209,7 +184,6 @@ impl State {
             &mut self.env,
             &mut self.environment,
             &mut self.view,
-            &self.preferences.view.custom_backgrounds,
             delta,
         );
         if applied.tracer_dirty {
@@ -248,7 +222,7 @@ impl State {
         solarxy_host::write_wireframe_params(
             &self.queue,
             &self.renderer,
-            self.resolve_background(pds),
+            Self::resolve_background(pds),
             pds,
             &self.view.display,
         );

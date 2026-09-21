@@ -16,7 +16,7 @@
 //! shells cannot come to mean different things by the same name.
 
 use egui_dock::{DockState, NodeIndex};
-use solarxy_core::preferences::{CanvasPrefs, UserArrangement};
+use solarxy_core::preferences::{CanvasPrefs, DockPrefs, UserArrangement};
 use solarxy_core::view_config::ViewLayout;
 
 use super::dock::SolarxyTab;
@@ -324,6 +324,57 @@ pub(crate) fn apply_user_chrome(user: &UserArrangement, canvas: &mut CanvasPrefs
     canvas.controls = user.controls;
 }
 
+/// The name a layout kept through the withdrawn Save Layout entry arrives
+/// under.
+pub(crate) const CARRIED_LAYOUT_NAME: &str = "Saved Layout";
+
+/// Carry a layout kept through the withdrawn layout menu into a user
+/// arrangement, once. Answers whether the preferences changed, which is
+/// the caller's cue to write them.
+///
+/// That menu wrote one slot and read it back, and with the menu gone the
+/// slot would sit in the file with nothing able to reach it. A saved
+/// arrangement is what took the menu's job, so that is where it goes. It
+/// rides with the canvas preferences and the pane split the caller names,
+/// because the slot never recorded either.
+///
+/// Emptying the slot is what makes this happen once: an arrangement the
+/// user later deletes would otherwise come back on the next launch. So the
+/// slot is emptied only when the layout was carried, and two cases leave it
+/// exactly as it was, so nothing the file held is lost. A layout that can no
+/// longer be restored is skipped without a word, since an arrangement that
+/// cannot be applied is worse than none. And an arrangement the user already
+/// saved under this name is theirs, and is not replaced.
+pub(crate) fn carry_saved_layout(
+    dock: &mut DockPrefs,
+    canvas: CanvasPrefs,
+    view_layout: ViewLayout,
+) -> bool {
+    let restorable = dock
+        .saved_layout_json
+        .as_deref()
+        .is_some_and(|json| super::dock::restore(json).is_ok());
+    let name_taken = dock
+        .arrangements
+        .iter()
+        .any(|existing| existing.name == CARRIED_LAYOUT_NAME);
+    if !restorable || name_taken {
+        return false;
+    }
+    let Some(layout_json) = dock.saved_layout_json.take() else {
+        return false;
+    };
+    dock.arrangements.push(UserArrangement {
+        name: CARRIED_LAYOUT_NAME.to_string(),
+        layout_json,
+        grid: canvas.grid,
+        minimap: canvas.minimap,
+        controls: canvas.controls,
+        view_layout,
+    });
+    true
+}
+
 /// The arrangement a new installation opens in, and the one a layout that
 /// cannot be restored falls back to.
 pub(crate) fn default_arrangement() -> &'static Arrangement {
@@ -483,6 +534,115 @@ mod tests {
             controls: false,
             view_layout: ViewLayout::Quad,
         }
+    }
+
+    /// A layout written by 0.8.1, which is what a slot kept by hand holds.
+    const KEPT_BY_HAND: &str = include_str!("../../tests/fixtures/dock-layout-0.8.1.json");
+
+    fn kept(json: &str) -> DockPrefs {
+        DockPrefs {
+            saved_layout_json: Some(json.to_string()),
+            ..DockPrefs::default()
+        }
+    }
+
+    /// Every value away from its default, so one that was written in rather
+    /// than read from the caller shows.
+    fn carried_canvas() -> CanvasPrefs {
+        CanvasPrefs {
+            grid: false,
+            minimap: true,
+            controls: false,
+            ..CanvasPrefs::default()
+        }
+    }
+
+    /// The layout arrives under its name with the bytes it was kept as, and
+    /// the slot is emptied, which is what stops it arriving twice: not on
+    /// the next launch, and not after the user deletes it.
+    #[test]
+    fn a_layout_kept_by_hand_arrives_as_an_arrangement_once() {
+        let mut dock = kept(KEPT_BY_HAND);
+        assert!(carry_saved_layout(
+            &mut dock,
+            carried_canvas(),
+            ViewLayout::Quad
+        ));
+        assert_eq!(dock.saved_layout_json, None, "the slot is emptied");
+        assert_eq!(
+            dock.arrangements,
+            vec![UserArrangement {
+                name: CARRIED_LAYOUT_NAME.to_string(),
+                layout_json: KEPT_BY_HAND.to_string(),
+                grid: false,
+                minimap: true,
+                controls: false,
+                view_layout: ViewLayout::Quad,
+            }]
+        );
+        assert!(
+            crate::gui::dock::restore(&dock.arrangements[0].layout_json).is_ok(),
+            "what was carried can be applied"
+        );
+
+        assert!(!carry_saved_layout(
+            &mut dock,
+            carried_canvas(),
+            ViewLayout::Quad
+        ));
+        assert_eq!(dock.arrangements.len(), 1, "a second launch adds nothing");
+
+        dock.arrangements.clear();
+        assert!(!carry_saved_layout(
+            &mut dock,
+            carried_canvas(),
+            ViewLayout::Quad
+        ));
+        assert!(dock.arrangements.is_empty(), "a deleted one stays deleted");
+    }
+
+    /// Text that is not a layout, and a layout whose every panel has since
+    /// been retired, are both passed over, and the slot keeps what it held.
+    #[test]
+    fn a_kept_layout_that_cannot_be_restored_is_left_where_it_was() {
+        let nothing_left = KEPT_BY_HAND.replace("\"Viewport\"", "\"Bogus\"");
+        assert_ne!(nothing_left, KEPT_BY_HAND, "the fixture names Viewport");
+        for unusable in ["not a layout", nothing_left.as_str()] {
+            let mut dock = kept(unusable);
+            assert!(!carry_saved_layout(
+                &mut dock,
+                carried_canvas(),
+                ViewLayout::Single
+            ));
+            assert!(dock.arrangements.is_empty());
+            assert_eq!(dock.saved_layout_json.as_deref(), Some(unusable));
+        }
+    }
+
+    /// An arrangement the user saved under the same name is theirs. It is
+    /// kept as it was, and so is the slot, so neither is lost to the other.
+    #[test]
+    fn an_arrangement_the_user_named_the_same_is_not_replaced() {
+        let mut dock = kept(KEPT_BY_HAND);
+        dock.arrangements.push(user(CARRIED_LAYOUT_NAME));
+        assert!(!carry_saved_layout(
+            &mut dock,
+            carried_canvas(),
+            ViewLayout::Single
+        ));
+        assert_eq!(dock.arrangements, vec![user(CARRIED_LAYOUT_NAME)]);
+        assert_eq!(dock.saved_layout_json.as_deref(), Some(KEPT_BY_HAND));
+    }
+
+    #[test]
+    fn an_empty_slot_carries_nothing() {
+        let mut dock = DockPrefs::default();
+        assert!(!carry_saved_layout(
+            &mut dock,
+            carried_canvas(),
+            ViewLayout::Single
+        ));
+        assert_eq!(dock, DockPrefs::default());
     }
 
     #[test]

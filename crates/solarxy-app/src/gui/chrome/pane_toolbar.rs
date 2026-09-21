@@ -27,8 +27,8 @@
 //! comparison this shell is held to is checked row by row.
 
 use solarxy_core::preferences::{
-    BackgroundMode, BuiltinBg, CustomBackground, InspectionMode, LineWeight, MaterialOverride,
-    NormalsMode, PaneMode, ProjectionMode, UvMapBackground, ViewMode,
+    BackgroundMode, BuiltinBg, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
+    ProjectionMode, UvMapBackground, ViewMode,
 };
 use solarxy_core::view_config::PANE_TOOLBAR_HEIGHT;
 use solarxy_core::scene::SceneObjectId;
@@ -95,8 +95,6 @@ pub(crate) struct PaneToolbarData<'a> {
     pub projections: [ProjectionMode; 4],
     /// `true` once an HDRI is loaded — gates the `HDRI Sky` background.
     pub hdri_available: bool,
-    /// User custom backgrounds, listed in every Background dropdown.
-    pub customs: &'a [CustomBackground],
     /// Latest UV-shell overlap percentage, shown in the UV `Display`
     /// label when overlap is on. `None` until a readback completes.
     pub uv_overlap_pct: Option<f32>,
@@ -150,7 +148,6 @@ pub(in crate::gui) fn draw_pane_toolbars(
 ) {
     let hdri_available = data.hdri_available;
     let uv_overlap_pct = data.uv_overlap_pct;
-    let customs = data.customs;
     for i in 0..data.rects.len() {
         let rect = data.rects[i];
         let strip =
@@ -177,7 +174,6 @@ pub(in crate::gui) fn draw_pane_toolbars(
                             index: i,
                             pane,
                             projection,
-                            customs,
                             hdri_available,
                             uv_overlap_pct,
                             cameras: data.cameras,
@@ -228,7 +224,6 @@ struct PaneControls<'a> {
     index: usize,
     pane: &'a PaneDisplaySettings,
     projection: ProjectionMode,
-    customs: &'a [CustomBackground],
     hdri_available: bool,
     uv_overlap_pct: Option<f32>,
     cameras: &'a [(u64, String)],
@@ -461,7 +456,6 @@ fn draw_display_menu(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
     let PaneControls {
         index,
         pane,
-        customs,
         hdri_available,
         turntable_rpm,
         ..
@@ -531,7 +525,7 @@ fn draw_display_menu(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
         }
     });
     ui.menu_button("Background", |ui| {
-        if let Some(v) = background_menu_body(ui, pane.background_mode, customs, hdri_available) {
+        if let Some(v) = background_menu_body(ui, pane.background_mode, hdri_available) {
             intents.pane(index, PaneChange::BackgroundMode(v));
         }
     });
@@ -601,41 +595,77 @@ fn label_menu(
     });
 }
 
-/// Body of the `Background ▸` submenu: builtins (`HDRI Sky` gated on a
-/// loaded HDRI) then, under a separator, every user custom background.
+/// Why `HDRI Sky` cannot be picked yet. Shown on the disabled entry.
+const NO_HDRI: &str = "Load an HDRI in the Environment dialog first";
+
+/// Body of the Background submenu: the builtins, which are the whole list,
+/// as they are in the browser.
+///
+/// `HDRI Sky` is always listed and cannot be picked until an HDRI is loaded.
+/// It is disabled rather than dropped so the list is the same six whatever
+/// the scene holds, and so the entry can say what it is waiting for.
 fn background_menu_body(
     ui: &mut egui::Ui,
     current: BackgroundMode,
-    customs: &[CustomBackground],
     hdri_available: bool,
 ) -> Option<BackgroundMode> {
-    let mut value = current;
     let mut picked = None;
     for &builtin in BuiltinBg::ALL {
-        if builtin == BuiltinBg::HdriSky && !hdri_available {
-            continue;
-        }
+        let mode = BackgroundMode::Builtin(builtin);
+        let offered = builtin != BuiltinBg::HdriSky || hdri_available;
         if ui
-            .radio_value(
-                &mut value,
-                BackgroundMode::Builtin(builtin),
-                builtin.to_string(),
+            .add_enabled(
+                offered,
+                egui::RadioButton::new(current == mode, builtin.to_string()),
             )
-            .changed()
+            .on_disabled_hover_text(NO_HDRI)
+            .clicked()
+            && current != mode
         {
-            picked = Some(BackgroundMode::Builtin(builtin));
-        }
-    }
-    if !customs.is_empty() {
-        ui.separator();
-        for custom in customs {
-            if ui
-                .radio_value(&mut value, BackgroundMode::Custom(custom.id), &custom.name)
-                .changed()
-            {
-                picked = Some(BackgroundMode::Custom(custom.id));
-            }
+            picked = Some(mode);
         }
     }
     picked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The browser's per-pane background list, as `(stored name, label)`
+    /// pairs in its order, read from the table its menu is drawn from.
+    fn browser_backgrounds() -> Vec<(String, String)> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../web/src/components/PaneToolbar.tsx");
+        let source = std::fs::read_to_string(&path).expect("the browser's pane toolbar reads");
+        let table = source
+            .split_once("const BACKGROUNDS = [")
+            .and_then(|(_, rest)| rest.split_once("] as const;"))
+            .map(|(table, _)| table)
+            .expect("the browser's pane toolbar has its background table");
+        table
+            .lines()
+            .filter_map(|line| {
+                let mut quoted = line.split('"').skip(1).step_by(2);
+                Some((quoted.next()?.to_string(), quoted.next()?.to_string()))
+            })
+            .collect()
+    }
+
+    /// The Background submenu lists what the browser's does: the same
+    /// entries, under the same labels, in the same order. The stored name
+    /// rides along so a label cannot be right on the wrong entry.
+    #[test]
+    fn the_background_list_is_the_browsers() {
+        let browser = browser_backgrounds();
+        assert_eq!(browser.len(), 6, "the reader found the browser's six");
+        let here: Vec<(String, String)> = BuiltinBg::ALL
+            .iter()
+            .map(|builtin| {
+                let stored = serde_json::to_string(builtin).expect("a builtin serializes");
+                (stored.trim_matches('"').to_string(), builtin.to_string())
+            })
+            .collect();
+        assert_eq!(here, browser);
+    }
 }

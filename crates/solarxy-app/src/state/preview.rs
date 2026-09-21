@@ -205,7 +205,7 @@ impl State {
             // Owed rather than run: the still owns the shared targets.
             return;
         }
-        let background = self.resolve_background(&preview_pane_settings());
+        let background = Self::resolve_background(&preview_pane_settings());
         let Some(scene) = self.preview.scene.as_mut() else {
             self.preview.dirty = false;
             return;

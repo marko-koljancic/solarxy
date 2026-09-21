@@ -80,7 +80,6 @@ pub struct EguiRenderer {
     /// maximize key acts on.
     hovered_tab: Option<SolarxyTab>,
     pub last_viewport_rect: Option<CachedViewportRect>,
-    pub(super) has_saved_layout: bool,
     /// Whether a node-engine scene is open. Separate from `model_info`,
     /// which describes a file-loaded model: the two roots are mutually
     /// exclusive, and File > Close acts on whichever is present.
@@ -155,7 +154,6 @@ impl EguiRenderer {
             dock: Dock::new(default_dock_state()),
             hovered_tab: None,
             last_viewport_rect: None,
-            has_saved_layout: false,
             scene_open: false,
         }
     }
@@ -554,10 +552,6 @@ impl EguiRenderer {
         self.arrangement_save.take_committed()
     }
 
-    pub fn reset_dock_layout(&mut self) {
-        self.dock.replace(default_dock_state());
-    }
-
     /// Replace the panel layout with a named arrangement's. The layout is
     /// all this touches: the canvas preferences and the pane split that an
     /// arrangement also carries are the state layer's to write.
@@ -567,10 +561,6 @@ impl EguiRenderer {
 
     pub fn set_scene_open(&mut self, open: bool) {
         self.scene_open = open;
-    }
-
-    pub fn set_has_saved_layout(&mut self, has: bool) {
-        self.has_saved_layout = has;
     }
 
     #[must_use]
@@ -677,7 +667,6 @@ impl EguiRenderer {
             review_active: review.active,
             review_markers_hidden: review.markers_hidden,
             review_dirty: review.dirty,
-            has_saved_layout: self.has_saved_layout,
             theme: self.theme,
         };
         let mut viewport_rect_logical: Option<egui::Rect> = None;

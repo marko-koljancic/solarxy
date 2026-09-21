@@ -956,7 +956,7 @@ mod tests {
     }
 
     /// The recovery path for the layout above: a user whose blob predates
-    /// the tab reaches it through the Window menu, exactly as they would
+    /// the tab reaches it through its panel toggle, exactly as they would
     /// any panel they had closed.
     #[test]
     fn the_tree_is_reachable_from_a_layout_that_never_had_it() {

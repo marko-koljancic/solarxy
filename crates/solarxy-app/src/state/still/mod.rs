@@ -358,7 +358,7 @@ impl State {
             return;
         };
         let pds = PaneDisplaySettings::for_still(background_mode);
-        let background = self.resolve_background(&pds);
+        let background = Self::resolve_background(&pds);
         let bounds = self.scene_bounds();
         let format = self.config.format;
 
@@ -625,11 +625,7 @@ impl State {
             }
             return;
         }
-        // Resolved before the tracer is borrowed: resolving reads the
-        // whole shell and the tracer is a field of it.
-        let (top, bottom) = self
-            .resolve_background(&self.view.pane_settings[0])
-            .sky_colors();
+        let (top, bottom) = Self::resolve_background(&self.view.pane_settings[0]).sky_colors();
         let ibl = &self.renderer.ibl_res.ibl;
         let built = match (ibl.equirect.as_ref(), ibl.distribution.as_ref()) {
             (Some(equirect), Some(distribution)) => Some(
