@@ -27,7 +27,6 @@ use super::modals::keymap_change::{KeymapNoticeState, draw_keymap_notice};
 use super::modals::recovery::{RecoveryChoice, RecoveryModalState, draw_recovery_modal};
 use super::modals::unsaved::{DiscardWhat, UnsavedChoice, UnsavedModalState, draw_unsaved_modal};
 use super::modals::environment::draw_environment_modal;
-use super::modals::update::{UpdateModalState, draw_update_modal};
 use egui_dock::{DockArea, DockState};
 use solarxy_core::preferences::{Preferences, ThemeChoice};
 
@@ -39,7 +38,6 @@ pub struct EguiRenderer {
     theme: Theme,
     pub menu_bar_visible: bool,
     about_open: bool,
-    update_modal: UpdateModalState,
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
     unsaved_modal: UnsavedModalState,
@@ -120,7 +118,6 @@ impl EguiRenderer {
             theme,
             menu_bar_visible: true,
             about_open: false,
-            update_modal: UpdateModalState::new(),
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
             unsaved_modal: UnsavedModalState::default(),
@@ -522,7 +519,6 @@ impl EguiRenderer {
     pub fn any_blocking_modal_open(&self, review: &crate::state::review::ReviewState) -> bool {
         self.about_open
             || self.preferences_modal.open
-            || self.update_modal.open
             || self.shortcuts_modal.open
             || self.unsaved_modal.open
             || self.recovery_modal.open
@@ -682,7 +678,6 @@ impl EguiRenderer {
             let screenshot_drawn = self.screenshot_modal.open && !capture.capturing;
             let suppress_overlay = self.about_open
                 || self.preferences_modal.open
-                || self.update_modal.open
                 || self.shortcuts_modal.open
                 || self.unsaved_modal.open
                 || self.recovery_modal.open
@@ -704,7 +699,6 @@ impl EguiRenderer {
             );
 
             draw_about_modal(ctx, &mut self.about_open);
-            draw_update_modal(ctx, &mut self.update_modal);
             draw_preferences_modal(ctx, &mut self.preferences_modal);
             draw_keyboard_shortcuts_modal(ctx, &mut self.shortcuts_modal);
             if !capture.capturing {
@@ -978,10 +972,6 @@ impl EguiRenderer {
 
     pub fn open_about(&mut self) {
         self.about_open = true;
-    }
-
-    pub fn check_for_updates(&mut self) {
-        self.update_modal.refresh();
     }
 
     pub fn open_preferences(&mut self, prefs: Preferences) {

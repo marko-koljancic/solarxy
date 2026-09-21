@@ -22,7 +22,12 @@ pub enum InstallSource {
     Unknown,
 }
 
-/// Channel-specific update instruction surfaced in the update modal.
+/// How an installation from a given channel is updated.
+///
+/// No interface in the workspace presents one: the desktop shell has no
+/// update dialog, and the command line prints its own wording. It stays as
+/// the one statement of which channel updates how, for whichever surface
+/// next needs to say so.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateHint {
     /// Open this URL in the default browser (e.g. Flathub page).

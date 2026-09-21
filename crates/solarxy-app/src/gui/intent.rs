@@ -232,13 +232,12 @@ pub(crate) enum LayoutIntent {
     ResetDock,
 }
 
-/// The Help menu.
+/// The Help menu. Every entry opens something, so a variant names what.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum HelpIntent {
-    OpenWiki,
-    OpenShortcuts,
-    CheckForUpdates,
-    OpenAbout,
+    Wiki,
+    Shortcuts,
+    About,
 }
 
 /// Cook mode and the explicit cook, raised from the header strip and the

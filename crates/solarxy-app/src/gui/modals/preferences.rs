@@ -1,26 +1,24 @@
 use solarxy_core::preferences::{
     self, CustomBackground, CustomBgKind, MAX_RECENT_FILES_CAP, MAX_WINDOW_HEIGHT,
     MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Preferences, ThemeChoice,
-    UpdaterChannel,
 };
 
+/// The modal's tabs.
+///
+/// There is no updater tab: the shell has no update check to steer, so the
+/// two fields it edited have no editor. They stay in the file, and a commit
+/// from here carries them through untouched because the draft is the whole
+/// of [`Preferences`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PrefsTab {
     Startup,
     Appearance,
     View,
     Interface,
-    Updater,
 }
 
 impl PrefsTab {
-    const ALL: [Self; 5] = [
-        Self::Startup,
-        Self::Appearance,
-        Self::View,
-        Self::Interface,
-        Self::Updater,
-    ];
+    const ALL: [Self; 4] = [Self::Startup, Self::Appearance, Self::View, Self::Interface];
 
     fn label(self) -> &'static str {
         match self {
@@ -28,7 +26,6 @@ impl PrefsTab {
             Self::Appearance => "Appearance",
             Self::View => "View",
             Self::Interface => "Interface",
-            Self::Updater => "Updater",
         }
     }
 }
@@ -95,9 +92,6 @@ impl PreferencesModal {
                 self.draft.ui.max_recent_files = defaults.ui.max_recent_files;
                 self.draft.autosave = defaults.autosave;
             }
-            PrefsTab::Updater => {
-                self.draft.updater = defaults.updater;
-            }
         }
     }
 
@@ -161,7 +155,6 @@ pub(in crate::gui) fn draw_preferences_modal(ctx: &egui::Context, modal: &mut Pr
                     draw_view_tab(ui, &mut modal.draft, &mut modal.editing_custom);
                 }
                 PrefsTab::Interface => draw_interface_tab(ui, &mut modal.draft),
-                PrefsTab::Updater => draw_updater_tab(ui, &mut modal.draft),
             }
 
             ui.add_space(8.0);
@@ -522,45 +515,34 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
         });
 }
 
-fn draw_updater_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
-    egui::Grid::new("prefs_updater")
-        .num_columns(2)
-        .spacing([12.0, 8.0])
-        .show(ui, |ui| {
-            ui.label("Check for updates on launch");
-            ui.checkbox(&mut draft.updater.check_on_launch, "");
-            ui.end_row();
-
-            ui.label("Release channel");
-            ui.horizontal(|ui| {
-                for channel in [UpdaterChannel::Stable, UpdaterChannel::Prerelease] {
-                    if ui
-                        .selectable_label(draft.updater.channel == channel, channel.to_string())
-                        .clicked()
-                    {
-                        draft.updater.channel = channel;
-                    }
-                }
-            });
-            ui.end_row();
-        });
-    if draft.updater.channel == UpdaterChannel::Prerelease {
-        ui.add_space(6.0);
-        ui.label(
-            egui::RichText::new(
-                "Prerelease channel includes release candidates and betas; \
-                 the stable channel ships tagged releases only.",
-            )
-            .italics()
-            .small()
-            .weak(),
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solarxy_core::preferences::{UpdaterChannel, UpdaterPrefs};
+
+    #[test]
+    fn the_tabs_are_the_four_the_shell_can_steer() {
+        let labels: Vec<&str> = PrefsTab::ALL.iter().map(|tab| tab.label()).collect();
+        assert_eq!(labels, ["Startup", "Appearance", "View", "Interface"]);
+    }
+
+    /// The updater fields have no editor, so nothing in the modal may write
+    /// them: a reset on any tab has to leave what the file carried alone.
+    #[test]
+    fn no_tab_resets_the_fields_that_have_no_editor() {
+        let mut prefs = Preferences::default();
+        prefs.updater = UpdaterPrefs {
+            check_on_launch: true,
+            channel: UpdaterChannel::Prerelease,
+        };
+        let mut m = PreferencesModal::default();
+        m.open_with(prefs.clone());
+        for tab in PrefsTab::ALL {
+            m.active_tab = tab;
+            m.reset_active_tab();
+        }
+        assert_eq!(m.draft.updater, prefs.updater);
+    }
 
     #[test]
     fn open_with_captures_snapshot_and_draft() {

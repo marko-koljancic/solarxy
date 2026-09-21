@@ -429,14 +429,13 @@ impl State {
 
     fn apply_help_intent(&mut self, intent: HelpIntent) {
         match intent {
-            HelpIntent::OpenWiki => {
+            HelpIntent::Wiki => {
                 if let Err(e) = open::that(solarxy_core::WIKI_URL) {
                     tracing::warn!("Failed to open wiki URL: {e}");
                 }
             }
-            HelpIntent::OpenShortcuts => self.gui.open_shortcuts_modal(),
-            HelpIntent::CheckForUpdates => self.gui.check_for_updates(),
-            HelpIntent::OpenAbout => self.gui.open_about(),
+            HelpIntent::Shortcuts => self.gui.open_shortcuts_modal(),
+            HelpIntent::About => self.gui.open_about(),
         }
     }
 }

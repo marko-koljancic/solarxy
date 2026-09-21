@@ -783,7 +783,6 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "f8" => KeyCode::F8,
         "f9" => KeyCode::F9,
         "f10" => KeyCode::F10,
-        "f11" => KeyCode::F11,
         "tab" => KeyCode::Tab,
         "enter" => KeyCode::Enter,
         "escape" => KeyCode::Escape,

@@ -867,23 +867,19 @@ fn draw_window_menu(
 fn draw_help_menu(ui: &mut egui::Ui, intents: &mut Intents) {
     ui.menu_button("Help", |ui| {
         if ui.button("Solarxy Wiki").clicked() {
-            intents.raise(Intent::Help(HelpIntent::OpenWiki));
+            intents.raise(Intent::Help(HelpIntent::Wiki));
             ui.close();
         }
         if ui
             .add(egui::Button::new("Keyboard Shortcuts").shortcut_text("?"))
             .clicked()
         {
-            intents.raise(Intent::Help(HelpIntent::OpenShortcuts));
+            intents.raise(Intent::Help(HelpIntent::Shortcuts));
             ui.close();
         }
         ui.separator();
-        if ui.button("Check for Updates\u{2026}").clicked() {
-            intents.raise(Intent::Help(HelpIntent::CheckForUpdates));
-            ui.close();
-        }
         if ui.button("About Solarxy").clicked() {
-            intents.raise(Intent::Help(HelpIntent::OpenAbout));
+            intents.raise(Intent::Help(HelpIntent::About));
             ui.close();
         }
     });

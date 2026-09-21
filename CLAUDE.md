@@ -252,7 +252,7 @@ step any more.
   - `chrome/` - the shell's own furniture, which is everything that draws outside a dock tab or
     on top of one: `menu`, `pane_toolbar`, `overlays`, `divider`,
     `viewport_context_menu`.
-  - `modals/` - `about`, `preferences`, `shortcuts`, `screenshot`, `still`, `update`, and since the
+  - `modals/` - `about`, `preferences`, `shortcuts`, `screenshot`, `still`, and since the
     authoring and panel epics `environment` (the browser's four rows: HDRI with Load and Clear, IBL
     mode, rotation, intensity; reached from `File > Environment...` until the menu-bar restructure
     moves it to the Viewport View menu), `unsaved` (Save, Discard, Cancel) and `recovery` (Restore
@@ -407,7 +407,7 @@ Review cannot arm in 0.10.0: it anchored against a file-loaded model's meshes, a
 - Resources loaded async with `pollster` blocking.
 - Per-pane rendering with independent command encoders, viewport rects, scissor rects.
 - egui sidebar bidirectionally synced with keyboard shortcuts.
-- Preferences live at `~/.config/solarxy/config.toml` (`dirs::config_dir()` + `solarxy/config.toml`); loaded via `solarxy_core::preferences::load()` on startup. Three edit surfaces, each authoritative for a different slice: **the sidebar** (plus `Edit → Save View Settings as Default`) for live per-session display/rendering/material settings; **`Edit → Preferences…` modal (`Ctrl/⌘+,`)** for startup-only fields (window size, MSAA), the theme choice (`UiPrefs::theme`), custom backgrounds, UI visibility defaults, recent-files capacity, and updater behaviour; **direct TOML editing** via the Preferences modal's **Open config file** button (Startup tab). `Preferences::ui` (`UiPrefs`), `Preferences::updater` (`UpdaterPrefs` + `UpdaterChannel`), and `Preferences::view` (`ViewPrefs` — custom backgrounds + default background) all default via `#[serde(default)]` so older `config.toml` files upgrade cleanly. Use `config_path()` to resolve the platform-specific path.
+- Preferences live at `~/.config/solarxy/config.toml` (`dirs::config_dir()` + `solarxy/config.toml`); loaded via `solarxy_core::preferences::load()` on startup. Three edit surfaces, each authoritative for a different slice: **the sidebar** (plus `Edit → Save View Settings as Default`) for live per-session display/rendering/material settings; **`Edit → Preferences…` modal (`Ctrl/⌘+,`)** for startup-only fields (window size, MSAA), the theme choice (`UiPrefs::theme`), custom backgrounds, UI visibility defaults, and recent-files capacity; **direct TOML editing** via the Preferences modal's **Open config file** button (Startup tab). `Preferences::ui` (`UiPrefs`), `Preferences::updater` (`UpdaterPrefs` + `UpdaterChannel`), and `Preferences::view` (`ViewPrefs` — custom backgrounds + default background) all default via `#[serde(default)]` so older `config.toml` files upgrade cleanly. **`Preferences::updater` has no editor since 0.10.0**: the desktop's update dialog and the modal's Updater tab were withdrawn, nothing in the workspace reads the two fields, and they stay only so an older file loads and a commit from the modal carries them through. Use `config_path()` to resolve the platform-specific path.
 
 ## Performance
 
