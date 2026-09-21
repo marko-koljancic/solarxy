@@ -16,7 +16,7 @@
 //! shells cannot come to mean different things by the same name.
 
 use egui_dock::{DockState, NodeIndex};
-use solarxy_core::preferences::CanvasPrefs;
+use solarxy_core::preferences::{CanvasPrefs, UserArrangement};
 use solarxy_core::view_config::ViewLayout;
 
 use super::dock::SolarxyTab;
@@ -268,14 +268,60 @@ pub(crate) const BUILT_IN: &[Arrangement] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ArrangementId {
     BuiltIn(usize),
+    /// An index into the user's saved arrangements, in stored order.
+    User(usize),
+}
+
+/// What an id means once the user's own arrangements are consulted.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Resolved<'a> {
+    BuiltIn(&'static Arrangement),
+    User(&'a UserArrangement),
 }
 
 impl ArrangementId {
-    pub(crate) fn resolve(self) -> Option<&'static Arrangement> {
+    /// **A user's arrangement takes the place of a built-in of the same
+    /// name**, as it does in the browser: someone who names theirs after a
+    /// built-in meant to replace it, so the built-in's own row applies
+    /// theirs too.
+    pub(crate) fn resolve(self, users: &[UserArrangement]) -> Option<Resolved<'_>> {
         match self {
-            Self::BuiltIn(index) => BUILT_IN.get(index),
+            Self::BuiltIn(index) => {
+                let built_in = BUILT_IN.get(index)?;
+                Some(
+                    users
+                        .iter()
+                        .find(|user| user.name == built_in.name)
+                        .map_or(Resolved::BuiltIn(built_in), Resolved::User),
+                )
+            }
+            Self::User(index) => users.get(index).map(Resolved::User),
         }
     }
+}
+
+/// The name an arrangement is saved under, or `None` when what was typed
+/// names nothing. Trimmed, as the browser trims it, so a name cannot differ
+/// from another only by a space nobody can see.
+pub(crate) fn saved_name(typed: &str) -> Option<String> {
+    let name = typed.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Save `arrangement`, replacing one of the same name. The replaced entry
+/// leaves its place and the new one goes last, which is the browser's
+/// order and keeps the newest save at the end of the list.
+pub(crate) fn upsert(users: &mut Vec<UserArrangement>, arrangement: UserArrangement) {
+    users.retain(|existing| existing.name != arrangement.name);
+    users.push(arrangement);
+}
+
+/// Write a saved arrangement's canvas preferences, the same three a
+/// built-in writes.
+pub(crate) fn apply_user_chrome(user: &UserArrangement, canvas: &mut CanvasPrefs) {
+    canvas.grid = user.grid;
+    canvas.minimap = user.minimap;
+    canvas.controls = user.controls;
 }
 
 /// The arrangement a new installation opens in, and the one a layout that
@@ -428,13 +474,90 @@ mod tests {
         assert!(canvas.grid && canvas.minimap && canvas.controls);
     }
 
+    fn user(name: &str) -> UserArrangement {
+        UserArrangement {
+            name: name.to_string(),
+            layout_json: format!("{{\"for\":\"{name}\"}}"),
+            grid: false,
+            minimap: true,
+            controls: false,
+            view_layout: ViewLayout::Quad,
+        }
+    }
+
     #[test]
     fn an_id_out_of_range_resolves_to_nothing() {
         assert_eq!(
-            ArrangementId::BuiltIn(0).resolve().map(|a| a.name),
-            Some("Default")
+            ArrangementId::BuiltIn(0).resolve(&[]),
+            Some(Resolved::BuiltIn(&BUILT_IN[0]))
         );
-        assert!(ArrangementId::BuiltIn(BUILT_IN.len()).resolve().is_none());
+        assert!(
+            ArrangementId::BuiltIn(BUILT_IN.len())
+                .resolve(&[])
+                .is_none()
+        );
+        assert!(ArrangementId::User(0).resolve(&[]).is_none());
+    }
+
+    /// A user arrangement named after a built-in is what that built-in's
+    /// own row applies, and every other built-in is untouched by it.
+    #[test]
+    fn a_user_arrangement_takes_the_place_of_a_built_in_of_its_name() {
+        let users = [user("Mine"), user("Review")];
+        let review = BUILT_IN
+            .iter()
+            .position(|a| a.name == "Review")
+            .expect("a built-in named Review");
+        assert_eq!(
+            ArrangementId::BuiltIn(review).resolve(&users),
+            Some(Resolved::User(&users[1]))
+        );
+        assert_eq!(
+            ArrangementId::BuiltIn(0).resolve(&users),
+            Some(Resolved::BuiltIn(&BUILT_IN[0]))
+        );
+        assert_eq!(
+            ArrangementId::User(0).resolve(&users),
+            Some(Resolved::User(&users[0]))
+        );
+    }
+
+    #[test]
+    fn a_name_is_trimmed_and_an_empty_one_is_no_name() {
+        assert_eq!(saved_name("  Sculpt  ").as_deref(), Some("Sculpt"));
+        assert_eq!(
+            saved_name("UV / Texturing").as_deref(),
+            Some("UV / Texturing")
+        );
+        assert_eq!(saved_name(""), None);
+        assert_eq!(saved_name("   \t "), None);
+    }
+
+    /// Saving under a name already in use replaces that arrangement rather
+    /// than listing two, and the replacement goes last.
+    #[test]
+    fn saving_under_a_used_name_replaces_it() {
+        let mut users = vec![user("A"), user("B"), user("C")];
+        let mut again = user("A");
+        again.layout_json = "newer".to_string();
+        upsert(&mut users, again);
+        let names: Vec<&str> = users.iter().map(|u| u.name.as_str()).collect();
+        assert_eq!(names, ["B", "C", "A"]);
+        assert_eq!(users[2].layout_json, "newer");
+
+        upsert(&mut users, user("D"));
+        assert_eq!(users.len(), 4);
+    }
+
+    #[test]
+    fn a_saved_arrangement_writes_the_same_three_preferences() {
+        let mut canvas = CanvasPrefs {
+            snap: true,
+            ..CanvasPrefs::default()
+        };
+        apply_user_chrome(&user("Mine"), &mut canvas);
+        assert!(!canvas.grid && canvas.minimap && !canvas.controls);
+        assert!(canvas.snap, "snapping is not an arrangement's to set");
     }
 
     // ---- held against the browser's table ----

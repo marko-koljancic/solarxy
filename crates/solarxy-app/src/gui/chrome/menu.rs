@@ -47,6 +47,8 @@ pub(in crate::gui) struct MenuContext<'a> {
     pub has_model: bool,
     pub still_renderable: bool,
     pub recent_files: &'a [String],
+    /// The names of the arrangements the user saved, in stored order.
+    pub arrangements: &'a [String],
     pub hdri_available: bool,
     pub customs: &'a [CustomBackground],
     pub review_available: bool,
@@ -73,7 +75,7 @@ pub(in crate::gui) fn draw_menu_bar(
             // View rather than stranded out past Help.
             draw_review_menu(ui, intents, cx);
             draw_view_menu(ui, settings, intents);
-            draw_layout_menu(ui, intents, cx.has_saved_layout);
+            draw_layout_menu(ui, intents, cx.arrangements, cx.has_saved_layout);
             draw_window_menu(ui, intents, present);
             draw_help_menu(ui, intents);
             draw_history_strip(ui, settings.history, intents);
@@ -702,18 +704,14 @@ fn draw_view_menu(ui: &mut egui::Ui, settings: PanelSettings<'_>, intents: &mut 
     });
 }
 
-fn draw_layout_menu(ui: &mut egui::Ui, intents: &mut Intents, has_saved_layout: bool) {
+fn draw_layout_menu(
+    ui: &mut egui::Ui,
+    intents: &mut Intents,
+    arrangements: &[String],
+    has_saved_layout: bool,
+) {
     ui.menu_button("Layout", |ui| {
-        // The named arrangements, listed here until the bar is restructured
-        // and they take the menu of their own that the browser gives them.
-        for (index, arrangement) in BUILT_IN.iter().enumerate() {
-            if ui.button(arrangement.name).clicked() {
-                intents.raise(Intent::Layout(LayoutIntent::ApplyArrangement(
-                    ArrangementId::BuiltIn(index),
-                )));
-                ui.close();
-            }
-        }
+        draw_arrangement_entries(ui, intents, arrangements);
         ui.separator();
         for (layout, label, shortcut) in [
             (ViewLayout::Single, "Single", "F1"),
@@ -746,6 +744,51 @@ fn draw_layout_menu(ui: &mut egui::Ui, intents: &mut Intents, has_saved_layout: 
             intents.raise(Intent::Layout(LayoutIntent::ResetDock));
             ui.close();
         }
+    });
+}
+
+/// The named arrangements, in the browser's order: the built-ins, the
+/// user's own under a divider when there are any, then saving and deleting.
+///
+/// Listed in the Layout menu until the bar is restructured and they take
+/// the menu of their own that the browser gives them, which is why this is
+/// a function of its own rather than part of that menu's body.
+fn draw_arrangement_entries(ui: &mut egui::Ui, intents: &mut Intents, arrangements: &[String]) {
+    for (index, arrangement) in BUILT_IN.iter().enumerate() {
+        if ui.button(arrangement.name).clicked() {
+            intents.raise(Intent::Layout(LayoutIntent::ApplyArrangement(
+                ArrangementId::BuiltIn(index),
+            )));
+            ui.close();
+        }
+    }
+    if !arrangements.is_empty() {
+        ui.separator();
+        for (index, name) in arrangements.iter().enumerate() {
+            if ui.button(name).clicked() {
+                intents.raise(Intent::Layout(LayoutIntent::ApplyArrangement(
+                    ArrangementId::User(index),
+                )));
+                ui.close();
+            }
+        }
+    }
+    ui.separator();
+    if ui.button("Save Current As\u{2026}").clicked() {
+        intents.raise(Intent::Layout(LayoutIntent::OpenArrangementSave));
+        ui.close();
+    }
+    ui.add_enabled_ui(!arrangements.is_empty(), |ui| {
+        ui.menu_button("Delete Desk", |ui| {
+            for (index, name) in arrangements.iter().enumerate() {
+                if ui.button(name).clicked() {
+                    intents.raise(Intent::Layout(LayoutIntent::DeleteArrangement(index)));
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_disabled_hover_text("You have saved no arrangement yet");
     });
 }
 

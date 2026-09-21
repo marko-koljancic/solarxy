@@ -958,6 +958,71 @@ pub struct DockPrefs {
     pub last_layout_json: Option<String>,
     #[serde(default)]
     pub saved_layout_json: Option<String>,
+    /// Arrangements the user saved under a name. Last, because it
+    /// serializes as an array of tables and those follow a table's plain
+    /// values. Read leniently: see [`UserArrangement`].
+    #[serde(default, deserialize_with = "lenient_arrangements")]
+    pub arrangements: Vec<UserArrangement>,
+}
+
+/// A layout the user saved under a name of their own.
+///
+/// A built-in arrangement is a recipe, which survives a hand edit and a
+/// docking-library upgrade. One the user saved is the serialized layout
+/// itself, because capturing exactly what they arranged is the whole point
+/// of saving one. Beside it ride the three canvas reading preferences and
+/// the pane split, the same four things a built-in carries.
+///
+/// **One bad entry never costs the rest.** The list is read entry by entry
+/// and an entry that does not parse is dropped, as is a list that is not a
+/// list at all, so a hand edit gone wrong or a field a later version adds
+/// cannot make the whole configuration file fail to load. A layout that
+/// parses here and still cannot be restored is the shell's to discard when
+/// it is applied.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserArrangement {
+    pub name: String,
+    /// A serialized dock layout, in the form the two layout slots hold.
+    pub layout_json: String,
+    #[serde(default = "yes")]
+    pub grid: bool,
+    #[serde(default)]
+    pub minimap: bool,
+    #[serde(default = "yes")]
+    pub controls: bool,
+    #[serde(default)]
+    pub view_layout: crate::view_config::ViewLayout,
+}
+
+fn lenient_arrangements<'de, D>(deserializer: D) -> Result<Vec<UserArrangement>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Entry {
+        Good(UserArrangement),
+        Bad(serde::de::IgnoredAny),
+    }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Field {
+        List(Vec<Entry>),
+        NotAList(serde::de::IgnoredAny),
+    }
+
+    Ok(match Field::deserialize(deserializer)? {
+        Field::List(entries) => entries
+            .into_iter()
+            .filter_map(|entry| match entry {
+                Entry::Good(arrangement) if !arrangement.name.trim().is_empty() => {
+                    Some(arrangement)
+                }
+                Entry::Good(_) | Entry::Bad(_) => None,
+            })
+            .collect(),
+        Field::NotAList(_) => Vec::new(),
+    })
 }
 
 /// User-level review-mode preferences. Project-level settings (sidecar
@@ -1205,6 +1270,14 @@ mod tests {
             dock: DockPrefs {
                 last_layout_json: Some(r#"{"surfaces":[]}"#.to_string()),
                 saved_layout_json: None,
+                arrangements: vec![UserArrangement {
+                    name: "Sculpt".to_string(),
+                    layout_json: r#"{"surfaces":[]}"#.to_string(),
+                    grid: false,
+                    minimap: true,
+                    controls: false,
+                    view_layout: crate::view_config::ViewLayout::Quad,
+                }],
             },
             view: ViewPrefs {
                 custom_backgrounds: vec![
@@ -1240,6 +1313,106 @@ mod tests {
         let toml_str = toml::to_string_pretty(&prefs).unwrap();
         let parsed: Preferences = toml::from_str(&toml_str).unwrap();
         assert_eq!(prefs, parsed);
+    }
+
+    /// The least a configuration file can say and still load, so the
+    /// arrangement tests below are about arrangements and nothing else.
+    const MINIMAL: &str = r#"
+config_version = 1
+
+[display]
+background = "Black"
+view_mode = "Shaded"
+normals_mode = "Off"
+grid_visible = true
+axis_gizmo_visible = false
+bloom_enabled = true
+"#;
+
+    fn with_minimal(rest: &str) -> Preferences {
+        toml::from_str(&format!("{MINIMAL}\n{rest}")).expect("the file loads")
+    }
+
+    /// A configuration file written before arrangements existed has none,
+    /// and loads.
+    #[test]
+    fn a_file_with_no_arrangements_loads_with_none() {
+        let parsed = with_minimal("[dock]\nlast_layout_json = \"{}\"\n");
+        assert!(parsed.dock.arrangements.is_empty());
+        assert_eq!(parsed.dock.last_layout_json.as_deref(), Some("{}"));
+    }
+
+    /// An entry that gives only its name and its layout takes the defaults
+    /// the browser's own reader gives a saved arrangement.
+    #[test]
+    fn an_arrangement_missing_its_extras_takes_the_defaults() {
+        let parsed = with_minimal("[[dock.arrangements]]\nname = \"Mine\"\nlayout_json = \"{}\"\n");
+        assert_eq!(
+            parsed.dock.arrangements,
+            vec![UserArrangement {
+                name: "Mine".to_string(),
+                layout_json: "{}".to_string(),
+                grid: true,
+                minimap: false,
+                controls: true,
+                view_layout: crate::view_config::ViewLayout::Single,
+            }]
+        );
+    }
+
+    /// The compatibility promise: a bad entry is dropped and everything
+    /// around it survives, including the rest of the file. Three ways to be
+    /// bad, between two good entries: no layout, a wrong type, no name.
+    #[test]
+    fn a_bad_arrangement_is_dropped_and_costs_nothing_else() {
+        let text = r#"
+[ui]
+max_recent_files = 7
+
+[[dock.arrangements]]
+name = "First"
+layout_json = "{}"
+
+[[dock.arrangements]]
+name = "No layout"
+
+[[dock.arrangements]]
+name = "Wrong type"
+layout_json = "{}"
+grid = "yes please"
+
+[[dock.arrangements]]
+name = "   "
+layout_json = "{}"
+
+[[dock.arrangements]]
+name = "Last"
+layout_json = "{}"
+view_layout = "splitVertical"
+"#;
+        let parsed = with_minimal(text);
+        let names: Vec<&str> = parsed
+            .dock
+            .arrangements
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect();
+        assert_eq!(names, ["First", "Last"]);
+        assert_eq!(
+            parsed.dock.arrangements[1].view_layout,
+            crate::view_config::ViewLayout::SplitVertical
+        );
+        assert_eq!(
+            parsed.ui.max_recent_files, 7,
+            "the rest of the file is read"
+        );
+    }
+
+    /// A list that is not a list is no arrangements, not a failed load.
+    #[test]
+    fn arrangements_that_are_not_a_list_are_none() {
+        let parsed = with_minimal("[dock]\narrangements = \"nonsense\"\n");
+        assert!(parsed.dock.arrangements.is_empty());
     }
 
     #[test]

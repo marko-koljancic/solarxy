@@ -27,6 +27,7 @@ use super::modals::keymap_change::{KeymapNoticeState, draw_keymap_notice};
 use super::modals::recovery::{RecoveryChoice, RecoveryModalState, draw_recovery_modal};
 use super::modals::unsaved::{DiscardWhat, UnsavedChoice, UnsavedModalState, draw_unsaved_modal};
 use super::modals::environment::draw_environment_modal;
+use super::modals::arrangement_save::{ArrangementSaveModal, draw_arrangement_save_modal};
 use egui_dock::{DockArea, DockState};
 use solarxy_core::preferences::{Preferences, ThemeChoice};
 
@@ -37,6 +38,7 @@ pub struct EguiRenderer {
     egui_format: wgpu::TextureFormat,
     theme: Theme,
     about_open: bool,
+    arrangement_save: ArrangementSaveModal,
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
     unsaved_modal: UnsavedModalState,
@@ -116,6 +118,7 @@ impl EguiRenderer {
             egui_format,
             theme,
             about_open: false,
+            arrangement_save: ArrangementSaveModal::default(),
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
             unsaved_modal: UnsavedModalState::default(),
@@ -469,15 +472,13 @@ impl EguiRenderer {
         self.graph_ctx = ctx;
     }
 
-    /// Apply a JSON-serialized dock layout. Returns `true` if the JSON
-    /// deserialized into a valid `DockState`; on failure, the existing
-    /// layout is preserved and a debug line is logged.
+    /// Apply a JSON-serialized dock layout. Returns `true` if it could be
+    /// restored; on failure, the existing layout is preserved and a debug
+    /// line is logged. A panel the layout names that this build no longer
+    /// has is dropped, and the rest kept.
     pub fn apply_layout_json(&mut self, json: &str) -> bool {
-        match serde_json::from_str::<DockState<SolarxyTab>>(json) {
-            Ok(mut state) => {
-                // A saved name for a panel this build no longer has parses
-                // as `Retired`; dropping only those keeps the rest.
-                let dropped = super::dock::sweep_retired(&mut state);
+        match super::dock::restore(json) {
+            Ok((state, dropped)) => {
                 if dropped > 0 {
                     tracing::debug!("dock layout named {dropped} retired panel(s), dropped");
                 }
@@ -485,7 +486,7 @@ impl EguiRenderer {
                 true
             }
             Err(err) => {
-                tracing::debug!("dock layout JSON rejected (falling back): {err}");
+                tracing::debug!("dock layout rejected (keeping the current one): {err}");
                 false
             }
         }
@@ -501,6 +502,16 @@ impl EguiRenderer {
 
     /// Replace the current dock layout with the factory default produced
     /// by the crate-private `default_dock_state` constructor.
+    /// Ask for a name to save the current arrangement under.
+    pub(crate) fn open_arrangement_save(&mut self) {
+        self.arrangement_save.open();
+    }
+
+    /// The name the user committed, once.
+    pub(crate) fn take_arrangement_name(&mut self) -> Option<String> {
+        self.arrangement_save.take_committed()
+    }
+
     pub fn reset_dock_layout(&mut self) {
         self.dock_state = default_dock_state();
     }
@@ -523,6 +534,7 @@ impl EguiRenderer {
     #[must_use]
     pub fn any_blocking_modal_open(&self, review: &crate::state::review::ReviewState) -> bool {
         self.about_open
+            || self.arrangement_save.open
             || self.preferences_modal.open
             || self.shortcuts_modal.open
             || self.unsaved_modal.open
@@ -608,6 +620,7 @@ impl EguiRenderer {
             has_model: self.scene_open,
             still_renderable: self.scene_open,
             recent_files: sources.recent_files,
+            arrangements: sources.arrangements,
             hdri_available: chrome.toolbars.hdri_available,
             customs: chrome.toolbars.customs,
             // **Review is off for this release.** It anchors against a
@@ -682,6 +695,7 @@ impl EguiRenderer {
             // is suppressed so the markers it would occlude get captured.
             let screenshot_drawn = self.screenshot_modal.open && !capture.capturing;
             let suppress_overlay = self.about_open
+                || self.arrangement_save.open
                 || self.preferences_modal.open
                 || self.shortcuts_modal.open
                 || self.unsaved_modal.open
@@ -704,6 +718,7 @@ impl EguiRenderer {
             );
 
             draw_about_modal(ctx, &mut self.about_open);
+            draw_arrangement_save_modal(ctx, &mut self.arrangement_save, sources.arrangements);
             draw_preferences_modal(ctx, &mut self.preferences_modal);
             draw_keyboard_shortcuts_modal(ctx, &mut self.shortcuts_modal);
             if !capture.capturing {

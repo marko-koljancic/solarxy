@@ -227,6 +227,11 @@ pub(crate) enum LayoutIntent {
     /// Apply a named arrangement: the panel layout, three canvas
     /// preferences and the pane split, and never the document.
     ApplyArrangement(super::ArrangementId),
+    /// Ask for a name to save the current arrangement under. The name
+    /// itself comes back through the dialog, not through an intent.
+    OpenArrangementSave,
+    /// Delete one of the user's arrangements, by its place in the list.
+    DeleteArrangement(usize),
     SetLayout(ViewLayout),
     SetSplitRatio(f32),
     SaveDock,

@@ -81,6 +81,10 @@ pub(crate) struct PanelSources<'a> {
     /// the Text tab is mounted.
     pub text: TextSource<'a>,
     pub recent_files: &'a [String],
+    /// The names of the arrangements the user saved, in stored order, for
+    /// the menu that lists them and the dialog that warns of a replacement.
+    /// Names only: the layouts behind them are the state layer's to read.
+    pub arrangements: &'a [String],
 }
 
 /// The per-panel interface state the dock's tabs write directly: folds,

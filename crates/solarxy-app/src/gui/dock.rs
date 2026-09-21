@@ -338,6 +338,23 @@ pub(super) fn sweep_retired(dock: &mut DockState<SolarxyTab>) -> usize {
     removed
 }
 
+/// Read a saved layout back, and say how many retired panels it named.
+///
+/// Two ways to fail, and both leave the caller's layout alone. The text may
+/// not be a layout at all, after corruption or a docking-library change. Or
+/// it may be one whose every panel has since been retired, which parses and
+/// then sweeps down to nothing: restoring that would leave an empty window
+/// with no panel to reopen anything from.
+pub(super) fn restore(json: &str) -> Result<(DockState<SolarxyTab>, usize), String> {
+    let mut state: DockState<SolarxyTab> =
+        serde_json::from_str(json).map_err(|err| err.to_string())?;
+    let dropped = sweep_retired(&mut state);
+    if state.iter_all_tabs().next().is_none() {
+        return Err("the layout has no panel this build still has".to_string());
+    }
+    Ok((state, dropped))
+}
+
 /// Show `tab`, adding it beside `neighbour` when that tab is mounted and
 /// to the first leaf otherwise, and make it the active tab of its leaf.
 /// The preview opens beside the Assets panel this way, as the browser's
@@ -592,6 +609,30 @@ mod tests {
             "the Material Inspector and the Console both go"
         );
         assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
+    }
+
+    /// A layout is restorable when it parses and something is left of it.
+    #[test]
+    fn a_layout_is_restored_with_its_retired_panels_counted() {
+        let (dock, dropped) = restore(LAYOUT_BEFORE_NODE_TREE).expect("restorable");
+        assert_eq!(dropped, 2);
+        assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
+    }
+
+    /// Text that is not a layout, and a layout with nothing left once its
+    /// retired panels are swept, are both refused rather than restored into
+    /// a broken window.
+    #[test]
+    fn a_layout_that_cannot_be_restored_is_refused() {
+        assert!(restore("not a layout").is_err());
+        assert!(restore("{}").is_err());
+
+        let nothing_left = LAYOUT_BEFORE_NODE_TREE.replace("\"Viewport\"", "\"Bogus\"");
+        assert_ne!(nothing_left, LAYOUT_BEFORE_NODE_TREE);
+        assert!(
+            restore(&nothing_left).is_err(),
+            "every panel retired leaves nothing to restore"
+        );
     }
 
     /// The wire name of the tree is the one every saved arrangement knows,

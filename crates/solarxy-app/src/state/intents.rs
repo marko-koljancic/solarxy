@@ -385,18 +385,97 @@ impl State {
     /// split. That the document is untouched is a property of what this
     /// function can see rather than of what it is careful about.
     fn apply_arrangement(&mut self, id: crate::gui::ArrangementId) {
-        let Some(arrangement) = id.resolve() else {
+        use crate::gui::ResolvedArrangement;
+
+        let view_layout = match id.resolve(&self.preferences.dock.arrangements) {
+            None => return,
+            Some(ResolvedArrangement::BuiltIn(arrangement)) => {
+                self.gui.apply_arrangement_layout(arrangement);
+                arrangement.apply_chrome(&mut self.preferences.canvas);
+                arrangement.view_layout
+            }
+            Some(ResolvedArrangement::User(user)) => {
+                // Cloned out, because the canvas preferences written below
+                // sit beside the list this was borrowed from.
+                let user = user.clone();
+                if !self.gui.apply_layout_json(&user.layout_json) {
+                    self.discard_arrangement(&user.name);
+                    return;
+                }
+                crate::gui::apply_user_chrome(&user, &mut self.preferences.canvas);
+                user.view_layout
+            }
+        };
+        self.set_view_layout(view_layout);
+    }
+
+    /// Save the current arrangement under `name`, replacing one of that
+    /// name. What is captured is what an arrangement is: the panel layout,
+    /// three canvas preferences and the pane split, and nothing of the
+    /// document.
+    pub(in crate::state) fn save_arrangement(&mut self, name: String) {
+        let Some(layout_json) = self.gui.serialize_layout() else {
+            self.gui
+                .set_toast("The layout could not be captured.", ToastSeverity::Warning);
             return;
         };
-        self.gui.apply_arrangement_layout(arrangement);
-        arrangement.apply_chrome(&mut self.preferences.canvas);
-        self.set_view_layout(arrangement.view_layout);
+        let canvas = self.preferences.canvas;
+        crate::gui::upsert_arrangement(
+            &mut self.preferences.dock.arrangements,
+            solarxy_core::preferences::UserArrangement {
+                name: name.clone(),
+                layout_json,
+                grid: canvas.grid,
+                minimap: canvas.minimap,
+                controls: canvas.controls,
+                view_layout: self.view.display.layout,
+            },
+        );
+        self.write_arrangements(&format!("Arrangement saved: {name}"));
+    }
+
+    fn delete_arrangement(&mut self, index: usize) {
+        if index >= self.preferences.dock.arrangements.len() {
+            return;
+        }
+        let removed = self.preferences.dock.arrangements.remove(index);
+        self.write_arrangements(&format!("Arrangement deleted: {}", removed.name));
+    }
+
+    /// An arrangement whose layout could not be restored is removed, so it
+    /// is not offered again, and the layout on screen is left as it was.
+    fn discard_arrangement(&mut self, name: &str) {
+        self.preferences
+            .dock
+            .arrangements
+            .retain(|arrangement| arrangement.name != name);
+        if let Err(e) = solarxy_core::preferences::save(&self.preferences) {
+            tracing::warn!("Failed to persist the arrangements: {e}");
+        }
+        self.gui.set_toast(
+            &format!("Arrangement removed, it could not be restored: {name}"),
+            ToastSeverity::Warning,
+        );
+    }
+
+    /// Write the configuration file as it stands, which is not the same as
+    /// saving the view settings as defaults: nothing about the live view is
+    /// snapshotted into it on the way.
+    fn write_arrangements(&mut self, done: &str) {
+        match solarxy_core::preferences::save(&self.preferences) {
+            Ok(()) => self.gui.set_toast(done, ToastSeverity::Success),
+            Err(e) => self
+                .gui
+                .set_toast(&format!("Save failed: {e}"), ToastSeverity::Error),
+        }
     }
 
     fn apply_layout_intent(&mut self, intent: LayoutIntent) {
         match intent {
             LayoutIntent::ToggleTab(tab) => self.gui.toggle_tab(tab),
             LayoutIntent::ApplyArrangement(id) => self.apply_arrangement(id),
+            LayoutIntent::OpenArrangementSave => self.gui.open_arrangement_save(),
+            LayoutIntent::DeleteArrangement(index) => self.delete_arrangement(index),
             LayoutIntent::SetLayout(layout) => self.set_view_layout(layout),
             LayoutIntent::SetSplitRatio(ratio) => {
                 self.view.display.split_ratio =

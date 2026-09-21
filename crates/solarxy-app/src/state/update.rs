@@ -426,6 +426,9 @@ impl State {
         if let Some(choice) = self.gui.take_recovery_choice() {
             self.resolve_recovery(choice);
         }
+        if let Some(name) = self.gui.take_arrangement_name() {
+            self.save_arrangement(name);
+        }
         self.poll_autosave();
         self.reconcile_history();
         self.poll_preview();

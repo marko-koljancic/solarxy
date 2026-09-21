@@ -577,6 +577,13 @@ impl State {
         );
 
         let recent_files = self.preferences.history.recent_files.clone();
+        let arrangements: Vec<String> = self
+            .preferences
+            .dock
+            .arrangements
+            .iter()
+            .map(|arrangement| arrangement.name.clone())
+            .collect();
         // `PaneToolbarData` is passed by value — `render_ui` consumes it,
         // releasing its `&mut self.view.pane_settings` borrow before
         // the drain re-borrows the same field below.
@@ -680,6 +687,7 @@ impl State {
                 canvas: canvas_source,
                 params: params_source,
                 recent_files: &recent_files,
+                arrangements: &arrangements,
             },
             &mut self.review,
             &mut intents,
