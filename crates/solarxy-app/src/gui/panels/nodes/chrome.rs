@@ -1,14 +1,18 @@
-//! What sits on top of the canvas: the toolbar, the overview inset and
-//! the zoom readout.
+//! What sits on top of the canvas: the overview inset and the zoom
+//! controls, and the request type the panel's menu and its keys both fill.
 //!
 //! All of it is a reading aid rather than a view of the document, which
 //! is why every toggle persists in preferences and none of it raises a
-//! command. The one exception is auto-layout, which is on the toolbar
-//! because that is where a user looks for it, and which moves nodes and
-//! therefore is one command like every other gesture.
+//! command. The one exception is auto-layout, which is in the panel's View
+//! menu because that is where a user looks for it, and which moves nodes
+//! and therefore is one command like every other gesture.
+//!
+//! There was a strip of eleven buttons here until 0.10.0. The panel's menu
+//! bar carries what they did, as the browser's does, and the zoom cluster
+//! moved onto the canvas, where the preference that was always meant to
+//! show and hide it finally does.
 
 use egui::{Color32, Rect, Stroke, Ui, pos2, vec2};
-use solarxy_core::preferences::CanvasPrefs;
 use solarxy_graph::document::Graph;
 
 use super::art::NODE_BOX;
@@ -23,16 +27,18 @@ pub(super) const GRID: f32 = 18.0;
 const MINIMAP: egui::Vec2 = vec2(160.0, 110.0);
 const MARGIN: f32 = 8.0;
 
-/// What the toolbar asked for.
+/// The room the zoom controls are laid out in.
+const ZOOM_STRIP: egui::Vec2 = vec2(120.0, 24.0);
+
+/// What the panel's menu or one of its keys asked for. One type for both,
+/// so an entry and the key it shows are one path.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct ChromeRequest {
     pub layout: bool,
     /// Swap between the graph and the rows.
     pub view: bool,
     pub fit: bool,
-    /// A scale to set outright, from the zoom buttons.
-    pub zoom: Option<ZoomStep>,
-    /// A preference the toolbar toggled, applied by the drain so it is
+    /// A preference that was toggled, applied by the drain so it is
     /// written and saved in one place.
     pub toggled: Option<Toggle>,
     /// Open the info card on the selected node.
@@ -68,81 +74,42 @@ pub(super) fn snap(position: [f32; 2]) -> [f32; 2] {
     ]
 }
 
-/// The strip along the top of the canvas.
-pub(super) fn toolbar(
-    ui: &mut Ui,
-    prefs: CanvasPrefs,
-    list_view: bool,
-    scale: f32,
-    theme: Theme,
-) -> ChromeRequest {
-    let mut request = ChromeRequest::default();
-    egui::Frame::new()
-        .fill(theme.bg_elevated)
-        .inner_margin(egui::Margin::symmetric(6, 3))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui
-                    .small_button("Tidy")
-                    .on_hover_text("Lay the graph out, as one undo step")
-                    .clicked()
-                {
-                    request.layout = true;
-                }
-                if ui
-                    .small_button("Info")
-                    .on_hover_text("Open the info card on the selected node (I)")
-                    .clicked()
-                {
-                    request.info = true;
-                }
-                if ui
-                    .small_button("Fit")
-                    .on_hover_text("Frame every node")
-                    .clicked()
-                {
-                    request.fit = true;
-                }
-                if ui
-                    .selectable_label(list_view, "Rows")
-                    .on_hover_text("Read the graph as a list")
-                    .clicked()
-                {
-                    request.view = true;
-                }
-                ui.separator();
-                if ui.small_button("-").clicked() {
-                    request.zoom = Some(ZoomStep::Out);
-                }
-                if ui
-                    .small_button(format!("{:.0}%", scale * 100.0))
-                    .on_hover_text("Reset the zoom")
-                    .clicked()
-                {
-                    request.zoom = Some(ZoomStep::Reset);
-                }
-                if ui.small_button("+").clicked() {
-                    request.zoom = Some(ZoomStep::In);
-                }
-                ui.separator();
-                for (label, on, toggle, hint) in [
-                    ("Grid", prefs.grid, Toggle::Grid, "The background lattice"),
-                    (
-                        "Snap",
-                        prefs.snap,
-                        Toggle::Snap,
-                        "Land a dragged node on the grid",
-                    ),
-                    ("Map", prefs.minimap, Toggle::Minimap, "The overview inset"),
-                    ("Zoom", prefs.controls, Toggle::Controls, "The zoom readout"),
-                ] {
-                    if ui.selectable_label(on, label).on_hover_text(hint).clicked() {
-                        request.toggled = Some(toggle);
+/// The zoom controls, in the canvas's bottom-left corner, which is where
+/// the browser's sit and the corner the overview inset leaves free.
+///
+/// Laid out in the panel's own layer after the canvas has drawn, so a press
+/// here is the button's rather than the canvas's underneath it.
+pub(super) fn zoom_controls(ui: &mut Ui, area: Rect, scale: f32, theme: Theme) -> Option<ZoomStep> {
+    let strip = Rect::from_min_size(
+        pos2(area.left() + MARGIN, area.bottom() - ZOOM_STRIP.y - MARGIN),
+        ZOOM_STRIP,
+    );
+    let mut step = None;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(strip), |ui| {
+        egui::Frame::new()
+            .fill(theme.bg.gamma_multiply(0.9))
+            .stroke(Stroke::new(1.0_f32, theme.border))
+            .corner_radius(egui::CornerRadius::same(4))
+            .inner_margin(egui::Margin::symmetric(4, 2))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.small_button("-").on_hover_text("Zoom out").clicked() {
+                        step = Some(ZoomStep::Out);
                     }
-                }
+                    if ui
+                        .small_button(format!("{:.0}%", scale * 100.0))
+                        .on_hover_text("Reset the zoom")
+                        .clicked()
+                    {
+                        step = Some(ZoomStep::Reset);
+                    }
+                    if ui.small_button("+").on_hover_text("Zoom in").clicked() {
+                        step = Some(ZoomStep::In);
+                    }
+                });
             });
-        });
-    request
+    });
+    step
 }
 
 /// The overview inset: every node as a dot in its category's fill, and a

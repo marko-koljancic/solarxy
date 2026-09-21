@@ -127,6 +127,7 @@ pub(crate) enum Action {
     ViewBottom,
     ProjectionPerspective,
     ProjectionOrthographic,
+    PanelMaximize,
     // Review
     ToggleReviewMode,
     ToggleReviewPanel,
@@ -192,6 +193,7 @@ impl Action {
             Self::ViewBottom => "view-bottom",
             Self::ProjectionPerspective => "view-perspective",
             Self::ProjectionOrthographic => "view-ortho",
+            Self::PanelMaximize => "panel-maximize",
             Self::ToggleReviewMode => "review-mode",
             Self::ToggleReviewPanel => "review-panel",
             Self::ReviewCancel => "review-cancel",
@@ -647,6 +649,18 @@ pub(crate) static BINDINGS: &[Binding] = &[
         ),
         "In a UV pane, O toggles the overlap display instead",
     ),
+    // Consumed inside the interface pass, which is the only place that
+    // knows which panel the pointer is over.
+    with_note(
+        panel(
+            Action::PanelMaximize,
+            "`",
+            KeyScope::Global,
+            KeyGroup::ViewportAndLayout,
+            "Maximize / restore the panel under the cursor",
+        ),
+        "Esc also restores",
+    ),
     // Review.
     b(
         Action::ToggleReviewMode,
@@ -669,7 +683,7 @@ pub(crate) static BINDINGS: &[Binding] = &[
         "escape",
         KeyScope::Global,
         KeyGroup::Review,
-        "Cancel the note editor, the re-anchor, or review mode",
+        "Cancel the note editor / re-anchor / review mode, or restore a maximized panel",
     ),
     // The debug harness. Dispatched, so it is declared, but not a user
     // binding and therefore not in the reference.
@@ -1018,7 +1032,6 @@ mod drift {
         ("step-back", "the transport bar"),
         ("step-forward", "the transport bar"),
         ("go-to-start", "the transport bar"),
-        ("panel-maximize", "maximizing a panel"),
         ("floating-props", "the floating properties panel"),
     ];
 
@@ -1041,16 +1054,10 @@ mod drift {
     ];
 
     /// A description that differs, with the reason it does.
-    const WORDED_DIFFERENTLY: &[(&str, &str)] = &[
-        (
-            "layout-cycle",
-            "one layout engine here rather than two, so there is nothing to cycle",
-        ),
-        (
-            "review-cancel",
-            "the escape ladder has no maximized panel to restore yet",
-        ),
-    ];
+    const WORDED_DIFFERENTLY: &[(&str, &str)] = &[(
+        "layout-cycle",
+        "one layout engine here rather than two, so there is nothing to cycle",
+    )];
 
     struct Declared {
         keys: String,

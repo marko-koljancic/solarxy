@@ -232,6 +232,9 @@ pub(crate) enum LayoutIntent {
     OpenArrangementSave,
     /// Delete one of the user's arrangements, by its place in the list.
     DeleteArrangement(usize),
+    /// Maximize the leaf this panel sits in, or restore when anything is
+    /// maximized. Raised by every panel bar's last entry.
+    ToggleMaximize(SolarxyTab),
     SetLayout(ViewLayout),
     SetSplitRatio(f32),
     SaveDock,

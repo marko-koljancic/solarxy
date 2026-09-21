@@ -5,7 +5,7 @@ use crate::state::hdri_info::HdriInfo;
 use solarxy_core::preferences::PaneMode;
 
 use super::modals::about::draw_about_modal;
-use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
+use super::dock::{Dock, SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
 use super::panels::asset_preview::AssetPreviewState;
@@ -28,7 +28,7 @@ use super::modals::recovery::{RecoveryChoice, RecoveryModalState, draw_recovery_
 use super::modals::unsaved::{DiscardWhat, UnsavedChoice, UnsavedModalState, draw_unsaved_modal};
 use super::modals::environment::draw_environment_modal;
 use super::modals::arrangement_save::{ArrangementSaveModal, draw_arrangement_save_modal};
-use egui_dock::{DockArea, DockState};
+use egui_dock::DockArea;
 use solarxy_core::preferences::{Preferences, ThemeChoice};
 
 pub struct EguiRenderer {
@@ -71,7 +71,10 @@ pub struct EguiRenderer {
     next_toast_id: u64,
     loading_message: Option<String>,
     hdri_info: Option<HdriInfo>,
-    pub(super) dock_state: DockState<SolarxyTab>,
+    dock: Dock,
+    /// The panel the pointer was over on the last pass, which is what the
+    /// maximize key acts on.
+    hovered_tab: Option<SolarxyTab>,
     pub last_viewport_rect: Option<CachedViewportRect>,
     pub(super) has_saved_layout: bool,
     /// Whether a node-engine scene is open. Separate from `model_info`,
@@ -143,7 +146,8 @@ impl EguiRenderer {
             next_toast_id: 0,
             loading_message: None,
             hdri_info: None,
-            dock_state: default_dock_state(),
+            dock: Dock::new(default_dock_state()),
+            hovered_tab: None,
             last_viewport_rect: None,
             has_saved_layout: false,
             scene_open: false,
@@ -168,7 +172,7 @@ impl EguiRenderer {
     pub(crate) fn open_asset_preview(&mut self, hash: String, name: String) {
         self.asset_preview = Some((hash, name));
         super::dock::show_tab_beside(
-            &mut self.dock_state,
+            self.dock.layout_mut(),
             SolarxyTab::AssetPreview,
             SolarxyTab::Assets,
         );
@@ -351,13 +355,18 @@ impl EguiRenderer {
     /// shortcuts and a panel's own close button all mean the same thing, and
     /// three of these existed with one of them never called.
     pub(crate) fn toggle_tab(&mut self, tab: SolarxyTab) {
-        toggle_tab(&mut self.dock_state, tab);
+        toggle_tab(self.dock.layout_mut(), tab);
+    }
+
+    /// Maximize the panel's leaf, or restore when anything is maximized.
+    pub(crate) fn toggle_maximize(&mut self, tab: SolarxyTab) {
+        self.dock.toggle_maximize(tab);
     }
 
     /// Whether a panel is currently mounted anywhere in the dock.
     #[must_use]
     pub(crate) fn tab_present(&self, tab: SolarxyTab) -> bool {
-        tab_present(&self.dock_state, tab)
+        tab_present(self.dock.layout(), tab)
     }
 
     #[must_use]
@@ -381,7 +390,9 @@ impl EguiRenderer {
     /// doesn't burn GPU work behind opaque docked panels.
     #[must_use]
     pub fn viewport_tab_present(&self) -> bool {
-        self.tab_present(SolarxyTab::Viewport)
+        // What is drawn rather than what is arranged: with another panel
+        // maximized the viewport is mounted and not on screen.
+        tab_present(self.dock.drawn(), SolarxyTab::Viewport)
     }
 
     /// `true` iff the Node Tree tab is currently mounted in the dock. The
@@ -482,7 +493,7 @@ impl EguiRenderer {
                 if dropped > 0 {
                     tracing::debug!("dock layout named {dropped} retired panel(s), dropped");
                 }
-                self.dock_state = state;
+                self.dock.replace(state);
                 true
             }
             Err(err) => {
@@ -497,7 +508,9 @@ impl EguiRenderer {
     /// `DockState<SolarxyTab>` impl, but we treat it as best-effort).
     #[must_use]
     pub fn serialize_layout(&self) -> Option<String> {
-        serde_json::to_string(&self.dock_state).ok()
+        // The arrangement, never the leaf that may be covering it: a
+        // maximized panel is not part of what gets saved.
+        serde_json::to_string(self.dock.layout()).ok()
     }
 
     /// Replace the current dock layout with the factory default produced
@@ -513,14 +526,14 @@ impl EguiRenderer {
     }
 
     pub fn reset_dock_layout(&mut self) {
-        self.dock_state = default_dock_state();
+        self.dock.replace(default_dock_state());
     }
 
     /// Replace the panel layout with a named arrangement's. The layout is
     /// all this touches: the canvas preferences and the pane split that an
     /// arrangement also carries are the state layer's to write.
     pub(crate) fn apply_arrangement_layout(&mut self, arrangement: &super::Arrangement) {
-        self.dock_state = arrangement.recipe.build();
+        self.dock.replace(arrangement.recipe.build());
     }
 
     pub fn set_scene_open(&mut self, open: bool) {
@@ -605,15 +618,19 @@ impl EguiRenderer {
         // review mode starts, so it is reconciled into the dock before the
         // pass; the reverse direction is synced after the drain, where the
         // toggles it raises have already landed.
-        if review.panel_open != tab_present(&self.dock_state, SolarxyTab::ReviewPanel) {
-            toggle_tab(&mut self.dock_state, SolarxyTab::ReviewPanel);
+        if review.panel_open != tab_present(self.dock.layout(), SolarxyTab::ReviewPanel) {
+            toggle_tab(self.dock.layout_mut(), SolarxyTab::ReviewPanel);
         }
 
         // Read from the dock rather than mirrored into a struct: the Window
         // menu's ticks are a question about the dock, and mirroring them was
         // what made a panel cost a field in four places.
-        let present_at_start: std::collections::HashSet<SolarxyTab> =
-            self.dock_state.iter_all_tabs().map(|(_, t)| *t).collect();
+        let present_at_start: std::collections::HashSet<SolarxyTab> = self
+            .dock
+            .layout()
+            .iter_all_tabs()
+            .map(|(_, t)| *t)
+            .collect();
         let menu_cx = MenuContext {
             // The still renders either root: an open scene, or an open model
             // through the synthesized document.
@@ -640,6 +657,7 @@ impl EguiRenderer {
         let mut viewport_rect_logical: Option<egui::Rect> = None;
         let mut canvas_rect_seen: Option<egui::Rect> = None;
         let mut preview_size_seen: Option<(u32, u32)> = None;
+        let mut hovered_tab_seen: Option<SolarxyTab> = None;
         let mut dismissed_toast_id: Option<u64> = None;
 
         // Cloned so the closure below can borrow the renderer mutably: the
@@ -684,9 +702,10 @@ impl EguiRenderer {
                 viewport_rect_out: &mut viewport_rect_logical,
                 canvas_rect_out: &mut canvas_rect_seen,
                 preview_size_out: &mut preview_size_seen,
+                hovered_tab_out: &mut hovered_tab_seen,
                 theme: self.theme,
             };
-            DockArea::new(&mut self.dock_state)
+            DockArea::new(self.dock.drawn_mut())
                 .style(make_dock_style(ctx, &self.theme))
                 .show(ctx, &mut tab_viewer);
 
@@ -830,6 +849,9 @@ impl EguiRenderer {
                 ctx.request_repaint();
             }
 
+            // The escape ladder, in the browser's order: a pending
+            // re-anchor, then review mode, then a maximized panel, which is
+            // last because it is the least in flight of the three.
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 if review.reanchor_target.is_some() {
                     review.cancel_reanchor();
@@ -837,8 +859,24 @@ impl EguiRenderer {
                 } else if review.active {
                     review.toggle_active();
                     intents.raise(Intent::Review(ReviewIntent::Exited));
+                } else {
+                    self.dock.restore();
                 }
             }
+            // Maximize or restore the panel under the pointer. Consumed here
+            // rather than dispatched, because only this pass knows which
+            // panel that is; while maximized there is one panel on screen,
+            // so the way back needs no target.
+            if !suppress_overlay
+                && !ctx.wants_keyboard_input()
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Backtick))
+                && let Some(tab) = hovered_tab_seen
+                    .or(self.hovered_tab)
+                    .or(self.dock.is_maximized().then_some(SolarxyTab::Viewport))
+            {
+                self.dock.toggle_maximize(tab);
+            }
+            self.dock.settle();
             let hud_ctx = HudCtx {
                 toasts: &self.toasts,
                 loading_message: self.loading_message.as_ref(),
@@ -924,6 +962,7 @@ impl EguiRenderer {
         // claiming the key it took while it was on screen.
         self.canvas_rect = canvas_rect_seen;
         self.preview_size_seen = preview_size_seen;
+        self.hovered_tab = hovered_tab_seen;
         if let Some(rect) = viewport_rect_logical {
             self.last_viewport_rect = Some(CachedViewportRect {
                 rect,

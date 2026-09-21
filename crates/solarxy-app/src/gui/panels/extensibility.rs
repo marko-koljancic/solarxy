@@ -49,7 +49,7 @@ use solarxy_graph::registry::{
 };
 use solarxy_studio::types::{self, PortSide};
 
-use super::nodes::{body_size, candidates, glyph_art, glyph_key, silhouette};
+use super::nodes::{add_groups, body_size, candidates, glyph_art, glyph_key, silhouette};
 use super::params::{ControlKind, control_kind, driven, offers_toggle};
 
 /// A node this shell has no knowledge of, using diverse existing types.
@@ -197,6 +197,22 @@ fn a_novel_node_is_offered_by_the_palette_in_its_own_contexts_only() {
         1
     );
     assert!(candidates(&registry, ContextKind::Sop, None, "nothing").is_empty());
+}
+
+/// The node panel's Add menu is a second interpreter of the registry, so it
+/// lists the probe too, under the probe's own category and only in the
+/// contexts it declared, with no list anywhere naming it.
+#[test]
+fn a_novel_node_is_listed_by_the_add_menu_under_its_own_category() {
+    let registry = registry();
+    let groups = add_groups(&registry, ContextKind::Sop);
+    assert_eq!(groups.len(), 1, "one category, the probe's");
+    assert_eq!(groups[0].category, probe().category);
+    let listed: Vec<&str> = groups[0].types.iter().map(|d| d.type_id).collect();
+    assert_eq!(listed, vec!["probe"]);
+
+    assert!(add_groups(&registry, ContextKind::Obj).is_empty());
+    assert!(add_groups(&registry, ContextKind::Mat).is_empty());
 }
 
 /// Its handles are typed, so the canvas can colour them and refuse a bad

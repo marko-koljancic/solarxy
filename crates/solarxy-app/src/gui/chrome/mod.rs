@@ -3,10 +3,15 @@
 //! viewport context menu.
 //!
 //! What separates this from `panels` is ownership of a dock tab. Everything
-//! here draws outside the dock, or on top of it.
+//! here draws outside the dock, or on top of it. Two modules are furniture a
+//! panel borrows rather than furniture the shell draws: `menu_items`, the
+//! entry vocabulary every menu is written in, and `panel_bar`, the frame a
+//! panel's own menu bar sits in.
 
 pub(in crate::gui) mod divider;
 pub(in crate::gui) mod menu;
+pub(in crate::gui) mod menu_items;
 pub(in crate::gui) mod overlays;
 pub(in crate::gui) mod pane_toolbar;
+pub(in crate::gui) mod panel_bar;
 pub(in crate::gui) mod viewport_context_menu;

@@ -33,6 +33,7 @@ mod glyphs;
 mod info;
 mod layout;
 mod list;
+mod menus;
 mod note;
 mod palette;
 mod pins;
@@ -56,6 +57,8 @@ pub(in crate::gui::panels) use art::{body_size, silhouette};
 pub(in crate::gui::panels) use glyphs::art as glyph_art;
 pub(in crate::gui::panels) use glyphs::paint as paint_glyph;
 pub(in crate::gui::panels) use glyphs::paint_path;
+#[cfg(test)]
+pub(in crate::gui::panels) use menus::add_groups;
 #[cfg(test)]
 pub(in crate::gui::panels) use palette::candidates;
 pub(in crate::gui::panels) use viewer::glyph_key;
@@ -130,6 +133,8 @@ pub(crate) enum CanvasAction {
     /// The next wire routing. A reading preference, so it changes no
     /// document state and adds nothing to the undo history.
     CycleRouting,
+    /// One wire routing, named, from the View menu's Connection Style.
+    SetRouting(solarxy_core::preferences::WireRouting),
     /// A gesture the coercion matrix would not carry. Named rather than
     /// silently dropped, and with both wire types in it, because that is
     /// the information needed to fix it.
@@ -177,14 +182,41 @@ pub(in crate::gui) fn draw_nodes_content(
     // would be a second fallback for the same case and a weaker one: a
     // context whose graph survives its owner passes that check and fails
     // this one.
+    // The bar first and the breadcrumb under it, which is the browser's
+    // order. The bar reads the context as the last frame left it; a dive
+    // whose container has gone is put right by the breadcrumb below, and
+    // the bar catches up on the next frame.
+    let graph = doc.graph(*ctx).ok();
+    let bar = menus::draw_bar(
+        ui,
+        registry,
+        graph.map(|g| g.kind),
+        prefs,
+        state.list_view,
+        graph.is_some_and(|g| !g.selection.is_empty()),
+        intents,
+        theme,
+    );
     draw_breadcrumb(ui, doc, registry, ctx, state, theme);
-    let request = chrome::toolbar(ui, prefs, state.list_view, state.last_scale(), theme);
-    apply_chrome_request(request, doc, registry, *ctx, state, intents);
+    apply_chrome_request(bar.chrome, doc, registry, *ctx, state, intents);
+    if let Some(routing) = bar.routing {
+        intents.panel(PanelIntent::Canvas(CanvasAction::SetRouting(routing)));
+    }
 
     // Above the list-view branch on purpose: the palette works in both
     // presentations, and the pane it places itself inside is what is
-    // left after the toolbar and the breadcrumb have drawn.
+    // left after the bar and the breadcrumb have drawn.
     let pane = ui.max_rect();
+    if bar.palette {
+        state.palette.open(palette::placement(None, pane));
+    }
+    if let Some(type_id) = bar.add {
+        let at = menus::menu_placement(state.to_graph(pane.center()), state.menu_adds);
+        state.menu_adds += 1;
+        intents.panel(PanelIntent::Canvas(CanvasAction::AddNode(
+            *ctx, type_id, at,
+        )));
+    }
     drive_palette(ui, doc, registry, *ctx, state, pane, intents, theme);
 
     // Rows rather than a graph: the same document, the same selection and
@@ -261,6 +293,11 @@ pub(in crate::gui) fn draw_nodes_content(
         && let Ok(graph) = doc.graph(*ctx)
     {
         chrome::minimap(ui, viewport, graph, registry, viewport, to_screen, theme);
+    }
+    if prefs.controls
+        && let Some(step) = chrome::zoom_controls(ui, viewport, state.last_scale(), theme)
+    {
+        state.request_view(Some(step), false);
     }
 
     let released = ui.ctx().input(|i| i.pointer.any_released());
@@ -401,7 +438,7 @@ fn drive_palette(
     }
 }
 
-/// Apply whatever the toolbar asked for.
+/// Apply whatever the panel's menu or one of its keys asked for.
 ///
 /// The toggles go through the queue so a preference is written and saved
 /// in one place; the view swap and the zoom are the canvas's own, since
@@ -436,7 +473,7 @@ fn apply_chrome_request(
     {
         state.info = graph.selection.last().copied();
     }
-    state.request_view(request.zoom, request.fit);
+    state.request_view(None, request.fit);
 }
 
 /// The canvas-scoped bindings, claimed here rather than by a dispatcher.

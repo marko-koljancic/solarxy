@@ -226,6 +226,10 @@ pub(crate) struct CanvasState {
     radial: Option<super::radial::Radial>,
     /// The palette, when it is open.
     pub(super) palette: super::palette::PaletteState,
+    /// How many nodes the Add menu has placed, which is what fans a run of
+    /// them out rather than stacking them. Interface memory, not document
+    /// state.
+    pub(super) menu_adds: usize,
     /// The canvas transform as the last frame left it.
     ///
     /// **Stored rather than used and dropped**, because the palette
@@ -294,6 +298,7 @@ impl Default for CanvasState {
             rename: None,
             info: None,
             palette: super::palette::PaletteState::default(),
+            menu_adds: 0,
             to_screen: egui::emath::TSTransform::IDENTITY,
             list_view: false,
             note_edit: None,

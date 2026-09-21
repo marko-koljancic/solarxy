@@ -476,6 +476,7 @@ impl State {
             LayoutIntent::ApplyArrangement(id) => self.apply_arrangement(id),
             LayoutIntent::OpenArrangementSave => self.gui.open_arrangement_save(),
             LayoutIntent::DeleteArrangement(index) => self.delete_arrangement(index),
+            LayoutIntent::ToggleMaximize(tab) => self.gui.toggle_maximize(tab),
             LayoutIntent::SetLayout(layout) => self.set_view_layout(layout),
             LayoutIntent::SetSplitRatio(ratio) => {
                 self.view.display.split_ratio =
@@ -899,6 +900,9 @@ impl State {
                     crate::gui::ToastSeverity::Info,
                 );
             }
+            // Picked by name from the menu, where the choice is already on
+            // screen, so there is nothing for a toast to add.
+            CanvasAction::SetRouting(routing) => self.preferences.canvas.routing = routing,
             CanvasAction::SetVisible(ctx, node, visible) => {
                 self.apply_node_command(solarxy_graph::Command::SetParam {
                     ctx,

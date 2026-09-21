@@ -113,7 +113,7 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
 
 /// Per-frame `TabViewer`, constructed fresh inside the interface pass.
 ///
-/// **Eight fields where there were seventeen**, and the difference is grouping
+/// **Nine fields where there were seventeen**, and the difference is grouping
 /// rather than removal: a panel that needs a new source adds a field to
 /// [`PanelSources`], and one that needs its own interface state adds a field to
 /// [`PanelState`]. Neither this struct nor the entry point's signature moves.
@@ -130,6 +130,9 @@ pub(super) struct SolarxyTabViewer<'a> {
     /// The size the preview tab drew its model at, in physical pixels, so
     /// the state layer can render the preview at that size.
     pub preview_size_out: &'a mut Option<(u32, u32)>,
+    /// The panel the pointer is over, which is what the maximize key acts
+    /// on. Only a leaf's front tab is drawn, so the tab names its leaf.
+    pub hovered_tab_out: &'a mut Option<SolarxyTab>,
     pub theme: Theme,
 }
 
@@ -161,6 +164,9 @@ impl TabViewer for SolarxyTabViewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        if ui.rect_contains_pointer(ui.max_rect()) {
+            *self.hovered_tab_out = Some(*tab);
+        }
         match tab {
             SolarxyTab::Viewport => {
                 *self.viewport_rect_out = Some(ui.max_rect());
@@ -317,6 +323,124 @@ impl TabViewer for SolarxyTabViewer<'_> {
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
         egui::Id::new(("solarxy_tab", tab.slug()))
+    }
+}
+
+/// The dock layout, and the one leaf that may be covering it.
+///
+/// `egui_dock` has no maximize, so it is built here: the leaf a panel sits
+/// in is copied into a layout of its own and drawn instead, while the full
+/// layout waits underneath. Keeping the two in one type is what makes that
+/// safe. **Every question about the arrangement and every change to it goes
+/// to the full layout, and a change restores first**, so nothing can be
+/// toggled into the maximized view by accident, an arrangement applied while
+/// maximized replaces the real layout rather than the copy, and what is
+/// saved on the way out is the arrangement rather than the one panel that
+/// happened to be covering it. Only the draw call sees the copy.
+pub(super) struct Dock {
+    layout: DockState<SolarxyTab>,
+    maximized: Option<Maximized>,
+}
+
+struct Maximized {
+    view: DockState<SolarxyTab>,
+    /// What the leaf held when it was maximized, so a tab the user closes
+    /// while maximized can be closed in the full layout on the way back.
+    tabs: Vec<SolarxyTab>,
+}
+
+impl Dock {
+    pub(super) fn new(layout: DockState<SolarxyTab>) -> Self {
+        Self {
+            layout,
+            maximized: None,
+        }
+    }
+
+    /// The full arrangement, whatever is drawn over it.
+    pub(super) fn layout(&self) -> &DockState<SolarxyTab> {
+        &self.layout
+    }
+
+    /// The full arrangement, to change. Restores first.
+    pub(super) fn layout_mut(&mut self) -> &mut DockState<SolarxyTab> {
+        self.restore();
+        &mut self.layout
+    }
+
+    /// Replace the arrangement outright. Whatever was maximized belonged to
+    /// the old one and goes with it.
+    pub(super) fn replace(&mut self, layout: DockState<SolarxyTab>) {
+        self.maximized = None;
+        self.layout = layout;
+    }
+
+    /// What is on screen: the maximized leaf, or the arrangement.
+    pub(super) fn drawn(&self) -> &DockState<SolarxyTab> {
+        self.maximized.as_ref().map_or(&self.layout, |m| &m.view)
+    }
+
+    pub(super) fn drawn_mut(&mut self) -> &mut DockState<SolarxyTab> {
+        match &mut self.maximized {
+            Some(maximized) => &mut maximized.view,
+            None => &mut self.layout,
+        }
+    }
+
+    pub(super) fn is_maximized(&self) -> bool {
+        self.maximized.is_some()
+    }
+
+    /// Maximize the leaf `tab` sits in, or restore when anything already is:
+    /// while maximized there is one panel on screen, so the way back needs
+    /// no target.
+    pub(super) fn toggle_maximize(&mut self, tab: SolarxyTab) {
+        if self.restore() {
+            return;
+        }
+        let Some((surface, node, _)) = self.layout.find_tab(&tab) else {
+            return;
+        };
+        let Some(leaf) = self.layout[surface][node].get_leaf() else {
+            return;
+        };
+        let tabs = leaf.tabs.clone();
+        let active = leaf.active;
+        let mut view = DockState::new(tabs.clone());
+        if let Some((surface, node, _)) = view.find_tab(&tab) {
+            view.set_active_tab((surface, node, active));
+        }
+        self.maximized = Some(Maximized { view, tabs });
+    }
+
+    /// Put the arrangement back, and say whether anything was maximized.
+    ///
+    /// A tab closed while maximized is closed in the arrangement too:
+    /// otherwise closing a panel and pressing Escape would bring it back.
+    pub(super) fn restore(&mut self) -> bool {
+        let Some(maximized) = self.maximized.take() else {
+            return false;
+        };
+        for tab in maximized.tabs {
+            if !tab_present(&maximized.view, tab)
+                && let Some(locator) = self.layout.find_tab(&tab)
+            {
+                self.layout.remove_tab(locator);
+            }
+        }
+        true
+    }
+
+    /// Restore when the last tab of the maximized leaf has been closed,
+    /// rather than leave an empty window. Run once a frame, after the draw.
+    pub(super) fn settle(&mut self) {
+        if self
+            .maximized
+            .as_ref()
+            .is_some_and(|m| m.view.iter_all_tabs().next().is_none())
+        {
+            self.restore();
+        }
     }
 }
 
@@ -609,6 +733,84 @@ mod tests {
             "the Material Inspector and the Console both go"
         );
         assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
+    }
+
+    fn technical() -> Dock {
+        let arrangement = super::super::arrangement::BUILT_IN
+            .iter()
+            .find(|a| a.name == "Review")
+            .expect("a built-in named Review");
+        Dock::new(arrangement.recipe.build())
+    }
+
+    /// Maximizing draws the panel's whole leaf and nothing else, leaves the
+    /// arrangement untouched underneath, and a second toggle puts it back.
+    #[test]
+    fn maximize_draws_one_leaf_and_restores_the_arrangement() {
+        let mut dock = technical();
+        let before = membership(dock.layout());
+
+        dock.toggle_maximize(SolarxyTab::ReviewPanel);
+        assert!(dock.is_maximized());
+        assert_eq!(
+            membership(dock.drawn()),
+            HashSet::from([SolarxyTab::Properties, SolarxyTab::ReviewPanel]),
+            "the leaf, with every tab it holds"
+        );
+        assert_eq!(membership(dock.layout()), before, "the arrangement waits");
+
+        dock.toggle_maximize(SolarxyTab::Nodes);
+        assert!(!dock.is_maximized(), "any toggle restores while maximized");
+        assert_eq!(membership(dock.drawn()), before);
+    }
+
+    /// A change to the arrangement restores first, so nothing is toggled
+    /// into the maximized copy and lost on the way back.
+    #[test]
+    fn changing_the_arrangement_restores_first() {
+        let mut dock = technical();
+        dock.toggle_maximize(SolarxyTab::Nodes);
+        toggle_tab(dock.layout_mut(), SolarxyTab::Tree);
+        assert!(!dock.is_maximized());
+        assert!(tab_present(dock.layout(), SolarxyTab::Tree));
+        assert!(tab_present(dock.drawn(), SolarxyTab::Tree));
+    }
+
+    /// An arrangement applied while a panel is maximized replaces the real
+    /// layout rather than the copy.
+    #[test]
+    fn replacing_the_arrangement_drops_the_maximized_view() {
+        let mut dock = technical();
+        dock.toggle_maximize(SolarxyTab::Nodes);
+        dock.replace(default_dock_state());
+        assert!(!dock.is_maximized());
+        assert_eq!(membership(dock.drawn()), membership(&default_dock_state()));
+    }
+
+    /// A tab closed while maximized stays closed after the restore, and
+    /// closing the last one restores rather than leaving an empty window.
+    #[test]
+    fn a_tab_closed_while_maximized_stays_closed() {
+        let mut dock = technical();
+        dock.toggle_maximize(SolarxyTab::ReviewPanel);
+        toggle_tab(dock.drawn_mut(), SolarxyTab::ReviewPanel);
+        dock.settle();
+        assert!(dock.is_maximized(), "Properties is still up");
+
+        toggle_tab(dock.drawn_mut(), SolarxyTab::Properties);
+        dock.settle();
+        assert!(!dock.is_maximized(), "nothing left to show");
+        assert!(!tab_present(dock.layout(), SolarxyTab::ReviewPanel));
+        assert!(!tab_present(dock.layout(), SolarxyTab::Properties));
+        assert!(tab_present(dock.layout(), SolarxyTab::Viewport));
+    }
+
+    /// A panel that is not mounted cannot be maximized.
+    #[test]
+    fn an_unmounted_panel_is_not_maximized() {
+        let mut dock = technical();
+        dock.toggle_maximize(SolarxyTab::Text);
+        assert!(!dock.is_maximized());
     }
 
     /// A layout is restorable when it parses and something is left of it.

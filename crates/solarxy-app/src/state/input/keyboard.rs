@@ -168,6 +168,7 @@ impl State {
             | Action::AutoLayout
             | Action::EdgeStyle
             | Action::CanvasFit
+            | Action::PanelMaximize
             | Action::ReviewCancel => {}
 
             // Inspection.
