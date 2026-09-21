@@ -280,8 +280,9 @@ step any more.
   - `dock.rs` - `egui_dock` integration: `SolarxyTab`, `SolarxyTabViewer`, `default_dock_state`,
     `tab_present` and `toggle_tab`. **The tab variant names are serialized into user
     preferences**, so renaming one silently costs a reader their arrangement. The Viewport tab is
-    special: non-floatable, transparent so the wgpu surface shows through, and closeable but
-    restorable from the panel rows of the Desks menu. The `compute_panes` math reads its rect from the **previous**
+    special: pinned as the browser's is, so neither closeable nor floatable, and transparent so the
+    wgpu surface shows through. It has no toggle, and a layout saved with it closed, which was
+    possible until 0.10.0, gets it back on restore. The `compute_panes` math reads its rect from the **previous**
     frame, a one-frame latency invisible at steady state.
 
 [`Intent`]: crates/solarxy-app/src/gui/intent.rs

@@ -6,10 +6,10 @@
 //! `Retired`, is what a saved layout's name for a panel that no longer
 //! exists deserializes to, so the arrangement survives with that tab gone.
 //! Users drag tab titles between leaves to dock left/right/bottom/top; drag
-//! outside the dock area to tear out into a floating window. The Viewport tab is **closeable but
-//! non-floatable and transparent** — `egui_dock` never paints over the
-//! wgpu surface, and the user can recover a closed Viewport from the panel
-//! rows of the Desks menu.
+//! outside the dock area to tear out into a floating window. The Viewport tab is **pinned:
+//! not closeable, not floatable, and transparent** — `egui_dock` never paints
+//! over the wgpu surface, and as in the browser there is no toggle for it
+//! because there is nothing to bring back.
 //!
 //! ## Viewport rect plumbing (one-frame latency)
 //!
@@ -34,9 +34,8 @@ use super::pass::{PanelSources, PanelState};
 use super::theme::Theme;
 
 /// The tab variants in the Solarxy dock. The `Viewport` variant is
-/// special-cased throughout: it never floats and never paints a background
-/// (so the wgpu surface shows through). It *can* be closed; the Window
-/// menu restores it via [`toggle_tab`].
+/// special-cased throughout: it never floats, never closes and never paints
+/// a background (so the wgpu surface shows through).
 ///
 /// **The variant names are serialized into every user's saved arrangement**,
 /// as bare strings, so adding one is safe and renaming or removing one is
@@ -294,8 +293,8 @@ impl TabViewer for SolarxyTabViewer<'_> {
         }
     }
 
-    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
-        true
+    fn closeable(&mut self, tab: &mut Self::Tab) -> bool {
+        can_close(*tab)
     }
 
     fn allowed_in_windows(&self, tab: &mut Self::Tab) -> bool {
@@ -459,6 +458,13 @@ impl Dock {
     }
 }
 
+/// Whether a tab has a close button. Every panel but the viewport, which is
+/// pinned as the browser's is: it has no toggle to bring it back, so it has
+/// no button to close it.
+pub(super) const fn can_close(tab: SolarxyTab) -> bool {
+    !matches!(tab, SolarxyTab::Viewport)
+}
+
 /// Return `true` if `tab` is currently mounted anywhere in the dock
 /// (main surface or a floating window).
 pub(super) fn tab_present(dock: &DockState<SolarxyTab>, tab: SolarxyTab) -> bool {
@@ -491,7 +497,29 @@ pub(super) fn restore(json: &str) -> Result<(DockState<SolarxyTab>, usize), Stri
     if state.iter_all_tabs().next().is_none() {
         return Err("the layout has no panel this build still has".to_string());
     }
+    ensure_viewport(&mut state);
     Ok((state, dropped))
+}
+
+/// Share of the width a viewport put back into a layout takes.
+const RESTORED_VIEWPORT_SHARE: f32 = 0.55;
+
+/// Put the viewport back into a layout that lacks one.
+///
+/// The viewport could be closed until 0.10.0, so a layout saved with it
+/// closed is a real thing in users' configuration files. It cannot be closed
+/// now and has no toggle, so such a layout would restore into a window with
+/// no scene and no way to get one. It goes back on the left, where every
+/// built-in arrangement has it, in a leaf of its own.
+fn ensure_viewport(dock: &mut DockState<SolarxyTab>) {
+    if tab_present(dock, SolarxyTab::Viewport) {
+        return;
+    }
+    dock.main_surface_mut().split_left(
+        egui_dock::NodeIndex::root(),
+        RESTORED_VIEWPORT_SHARE,
+        vec![SolarxyTab::Viewport],
+    );
 }
 
 /// Show `tab`, adding it beside `neighbour` when that tab is mounted and
@@ -530,6 +558,11 @@ const REOPEN_CANVAS_SHARE: f32 = 0.5;
 /// the right of the viewport, the parameter panel under the canvas, and
 /// every other panel tabs in behind the parameter panel.
 pub(super) fn toggle_tab(dock: &mut DockState<SolarxyTab>, tab: SolarxyTab) {
+    // The viewport is pinned. Nothing asks to toggle it, and a request that
+    // did would otherwise remove the one panel that has no way back.
+    if tab == SolarxyTab::Viewport && tab_present(dock, tab) {
+        return;
+    }
     if let Some(locator) = dock.find_tab(&tab) {
         dock.remove_tab(locator);
         // Sweep any duplicate occurrences too.
@@ -826,6 +859,64 @@ mod tests {
         let mut dock = technical();
         dock.toggle_maximize(SolarxyTab::Text);
         assert!(!dock.is_maximized());
+    }
+
+    /// The viewport is pinned: a toggle does not remove it, and it alone
+    /// has no close button.
+    #[test]
+    fn the_viewport_cannot_be_toggled_away() {
+        let mut dock = default_dock_state();
+        toggle_tab(&mut dock, SolarxyTab::Viewport);
+        assert!(tab_present(&dock, SolarxyTab::Viewport));
+
+        assert!(!can_close(SolarxyTab::Viewport));
+        for tab in [
+            SolarxyTab::Sidebar,
+            SolarxyTab::ReviewPanel,
+            SolarxyTab::Properties,
+            SolarxyTab::Tree,
+            SolarxyTab::Nodes,
+            SolarxyTab::Assets,
+            SolarxyTab::AssetPreview,
+            SolarxyTab::Texture,
+            SolarxyTab::Attributes,
+            SolarxyTab::Text,
+        ] {
+            assert!(can_close(tab), "{tab:?} closes");
+        }
+    }
+
+    /// A layout saved with the viewport closed, which was possible until
+    /// 0.10.0, restores with the viewport back in a leaf of its own and
+    /// every other panel where it was.
+    ///
+    /// Built from the real saved layout rather than from a fresh state,
+    /// whose unlaid-out rects do not survive serialization: its viewport is
+    /// renamed to a panel this build has, which leaves a layout with
+    /// something in it and no viewport.
+    #[test]
+    fn a_layout_saved_without_a_viewport_gets_it_back() {
+        let saved = LAYOUT_BEFORE_NODE_TREE.replace("\"Viewport\"", "\"Properties\"");
+        assert_ne!(saved, LAYOUT_BEFORE_NODE_TREE, "the fixture names Viewport");
+
+        let (dock, dropped) = restore(&saved).expect("restorable");
+        assert_eq!(dropped, 2, "the two retired panels still go");
+        assert_eq!(
+            membership(&dock),
+            HashSet::from([SolarxyTab::Properties, SolarxyTab::Viewport])
+        );
+        assert_eq!(leaf_of(&dock, SolarxyTab::Viewport), [SolarxyTab::Viewport]);
+    }
+
+    /// A layout that has its viewport is left exactly as it was.
+    #[test]
+    fn a_layout_with_its_viewport_is_left_alone() {
+        let mut dock = default_dock_state();
+        let before = membership(&dock);
+        let count = dock.iter_all_tabs().count();
+        ensure_viewport(&mut dock);
+        assert_eq!(membership(&dock), before);
+        assert_eq!(dock.iter_all_tabs().count(), count, "no second viewport");
     }
 
     /// A layout is restorable when it parses and something is left of it.

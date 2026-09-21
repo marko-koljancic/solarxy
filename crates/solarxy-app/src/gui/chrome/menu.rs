@@ -446,14 +446,12 @@ fn draw_recent_files(
     });
 }
 
-/// The arrangements menu: the named arrangements, then the panels.
+/// The arrangements menu: the named arrangements, then the panel toggles.
 ///
-/// Two blocks under it are passing through. The panel rows are the old
-/// Window menu's, moved here whole until they become the browser's seven
-/// toggles; and the three layout entries are the old Layout menu's, here
-/// until saved arrangements take their job and they are withdrawn. Both sit
-/// here rather than in menus of their own so the bar is the browser's five
-/// from this point on.
+/// One block under it is passing through. The three layout entries are the
+/// old Layout menu's, here until saved arrangements take their job and they
+/// are withdrawn. They sit here rather than in a menu of their own so the
+/// bar is the browser's five.
 fn draw_desks_menu(
     ui: &mut egui::Ui,
     intents: &mut Intents,
@@ -463,9 +461,11 @@ fn draw_desks_menu(
     ui.menu_button(MENU_TITLES[2], |ui| {
         draw_arrangement_entries(ui, intents, cx.arrangements);
         ui.separator();
-        for row in PANEL_ROWS {
-            if check_entry(ui, present(row.tab), row.label, row.action).clicked() {
-                intents.raise(Intent::Layout(LayoutIntent::ToggleTab(row.tab)));
+        // Presence in the dock is the open state, so a tick cannot disagree
+        // with what is on screen.
+        for (tab, label) in PANEL_TOGGLES.iter().chain([&SIDEBAR_TOGGLE]) {
+            if check_entry(ui, present(*tab), label, None).clicked() {
+                intents.raise(Intent::Layout(LayoutIntent::ToggleTab(*tab)));
                 ui.close();
             }
         }
@@ -616,68 +616,32 @@ fn draw_arrangement_entries(ui: &mut egui::Ui, intents: &mut Intents, arrangemen
     });
 }
 
-/// A panel's row in the arrangements menu.
+/// The panel toggles, in the browser's order and under its labels.
 ///
 /// **This table is the registration a new panel needs.** Before it, every
 /// panel cost a field on a shared visibility struct, a line building that
 /// struct, a line in a diff table, and a line applying the diff. Now it costs
-/// a row, and the tick state is read from the dock rather than mirrored.
-struct PanelRow {
-    tab: SolarxyTab,
-    label: &'static str,
-    /// The binding that opens this panel, where one exists. Read from the
-    /// table rather than written here, so a rebinding cannot leave the menu
-    /// describing a key that does something else.
-    action: Option<Action>,
-}
-
-const PANEL_ROWS: &[PanelRow] = &[
-    PanelRow {
-        tab: SolarxyTab::Viewport,
-        label: "Viewport",
-        action: None,
-    },
-    PanelRow {
-        tab: SolarxyTab::Sidebar,
-        label: "Sidebar",
-        action: None,
-    },
-    PanelRow {
-        tab: SolarxyTab::Tree,
-        label: "Tree",
-        action: None,
-    },
-    PanelRow {
-        tab: SolarxyTab::Nodes,
-        label: "Nodes",
-        action: None,
-    },
-    PanelRow {
-        tab: SolarxyTab::Assets,
-        label: "Assets",
-        action: None,
-    },
-    PanelRow {
-        tab: SolarxyTab::Texture,
-        label: "Texture Viewer",
-        action: None,
-    },
-    PanelRow {
-        tab: SolarxyTab::Attributes,
-        label: "Attributes",
-        action: None,
-    },
-    PanelRow {
-        tab: SolarxyTab::Text,
-        label: "Text",
-        action: None,
-    },
-    PanelRow {
-        tab: SolarxyTab::Properties,
-        label: "Properties",
-        action: None,
-    },
+/// a row, and the tick is read from the dock rather than mirrored, so a panel
+/// closed by its own tab button unticks itself.
+///
+/// The viewport is not here, as it is not in the browser: it is the one
+/// panel that cannot be closed. The asset preview is not either, since it
+/// opens from an asset rather than from a menu.
+const PANEL_TOGGLES: &[(SolarxyTab, &str)] = &[
+    (SolarxyTab::Nodes, "Nodes Panel"),
+    (SolarxyTab::Properties, "Properties Panel"),
+    (SolarxyTab::Tree, "Tree Panel"),
+    (SolarxyTab::Text, "Text Panel"),
+    (SolarxyTab::Assets, "Assets Panel"),
+    (SolarxyTab::Texture, "Texture Viewer"),
+    (SolarxyTab::Attributes, "Attributes Panel"),
 ];
+
+/// The one toggle the browser does not have, because it has no such panel.
+/// The Sidebar holds the scene-global display controls until the per-pane
+/// look editor takes them, and without a toggle a closed Sidebar would have
+/// no way back. It leaves with the panel.
+const SIDEBAR_TOGGLE: (SolarxyTab, &str) = (SolarxyTab::Sidebar, "Sidebar");
 
 #[cfg(test)]
 mod tests {
@@ -851,6 +815,54 @@ mod tests {
         ];
         let found: Vec<&String> = desks.iter().filter(|label| ours.contains(label)).collect();
         assert_eq!(found, ours.iter().collect::<Vec<_>>());
+    }
+
+    /// The seven panel toggles are the browser's, by label and in order.
+    /// They follow its two arrangement entries in its menu, so they are what
+    /// is left of that menu's quoted labels once the presets, which are
+    /// built from a table there, and those two entries are passed.
+    #[test]
+    fn the_panel_toggles_are_the_browsers_seven() {
+        let desks = browser_menu(&browser_source(), "desks");
+        let after = desks
+            .iter()
+            .position(|label| label == DELETE_DESK)
+            .expect("the browser's menu has the delete entry");
+        let browser: Vec<&str> = desks[after + 1..].iter().map(String::as_str).collect();
+        assert_eq!(browser.len(), 7, "the reader found the seven toggles");
+        let here: Vec<&str> = PANEL_TOGGLES.iter().map(|(_, label)| *label).collect();
+        assert_eq!(here, browser);
+    }
+
+    /// Every panel a user can close has a way back, and the two that do not
+    /// belong in the list are not in it: the viewport, which cannot be
+    /// closed, and the asset preview, which opens from an asset.
+    #[test]
+    fn every_closeable_panel_has_a_toggle_and_the_viewport_has_none() {
+        let mut toggled: Vec<SolarxyTab> = PANEL_TOGGLES.iter().map(|(tab, _)| *tab).collect();
+        toggled.push(SIDEBAR_TOGGLE.0);
+        toggled.push(SolarxyTab::ReviewPanel); // in the Review menu
+        for tab in [
+            SolarxyTab::Sidebar,
+            SolarxyTab::ReviewPanel,
+            SolarxyTab::Properties,
+            SolarxyTab::Tree,
+            SolarxyTab::Nodes,
+            SolarxyTab::Assets,
+            SolarxyTab::Texture,
+            SolarxyTab::Attributes,
+            SolarxyTab::Text,
+        ] {
+            assert!(
+                toggled.contains(&tab),
+                "{tab:?} can be closed and not reopened"
+            );
+        }
+        assert!(!toggled.contains(&SolarxyTab::Viewport));
+        assert!(!toggled.contains(&SolarxyTab::AssetPreview));
+        let mut unique = toggled.clone();
+        unique.dedup();
+        assert_eq!(unique.len(), toggled.len(), "no panel is toggled twice");
     }
 
     /// An entry that names a binding shows a key, because the table binds
