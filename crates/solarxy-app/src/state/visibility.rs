@@ -1,5 +1,5 @@
-//! What a scene object's actions do: the Outliner's, the viewport right-click
-//! menu's, and the keyboard shortcuts that raise the same ones.
+//! What a scene object's actions do. The viewport context menu is the one
+//! surface that raises them, as it is in the browser.
 //!
 //! **Hiding is a parameter change, never a direct write.** An object's
 //! visibility belongs to the engine and is re-emitted from its owning node on
@@ -15,10 +15,7 @@ use solarxy_graph::params::{ParamSource, ParamValue};
 
 use super::State;
 
-/// One thing the viewport context menu can ask of a scene object. These
-/// were the Outliner's actions until that panel was replaced by the Tree;
-/// the menu raised them through the Outliner's handler and still does
-/// through this one.
+/// One thing the viewport context menu can ask of a scene object.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ObjectAction {
     /// Frame the active pane on the object's world bounds.

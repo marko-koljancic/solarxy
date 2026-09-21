@@ -7,16 +7,16 @@
 //! a node type added in Rust gets a working panel with no change to this
 //! file.
 //!
-//! ## Why this is not the Properties panel
+//! ## Why the tab is still called Properties
 //!
-//! `panels/properties.rs` reports on the open file: its statistics, its
-//! HDRI, its validation. It also carries an Actions section, whose own
-//! header calls itself the seed of this panel, because it already
-//! interprets the registry and branches on no node type. This is that
-//! section generalized to every parameter. The two live side by side
-//! until the panel work that collapses them, and Properties keeps its
-//! name and its slug throughout, because those names are serialized into
-//! a user's saved dock arrangement.
+//! This panel is what the Properties tab draws, and the tab keeps that name
+//! and its slug because both are serialized into a user's saved dock
+//! arrangement, and because it is the name the browser's panel has. The
+//! panel that carried the name before reported on an imported file: its
+//! statistics, its HDRI, its validation. That content has no source with
+//! one document root, and what it answered is read elsewhere now: cook
+//! statistics in this panel's header, validation on its Validation tab,
+//! and the HDRI in the Environment modal.
 
 mod controls;
 mod draft;

@@ -73,7 +73,7 @@ pub(in crate::gui) fn draw_menu_bar(
             draw_review_menu(ui, intents, cx);
             draw_view_menu(ui, settings, intents);
             draw_layout_menu(ui, intents, cx.has_saved_layout);
-            draw_window_menu(ui, intents, present, cx);
+            draw_window_menu(ui, intents, present);
             draw_help_menu(ui, intents);
             draw_history_strip(ui, settings.history, intents);
             draw_cook_strip(ui, settings.cook, intents);
@@ -750,8 +750,6 @@ struct PanelRow {
     /// table rather than written here, so a rebinding cannot leave the menu
     /// describing a key that does something else.
     action: Option<Action>,
-    /// Panels that inspect an imported file are disabled without one.
-    needs_model: bool,
 }
 
 const PANEL_ROWS: &[PanelRow] = &[
@@ -759,67 +757,51 @@ const PANEL_ROWS: &[PanelRow] = &[
         tab: SolarxyTab::Viewport,
         label: "Viewport",
         action: None,
-        needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Sidebar,
         label: "Sidebar",
         action: None,
-        needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Tree,
         label: "Tree",
         action: None,
-        needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Nodes,
         label: "Nodes",
         action: None,
-        needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Assets,
         label: "Assets",
         action: None,
-        needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Texture,
         label: "Texture Viewer",
         action: None,
-        needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Attributes,
         label: "Attributes",
         action: None,
-        needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Text,
         label: "Text",
         action: None,
-        needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::Properties,
         label: "Properties",
         action: None,
-        needs_model: false,
     },
     PanelRow {
         tab: SolarxyTab::ReviewPanel,
         label: "Review Panel",
         action: Some(Action::ToggleReviewPanel),
-        needs_model: false,
-    },
-    PanelRow {
-        tab: SolarxyTab::MaterialInspector,
-        label: "Material Inspector",
-        action: None,
-        needs_model: true,
     },
 ];
 
@@ -827,7 +809,6 @@ fn draw_window_menu(
     ui: &mut egui::Ui,
     intents: &mut Intents,
     present: &dyn Fn(SolarxyTab) -> bool,
-    cx: MenuContext<'_>,
 ) {
     ui.menu_button("Window", |ui| {
         for row in PANEL_ROWS {
@@ -835,10 +816,7 @@ fn draw_window_menu(
             if let Some(keys) = row.action.and_then(hint) {
                 button = button.shortcut_text(keys);
             }
-            if ui
-                .add_enabled(!row.needs_model || cx.has_model, button)
-                .clicked()
-            {
+            if ui.add(button).clicked() {
                 intents.raise(Intent::Layout(LayoutIntent::ToggleTab(row.tab)));
                 ui.close();
             }

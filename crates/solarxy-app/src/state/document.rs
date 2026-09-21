@@ -380,7 +380,6 @@ impl State {
         if let Some(scene) = &mut self.engine_scene {
             scene.filename.clone_from(&filename);
             scene.path.clone_from(&display_path);
-            scene.file_size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
             if scene.created.is_empty() {
                 scene.created.clone_from(&sidecar.meta.created);
             }

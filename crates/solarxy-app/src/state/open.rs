@@ -272,11 +272,10 @@ impl State {
         };
         match pending.receiver.try_recv() {
             Ok(Ok(opened)) => {
-                let file_size = std::fs::metadata(&pending.path).map_or(0, |m| m.len());
                 for w in &opened.warnings {
                     tracing::warn!("{w}");
                 }
-                self.adopt_document(opened.engine, &pending.filename, &pending.path, file_size);
+                self.adopt_document(opened.engine, &pending.filename, &pending.path);
                 self.view.cameras = [None, None, None, None];
                 self.pending_frame = [false; 4];
                 self.ensure_pane_cameras();
@@ -376,14 +375,13 @@ impl State {
         let environment = loaded.sidecar.environment.clone();
         let created = loaded.sidecar.meta.created.clone();
 
-        let file_size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         if display_path.is_empty() {
             self.install_engine(
                 engine,
-                EngineSceneInfo::new(filename.to_string(), String::new(), file_size),
+                EngineSceneInfo::new(filename.to_string(), String::new()),
             );
         } else {
-            self.adopt_document(engine, filename, display_path, file_size);
+            self.adopt_document(engine, filename, display_path);
         }
         if let Some(scene) = &mut self.engine_scene {
             scene.created = created;
@@ -678,10 +676,10 @@ impl State {
     }
 
     /// Install a document built from a file, and remember the file.
-    fn adopt_document(&mut self, engine: Box<Engine>, filename: &str, path: &str, file_size: u64) {
+    fn adopt_document(&mut self, engine: Box<Engine>, filename: &str, path: &str) {
         self.install_engine(
             engine,
-            EngineSceneInfo::new(filename.to_string(), path.to_string(), file_size),
+            EngineSceneInfo::new(filename.to_string(), path.to_string()),
         );
         preferences::add_recent_file(&mut self.preferences, path);
     }
@@ -694,7 +692,7 @@ impl State {
             Ok(engine) => {
                 self.install_engine(
                     Box::new(engine),
-                    EngineSceneInfo::new("Untitled".to_string(), String::new(), 0),
+                    EngineSceneInfo::new("Untitled".to_string(), String::new()),
                 );
                 self.pending_frame = [true; 4];
                 true

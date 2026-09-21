@@ -552,7 +552,7 @@ fn draw_section(
 
 /// One annotation row — a full-width, single click target painted
 /// manually (no child widgets, which would each steal the click and shrink
-/// the hit region to the text). Mirrors `material_inspector::draw_material_row`.
+/// the hit region to the text).
 /// Shows a category-letter column, a 2-line wrapped text preview, and an
 /// author · time line; the row sizes to that content.
 fn draw_annotation_row(

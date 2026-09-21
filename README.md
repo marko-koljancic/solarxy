@@ -72,7 +72,6 @@ engineering standards, and the decision record.
 - **Split viewport** - side-by-side, stacked, quad, or three-left-big panes with independent cameras and display settings per pane. A pane shows either the 3D scene or the UV layout, with overlap detection.
 - **Inspection modes** - Shaded, Material ID, Texel Density heat map, Depth, Overdraw heat map, AO Preview.
 - **Material overrides** - Clay Light, Clay Dark, Chrome (IBL-only reflective black), and Silhouette (flat black) for surface inspection.
-- **Material Inspector** - view-only per-material panel with base-color swatch, scalar PBR (metallic/roughness), alpha mode, and 128x128 texture thumbnails for albedo / normal / metallic-roughness / occlusion / emissive.
 - **Validation overlay** - color-coded 3D visualization of validation issues (flipped normals, non-manifold edges, triangle-budget overruns, degenerate triangles, missing UVs, bad material refs).
 - **Review System** - place spatially-anchored annotations on a model's surface (desktop saves a `<model>.solarxy-review.json` sidecar; web keeps them in the `.slxy` document), categories (Info / Warning / Question / Change), threaded replies, re-anchoring, cascade-delete confirm. Toggle via `Shift+R`.
 

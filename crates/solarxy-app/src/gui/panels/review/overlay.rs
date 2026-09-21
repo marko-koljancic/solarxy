@@ -193,8 +193,9 @@ struct VisiblePin<'a> {
     /// Body text pre-laid-out at [`CARD_WIDTH`] — measured once so the
     /// card height matches what `draw_card` paints.
     body_galley: std::sync::Arc<egui::Galley>,
-    /// The mesh this annotation is anchored to is hidden (Outliner / hide
-    /// shortcuts) — the pin renders dimmed, like a resolved one.
+    /// The mesh this annotation is anchored to is hidden, so the pin
+    /// renders dimmed, like a resolved one. Always `false` until review is
+    /// repointed at the document, where hiding is a node's parameter.
     mesh_hidden: bool,
 }
 

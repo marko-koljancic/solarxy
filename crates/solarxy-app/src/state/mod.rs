@@ -24,9 +24,9 @@
 //! - `still/`, the tiled still render job. `review/`, the annotation state,
 //!   the anchoring, and the sidecar. `input/`, keyboard, pointer, and the
 //!   native pickers.
-//! - `engine_scene.rs`, what the inspection panels read about the open
-//!   document. `cook_health.rs`, which nodes are failing. `hdri_info.rs`,
-//!   what Properties says about the loaded HDRI.
+//! - `engine_scene.rs`, what the shell knows about the open document as a
+//!   file. `cook_health.rs`, which nodes are failing. `hdri_info.rs`, what
+//!   the Environment modal says about the loaded HDRI.
 //! - `view_state.rs`, `ViewState` (re-exports the `view_config` types).
 //! - `raycast`, CPU picking (Moller-Trumbore plus an AABB early reject), now
 //!   `solarxy_core::raycast` so web picking can run in Rust; re-exported here

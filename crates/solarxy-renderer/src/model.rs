@@ -216,15 +216,18 @@ pub struct CpuMesh {
     pub indices: Vec<u32>,
 }
 
-/// CPU-side mirror of a material's source textures, kept alive so the
-/// Material Inspector (`solarxy-app::gui::material_inspector`) can render
-/// 128×128 thumbnails without re-decoding files or reading back from
-/// the GPU. Indexed in lockstep with [`Model::materials`].
+/// CPU-side mirror of a material's source textures, kept alive so a shell
+/// can draw thumbnails without re-decoding files or reading back from the
+/// GPU. Indexed in lockstep with [`Model::materials`].
+///
+/// It was built for the desktop's material inspector, which drew 128×128
+/// thumbnails from it and was withdrawn in 0.10.0. Nothing in the workspace
+/// reads it now; it is still filled on both upload paths.
 ///
 /// Five roles, one per slot in the source data ([`solarxy_core::RawMaterialData`]).
 /// Roles whose source has no texture are `None`. The renderer combines
-/// metallic-roughness + occlusion into a packed GPU "ORM" texture, but
-/// the Inspector shows the source-side split that artists author against.
+/// metallic-roughness + occlusion into a packed GPU "ORM" texture, while
+/// this keeps the source-side split that artists author against.
 pub struct MaterialThumbnails {
     pub albedo: Option<TextureThumbnail>,
     pub normal: Option<TextureThumbnail>,

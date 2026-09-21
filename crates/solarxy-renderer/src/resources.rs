@@ -207,11 +207,12 @@ pub fn upload_model(
             layout,
         ));
 
-        // CPU-side thumbnail cache for the Material Inspector. `take` moves
-        // the decoded bytes out of the raw material (which is about to
-        // drop anyway) into an Arc so the inspector can hold a cheap
-        // reference; paths are cloned because both the GPU upload and the
-        // cache need them.
+        // CPU-side copy of the material's source textures. `take` moves the
+        // decoded bytes out of the raw material (which is about to drop
+        // anyway) into an Arc so a reader can hold a cheap reference; paths
+        // are cloned because both the GPU upload and the cache need them.
+        // Built for the desktop's material inspector, which was withdrawn in
+        // 0.10.0; nothing in the workspace reads it now.
         material_thumbnails.push(model::MaterialThumbnails {
             albedo: take_thumbnail(
                 &mut mat.diffuse_texture_data,

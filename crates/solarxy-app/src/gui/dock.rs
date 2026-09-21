@@ -1,7 +1,7 @@
 //! `egui_dock` integration — the unified panel + viewport docking layer.
 //!
-//! The user-facing panels (Sidebar, Review Panel, Material Inspector,
-//! Properties, Tree, Nodes and the rest) plus the 3D Viewport live as tabs
+//! The user-facing panels (Sidebar, Review Panel, Properties, Tree, Nodes
+//! and the rest) plus the 3D Viewport live as tabs
 //! inside a single [`egui_dock::DockState`], and one more variant,
 //! `Retired`, is what a saved layout's name for a panel that no longer
 //! exists deserializes to, so the arrangement survives with that tab gone.
@@ -47,13 +47,14 @@ use super::theme::Theme;
 /// name deserializes to `Retired`, which [`sweep_retired`] removes after the
 /// parse, so a layout that named a panel this build no longer has restores
 /// with only that panel gone. `layout_saved_before_the_tree_still_restores`
-/// pins both against a real blob written by 0.8.1, which names `Outliner`.
+/// pins both against a real blob written by 0.8.1, which names `Outliner`,
+/// and `a_layout_naming_the_material_inspector_restores_without_it` holds
+/// the same for the panel withdrawn in 0.10.0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum SolarxyTab {
     Viewport,
     Sidebar,
     ReviewPanel,
-    MaterialInspector,
     /// Hosts the parameter panel, under the name the browser's panel has.
     Properties,
     /// The scene tree. Written as `NodeTree`, the name every saved
@@ -85,7 +86,6 @@ impl SolarxyTab {
             Self::Viewport => "viewport",
             Self::Sidebar => "sidebar",
             Self::ReviewPanel => "review-panel",
-            Self::MaterialInspector => "material-inspector",
             Self::Properties => "properties",
             Self::Tree => "tree",
             Self::Nodes => "nodes",
@@ -101,9 +101,10 @@ impl SolarxyTab {
 
 /// Build the default dock layout: Viewport central, the Tree top-left with
 /// the Sidebar below it, Properties top-right with `ReviewPanel` below it,
-/// and the node canvas tabbed with the Material Inspector along the
-/// bottom, active of the two. Every panel ships in the default tree:
-/// discoverability is the layout itself (no panel auto-opens on load).
+/// and the node canvas along the bottom, tabbed with Attributes and Text
+/// and active of the three. Every panel ships in the default tree except
+/// the asset preview, which opens from Assets: discoverability is the
+/// layout itself (no panel auto-opens on load).
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let mut state = DockState::new(vec![SolarxyTab::Viewport]);
     let surface = state.main_surface_mut();
@@ -122,12 +123,7 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let [_main, _bottom] = surface.split_below(
         center,
         0.72,
-        vec![
-            SolarxyTab::Nodes,
-            SolarxyTab::Attributes,
-            SolarxyTab::Text,
-            SolarxyTab::MaterialInspector,
-        ],
+        vec![SolarxyTab::Nodes, SolarxyTab::Attributes, SolarxyTab::Text],
     );
 
     state
@@ -163,7 +159,6 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::Viewport => "Viewport".into(),
             SolarxyTab::Sidebar => "Sidebar".into(),
             SolarxyTab::ReviewPanel => format!("Review ({})", self.review.annotations.len()).into(),
-            SolarxyTab::MaterialInspector => "Material Inspector".into(),
             SolarxyTab::Properties => "Properties".into(),
             SolarxyTab::Tree => "Tree".into(),
             SolarxyTab::Nodes => "Nodes".into(),
@@ -209,12 +204,6 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.review,
                     self.intents,
                     self.theme,
-                );
-            }
-            SolarxyTab::MaterialInspector => {
-                super::panels::material_inspector::draw_material_inspector_content(
-                    ui,
-                    self.sources.settings.cook.open,
                 );
             }
             // Properties hosts the parameter panel, under the name the
@@ -422,7 +411,6 @@ mod tests {
             SolarxyTab::Sidebar,
             SolarxyTab::ReviewPanel,
             SolarxyTab::Properties,
-            SolarxyTab::MaterialInspector,
             SolarxyTab::Tree,
             SolarxyTab::Nodes,
             SolarxyTab::Assets,
@@ -493,6 +481,25 @@ mod tests {
         assert_eq!(sweep_retired(&mut dock), 2, "Bogus and Console both go");
         assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
         assert_eq!(sweep_retired(&mut dock), 0, "a second sweep finds nothing");
+    }
+
+    /// And for the panel withdrawn in 0.10.0, whose name is in every
+    /// arrangement saved while it shipped in the default layout. The
+    /// variant is gone, so the name has to land on `Retired` like any
+    /// other this build does not have; were the variant still here, the
+    /// name would parse as itself and only the Console would be swept.
+    #[test]
+    fn a_layout_naming_the_material_inspector_restores_without_it() {
+        let blob = LAYOUT_BEFORE_NODE_TREE.replace("\"Outliner\"", "\"MaterialInspector\"");
+        assert_ne!(blob, LAYOUT_BEFORE_NODE_TREE, "the fixture names Outliner");
+        let mut dock: DockState<SolarxyTab> = serde_json::from_str(&blob)
+            .expect("a blob naming the withdrawn panel must still deserialize");
+        assert_eq!(
+            sweep_retired(&mut dock),
+            2,
+            "the Material Inspector and the Console both go"
+        );
+        assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
     }
 
     /// The wire name of the tree is the one every saved arrangement knows,
@@ -593,12 +600,12 @@ mod tests {
         let mut dock = default_dock_state();
         // Every panel ships in the default tree, so the round-trip starts
         // from present.
-        assert!(tab_present(&dock, SolarxyTab::MaterialInspector));
+        assert!(tab_present(&dock, SolarxyTab::Text));
 
-        toggle_tab(&mut dock, SolarxyTab::MaterialInspector);
-        assert!(!tab_present(&dock, SolarxyTab::MaterialInspector));
+        toggle_tab(&mut dock, SolarxyTab::Text);
+        assert!(!tab_present(&dock, SolarxyTab::Text));
 
-        toggle_tab(&mut dock, SolarxyTab::MaterialInspector);
-        assert!(tab_present(&dock, SolarxyTab::MaterialInspector));
+        toggle_tab(&mut dock, SolarxyTab::Text);
+        assert!(tab_present(&dock, SolarxyTab::Text));
     }
 }

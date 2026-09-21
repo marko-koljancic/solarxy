@@ -295,12 +295,9 @@ impl State {
             }
             self.apply_scene_environment(&delta);
         }
-        // The panels read summed counters and one merged validation report.
-        // Both are derived from what just landed, so they are rebuilt here
-        // rather than per frame: a delta is the only thing that can change
-        // either. The same is true of the per-mesh overlay buffers, which are
-        // baked geometry rather than a pass over the live scene.
-        self.refresh_engine_scene_info();
+        // The per-mesh overlay buffers are baked geometry rather than a pass
+        // over the live scene, so they are rebuilt from what just landed
+        // rather than per frame: a delta is the only thing that changes them.
         self.viz_dirty = true;
     }
 
