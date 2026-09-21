@@ -30,10 +30,15 @@ pub(in crate::gui) fn panel_bar(
         });
 }
 
+/// The label of the entry every panel's View menu ends with. One constant,
+/// so the entry and the tests that hold a menu against the browser's cannot
+/// come to spell it differently.
+pub(in crate::gui) const MAXIMIZE_LABEL: &str = "Maximize Panel";
+
 /// The entry every panel's View menu ends with. It toggles, so the same
 /// entry is the way back, as are the key it shows and Escape.
 pub(in crate::gui) fn maximize_entry(ui: &mut egui::Ui, tab: SolarxyTab, intents: &mut Intents) {
-    if entry(ui, "Maximize Panel", Some(Action::PanelMaximize)).clicked() {
+    if entry(ui, MAXIMIZE_LABEL, Some(Action::PanelMaximize)).clicked() {
         intents.raise(Intent::Layout(LayoutIntent::ToggleMaximize(tab)));
         ui.close();
     }

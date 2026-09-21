@@ -19,7 +19,7 @@ use solarxy_core::view_config::ViewLayout;
 
 use super::menu_items::{check_entry, entry, waiting_entry};
 use super::pane_toolbar::PaneView;
-use super::panel_bar::{maximize_entry, panel_bar};
+use super::panel_bar::{MAXIMIZE_LABEL, maximize_entry, panel_bar};
 use crate::gui::dock::SolarxyTab;
 use crate::gui::intent::{CaptureIntent, FileIntent, Intent, Intents, LayoutIntent};
 use crate::gui::settings::PanelSettings;
@@ -52,7 +52,7 @@ impl Item {
             Self::Environment => Some("Environment\u{2026}"),
             Self::Screenshot => Some("Save Screenshot\u{2026}"),
             Self::Turntable => Some("Export Turntable\u{2026}"),
-            Self::Maximize => Some("Maximize Panel"),
+            Self::Maximize => Some(MAXIMIZE_LABEL),
         }
     }
 }
