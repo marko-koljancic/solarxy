@@ -518,6 +518,12 @@ impl CanvasState {
         self.boxes.get(key).map(|rect| to_screen * *rect)
     }
 
+    /// Open the info card on a node. The card follows a node rather than a
+    /// place, so a surface other than the canvas can ask for it.
+    pub(in crate::gui) fn open_info(&mut self, node: NodeId) {
+        self.info = Some(node);
+    }
+
     /// The scale the last frame drew at.
     pub(super) fn last_scale(&self) -> f32 {
         self.scale

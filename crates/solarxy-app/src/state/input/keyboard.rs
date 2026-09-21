@@ -162,6 +162,7 @@ impl State {
             | Action::DisplayFlag
             | Action::Rename
             | Action::NodeInfo
+            | Action::FloatingProps
             | Action::CanvasGrid
             | Action::CanvasMinimap
             | Action::CanvasControls

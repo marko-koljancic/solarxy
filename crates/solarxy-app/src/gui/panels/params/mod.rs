@@ -23,6 +23,7 @@ mod draft;
 mod drag;
 mod expression;
 mod frame;
+mod menus;
 
 pub(crate) use expression::Resolved as ResolvedParams;
 pub(in crate::gui) use draft::{Draft, shown_text, step as draft_step};
@@ -34,4 +35,5 @@ pub(in crate::gui::panels) use controls::{ControlKind, control_kind};
 pub(in crate::gui::panels) use expression::offers_toggle;
 #[cfg(test)]
 pub(in crate::gui::panels) use frame::driven;
+pub(in crate::gui) use frame::Surface;
 pub(crate) use frame::{ParamPanelSource, ParamPanelState, ParamScene, draw_params_content};

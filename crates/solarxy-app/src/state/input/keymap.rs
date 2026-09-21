@@ -99,6 +99,7 @@ pub(crate) enum Action {
     DisplayFlag,
     Rename,
     NodeInfo,
+    FloatingProps,
     CanvasGrid,
     CanvasMinimap,
     CanvasControls,
@@ -167,6 +168,7 @@ impl Action {
             Self::DisplayFlag => "display-flag",
             Self::Rename => "rename",
             Self::NodeInfo => "node-info",
+            Self::FloatingProps => "floating-props",
             Self::CanvasGrid => "flow-grid",
             Self::CanvasMinimap => "flow-minimap",
             Self::CanvasControls => "flow-controls",
@@ -456,6 +458,19 @@ pub(crate) static BINDINGS: &[Binding] = &[
             "Show info for the selected node",
         ),
         "Ports, parameters and cook status; also on the hover radial",
+    ),
+    // Canvas-scoped, so it does not collide with the viewport's own P. The
+    // same key doing two things depending on where the pointer is has to be
+    // said out loud, which is what the note is for.
+    with_note(
+        panel(
+            Action::FloatingProps,
+            "p",
+            KeyScope::Canvas,
+            KeyGroup::NodeCanvas,
+            "Toggle the floating properties panel",
+        ),
+        "Over the viewport, P is the Perspective projection",
     ),
     panel(
         Action::CanvasGrid,
@@ -935,6 +950,7 @@ mod tests {
             ("b", Action::Bypass, Action::ViewBottom),
             ("c", Action::CanvasControls, Action::Screenshot),
             ("f", Action::CanvasFit, Action::ViewFront),
+            ("p", Action::FloatingProps, Action::ProjectionPerspective),
             ("l", Action::AutoLayout, Action::ViewLeft),
         ];
         for (keys, canvas, viewport) in both {
@@ -952,8 +968,12 @@ mod tests {
         }
     }
 
-    /// Two of the browser's double-bound letters have only one half here,
-    /// because the other half is a capability this release builds later.
+    /// One of the browser's double-bound letters has only one half here,
+    /// because the other half is a capability this release builds later: `E`
+    /// is the display flag over the canvas, and over the viewport it waits
+    /// on the transform tools. `P` was the second such letter until the
+    /// floating parameter panel arrived, and is held by the table of
+    /// double-bound keys above now that both halves exist.
     ///
     /// A scope with no binding resolves to nothing rather than falling back,
     /// which is what stops a canvas key firing over the viewport by accident
@@ -967,16 +987,6 @@ mod tests {
         );
         assert_eq!(
             lookup(rotate_tool, KeyScope::Viewport).map(|b| b.action),
-            None
-        );
-
-        let floating_properties = Chord::parse("p").expect("parses");
-        assert_eq!(
-            lookup(floating_properties, KeyScope::Viewport).map(|b| b.action),
-            Some(Action::ProjectionPerspective)
-        );
-        assert_eq!(
-            lookup(floating_properties, KeyScope::Canvas).map(|b| b.action),
             None
         );
     }
@@ -1032,7 +1042,6 @@ mod drift {
         ("step-back", "the transport bar"),
         ("step-forward", "the transport bar"),
         ("go-to-start", "the transport bar"),
-        ("floating-props", "the floating properties panel"),
     ];
 
     /// A binding this shell has and the browser does not, with the reason.

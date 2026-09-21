@@ -67,6 +67,9 @@ pub(crate) struct PanelSources<'a> {
     /// The node the parameter panel edits, and what its last cook said,
     /// when the Properties tab that hosts it is mounted.
     pub params: ParamPanelSource<'a>,
+    /// The same, for the floating host, which has a pin of its own and so
+    /// a subject of its own. Empty while that window is closed.
+    pub params_floating: ParamPanelSource<'a>,
     /// The staged assets, when the Assets tab or the preview is mounted.
     pub assets: AssetsSource<'a>,
     /// The model preview's texture and status, for the preview tab.

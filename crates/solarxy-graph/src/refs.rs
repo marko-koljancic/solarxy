@@ -39,6 +39,31 @@ pub struct Target {
     pub key: String,
 }
 
+/// A node's absolute path, in the form an expression accepts.
+///
+/// `/name` for a node at the root and `/container/name` for one inside a
+/// container, which is the whole of the two-level tree. The names are the
+/// ones [`node_name`] gives, the same ones [`resolve_path`] looks up, so a
+/// path made here with a parameter key appended is one `ch()` resolves from
+/// anywhere in the document. `None` when the node or its container is not
+/// in the document.
+#[must_use]
+pub fn node_path(
+    doc: &Document,
+    registry: &Registry,
+    ctx: GraphContext,
+    node: NodeId,
+) -> Option<String> {
+    let name = node_name(doc.graph(ctx).ok()?.node(node)?, registry);
+    match ctx {
+        GraphContext::Root => Some(format!("/{name}")),
+        GraphContext::Subflow(owner) => {
+            let container = doc.graph(GraphContext::Root).ok()?.node(owner)?;
+            Some(format!("/{}/{name}", node_name(container, registry)))
+        }
+    }
+}
+
 /// Resolves a `ch()` path relative to the node holding the expression.
 ///
 /// The four forms, all bounded by the two-level tree:

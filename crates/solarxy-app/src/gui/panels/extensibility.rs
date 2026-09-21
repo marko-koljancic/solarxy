@@ -558,6 +558,9 @@ fn a_novel_node_draws_in_both_surfaces_and_asks_for_nothing() {
                         resolved: &super::params::ResolvedParams::new(),
                     }),
                     &mut panel,
+                    super::params::Surface::Docked {
+                        floating_open: false,
+                    },
                     &mut intents,
                     theme,
                 );

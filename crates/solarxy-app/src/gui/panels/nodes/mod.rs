@@ -142,6 +142,9 @@ pub(crate) enum CanvasAction {
     /// A gesture that happened and is worth saying out loud: a lossy
     /// connection, or a wire dropped on nothing.
     Warn(String),
+    /// Something worth saying that is neither a refusal nor a warning,
+    /// such as what was just copied.
+    Notify(String),
     /// Every rewiring gesture, in one shape.
     ///
     /// Connect, disconnect, reconnect and drop-to-void differ only in
@@ -506,6 +509,13 @@ fn drive_canvas_keys(
 
     if pressed(egui::Key::S) {
         intents.panel(PanelIntent::Canvas(CanvasAction::CycleRouting));
+    }
+    // The floating parameter panel. Over the canvas only, which is what
+    // keeps it apart from the viewport's own P.
+    if pressed(egui::Key::P) {
+        intents.raise(crate::gui::intent::Intent::Layout(
+            crate::gui::intent::LayoutIntent::ToggleFloatingProps,
+        ));
     }
 
     // The toolbar's own request, so a key and its button are one path.

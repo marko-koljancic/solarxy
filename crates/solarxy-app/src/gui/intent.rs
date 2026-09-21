@@ -235,6 +235,9 @@ pub(crate) enum LayoutIntent {
     /// Maximize the leaf this panel sits in, or restore when anything is
     /// maximized. Raised by every panel bar's last entry.
     ToggleMaximize(SolarxyTab),
+    /// Show or hide the floating parameter panel: the second host of the
+    /// same panel, with a pin of its own.
+    ToggleFloatingProps,
     SetLayout(ViewLayout),
     SetSplitRatio(f32),
     SaveDock,
@@ -296,13 +299,17 @@ pub(crate) enum PanelIntent {
     Preview(crate::state::preview::PreviewGesture),
     /// The node canvas.
     Canvas(CanvasAction),
-    /// The parameter panel's tab reset: every key in a group, hidden
-    /// rows included, in one command and therefore one undo step.
+    /// A parameter reset, in one command and therefore one undo step. The
+    /// keys are a tab's whole group, hidden rows included; `None` is every
+    /// parameter the node has, which is the engine command's own shape.
     ResetParams(
         solarxy_graph::document::GraphContext,
         solarxy_graph::document::NodeId,
-        Vec<String>,
+        Option<Vec<String>>,
     ),
+    /// Open the node info card on a node, from a surface other than the
+    /// canvas it is drawn over.
+    OpenNodeInfo(solarxy_graph::document::NodeId),
 }
 
 impl Intent {
@@ -355,7 +362,10 @@ impl Intent {
             // kind of change to the same document, and only one of them
             // can be under the pointer in a frame.
             Self::Panel(
-                PanelIntent::Tree(_) | PanelIntent::Canvas(_) | PanelIntent::ResetParams(..),
+                PanelIntent::Tree(_)
+                | PanelIntent::Canvas(_)
+                | PanelIntent::ResetParams(..)
+                | PanelIntent::OpenNodeInfo(_),
             ) => 14,
             Self::Cook(_) => 15,
             Self::Panel(

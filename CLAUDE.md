@@ -230,7 +230,7 @@ step any more.
     so they can be compared character for character against the browser's copy, and `vector` the
     path-subset flattener both of those draw through) and `review/` (panel, overlay, popup, and the
     `visuals` the first two share, because marker colour and panel chip colour are the
-    reader's first correlation cue), plus `params/` (the parameter panel: `frame` the target
+    reader's first correlation cue), plus `params/` (the parameter panel, one panel with two hosts, the dock tab and a floating window, each with a state and therefore a pin of its own, the state layer assembling a subject per host that is up: `menus` the docked host's bar, whose Node, Params and View menus are drawn from one pure model over the node the panel shows, so a pin wins there as it does underneath; `frame` the target
     resolution, the header, the tab strip and the sections, all of them read from
     `solarxy_studio::params` and the registry's own visibility evaluator; `controls` one control
     per `ParamType` dispatched by an **exhaustive match with no catch-all**, so a sixteenth

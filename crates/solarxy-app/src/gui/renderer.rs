@@ -59,6 +59,10 @@ pub struct EguiRenderer {
     preview_size_seen: Option<(u32, u32)>,
     canvas: super::panels::nodes::CanvasState,
     params: super::panels::params::ParamPanelState,
+    /// The floating host's state: a second pin and a second tab, which is
+    /// what lets one node stay up beside the one the docked panel follows.
+    params_floating: super::panels::params::ParamPanelState,
+    floating_props: bool,
     /// The node canvas's rect as the last frame drew it, so a key claim
     /// made before the interface pass can ask where the pointer is.
     pub(super) canvas_rect: Option<egui::Rect>,
@@ -140,6 +144,8 @@ impl EguiRenderer {
             preview_size_seen: None,
             canvas: super::panels::nodes::CanvasState::default(),
             params: super::panels::params::ParamPanelState::default(),
+            params_floating: super::panels::params::ParamPanelState::default(),
+            floating_props: false,
             canvas_rect: None,
             graph_ctx: solarxy_graph::document::GraphContext::Root,
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
@@ -426,6 +432,28 @@ impl EguiRenderer {
         self.params.pinned()
     }
 
+    /// Whether the floating parameter panel is up, which is what the state
+    /// layer gates its subject's assembly on.
+    #[must_use]
+    pub fn floating_props_open(&self) -> bool {
+        self.floating_props
+    }
+
+    #[must_use]
+    pub fn floating_params_pin(&self) -> Option<solarxy_graph::document::NodeId> {
+        self.params_floating.pinned()
+    }
+
+    pub(crate) fn toggle_floating_props(&mut self) {
+        self.floating_props = !self.floating_props;
+    }
+
+    /// Open the node info card on a node, from a surface other than the
+    /// canvas the card is drawn over.
+    pub(crate) fn open_node_info(&mut self, node: solarxy_graph::document::NodeId) {
+        self.canvas.open_info(node);
+    }
+
     /// Whether the pointer is over the node canvas, which is the one
     /// thing a key claim decides by position rather than by focus.
     ///
@@ -468,6 +496,7 @@ impl EguiRenderer {
         // carried across an open would point at whatever holds that id in
         // the incoming scene.
         self.params.reset();
+        self.params_floating.reset();
     }
 
     /// The graph the user is looking at: where a selection made in either
@@ -703,6 +732,7 @@ impl EguiRenderer {
                 canvas_rect_out: &mut canvas_rect_seen,
                 preview_size_out: &mut preview_size_seen,
                 hovered_tab_out: &mut hovered_tab_seen,
+                floating_props_open: self.floating_props,
                 theme: self.theme,
             };
             DockArea::new(self.dock.drawn_mut())
@@ -735,6 +765,34 @@ impl EguiRenderer {
                 self.theme,
                 capture.expand_review,
             );
+
+            // The parameter panel's second host: modeless, so the canvas
+            // underneath stays usable, which is what makes it useful for
+            // holding one node up beside the one the docked panel follows.
+            if self.floating_props {
+                let mut open = true;
+                egui::Window::new("Properties")
+                    .id(egui::Id::new("solarxy_floating_properties"))
+                    .open(&mut open)
+                    .collapsible(false)
+                    .resizable(true)
+                    .min_width(300.0)
+                    .min_height(220.0)
+                    .default_size([340.0, 420.0])
+                    .show(ctx, |ui| {
+                        super::panels::params::draw_params_content(
+                            ui,
+                            sources.params_floating,
+                            &mut self.params_floating,
+                            super::panels::params::Surface::Floating,
+                            intents,
+                            self.theme,
+                        );
+                    });
+                if !open {
+                    self.floating_props = false;
+                }
+            }
 
             draw_about_modal(ctx, &mut self.about_open);
             draw_arrangement_save_modal(ctx, &mut self.arrangement_save, sources.arrangements);
@@ -859,8 +917,10 @@ impl EguiRenderer {
                 } else if review.active {
                     review.toggle_active();
                     intents.raise(Intent::Review(ReviewIntent::Exited));
-                } else {
-                    self.dock.restore();
+                } else if !self.dock.restore() {
+                    // Last of all, the floating parameter panel: the least
+                    // in flight of anything Escape lets go of.
+                    self.floating_props = false;
                 }
             }
             // Maximize or restore the panel under the pointer. Consumed here

@@ -47,6 +47,53 @@ fn add(e: &mut Engine, ctx: GraphContext, ty: &str) -> NodeId {
     }
 }
 
+/// What a user copies is what an expression accepts: a node's path with a
+/// parameter key appended resolves, from the root and from inside another
+/// network alike, to that node and that key.
+#[test]
+fn a_copied_node_path_is_one_an_expression_resolves() {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "sopnet");
+    let other = add(&mut e, GraphContext::Root, "sopnet");
+    let inside = GraphContext::Subflow(geo);
+    let sphere = add(&mut e, inside, "sphere");
+    let asker = add(&mut e, GraphContext::Subflow(other), "box");
+
+    let root_path =
+        crate::refs::node_path(&e.doc, e.registry(), GraphContext::Root, geo).expect("a path");
+    assert_eq!(root_path.matches('/').count(), 1, "{root_path}");
+
+    let path = crate::refs::node_path(&e.doc, e.registry(), inside, sphere).expect("a path");
+    assert!(
+        path.starts_with(&root_path),
+        "{path} sits under {root_path}"
+    );
+    assert_eq!(path.matches('/').count(), 2, "{path}");
+
+    for (from_ctx, from_node) in [
+        (GraphContext::Root, geo),
+        (GraphContext::Subflow(other), asker),
+    ] {
+        let target = crate::refs::resolve_path(
+            &e.doc,
+            e.registry(),
+            from_ctx,
+            from_node,
+            &format!("{path}/radius"),
+        )
+        .expect("the copied path resolves");
+        assert_eq!(
+            (target.ctx, target.node, target.key.as_str()),
+            (inside, sphere, "radius")
+        );
+    }
+
+    assert!(
+        crate::refs::node_path(&e.doc, e.registry(), GraphContext::Root, NodeId(9_999)).is_none(),
+        "a node that is not there has no path"
+    );
+}
+
 #[test]
 fn add_node_emits_mirror_and_claims_first_display() {
     let (mut e, ctx) = subflow_engine();

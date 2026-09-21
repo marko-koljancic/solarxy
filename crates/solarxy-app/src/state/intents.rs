@@ -144,9 +144,10 @@ impl State {
                     self.apply_node_command(solarxy_graph::Command::ResetParams {
                         ctx,
                         node,
-                        keys: Some(keys),
+                        keys,
                     });
                 }
+                Intent::Panel(PanelIntent::OpenNodeInfo(node)) => self.gui.open_node_info(node),
                 Intent::Panel(PanelIntent::InvokeAction { ctx, node, key }) => {
                     self.invoke_action(ctx, node, &key);
                 }
@@ -477,6 +478,7 @@ impl State {
             LayoutIntent::OpenArrangementSave => self.gui.open_arrangement_save(),
             LayoutIntent::DeleteArrangement(index) => self.delete_arrangement(index),
             LayoutIntent::ToggleMaximize(tab) => self.gui.toggle_maximize(tab),
+            LayoutIntent::ToggleFloatingProps => self.gui.toggle_floating_props(),
             LayoutIntent::SetLayout(layout) => self.set_view_layout(layout),
             LayoutIntent::SetSplitRatio(ratio) => {
                 self.view.display.split_ratio =
@@ -883,6 +885,10 @@ impl State {
             CanvasAction::Warn(message) => {
                 self.gui
                     .set_toast(&message, crate::gui::ToastSeverity::Warning);
+            }
+            CanvasAction::Notify(message) => {
+                self.gui
+                    .set_toast(&message, crate::gui::ToastSeverity::Info);
             }
             // One gesture, one undo step, and the transaction is opened
             // only when there are two halves to group. A lone connect or

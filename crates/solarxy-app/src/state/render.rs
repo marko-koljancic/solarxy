@@ -505,43 +505,45 @@ impl State {
         // Owned here rather than inside the source, because the source
         // holds borrows and the engine builds this list fresh. Gathered
         // only when the tab is up: it walks every staged asset.
+        let docked_up = self.gui.properties_tab_present();
+        let floating_up = self.gui.floating_props_open();
         let staged: Vec<(String, String)> = self
             .engine
             .as_deref()
-            .filter(|_| self.gui.properties_tab_present())
+            .filter(|_| docked_up || floating_up)
             .map(solarxy_graph::Engine::asset_manifest)
             .unwrap_or_default();
-        let params_subject = params_subject(
-            self.engine.as_deref(),
-            self.gui.properties_tab_present(),
-            self.gui.graph_ctx(),
-            self.gui.params_pin(),
-        );
-        // Owned here for the same reason the manifest is: the lanes come
-        // from a cooked geometry the engine assembles on request, and the
-        // failure text is the shell's own cook-health record.
-        let lanes: Vec<(String, String)> = params_subject
-            .and_then(|node| upstream_lanes(self.engine.as_deref()?, self.gui.graph_ctx(), node))
-            .unwrap_or_default();
-        let node_error = params_subject.and_then(|node| self.cook_health.failure(node));
-        // Pulled once a frame, for the driven rows only. An expression's
-        // value moves whenever what it reads moves, which is every applied
-        // command, so pushing it would be one event per expression per
-        // frame under a playing runtime.
-        let resolved = params_subject
-            .and_then(|node| {
-                resolved_expressions(self.engine.as_deref()?, self.gui.graph_ctx(), node)
-            })
-            .unwrap_or_default();
+        // One subject per host. The docked panel and the floating one each
+        // have a pin, so each may be showing a different node, and what a
+        // node's panel needs owned for it is assembled once per host that
+        // is up. A closed host costs nothing.
+        let docked = self.param_subject_facts(docked_up, self.gui.params_pin());
+        let floating = self.param_subject_facts(floating_up, self.gui.floating_params_pin());
+        let docked_error = docked
+            .subject
+            .and_then(|node| self.cook_health.failure(node));
+        let floating_error = floating
+            .subject
+            .and_then(|node| self.cook_health.failure(node));
         let params_scene = params_source(
             self.engine.as_deref(),
-            self.gui.properties_tab_present(),
+            docked_up,
             self.gui.graph_ctx(),
             self.gui.params_pin(),
             &staged,
-            &lanes,
-            node_error,
-            &resolved,
+            &docked.lanes,
+            docked_error,
+            &docked.resolved,
+        );
+        let params_floating_scene = params_source(
+            self.engine.as_deref(),
+            floating_up,
+            self.gui.graph_ctx(),
+            self.gui.floating_params_pin(),
+            &staged,
+            &floating.lanes,
+            floating_error,
+            &floating.resolved,
         );
         // The image network's published output, asked for only while the
         // tab is up: an `Arc` clone and a hash compare per frame.
@@ -568,6 +570,10 @@ impl State {
             _ => crate::gui::TextureSource::Empty,
         };
         let params_source = params_scene.as_ref().map_or(
+            crate::gui::ParamPanelSource::Empty,
+            crate::gui::ParamPanelSource::Scene,
+        );
+        let params_floating_source = params_floating_scene.as_ref().map_or(
             crate::gui::ParamPanelSource::Empty,
             crate::gui::ParamPanelSource::Scene,
         );
@@ -686,6 +692,7 @@ impl State {
                 },
                 canvas: canvas_source,
                 params: params_source,
+                params_floating: params_floating_source,
                 recent_files: &recent_files,
                 arrangements: &arrangements,
             },
@@ -940,6 +947,40 @@ fn resolved_expressions(
 /// have to describe the node the panel actually shows: taking one of them
 /// for a different node is the kind of mistake that looks like a stale
 /// readout rather than like a bug.
+/// What one host of the parameter panel needs owned on its behalf.
+///
+/// Owned here rather than inside the source, because the source holds
+/// borrows: the lanes come from a cooked geometry the engine assembles on
+/// request, and the resolved values are pulled once a frame for the driven
+/// rows only, since an expression's value moves with every applied command
+/// and pushing it would be one event per expression per frame.
+#[derive(Default)]
+struct SubjectFacts {
+    subject: Option<NodeId>,
+    lanes: Vec<(String, String)>,
+    resolved: crate::gui::ResolvedParams,
+}
+
+impl State {
+    /// Assemble a host's subject, or nothing at all while the host is down.
+    fn param_subject_facts(&self, up: bool, pin: Option<NodeId>) -> SubjectFacts {
+        let ctx = self.gui.graph_ctx();
+        let Some(engine) = self.engine.as_deref().filter(|_| up) else {
+            return SubjectFacts::default();
+        };
+        let subject = params_subject(Some(engine), up, ctx, pin);
+        SubjectFacts {
+            subject,
+            lanes: subject
+                .and_then(|node| upstream_lanes(engine, ctx, node))
+                .unwrap_or_default(),
+            resolved: subject
+                .and_then(|node| resolved_expressions(engine, ctx, node))
+                .unwrap_or_default(),
+        }
+    }
+}
+
 fn params_subject(
     engine: Option<&solarxy_graph::Engine>,
     tab_present: bool,

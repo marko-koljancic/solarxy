@@ -113,7 +113,7 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
 
 /// Per-frame `TabViewer`, constructed fresh inside the interface pass.
 ///
-/// **Nine fields where there were seventeen**, and the difference is grouping
+/// **Ten fields where there were seventeen**, and the difference is grouping
 /// rather than removal: a panel that needs a new source adds a field to
 /// [`PanelSources`], and one that needs its own interface state adds a field to
 /// [`PanelState`]. Neither this struct nor the entry point's signature moves.
@@ -133,6 +133,9 @@ pub(super) struct SolarxyTabViewer<'a> {
     /// The panel the pointer is over, which is what the maximize key acts
     /// on. Only a leaf's front tab is drawn, so the tab names its leaf.
     pub hovered_tab_out: &'a mut Option<SolarxyTab>,
+    /// Whether the floating parameter panel is up, for the docked panel's
+    /// View menu to tick.
+    pub floating_props_open: bool,
     pub theme: Theme,
 }
 
@@ -211,6 +214,9 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     ui,
                     self.sources.params,
                     self.panels.params,
+                    super::panels::params::Surface::Docked {
+                        floating_open: self.floating_props_open,
+                    },
                     self.intents,
                     self.theme,
                 );

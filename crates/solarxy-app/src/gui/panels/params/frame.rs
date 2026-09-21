@@ -75,6 +75,24 @@ pub(crate) enum ParamPanelSource<'a> {
     Scene(&'a ParamScene<'a>),
 }
 
+/// Which of the panel's two hosts is drawing it.
+///
+/// One panel, two hosts, so a control added to the panel appears in both
+/// without anybody remembering to do it twice. Each host has a state of its
+/// own, and therefore a pin of its own, which is the point of the second
+/// one: a node pinned in the floating window beside the one the docked
+/// panel follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Surface {
+    /// The dock tab, which carries the panel's menu bar.
+    Docked {
+        /// Whether the floating host is up, for the bar's tick.
+        floating_open: bool,
+    },
+    /// The floating window, whose only chrome is its pin.
+    Floating,
+}
+
 /// The panel's own state: what it is pinned to, and which tab it was on.
 #[derive(Debug, Default)]
 pub(crate) struct ParamPanelState {
@@ -221,15 +239,67 @@ pub(in crate::gui::panels) fn driven(
         .any(|edge| edge.to == node && edge.to_port == port)
 }
 
+/// The host's own chrome above the panel: the menu bar when docked, a pin
+/// toggle when floating. Drawn before anything can return early, so the
+/// bar is there with its entries disabled even when there is nothing to
+/// edit, as the browser's is.
+fn draw_surface_chrome(
+    ui: &mut Ui,
+    scene: Option<&ParamScene<'_>>,
+    state: &mut ParamPanelState,
+    surface: Surface,
+    intents: &mut Intents,
+    theme: Theme,
+) {
+    let model = super::menus::bar_model(scene, state.pin, &state.tab);
+    let toggle_pin = match surface {
+        Surface::Docked { floating_open } => {
+            super::menus::draw_bar(ui, &model, floating_open, intents, theme).toggle_pin
+        }
+        Surface::Floating => {
+            let can_pin = model.pinned || model.node.is_some();
+            let mut toggled = false;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                toggled = ui
+                    .add_enabled(
+                        can_pin,
+                        egui::Button::new("Pin").selected(model.pinned).small(),
+                    )
+                    .on_hover_text(if model.pinned {
+                        "Pinned: this panel stays on one node. Click to follow the selection."
+                    } else {
+                        "Pin to the selected node so it stops following the selection"
+                    })
+                    .on_disabled_hover_text("Select a node first")
+                    .clicked();
+            });
+            toggled
+        }
+    };
+    if toggle_pin {
+        state.pin = if state.pin.is_some() {
+            None
+        } else {
+            model.node.map(|(_, id)| id)
+        };
+    }
+}
+
 /// Draw the panel.
 pub(crate) fn draw_params_content(
     ui: &mut Ui,
     source: ParamPanelSource<'_>,
     state: &mut ParamPanelState,
+    surface: Surface,
     intents: &mut Intents,
     theme: Theme,
 ) {
-    let ParamPanelSource::Scene(scene) = source else {
+    let scene = match source {
+        ParamPanelSource::Scene(scene) => Some(scene),
+        ParamPanelSource::Empty => None,
+    };
+    draw_surface_chrome(ui, scene, state, surface, intents, theme);
+    let Some(scene) = scene else {
         return placeholder(ui, "No document open", theme);
     };
     let &ParamScene {
@@ -276,6 +346,10 @@ pub(crate) fn draw_params_content(
                     egui::RichText::new(solarxy_graph::naming::node_name(data, registry))
                         .size(13.0),
                 );
+                // The state, not the control: pinning is in the View menu
+                // and on the floating host's own toggle. The chip is here
+                // so a pinned panel does not look like an unpinned one
+                // until something surprising happens, and a click lets go.
                 if pinned
                     && ui
                         .small_button("pinned")
@@ -284,28 +358,12 @@ pub(crate) fn draw_params_content(
                 {
                     state.pin = None;
                 }
-                if !pinned
-                    && ui
-                        .small_button("pin")
-                        .on_hover_text("Follow this node")
-                        .clicked()
-                {
-                    state.pin = Some(node);
-                }
             });
             if let Some(line) = stats_line(stats) {
                 ui.label(egui::RichText::new(line).color(theme.muted).size(10.0));
             }
 
             let (offered, active) = tabs(&desc.params, &data.params, has_report, &state.tab);
-            let resettable = active.as_deref().and_then(|tab| {
-                reset_keys(&desc.params, tab).map(|keys| {
-                    (
-                        tab.to_string(),
-                        keys.into_iter().map(str::to_owned).collect::<Vec<_>>(),
-                    )
-                })
-            });
             // Hidden at one, not at zero: a node with a single tab draws
             // no strip, and a node whose only tab is Validation draws no
             // strip and still renders the report.
@@ -325,17 +383,6 @@ pub(crate) fn draw_params_content(
                         }
                     }
                 });
-            }
-            if let Some((tab, keys)) = resettable
-                && ui
-                    .small_button("Reset tab")
-                    .on_hover_text(format!("Return every parameter in {tab} to its default"))
-                    .clicked()
-            {
-                // The whole group, hidden rows included, which is what
-                // `group_keys` returns and why. The menu entry the
-                // browser puts this behind arrives with the menu work.
-                intents.panel(crate::gui::PanelIntent::ResetParams(ctx, node, keys));
             }
             ui.separator();
 
@@ -735,6 +782,9 @@ mod tests {
                         resolved: &super::expression::Resolved::new(),
                     }),
                     state,
+                    Surface::Docked {
+                        floating_open: false,
+                    },
                     intents,
                     theme(),
                 );
@@ -1016,6 +1066,9 @@ mod tests {
                             resolved: &resolved,
                         }),
                         &mut state,
+                        Surface::Docked {
+                            floating_open: false,
+                        },
                         &mut intents,
                         theme(),
                     );
