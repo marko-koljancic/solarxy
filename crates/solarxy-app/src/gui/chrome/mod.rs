@@ -1,6 +1,6 @@
 //! The shell's own furniture, as against the panels it hosts: the menu bar,
-//! the per-pane toolbars, the floating overlays, the split divider and the
-//! viewport context menu.
+//! the viewport's own bar, the per-pane toolbars, the floating overlays, the
+//! split divider and the viewport context menu.
 //!
 //! What separates this from `panels` is ownership of a dock tab. Everything
 //! here draws outside the dock, or on top of it. Two modules are furniture a
@@ -14,4 +14,5 @@ pub(in crate::gui) mod menu_items;
 pub(in crate::gui) mod overlays;
 pub(in crate::gui) mod pane_toolbar;
 pub(in crate::gui) mod panel_bar;
+pub(in crate::gui) mod viewport_bar;
 pub(in crate::gui) mod viewport_context_menu;

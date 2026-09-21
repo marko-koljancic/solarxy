@@ -254,8 +254,8 @@ step any more.
     `viewport_context_menu`.
   - `modals/` - `about`, `preferences`, `shortcuts`, `screenshot`, `still`, and since the
     authoring and panel epics `environment` (the browser's four rows: HDRI with Load and Clear, IBL
-    mode, rotation, intensity; reached from `File > Environment...` until the menu-bar restructure
-    moves it to the Viewport View menu), `unsaved` (Save, Discard, Cancel) and `recovery` (Restore
+    mode, rotation, intensity; reached from the viewport's View menu, and still from
+    `File > Environment...` until the global bar's restructure removes that entry), `unsaved` (Save, Discard, Cancel) and `recovery` (Restore
     or Discard, offered once on launch). Each owns
     state on the renderer and is drained through a `take_*` accessor rather than the queue: a
     single-value handle is already the right shape.

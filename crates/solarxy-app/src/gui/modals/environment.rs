@@ -1,11 +1,11 @@
 //! The Environment modal: the scene's HDRI, its image-based lighting mode,
 //! and the rotation and intensity of the light it casts.
 //!
-//! The browser reaches the environment through this dialog from the
-//! Viewport panel's View menu; this shell reaches it from the File menu
-//! until the viewport menu bar exists, and the Properties panel, which
-//! used to carry these rows, is the parameter panel now. The rows raise
-//! the same intents they always did; only the surface moved.
+//! It is reached from the Viewport panel's View menu, as the browser's
+//! is. The File menu still has an entry too, until the global bar is
+//! restructured and that one goes. The Properties panel, which used to
+//! carry these rows, is the parameter panel now. The rows raise the same
+//! intents they always did; only the surface moved.
 
 use solarxy_core::preferences::IblMode;
 

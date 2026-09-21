@@ -169,7 +169,16 @@ impl TabViewer for SolarxyTabViewer<'_> {
         }
         match tab {
             SolarxyTab::Viewport => {
-                *self.viewport_rect_out = Some(ui.max_rect());
+                super::chrome::viewport_bar::draw(
+                    ui,
+                    self.sources.settings,
+                    self.intents,
+                    self.theme,
+                );
+                // What is left under the bar is what the scene renders
+                // into. Recording the whole tab would put the top of the
+                // render behind the bar.
+                *self.viewport_rect_out = Some(ui.available_rect_before_wrap());
                 super::chrome::pane_toolbar::draw_pane_toolbars(
                     ui,
                     self.toolbars,
