@@ -1,21 +1,29 @@
 //! Pointer handling: what a click, a drag and a wheel mean.
 //!
-//! A click in review mode used to walk a three-step ladder before it landed.
-//! Review anchors against a file-loaded model's meshes and cannot arm while
-//! there is no such root, so the ladder came out with it; what the repointed
-//! review picks against is the engine's anchor model, not this one.
+//! A click that did not travel walks a ladder before it lands, in the
+//! browser's order: a transform drag in flight owns the release, then a
+//! pending re-anchor, then review mode, then an ordinary pick. Only the last
+//! rung is built; the others arrive with the tools and with review, and the
+//! ladder is written so each slots in above the pick rather than around it.
+//!
+//! Picking asks the engine, never the shell. The engine answers with the
+//! node that produced what is under the cursor, which is what a selection
+//! is, and a marker pick rides the same call so a light with no geometry is
+//! as clickable as a mesh.
+
+use std::time::Instant;
 
 use winit::event::MouseButton;
 
-use solarxy_renderer::camera_state::CameraState;
 use crate::gui::{ContextTarget, ViewportContextMenu};
-use solarxy_graph::document::{GraphContext, NodeId};
-use solarxy_renderer::input::PointerButton;
 use solarxy_core::preferences::PaneMode;
+use solarxy_graph::document::{GraphContext, NodeId};
+use solarxy_renderer::camera_state::CameraState;
+use solarxy_renderer::input::PointerButton;
 
-use cgmath::{SquareMatrix, Transform};
 use solarxy_core::scene::SceneObjectId;
 
+use super::click::{CLICK_SLOP_PX, Click, DOUBLE_CLICK_INTERVAL, DOUBLE_CLICK_PX};
 use crate::state::State;
 
 fn to_pointer_button(button: MouseButton) -> PointerButton {
@@ -27,75 +35,64 @@ fn to_pointer_button(button: MouseButton) -> PointerButton {
     }
 }
 
+/// The ray under the cursor through one 3D pane, and what the engine's
+/// marker pick needs to judge a click against the pane's light markers.
+pub(in crate::state) struct PaneRay {
+    pub origin: [f32; 3],
+    pub direction: [f32; 3],
+    pub markers: Option<solarxy_graph::engine::MarkerPick>,
+}
+
 impl State {
-    /// The frontmost **visible** scene object under the cursor, via a CPU
-    /// raycast through the active 3D pane's content rect. `None` if the cursor
-    /// is not over a `Scene3D` pane or hits nothing.
+    /// The ray under the cursor, or `None` when the cursor is not over a
+    /// 3D pane with a camera.
     ///
-    /// Objects rather than meshes, because an object is what a document can
-    /// durably say something about: its visibility is a parameter on the node
-    /// that owns it, where a cooked mesh is an artefact of the cook and is
-    /// re-derived on the next one.
-    ///
-    /// The ray is transformed into each object's own space rather than the
-    /// geometry into the world, which is the same trick the hierarchy
-    /// traversal uses and costs nothing per triangle. The direction is
-    /// deliberately **not** renormalized, so the hit distances stay comparable
-    /// across objects at different scales.
-    pub(in crate::state) fn hovered_object(&self) -> Option<SceneObjectId> {
+    /// Physical pixels throughout, matching the cursor, so the marker
+    /// radius scales with the window's pixel ratio: a marker is drawn at a
+    /// logical size and a click radius in physical pixels would make it half
+    /// as clickable as it looks on a high-density display. Markers are
+    /// offered only when the pane draws them, so a pane with them off picks
+    /// exactly the geometry it shows.
+    pub(in crate::state) fn pane_ray(&self) -> Option<PaneRay> {
         let panes = self.compute_panes();
         let cursor = self.input.cursor_pos;
-        let pane_idx = crate::state::hit_test_pane(&panes, cursor);
-        if self.view.pane_settings[pane_idx].pane_mode != PaneMode::Scene3D {
+        let pane = crate::state::hit_test_pane(&panes, cursor);
+        if self.view.pane_settings[pane].pane_mode != PaneMode::Scene3D {
             return None;
         }
-        let content = panes[pane_idx].content(self.pane_toolbar_height_px());
-        let mut camera = self.view.cameras[pane_idx].as_ref().map(|c| c.camera)?;
+        let content = panes[pane].content(self.pane_toolbar_height_px());
+        let mut camera = self.view.cameras[pane].as_ref().map(|c| c.camera)?;
         camera.aspect = content.width.max(1.0) / content.height.max(1.0);
+        let view_proj = camera.build_view_projection_matrix();
+        let cursor_px = (cursor.0 - content.x, cursor.1 - content.y);
         let ray = crate::state::raycast::screen_to_world_ray(
-            (cursor.0 - content.x, cursor.1 - content.y),
+            cursor_px,
             (content.width, content.height),
-            camera.build_view_projection_matrix(),
+            view_proj,
         );
+        let ppp = self.window.scale_factor() as f32;
+        let markers = self.view.pane_settings[pane].show_light_markers.then(|| {
+            solarxy_graph::engine::MarkerPick {
+                view_proj: view_proj.into(),
+                viewport_px: [content.width, content.height],
+                cursor_px: [cursor_px.0, cursor_px.1],
+                radius_px: solarxy_renderer::manipulator::MARKER_PX * ppp,
+            }
+        });
+        Some(PaneRay {
+            origin: ray.origin.into(),
+            direction: ray.direction.into(),
+            markers,
+        })
+    }
 
-        let mut best: Option<(f32, SceneObjectId)> = None;
-        for (id, object) in self.raster.scene().iter() {
-            // A hidden object you cannot see must not steal the pick from the
-            // geometry behind it.
-            if !object.visible {
-                continue;
-            }
-            let Some(inverse) = object.transform.invert() else {
-                continue;
-            };
-            let local = crate::state::raycast::Ray {
-                origin: inverse.transform_point(ray.origin),
-                direction: inverse.transform_vector(ray.direction),
-            };
-
-            let mut views: Vec<crate::state::raycast::MeshView<'_>> = Vec::new();
-            for (i, mesh) in object.model.meshes.iter().enumerate() {
-                if !mesh.visible {
-                    continue;
-                }
-                if let (Some(cpu), Some(bounds)) = (
-                    object.model.cpu_meshes.get(i),
-                    object.model.mesh_bounds.get(i),
-                ) {
-                    views.push(crate::state::raycast::MeshView {
-                        positions: &cpu.positions,
-                        indices: &cpu.indices,
-                        bounds: *bounds,
-                    });
-                }
-            }
-            if let Some(hit) = crate::state::raycast::raycast_meshes(&local, &views)
-                && best.is_none_or(|(t, _)| hit.distance < t)
-            {
-                best = Some((hit.distance, *id));
-            }
-        }
-        best.map(|(_, id)| id)
+    /// The root node that produced what is under the cursor, or `None`
+    /// over empty space. A light marker wins over geometry when the pane
+    /// draws markers, which the engine decides.
+    pub(in crate::state) fn pick_under_cursor(&self) -> Option<NodeId> {
+        let engine = self.engine.as_deref()?;
+        let ray = self.pane_ray()?;
+        engine.pick(ray.origin, ray.direction, ray.markers)
     }
 
     /// Open the viewport right-click context menu.
@@ -104,18 +101,24 @@ impl State {
     /// there enabled. A menu that sometimes fails to appear reads as a broken
     /// gesture, and framing the view is worth reaching for wherever the
     /// pointer happens to be.
+    ///
+    /// The menu acts on what is under the pointer, which the browser's does
+    /// not: its right-click only positions the menu, which then reads the
+    /// selection. Picking here is the ruled exception rather than an
+    /// oversight, because a menu that acts on something other than what was
+    /// clicked is the confusing one.
     pub fn open_viewport_context_menu(&mut self) {
-        let target = self.hovered_object().and_then(|object| {
+        let target = self.pick_under_cursor().and_then(|node| {
+            let object = SceneObjectId(node.0);
             let visible = self.raster.scene().get(object)?.visible;
             // Whether the node has a transform at all is the registry's
             // answer, not a list kept here: the reset writes exactly the
             // parameters that node declares, and a type declaring none has
             // nothing to reset rather than a reset that does nothing.
-            let resettable = self.engine.as_ref().is_some_and(|engine| {
-                engine
-                    .transform_params(GraphContext::Root, NodeId(object.0))
-                    .is_some()
-            });
+            let resettable = self
+                .engine
+                .as_ref()
+                .is_some_and(|engine| engine.transform_params(GraphContext::Root, node).is_some());
             Some(ContextTarget {
                 object,
                 visible,
@@ -128,6 +131,43 @@ impl State {
             screen_pos: egui::pos2(self.input.cursor_pos.0 / ppp, self.input.cursor_pos.1 / ppp),
             suppress_dismiss: true,
         });
+    }
+
+    /// A primary-button click that did not travel, in a 3D pane.
+    ///
+    /// A hit selects the producing node at the root and brings the graph
+    /// surfaces back to the root to show it, since a selection made inside
+    /// a container would be invisible from the viewport. A miss leaves the
+    /// selection as it was, which is the browser's rule: its ladder
+    /// dispatches only on a hit.
+    ///
+    /// A double-click additionally dives into the node when its type opens
+    /// a network. The first click of the pair already selected, as the
+    /// browser's click and dblclick both fire.
+    fn viewport_click(&mut self, click: Click) {
+        let Some(hit) = self.pick_under_cursor() else {
+            return;
+        };
+        self.gui.set_graph_ctx(GraphContext::Root);
+        self.handle_selection(GraphContext::Root, vec![hit]);
+        if click == Click::Double && self.opens_network(hit) {
+            self.gui.set_graph_ctx(GraphContext::Subflow(hit));
+        }
+    }
+
+    /// Whether a root node's type opens a child network. Asked of the
+    /// registry rather than compared against a type id: picking returns
+    /// lights as well as containers, and diving into a light would leave
+    /// the canvas showing a context that does not exist.
+    fn opens_network(&self, node: NodeId) -> bool {
+        self.engine.as_deref().is_some_and(|engine| {
+            engine
+                .document()
+                .graph(GraphContext::Root)
+                .ok()
+                .and_then(|graph| graph.node(node))
+                .is_some_and(|data| engine.registry().opens(&data.type_id).is_some())
+        })
     }
 
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
@@ -157,6 +197,24 @@ impl State {
                 self.input.nav_button_down = pressed;
             }
             self.for_each_target_cam(|cam| cam.handle_mouse_button(mapped, pressed));
+
+            if mapped == PointerButton::Left {
+                let cursor = self.input.cursor_pos;
+                if pressed {
+                    self.input.clicks.press(cursor);
+                } else {
+                    let ppp = self.window.scale_factor() as f32;
+                    let click = self.input.clicks.release(
+                        cursor,
+                        Instant::now(),
+                        DOUBLE_CLICK_INTERVAL,
+                        DOUBLE_CLICK_PX * ppp,
+                    );
+                    if let Some(click) = click {
+                        self.viewport_click(click);
+                    }
+                }
+            }
         }
     }
 
@@ -180,6 +238,8 @@ impl State {
             }
         } else {
             let ap = self.view.active_pane;
+            let ppp = self.window.scale_factor() as f32;
+            self.input.clicks.moved_to((x, y), CLICK_SLOP_PX * ppp);
             // A move with a camera button held is a navigation drag, and a
             // drag on a bound pane takes the view over. A plain move or a
             // click-release never releases anything.
@@ -190,9 +250,9 @@ impl State {
                 .as_ref()
                 .is_some_and(CameraState::is_orbiting);
             if orbiting {
-                // CL-5: an orbit drag stays local to the active pane so
-                // linked orthographic panes keep their axis lock. Pan and
-                // zoom still propagate via `for_each_target_cam`.
+                // An orbit drag stays local to the active pane so linked
+                // orthographic panes keep their axis lock. Pan and zoom
+                // still propagate via `for_each_target_cam`.
                 if self.view.pane_settings[ap].pane_mode == PaneMode::Scene3D
                     && let Some(cam) = &mut self.view.cameras[ap]
                 {

@@ -28,9 +28,11 @@
 //!   file. `cook_health.rs`, which nodes are failing. `hdri_info.rs`, what
 //!   the Environment modal says about the loaded HDRI.
 //! - `view_state.rs`, `ViewState` (re-exports the `view_config` types).
-//! - `raycast`, CPU picking (Moller-Trumbore plus an AABB early reject), now
-//!   `solarxy_core::raycast` so web picking can run in Rust; re-exported here
-//!   so call sites keep their paths.
+//! - `raycast`, the ray builder the viewport picks with and the hit type the
+//!   review module still anchors on, now `solarxy_core::raycast` so web
+//!   picking can run in Rust; re-exported here so call sites keep their
+//!   paths. Picking itself asks the engine since 0.10.0, which answers with
+//!   the node that produced what is under the cursor.
 
 mod actions;
 mod autosave;
@@ -134,6 +136,9 @@ pub(super) struct InputState {
     /// it is a navigation drag, which is the gesture that releases a
     /// look-through binding; a plain click never does.
     pub(super) nav_button_down: bool,
+    /// Whether the primary button's press is going to release as a click,
+    /// and whether that click pairs with the one before it.
+    pub(super) clicks: input::click::ClickTracker,
 }
 
 pub struct State {

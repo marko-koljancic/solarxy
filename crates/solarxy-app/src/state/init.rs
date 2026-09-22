@@ -245,6 +245,7 @@ impl State {
                 uv_middle_pressed: false,
                 modifiers: ModifiersState::empty(),
                 nav_button_down: false,
+                clicks: super::input::click::ClickTracker::default(),
             },
             review: super::review::ReviewState {
                 author: preferences.review.author.clone(),
