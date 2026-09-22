@@ -134,7 +134,10 @@ step any more.
     top-of-frame snapshot used to overwrite them. `Recompute` is the pure rule saying what a
     change made stale, applied once at the end.
   - `camera.rs` - where the pane cameras point. `for_each_target_cam` is the one answer to which
-    cameras a gesture moves: the active pane, or every pane when they are linked.
+    cameras a gesture moves: the active pane, or every pane when they are linked. Nothing in this
+    shell links them since 0.10.0: the entry had no browser counterpart, and the cameras start
+    unlinked because removing the entry alone would have left them linked for good. The flag
+    lives on the host's view state, which the browser shares.
   - `open.rs` - **how a file becomes the open document, and the only place `engine` is
     assigned.** A scene file already is a document; a model file becomes one through
     `solarxy_graph::model_document`, the synthesis the terminal's render command stands on too.
@@ -250,12 +253,24 @@ step any more.
     a build failure here rather than a stale list, and an unknown category or data type is a
     compile error rather than a string arriving over a boundary.
   - `chrome/` - the shell's own furniture, which is everything that draws outside a dock tab or
-    on top of one: `menu`, `pane_toolbar`, `overlays`, `divider`,
-    `viewport_context_menu`.
+    on top of one: `menu` (the global bar, the browser's five menus: **entries and their order are
+    data in tables, the draw function walks a table, and a test compares each table with the
+    browser's source**, with three allowlists for what only one shell has or words differently,
+    each checked in reverse so a withdrawal has to delete its row), `menu_items` (the vocabulary
+    every menu draws with: a hint is **read from the binding table, never typed beside the entry**,
+    and an entry that cannot act takes its reason as an argument and is drawn disabled, never
+    dropped, so a menu's shape does not depend on the scene), `panel_bar` (the frame a panel's own
+    bar shares, filled because the viewport tab paints no background, and the `Maximize Panel`
+    entry every panel's View menu ends with), `viewport_bar` (the viewport's View menu, held
+    against the browser's), `pane_toolbar`, `overlays`, `divider`, `viewport_context_menu`. A
+    panel owns its commands, so its bar is drawn by the panel's own module (`nodes/menus`,
+    `params/menus`, `text`) and moves with the panel wherever it is docked or floated.
   - `modals/` - `about`, `preferences`, `shortcuts`, `screenshot`, `still`, and since the
     authoring and panel epics `environment` (the browser's four rows: HDRI with Load and Clear, IBL
     mode, rotation, intensity; reached from the viewport's View menu), `unsaved` (Save, Discard, Cancel) and `recovery` (Restore
-    or Discard, offered once on launch). Each owns
+    or Discard, offered once on launch), and since the chrome epics `arrangement_save` (the name
+    for a saved arrangement, saying what a used name would replace) and `keymap_change` (the
+    one-time notice an upgraded installation gets that the keys moved). Each owns
     state on the renderer and is drained through a `take_*` accessor rather than the queue: a
     single-value handle is already the right shape.
   - `widgets.rs` - the helpers more than one of the three uses.
@@ -277,8 +292,21 @@ step any more.
     inside one, and an intent is raised only from a widget response or a consumed key.
   - `settings.rs` - the read-only display state panels draw from. `theme.rs` - the egui adapter
     over the shared palette, authoring no colours of its own.
-  - `dock.rs` - `egui_dock` integration: `SolarxyTab`, `SolarxyTabViewer`, `default_dock_state`,
-    `tab_present` and `toggle_tab`. **The tab variant names are serialized into user
+  - `arrangement.rs` - the named arrangements. The six built-ins are **data, not construction
+    code**: each is a `Recipe` in the facts the browser's presets are written in, `Recipe::build`
+    is the one place a recipe becomes a dock tree, and the table is held against
+    `web/src/store/desks.ts` by a test. An arrangement is interface state and nothing else, which
+    is what makes switching one free. The user's own are stored as the serialized layout itself,
+    shadow a built-in of the same name, and replace by name on save; `carry_saved_layout` is the
+    one-time carry described under Dock layout persistence.
+  - `dock.rs` - `egui_dock` integration: `SolarxyTab`, `SolarxyTabViewer`, `default_dock_state`
+    (the first built-in recipe, built), `tab_present` and `toggle_tab`, plus `reopen`, which puts
+    a panel back beside the neighbour the browser would choose, and `restore`, which refuses a
+    layout with nothing left in it and gives the Viewport back to one saved without it. **`Dock`
+    makes maximize safe by construction**: it holds the full layout and the one maximized leaf,
+    every question and every change goes to the full layout and restores first, and only the
+    draw call sees the maximized copy, so what is written at quit is the arrangement and never
+    the single panel. **The tab variant names are serialized into user
     preferences**, so renaming one silently costs a reader their arrangement. The Viewport tab is
     special: pinned as the browser's is, so neither closeable nor floatable, and transparent so the
     wgpu surface shows through. It has no toggle, and a layout saved with it closed, which was

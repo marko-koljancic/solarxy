@@ -30,39 +30,48 @@ cargo run --release -- --model res/models/xyzrgb_dragon.obj
 - [ ] A colored-but-untextured material renders in its colour, **not white**. (This was a real bug fixed in Phase 14: `base_color_factor` was parsed but never reached the shader.)
 - [ ] Drag-and-drop a model onto the window loads it.
 
-## 2. Inspection modes (number keys 1-7)
+## 2. Inspection modes (number keys, pointer over the viewport)
 
-Each renders without artifacts and the HUD/status bar names the active mode.
+The keys are scoped: they act on the pane under the pointer and do nothing over the node canvas.
+Each mode renders without artifacts and the pane's own Inspect label names it.
 
 - [ ] 1 Shaded
 - [ ] 2 Material ID
-- [ ] 3 UV Map
+- [ ] 3 toggles the UV pane, and the pane's Display menu has `Exit UV Layout` as the way back.
 - [ ] 4 Texel Density
 - [ ] 5 Depth
 - [ ] 6 Overdraw
 - [ ] 7 AO Preview
 
-## 3. Display and overlays
+## 3. Display and overlays (the per-pane menus)
 
-- [ ] Wireframe and ghosted-wireframe.
-- [ ] Normals overlay.
-- [ ] Grid and axis gizmo toggle.
-- [ ] Bounds display.
-- [ ] Material overrides (`Shift+M`): Clay, Clay Dark, Chrome, Silhouette.
+None of these has a key since the two shells came to share one keymap. Each is reached from the
+labels across the top of a pane.
+
+- [ ] Wireframe and ghosted-wireframe, from the pane's view-mode menu.
+- [ ] Normals, Bounds and Wireframe weight, from the Display menu's submenus.
+- [ ] Grid and Axes toggle from the Display menu.
+- [ ] Material overrides from the pane's material menu: Clay, Clay Dark, Chrome, Silhouette.
+- [ ] Background lists six in this order: Gradient, White, Dark, Ayu, Black, HDRI Sky. With no HDRI
+      loaded, HDRI Sky is greyed and says why on hover.
+- [ ] `Look...` and `Light markers` are present and greyed, each with a reason on hover.
 - [ ] **Validation overlay**: issues highlight, and the non-manifold **edge lines do not z-fight** with the surface. (WebGPU forbids `depthBias` on line topologies, so the depth bias was removed from that pipeline in Phase 0. If z-fighting is visible, the fix is a clip-space nudge in `vs_validation`.)
 
 ## 4. Layouts and cameras
 
-- [ ] F1 single, F2 vertical split, F3 horizontal split, F4 quad, F5 three-left-big.
+- [ ] F1 single, F2 vertical split, F3 horizontal split, F4 quad, F5 three-left-big, from the keys
+      and from the viewport's `View > Pane Layout`.
 - [ ] Orbit, pan, zoom, and arrow-key nav work in every layout.
 - [ ] The active pane follows the cursor; per-pane inspection modes are independent.
-- [ ] Linked and unlinked cameras both behave.
+- [ ] Each pane's camera moves alone. Nothing links them, and none starts linked.
+- [ ] `Z` fits the view, `T` `F` `L` `B` snap to a side, `P` and `O` switch projection.
 
 ## 5. Lighting
 
 - [ ] Drag-drop an `.hdr` HDRI: sky renders, IBL lights the model.
 - [ ] Drag-drop an `.exr` HDRI.
-- [ ] IBL toggle (`I` / `Shift+I`).
+- [ ] The viewport's `View > Environment...` opens the dialog: load and clear the HDRI, the IBL
+      mode, rotation and intensity. This is the only place the IBL mode is set.
 - [ ] Shadows render; the shadow-catching floor works.
 
 ## 6. UV pane
@@ -70,28 +79,76 @@ Each renders without artifacts and the HUD/status bar names the active mode.
 - [ ] A UV pane opens and shows the layout.
 - [ ] The overlap statistic computes (it is an async GPU readback).
 
-## 7. Panels and dialogs
+## 7. Menus
 
-- [ ] Sidebar, Outliner, Properties, Console, Material Inspector, Review Panel all open and dock.
-- [ ] Material Inspector shows texture thumbnails for a textured model.
-- [ ] Preferences (`Ctrl/Cmd+,`) opens; theme hot-swaps light/dark with no restart.
-- [ ] Keyboard-shortcuts modal (`?`).
-- [ ] Save Layout / Restore Saved Layout / Reset Layout.
+- [ ] The global bar is five menus: File, Edit, Desks, Review, Help. It cannot be hidden.
+- [ ] Every shortcut shown beside an entry does what it says when pressed.
+- [ ] An entry that cannot act is greyed and says why on hover, and none disappears as the scene
+      changes. `Help > Take a Tour` is one.
+- [ ] The File menu has no `Close`. A document is left by opening another or by `New Scene`, and
+      both ask first when there are unsaved changes.
+- [ ] Each of the four panels with a bar of its own draws it across its top, docked or floated:
+      the node panel (Add, View), the parameter panel (Node, Params, View), the viewport (View)
+      and the text panel (File, View).
+- [ ] The node panel's Add menu lists the node types of the network being looked at, by category,
+      and a node added from it lands in view.
+- [ ] The viewport's `Gizmo Orientation`, `Playbar` and `Export Turntable...` are present and
+      greyed, each with a reason.
 
-## 8. Review system
+## 8. Panels and arrangements
 
-- [ ] `Shift+R` enters review mode (amber indicator).
-- [ ] Click geometry to place an annotation; it saves to the sidecar.
-- [ ] Re-anchor and cascade-delete work.
+- [ ] The Desks menu toggles seven panels (Nodes, Properties, Tree, Text, Assets, Texture Viewer,
+      Attributes) plus the Sidebar, and a tick always agrees with what is on screen.
+- [ ] The Viewport tab has no close button and cannot be dragged out into a window.
+- [ ] A closed panel comes back beside a sensible neighbour rather than in a corner.
+- [ ] Each of the six built-in arrangements applies: Default, Modeling, Review, Technical,
+      LookDev, UV / Texturing. Applying one never touches the document or its unsaved state.
+- [ ] `Save Current As...` saves under a name, the dialog says when a name would replace one, the
+      saved arrangement applies, survives a restart, and `Delete Desk` removes it.
+- [ ] `Maximize Panel` from each bar, and the backtick key over any panel, fills the window with
+      that panel. The same entry, the same key and `Esc` restore it.
+- [ ] Quit while a panel is maximized and relaunch: the whole arrangement comes back, not the one
+      panel.
+- [ ] `P` over the node canvas opens the floating parameter panel, with a pin of its own; `Esc`
+      closes it.
+- [ ] Preferences (`Ctrl/Cmd+,`) opens with four tabs: Startup, Appearance, View, Interface. The
+      theme hot-swaps light and dark with no restart. The View tab has one row, the default
+      background.
+- [ ] The keyboard-shortcuts reference (`?`) lists what the keys actually do.
 
-## 9. Screenshot
+## 9. Review system
 
-- [ ] `C` opens the screenshot modal; Save As writes a PNG.
+Review cannot arm in 0.10.0. It anchored against a file-loaded model's meshes, and the one
+document root supplies none. It returns when review is repointed at the document.
 
-## 10. Exit
+- [ ] `Shift+R` over the viewport says so in a toast and changes nothing else.
+- [ ] `N` toggles the review panel, from anywhere.
+
+## 10. Screenshot
+
+- [ ] `C` over the viewport opens the screenshot modal; Save As writes a PNG. The viewport's
+      `View > Save Screenshot...` opens the same one.
+
+## 11. Coming from an earlier version
+
+Run these against a configuration file written by a previous release. Keep a copy, since the
+desktop rewrites the file.
+
+- [ ] The file loads, whatever it holds: an `[updater]` table, user backgrounds, a saved layout.
+- [ ] A saved layout arrives in the Desks menu as `Saved Layout` on first launch, applies, and
+      does not come back after being deleted and the application relaunched.
+- [ ] User backgrounds are still in the file afterwards. If the stored default named one, the
+      viewport starts on Gradient.
+- [ ] A dock layout that names the Console, the Outliner or the Material Inspector restores
+      without them and keeps everything else.
+- [ ] The notice that the keys moved appears once, and never on a fresh installation.
+- [ ] `solarxy-cli --update` still runs. The desktop has no update check of its own.
+
+## 12. Exit
 
 - [ ] Quitting persists the dock layout; relaunching restores it.
-- [ ] No panics in the console; `RUST_LOG=solarxy=debug` shows no errors.
+- [ ] No panics in the terminal; `RUST_LOG=solarxy=debug` shows no errors. The desktop has no log
+      panel, so the terminal is where this is read.
 
 ## Golden captures
 
