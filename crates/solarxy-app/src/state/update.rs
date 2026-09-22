@@ -483,6 +483,7 @@ impl State {
         self.gui.set_scene_open(self.engine.is_some());
         self.sync_env_bounds();
         self.sync_visualization();
+        self.sync_gizmo();
 
         let now = Instant::now();
         self.dt = (now - self.last_frame_time).as_secs_f32().min(0.1);

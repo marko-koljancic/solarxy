@@ -152,6 +152,15 @@ impl State {
         {
             self.setup_pane_lighting(&cam_data);
         }
+        if !is_uv_map && let Some(cam_data) = cam_data {
+            // The gizmo's world size is per pane, because a pane's camera
+            // and height decide how many world units a pixel is, so it is
+            // re-written before each pane's pass rather than once per frame.
+            // Logical pixels, so a high-density display does not halve it.
+            let ppp = self.window.scale_factor() as f32;
+            self.renderer
+                .write_manipulator(&self.queue, &cam_data, pane.height / ppp);
+        }
 
         let background = Self::resolve_background(&pds);
         let bounds = self.scene_bounds();
@@ -407,6 +416,12 @@ impl State {
             history: self.history_readout(),
             clipboard: self.clipboard_readout(),
             canvas: self.preferences.canvas,
+            tools: super::gizmo_drag::tool_readout(
+                &self.gizmo,
+                self.tools_available.as_deref(),
+                &self.preferences.viewport,
+                self.gizmo_readout.as_deref(),
+            ),
         };
         let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
         let active_pane_mode = self.view.pane_settings[self.view.active_pane].pane_mode;
@@ -733,6 +748,9 @@ impl State {
             if self.preferences.history.recent_files.len() > cap {
                 self.preferences.history.recent_files.truncate(cap);
             }
+            // The handle frame and the snaps reach the solver through the
+            // same re-read the key and the viewport menu use.
+            self.apply_gizmo_prefs();
             self.gui
                 .set_toast("Preferences saved", crate::gui::ToastSeverity::Success);
         }

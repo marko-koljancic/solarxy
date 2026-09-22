@@ -12,16 +12,17 @@
 //! order. An entry typed straight into the draw could drift and nothing
 //! would say so.
 //!
-//! Three entries are listed and cannot be used yet. Each waits on work this
+//! Two entries are listed and cannot be used yet. Each waits on work this
 //! release does later or files for later, and each says which.
 
+use solarxy_core::preferences::GizmoOrientation;
 use solarxy_core::view_config::ViewLayout;
 
 use super::menu_items::{check_entry, entry, waiting_entry};
 use super::pane_toolbar::PaneView;
 use super::panel_bar::{MAXIMIZE_LABEL, maximize_entry, panel_bar};
 use crate::gui::dock::SolarxyTab;
-use crate::gui::intent::{CaptureIntent, FileIntent, Intent, Intents, LayoutIntent};
+use crate::gui::intent::{CaptureIntent, FileIntent, Intent, Intents, LayoutIntent, ToolIntent};
 use crate::gui::settings::PanelSettings;
 use crate::gui::theme::Theme;
 use crate::state::keymap::Action;
@@ -70,6 +71,9 @@ const VIEW_MENU: &[Item] = &[
     Item::Divider,
     Item::Maximize,
 ];
+
+/// The two frames the handles can align to, in the browser's order.
+const ORIENTATIONS: [GizmoOrientation; 2] = [GizmoOrientation::World, GizmoOrientation::Local];
 
 /// The five ways to split the viewport, with the binding each one has.
 const PANE_LAYOUTS: [(ViewLayout, &str, Action); 5] = [
@@ -137,11 +141,18 @@ fn draw_item(ui: &mut egui::Ui, item: Item, settings: PanelSettings<'_>, intents
             });
         }
         Item::GizmoOrientation => {
-            waiting_entry(
-                ui,
-                label,
-                "Arrives with the transform tools, which this shell does not have yet",
-            );
+            // Writes the same preference the orientation key and the
+            // preferences dialog write, so the three can never disagree
+            // about which frame the handles are in.
+            ui.menu_button(label, |ui| {
+                for orientation in ORIENTATIONS {
+                    let checked = settings.tools.orientation == orientation;
+                    if check_entry(ui, checked, orientation.label(), None).clicked() {
+                        intents.raise(Intent::Tool(ToolIntent::SetOrientation(orientation)));
+                        ui.close();
+                    }
+                }
+            });
         }
         Item::Playbar => {
             waiting_entry(
@@ -247,6 +258,31 @@ mod tests {
             .collect();
         assert_eq!(here_names, names);
         assert_eq!(here_keys, keys);
+    }
+
+    /// The two handle frames, named as the browser names them and in its
+    /// order, read from its `ORIENTATIONS` table.
+    #[test]
+    fn the_orientations_are_the_browsers_in_its_order() {
+        let source = browser_source();
+        let start = source
+            .find("const ORIENTATIONS")
+            .expect("the orientation table");
+        let block = &source[start..];
+        let block = &block[..block.find("];").expect("the table's end")];
+        let names = labels(block);
+        let values: Vec<String> = block
+            .split("value: \"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .map(str::to_string)
+            .collect();
+        assert_eq!(names.len(), 2, "the reader found the two frames");
+
+        let here_names: Vec<&str> = ORIENTATIONS.iter().map(|o| o.label()).collect();
+        let here_values: Vec<&str> = ORIENTATIONS.iter().map(|o| o.as_str()).collect();
+        assert_eq!(here_names, names);
+        assert_eq!(here_values, values);
     }
 
     /// The layouts offered are every layout there is, once each.

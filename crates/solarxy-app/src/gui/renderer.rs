@@ -7,7 +7,7 @@ use solarxy_core::preferences::PaneMode;
 use super::modals::about::draw_about_modal;
 use super::dock::{Dock, SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::modals::shortcuts::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
-use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
+use super::intent::{Intent, Intents, LayoutIntent, ReviewIntent, ToolIntent};
 use super::panels::asset_preview::AssetPreviewState;
 use super::panels::assets::AssetsState;
 use super::panels::attributes::AttributesState;
@@ -79,6 +79,11 @@ pub struct EguiRenderer {
     /// The panel the pointer was over on the last pass, which is what the
     /// maximize key acts on.
     hovered_tab: Option<SolarxyTab>,
+    /// The interactive furniture drawn over the viewport on the last pass,
+    /// the tool column today, in logical pixels. The pointer routing keeps
+    /// a click on any of it from also reaching the camera and the pick,
+    /// the way the pane toolbar strip is kept out.
+    viewport_chrome: Vec<egui::Rect>,
     pub last_viewport_rect: Option<CachedViewportRect>,
     /// Whether a node-engine scene is open. Separate from `model_info`,
     /// which describes a file-loaded model: the two roots are mutually
@@ -153,6 +158,7 @@ impl EguiRenderer {
             hdri_info: None,
             dock: Dock::new(default_dock_state()),
             hovered_tab: None,
+            viewport_chrome: Vec::new(),
             last_viewport_rect: None,
             scene_open: false,
         }
@@ -377,6 +383,15 @@ impl EguiRenderer {
     pub fn cursor_in_viewport(&self, cursor_logical: egui::Pos2) -> bool {
         self.last_viewport_rect
             .is_none_or(|c| c.rect.contains(cursor_logical))
+    }
+
+    /// Whether the cursor is over furniture drawn on the viewport that
+    /// takes clicks of its own, so a press there is the widget's and never
+    /// also the camera's or the pick's.
+    pub fn cursor_over_viewport_chrome(&self, cursor_logical: egui::Pos2) -> bool {
+        self.viewport_chrome
+            .iter()
+            .any(|rect| rect.contains(cursor_logical))
     }
 
     #[must_use]
@@ -673,6 +688,7 @@ impl EguiRenderer {
         let mut canvas_rect_seen: Option<egui::Rect> = None;
         let mut preview_size_seen: Option<(u32, u32)> = None;
         let mut hovered_tab_seen: Option<SolarxyTab> = None;
+        let mut chrome_rects_seen: Vec<egui::Rect> = Vec::new();
         let mut dismissed_toast_id: Option<u64> = None;
 
         // Cloned so the closure below can borrow the renderer mutably: the
@@ -718,6 +734,7 @@ impl EguiRenderer {
                 canvas_rect_out: &mut canvas_rect_seen,
                 preview_size_out: &mut preview_size_seen,
                 hovered_tab_out: &mut hovered_tab_seen,
+                chrome_rects_out: &mut chrome_rects_seen,
                 floating_props_open: self.floating_props,
                 theme: self.theme,
             };
@@ -893,11 +910,15 @@ impl EguiRenderer {
                 ctx.request_repaint();
             }
 
-            // The escape ladder, in the browser's order: a pending
-            // re-anchor, then review mode, then a maximized panel, which is
-            // last because it is the least in flight of the three.
+            // The escape ladder, in the browser's order: a transform drag
+            // in flight, then a pending re-anchor, then review mode, then a
+            // maximized panel, which is last because it is the least in
+            // flight of the four. The drag is the state's, so its rung
+            // raises rather than cancels.
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                if review.reanchor_target.is_some() {
+                if sources.settings.tools.dragging {
+                    intents.raise(Intent::Tool(ToolIntent::CancelDrag));
+                } else if review.reanchor_target.is_some() {
                     review.cancel_reanchor();
                     intents.raise(Intent::Review(ReviewIntent::ReanchorCancelled));
                 } else if review.active {
@@ -1009,6 +1030,7 @@ impl EguiRenderer {
         self.canvas_rect = canvas_rect_seen;
         self.preview_size_seen = preview_size_seen;
         self.hovered_tab = hovered_tab_seen;
+        self.viewport_chrome = chrome_rects_seen;
         if let Some(rect) = viewport_rect_logical {
             self.last_viewport_rect = Some(CachedViewportRect {
                 rect,

@@ -38,8 +38,8 @@
 //! built once outside the closure and every write was idempotent.
 
 use solarxy_core::preferences::{
-    BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
-    ProjectionMode, ToneMode, UvMapBackground, ViewMode,
+    BackgroundMode, GizmoOrientation, IblMode, InspectionMode, LineWeight, MaterialOverride,
+    NormalsMode, PaneMode, ProjectionMode, ToneMode, UvMapBackground, ViewMode,
 };
 use solarxy_core::view_config::PostStrengths;
 
@@ -70,6 +70,11 @@ pub(crate) enum Intent {
     CreateCameraFromView { pane: usize },
     /// The viewport's right-click menu, acting on what the pointer landed on.
     Viewport(ViewportAction),
+    /// The transform tools: which one is armed, and which frame the
+    /// handles are in. Raised by the tool column, the context menu, the
+    /// viewport menu and the keys, and every one of them lands in the same
+    /// arm so the four cannot disagree.
+    Tool(ToolIntent),
     /// A pane's own framing, from that pane's Views menu or the viewport's
     /// View menu. It writes the pane it names and nothing else.
     PaneView { pane: usize, view: PaneView },
@@ -197,6 +202,23 @@ pub(crate) enum EditIntent {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CaptureIntent {
     Screenshot,
+}
+
+/// The transform tools and the frame their handles align to.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ToolIntent {
+    /// Arm a tool. Arming the one already armed changes nothing; arming
+    /// another mid-drag rolls the drag back first.
+    Set(solarxy_host::gizmo::ToolMode),
+    /// Abandon the drag in flight: the first rung of the escape ladder,
+    /// which runs inside the interface pass where the rest of the ladder
+    /// lives, while the drag itself is the state's.
+    CancelDrag,
+    /// Which frame the Move and Rotate handles align to, from the viewport
+    /// menu or the preferences dialog.
+    SetOrientation(GizmoOrientation),
+    /// Flip between the two frames, from the key.
+    ToggleOrientation,
 }
 
 /// Review mode and its notes.
@@ -346,7 +368,10 @@ impl Intent {
             Self::Panel(PanelIntent::FlyToIssue { .. }) => 10,
             Self::Panel(PanelIntent::ClearHdri) => 11,
             Self::Panel(PanelIntent::LoadHdri) => 12,
-            Self::Viewport(_) => 13,
+            // The tools share the context menu's key: a tool is armed from
+            // the menu as readily as from the column, and only one of the
+            // two can be clicked in a frame.
+            Self::Viewport(_) | Self::Tool(_) => 13,
             // The two graph surfaces share a key: they raise the same
             // kind of change to the same document, and only one of them
             // can be under the pointer in a frame.

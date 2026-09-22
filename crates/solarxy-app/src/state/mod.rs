@@ -47,6 +47,7 @@ mod discard;
 mod document;
 mod drop;
 pub(crate) mod engine_scene;
+mod gizmo_drag;
 pub(crate) mod hdri_info;
 mod history;
 mod init;
@@ -174,6 +175,21 @@ pub struct State {
     /// selects engine-side and leaves the viewport alone, which is what
     /// the web shell does with the same gesture.
     pub(super) selected_object: Option<solarxy_core::scene::SceneObjectId>,
+    /// The armed transform tool, its snap settings, the hovered handle and
+    /// the drag in flight, over the shared solver. The drive loop that
+    /// turns a drag into engine commands is `gizmo_drag.rs`, this shell's
+    /// twin of the browser host's.
+    pub(super) gizmo: solarxy_host::gizmo::GizmoState,
+    /// Where the drag in flight writes: the context and node the target
+    /// resolved to when the drag began. Taken together with the drag, so
+    /// a solved value never lacks a place to go.
+    pub(super) gizmo_addr: Option<gizmo_drag::GizmoAddr>,
+    /// The live delta of the drag in flight, as the readout shows it.
+    pub(super) gizmo_readout: Option<String>,
+    /// Which tools the selection can take, for the column and the context
+    /// menu to draw the rest unavailable; `None` with nothing selected,
+    /// which narrows nothing.
+    pub(super) tools_available: Option<Vec<solarxy_host::gizmo::ToolMode>>,
     /// Which nodes' cooks are failing, absorbed from the engine's event
     /// stream each frame. Fresh failures toast; the standing map is what
     /// the still render consults before reporting success.

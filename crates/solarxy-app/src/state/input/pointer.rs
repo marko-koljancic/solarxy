@@ -2,8 +2,8 @@
 //!
 //! A click that did not travel walks a ladder before it lands, in the
 //! browser's order: a transform drag in flight owns the release, then a
-//! pending re-anchor, then review mode, then an ordinary pick. Only the last
-//! rung is built; the others arrive with the tools and with review, and the
+//! pending re-anchor, then review mode, then an ordinary pick. The drag and
+//! the pick are built; the two review rungs arrive with review, and the
 //! ladder is written so each slots in above the pick rather than around it.
 //!
 //! Picking asks the engine, never the shell. The engine answers with the
@@ -35,6 +35,17 @@ fn to_pointer_button(button: MouseButton) -> PointerButton {
     }
 }
 
+/// The 3D pane under the cursor as a pick or a drag sees it: its rect in
+/// physical pixels, its camera with the pane's aspect, and the world ray
+/// through the cursor. One recipe for both, so the gizmo grabs what the
+/// pick would hit.
+pub(in crate::state) struct PaneView {
+    pub index: usize,
+    pub rect: crate::state::Pane,
+    pub camera: solarxy_renderer::camera::Camera,
+    pub ray: crate::state::raycast::Ray,
+}
+
 /// The ray under the cursor through one 3D pane, and what the engine's
 /// marker pick needs to judge a click against the pane's light markers.
 pub(in crate::state) struct PaneRay {
@@ -44,6 +55,38 @@ pub(in crate::state) struct PaneRay {
 }
 
 impl State {
+    /// The 3D pane under the cursor as a pick or a drag sees it: its rect,
+    /// its camera with the pane's aspect, and the world ray through the
+    /// cursor. `None` when the cursor is not over a 3D pane with a camera.
+    ///
+    /// The whole pane rect, not the content rect under the toolbar strip:
+    /// the pane renders with the aspect of its full rect and the strip
+    /// floats over the picture, so a ray built over the shorter rect would
+    /// land above what the cursor is on by the strip's share. The old
+    /// raycast did exactly that; the browser builds over the full rect.
+    pub(in crate::state) fn pane_view(&self) -> Option<PaneView> {
+        let panes = self.compute_panes();
+        let cursor = self.input.cursor_pos;
+        let pane = crate::state::hit_test_pane(&panes, cursor);
+        if self.view.pane_settings[pane].pane_mode != PaneMode::Scene3D {
+            return None;
+        }
+        let rect = panes[pane];
+        let mut camera = self.view.cameras[pane].as_ref().map(|c| c.camera)?;
+        camera.aspect = rect.width.max(1.0) / rect.height.max(1.0);
+        let ray = crate::state::raycast::screen_to_world_ray(
+            (cursor.0 - rect.x, cursor.1 - rect.y),
+            (rect.width, rect.height),
+            camera.build_view_projection_matrix(),
+        );
+        Some(PaneView {
+            index: pane,
+            rect,
+            camera,
+            ray,
+        })
+    }
+
     /// The ray under the cursor, or `None` when the cursor is not over a
     /// 3D pane with a camera.
     ///
@@ -54,34 +97,22 @@ impl State {
     /// offered only when the pane draws them, so a pane with them off picks
     /// exactly the geometry it shows.
     pub(in crate::state) fn pane_ray(&self) -> Option<PaneRay> {
-        let panes = self.compute_panes();
+        let view = self.pane_view()?;
         let cursor = self.input.cursor_pos;
-        let pane = crate::state::hit_test_pane(&panes, cursor);
-        if self.view.pane_settings[pane].pane_mode != PaneMode::Scene3D {
-            return None;
-        }
-        let content = panes[pane].content(self.pane_toolbar_height_px());
-        let mut camera = self.view.cameras[pane].as_ref().map(|c| c.camera)?;
-        camera.aspect = content.width.max(1.0) / content.height.max(1.0);
-        let view_proj = camera.build_view_projection_matrix();
-        let cursor_px = (cursor.0 - content.x, cursor.1 - content.y);
-        let ray = crate::state::raycast::screen_to_world_ray(
-            cursor_px,
-            (content.width, content.height),
-            view_proj,
-        );
+        let rect = view.rect;
+        let cursor_px = (cursor.0 - rect.x, cursor.1 - rect.y);
         let ppp = self.window.scale_factor() as f32;
-        let markers = self.view.pane_settings[pane].show_light_markers.then(|| {
-            solarxy_graph::engine::MarkerPick {
-                view_proj: view_proj.into(),
-                viewport_px: [content.width, content.height],
+        let markers = self.view.pane_settings[view.index]
+            .show_light_markers
+            .then(|| solarxy_graph::engine::MarkerPick {
+                view_proj: view.camera.build_view_projection_matrix().into(),
+                viewport_px: [rect.width, rect.height],
                 cursor_px: [cursor_px.0, cursor_px.1],
                 radius_px: solarxy_renderer::manipulator::MARKER_PX * ppp,
-            }
-        });
+            });
         Some(PaneRay {
-            origin: ray.origin.into(),
-            direction: ray.direction.into(),
+            origin: view.ray.origin.into(),
+            direction: view.ray.direction.into(),
             markers,
         })
     }
@@ -126,8 +157,13 @@ impl State {
             })
         });
         let ppp = self.window.scale_factor() as f32;
+        let tools = self.tool_readout();
         self.viewport_context_menu = Some(ViewportContextMenu {
             target,
+            tools: crate::gui::ToolRows {
+                armed: tools.tool,
+                applies: tools.applies,
+            },
             screen_pos: egui::pos2(self.input.cursor_pos.0 / ppp, self.input.cursor_pos.1 / ppp),
             suppress_dismiss: true,
         });
@@ -190,6 +226,19 @@ impl State {
             }
         } else {
             let mapped = to_pointer_button(button);
+            if mapped == PointerButton::Left {
+                // A press with a transform tool armed grabs a handle if one
+                // is under the cursor, and the whole gesture is then the
+                // gizmo's: no navigation, no click. A miss falls through to
+                // the camera and the pick.
+                if pressed && self.gizmo.tool.is_transform_tool() && self.begin_gizmo_drag() {
+                    return;
+                }
+                if !pressed && self.gizmo_dragging() {
+                    self.commit_gizmo_drag();
+                    return;
+                }
+            }
             // Only the buttons the camera navigates with count: a right or
             // side button is ignored by the controller, so a drag with one
             // held must not read as navigation and release a binding.
@@ -218,6 +267,17 @@ impl State {
         }
     }
 
+    /// The snap modifier as the solver reads it: control, or the command
+    /// key on a Mac, where control-click is the secondary click and command
+    /// is what the hand reaches for.
+    fn gizmo_mods(&self) -> u8 {
+        if self.input.modifiers.control_key() || self.input.modifiers.super_key() {
+            solarxy_host::gizmo::MOD_SNAP
+        } else {
+            0
+        }
+    }
+
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {
         let ap = self.view.active_pane;
         if self.view.pane_settings[ap].pane_mode == PaneMode::UvMap {
@@ -238,6 +298,16 @@ impl State {
             }
         } else {
             let ap = self.view.active_pane;
+            // A drag in flight owns every move; with a tool armed and no
+            // button held, a move only decides which handle lights up.
+            if self.gizmo_dragging() {
+                let mods = self.gizmo_mods();
+                self.update_gizmo_drag(mods);
+                return;
+            }
+            if self.gizmo.tool.is_transform_tool() && !self.input.nav_button_down {
+                self.update_gizmo_hover();
+            }
             let ppp = self.window.scale_factor() as f32;
             self.input.clicks.moved_to((x, y), CLICK_SLOP_PX * ppp);
             // A move with a camera button held is a navigation drag, and a

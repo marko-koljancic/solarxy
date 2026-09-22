@@ -13,8 +13,9 @@
 
 use winit::keyboard::KeyCode;
 
-use crate::gui::ToastSeverity;
+use crate::gui::{ToastSeverity, ToolIntent};
 use solarxy_host::cameras::StandardView;
+use solarxy_host::gizmo::ToolMode;
 use solarxy_renderer::input::CameraKey;
 use solarxy_core::preferences::{InspectionMode, PaneMode, ProjectionMode};
 
@@ -228,6 +229,16 @@ impl State {
                         cam.set_projection(ProjectionMode::Orthographic);
                     });
                 }
+            }
+
+            // The transform tools, through the same arm the column, the
+            // context menu and the viewport menu reach.
+            Action::ToolSelect => self.handle_tool_intent(ToolIntent::Set(ToolMode::Select)),
+            Action::ToolMove => self.handle_tool_intent(ToolIntent::Set(ToolMode::Move)),
+            Action::ToolRotate => self.handle_tool_intent(ToolIntent::Set(ToolMode::Rotate)),
+            Action::ToolScale => self.handle_tool_intent(ToolIntent::Set(ToolMode::Scale)),
+            Action::ToggleGizmoOrientation => {
+                self.handle_tool_intent(ToolIntent::ToggleOrientation);
             }
 
             // Review.

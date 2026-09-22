@@ -19,7 +19,9 @@
 
 use crate::state::keymap::{Action, hint};
 
-fn button(label: &str, action: Option<Action>) -> egui::Button<'_> {
+/// A button labelled and hinted the way every entry is, for the one menu
+/// that draws its rows itself.
+pub(in crate::gui) fn button(label: &str, action: Option<Action>) -> egui::Button<'_> {
     let button = egui::Button::new(label);
     match action.and_then(hint) {
         Some(keys) => button.shortcut_text(keys),

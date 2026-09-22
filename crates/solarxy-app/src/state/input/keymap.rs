@@ -129,6 +129,12 @@ pub(crate) enum Action {
     ProjectionPerspective,
     ProjectionOrthographic,
     PanelMaximize,
+    // The transform tools
+    ToolSelect,
+    ToolMove,
+    ToolRotate,
+    ToolScale,
+    ToggleGizmoOrientation,
     // Review
     ToggleReviewMode,
     ToggleReviewPanel,
@@ -196,6 +202,11 @@ impl Action {
             Self::ProjectionPerspective => "view-perspective",
             Self::ProjectionOrthographic => "view-ortho",
             Self::PanelMaximize => "panel-maximize",
+            Self::ToolSelect => "tool-select",
+            Self::ToolMove => "tool-move",
+            Self::ToolRotate => "tool-rotate",
+            Self::ToolScale => "tool-scale",
+            Self::ToggleGizmoOrientation => "gizmo-orientation",
             Self::ToggleReviewMode => "review-mode",
             Self::ToggleReviewPanel => "review-panel",
             Self::ReviewCancel => "review-cancel",
@@ -664,6 +675,44 @@ pub(crate) static BINDINGS: &[Binding] = &[
         ),
         "In a UV pane, O toggles the overlap display instead",
     ),
+    // The transform tools, on the browser's keys. `E` is free over the
+    // viewport because the display-flag binding is the canvas's, which is
+    // where it always belonged; Aim has no key on either shell.
+    b(
+        Action::ToolSelect,
+        "q",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Tool: Select",
+    ),
+    b(
+        Action::ToolMove,
+        "w",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Tool: Move (translate gizmo)",
+    ),
+    b(
+        Action::ToolRotate,
+        "e",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Tool: Rotate (rotation rings)",
+    ),
+    b(
+        Action::ToolScale,
+        "r",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Tool: Scale (scale handles)",
+    ),
+    b(
+        Action::ToggleGizmoOrientation,
+        "x",
+        KeyScope::Viewport,
+        KeyGroup::ViewportAndLayout,
+        "Toggle gizmo orientation (world / local)",
+    ),
     // Consumed inside the interface pass, which is the only place that
     // knows which panel the pointer is over.
     with_note(
@@ -949,6 +998,7 @@ mod tests {
         let both = [
             ("b", Action::Bypass, Action::ViewBottom),
             ("c", Action::CanvasControls, Action::Screenshot),
+            ("e", Action::DisplayFlag, Action::ToolRotate),
             ("f", Action::CanvasFit, Action::ViewFront),
             ("p", Action::FloatingProps, Action::ProjectionPerspective),
             ("l", Action::AutoLayout, Action::ViewLeft),
@@ -966,29 +1016,6 @@ mod tests {
                 "{keys} over the viewport"
             );
         }
-    }
-
-    /// One of the browser's double-bound letters has only one half here,
-    /// because the other half is a capability this release builds later: `E`
-    /// is the display flag over the canvas, and over the viewport it waits
-    /// on the transform tools. `P` was the second such letter until the
-    /// floating parameter panel arrived, and is held by the table of
-    /// double-bound keys above now that both halves exist.
-    ///
-    /// A scope with no binding resolves to nothing rather than falling back,
-    /// which is what stops a canvas key firing over the viewport by accident
-    /// once the second half arrives.
-    #[test]
-    fn a_letter_whose_other_half_is_unbuilt_resolves_in_one_scope_only() {
-        let rotate_tool = Chord::parse("e").expect("parses");
-        assert_eq!(
-            lookup(rotate_tool, KeyScope::Canvas).map(|b| b.action),
-            Some(Action::DisplayFlag)
-        );
-        assert_eq!(
-            lookup(rotate_tool, KeyScope::Viewport).map(|b| b.action),
-            None
-        );
     }
 
     /// Tab is the palette's, declared globally with a note, as the browser
@@ -1033,11 +1060,6 @@ mod drift {
     /// empties as the release proceeds and an empty list at release is
     /// itself the proof that the two maps agree.
     const UNBUILT: &[(&str, &str)] = &[
-        ("tool-select", "the transform tools"),
-        ("tool-move", "the transform tools"),
-        ("tool-rotate", "the transform tools"),
-        ("tool-scale", "the transform tools"),
-        ("gizmo-orientation", "the transform tools"),
         ("play-pause", "the transport bar"),
         ("step-back", "the transport bar"),
         ("step-forward", "the transport bar"),

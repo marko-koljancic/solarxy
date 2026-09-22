@@ -60,6 +60,9 @@ impl State {
                 });
             }
             ViewportAction::ResetTransform(id) => self.reset_transform(NodeId(id.0)),
+            ViewportAction::SetTool(tool) => {
+                self.handle_tool_intent(crate::gui::ToolIntent::Set(tool));
+            }
         }
     }
 

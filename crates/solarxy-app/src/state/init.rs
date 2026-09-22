@@ -221,6 +221,13 @@ impl State {
             engine: None,
             engine_scene: None,
             selected_object: None,
+            gizmo: solarxy_host::gizmo::GizmoState {
+                settings: super::gizmo_drag::settings_from_prefs(&preferences.viewport),
+                ..Default::default()
+            },
+            gizmo_addr: None,
+            gizmo_readout: None,
+            tools_available: None,
             cook_health: super::cook_health::CookHealth::default(),
             cook_readout: crate::gui::CookReadout::default(),
             still: None,

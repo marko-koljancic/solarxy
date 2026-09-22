@@ -63,10 +63,11 @@
 //! decides what a menu item does.
 //!
 //! **Single-consumer code here is legitimate and is not an oversight.**
-//! `gizmo.rs`, `attr_viz.rs` and `attr_labels.rs` are 2,574 lines read only by
-//! the browser today. They were placed here for 0.10.0, which lights them up
-//! from the desktop, and rule 1's second clause is written for exactly them. A
-//! tidy-up that moves them back would be undoing the work rather than
+//! `gizmo.rs`, `attr_viz.rs` and `attr_labels.rs` were placed here read only
+//! by the browser, for 0.10.0 to light them up from the desktop, and rule 1's
+//! second clause is written for exactly them. The solver has both readers now;
+//! the attribute channel still waits on its desktop caller. A tidy-up that
+//! moves a single-consumer module back would be undoing the work rather than
 //! finishing it.
 //!
 //! # The exceptions, and why each one resists the rule

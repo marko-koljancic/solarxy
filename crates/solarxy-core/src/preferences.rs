@@ -637,6 +637,96 @@ pub struct Preferences {
     pub canvas: CanvasPrefs,
     #[serde(default)]
     pub autosave: AutosavePrefs,
+    /// The viewport gizmo's drag ergonomics.
+    #[serde(default)]
+    pub viewport: GizmoPrefs,
+}
+
+/// Which frame the Move and Rotate handles align to. Scale is always
+/// local, because a world-axis scale on a rotated object would need a
+/// shear the transform node does not carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GizmoOrientation {
+    #[default]
+    World,
+    Local,
+}
+
+impl GizmoOrientation {
+    /// The browser's wire word, which is also what the shared solver's
+    /// `Orientation::parse` reads.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::World => "world",
+            Self::Local => "local",
+        }
+    }
+
+    /// The other frame, for the key that flips between the two.
+    #[must_use]
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::World => Self::Local,
+            Self::Local => Self::World,
+        }
+    }
+
+    /// What the menu and the preferences row call each frame.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::World => "World Axes",
+            Self::Local => "Object Axes",
+        }
+    }
+}
+
+/// The viewport gizmo's drag ergonomics: the handle frame, and what a
+/// drag snaps to while the snap modifier is held. Three surfaces write it,
+/// the orientation key, the viewport menu and the preferences dialog, and
+/// one preference is what keeps them from disagreeing about which frame
+/// the handles are in.
+///
+/// The defaults are the browser's, and the shared solver's own defaults
+/// state the same three numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GizmoPrefs {
+    #[serde(default)]
+    pub orientation: GizmoOrientation,
+    /// World units a translate drag snaps to.
+    #[serde(default = "default_snap_translate")]
+    pub snap_translate: f32,
+    /// Degrees a rotate drag snaps to.
+    #[serde(default = "default_snap_rotate")]
+    pub snap_rotate: f32,
+    /// The increment a scale drag snaps to.
+    #[serde(default = "default_snap_scale")]
+    pub snap_scale: f32,
+}
+
+const fn default_snap_translate() -> f32 {
+    0.5
+}
+
+const fn default_snap_rotate() -> f32 {
+    15.0
+}
+
+const fn default_snap_scale() -> f32 {
+    0.1
+}
+
+impl Default for GizmoPrefs {
+    fn default() -> Self {
+        Self {
+            orientation: GizmoOrientation::World,
+            snap_translate: default_snap_translate(),
+            snap_rotate: default_snap_rotate(),
+            snap_scale: default_snap_scale(),
+        }
+    }
 }
 
 /// How a wire is routed between two sockets.
@@ -1083,6 +1173,7 @@ impl Default for Preferences {
             view: ViewPrefs::default(),
             canvas: CanvasPrefs::default(),
             autosave: AutosavePrefs::default(),
+            viewport: GizmoPrefs::default(),
         }
     }
 }
@@ -1335,6 +1426,12 @@ mod tests {
                 controls: false,
             },
             autosave: AutosavePrefs::default(),
+            viewport: GizmoPrefs {
+                orientation: GizmoOrientation::Local,
+                snap_translate: 0.25,
+                snap_rotate: 5.0,
+                snap_scale: 0.5,
+            },
         };
         let toml_str = toml::to_string_pretty(&prefs).unwrap();
         let parsed: Preferences = toml::from_str(&toml_str).unwrap();
@@ -1605,6 +1702,34 @@ view_layout = "splitVertical"
         let prefs: Preferences = toml::from_str(older).expect("an older file still loads");
         assert!(!prefs.ui.keymap_notice_seen);
         assert_eq!(prefs.ui.max_recent_files, 12);
+    }
+
+    /// A configuration file written before the viewport gained transform
+    /// handles carries no `[viewport]` section and reads as the browser's
+    /// defaults; one that names a frame reads it back, in the browser's
+    /// wire words.
+    #[test]
+    fn the_gizmo_section_defaults_and_reads_the_browsers_words() {
+        let older: Preferences =
+            toml::from_str("config_version = 1\n").expect("an older file still loads");
+        assert_eq!(older.viewport, GizmoPrefs::default());
+        assert_eq!(older.viewport.orientation, GizmoOrientation::World);
+
+        let local = r#"
+            config_version = 1
+
+            [viewport]
+            orientation = "local"
+            snap_rotate = 45.0
+        "#;
+        let prefs: Preferences = toml::from_str(local).expect("a frame and one snap read");
+        assert_eq!(prefs.viewport.orientation, GizmoOrientation::Local);
+        assert!((prefs.viewport.snap_rotate - 45.0).abs() < f32::EPSILON);
+        assert!((prefs.viewport.snap_translate - 0.5).abs() < f32::EPSILON);
+        assert!((prefs.viewport.snap_scale - 0.1).abs() < f32::EPSILON);
+
+        let written = toml::to_string(&prefs).expect("serializes");
+        assert!(written.contains("orientation = \"local\""));
     }
 
     #[test]

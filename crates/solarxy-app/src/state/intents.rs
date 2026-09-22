@@ -17,7 +17,7 @@ use super::State;
 use crate::gui::{
     CanvasAction, CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent,
     Intent, Intents, LayoutIntent, LookThroughChange, TreeAction, PaneChange, PanelIntent,
-    PaneView, PostChange, ReviewIntent, ToastSeverity,
+    PaneView, PostChange, ReviewIntent, ToastSeverity, ToolIntent,
 };
 
 impl State {
@@ -79,6 +79,7 @@ impl State {
                 }
                 Intent::CreateCameraFromView { pane } => self.create_camera_from_view(pane),
                 Intent::Viewport(action) => self.handle_viewport_action(action),
+                Intent::Tool(intent) => self.handle_tool_intent(intent),
                 Intent::LookThrough { pane, change } => {
                     // The pose lands on the next frame's follow, one frame
                     // after the click.
@@ -265,6 +266,7 @@ impl Recompute {
             | Intent::PaneView { .. }
             | Intent::CreateCameraFromView { .. }
             | Intent::Viewport(_)
+            | Intent::Tool(_)
             | Intent::LookThrough { .. }
             | Intent::File(_)
             | Intent::Edit(_)
@@ -449,6 +451,30 @@ impl State {
             Err(e) => self
                 .gui
                 .set_toast(&format!("Save failed: {e}"), ToastSeverity::Error),
+        }
+    }
+
+    /// The transform tools, from whichever of their four surfaces asked.
+    ///
+    /// The orientation writes the preference the three writers share and
+    /// then re-reads the solver's settings from it, so the key, the menu
+    /// and the dialog can never leave the handles in a frame the file does
+    /// not say.
+    pub(super) fn handle_tool_intent(&mut self, intent: ToolIntent) {
+        match intent {
+            ToolIntent::Set(tool) => self.set_tool(tool),
+            ToolIntent::CancelDrag => self.cancel_gizmo_drag(),
+            ToolIntent::SetOrientation(orientation) => {
+                self.preferences.viewport.orientation = orientation;
+                self.apply_gizmo_prefs();
+            }
+            ToolIntent::ToggleOrientation => {
+                let next = self.preferences.viewport.orientation.toggled();
+                self.preferences.viewport.orientation = next;
+                self.apply_gizmo_prefs();
+                self.gui
+                    .set_toast(&format!("Gizmo: {}", next.label()), ToastSeverity::Info);
+            }
         }
     }
 

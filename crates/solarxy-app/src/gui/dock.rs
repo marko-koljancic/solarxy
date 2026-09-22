@@ -132,6 +132,10 @@ pub(super) struct SolarxyTabViewer<'a> {
     /// The panel the pointer is over, which is what the maximize key acts
     /// on. Only a leaf's front tab is drawn, so the tab names its leaf.
     pub hovered_tab_out: &'a mut Option<SolarxyTab>,
+    /// The rects of the furniture drawn over the viewport that takes
+    /// clicks, recorded so the pointer routing keeps those clicks from the
+    /// camera and the pick.
+    pub chrome_rects_out: &'a mut Vec<egui::Rect>,
     /// Whether the floating parameter panel is up, for the docked panel's
     /// View menu to tick.
     pub floating_props_open: bool,
@@ -180,12 +184,30 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 // What is left under the bar is what the scene renders
                 // into. Recording the whole tab would put the top of the
                 // render behind the bar.
-                *self.viewport_rect_out = Some(ui.available_rect_before_wrap());
+                let viewport = ui.available_rect_before_wrap();
+                *self.viewport_rect_out = Some(viewport);
                 super::chrome::pane_toolbar::draw_pane_toolbars(
                     ui,
                     self.toolbars,
                     self.sources.settings,
                     self.intents,
+                    self.theme,
+                );
+                // The furniture over the render: the tool column at the left
+                // edge, which takes clicks and so records its rect, and the
+                // drag readout at the bottom, which takes none.
+                let column = super::chrome::tool_column::draw_tool_column(
+                    ui,
+                    viewport,
+                    self.sources.settings,
+                    self.intents,
+                    self.theme,
+                );
+                self.chrome_rects_out.push(column);
+                super::chrome::gizmo_readout::draw_gizmo_readout(
+                    ui,
+                    viewport,
+                    self.sources.settings.tools.readout,
                     self.theme,
                 );
                 ui.allocate_space(ui.available_size());

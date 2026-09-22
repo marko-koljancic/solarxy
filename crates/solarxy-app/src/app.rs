@@ -36,9 +36,12 @@ fn route_pointer_to_camera(state: &State) -> bool {
         state.input.cursor_pos.1 / ppp,
     );
     // Inside the Viewport tab, and specifically inside a pane's 3D
-    // content rect — a click on a per-pane toolbar strip or an open
-    // toolbar dropdown must not orbit the scene.
-    state.gui.cursor_in_viewport(cursor_logical) && state.pointer_in_pane_content()
+    // content rect, and not over the furniture drawn on it: a click on a
+    // per-pane toolbar strip, an open toolbar dropdown or a tool column
+    // button must not orbit the scene or pick.
+    state.gui.cursor_in_viewport(cursor_logical)
+        && !state.gui.cursor_over_viewport_chrome(cursor_logical)
+        && state.pointer_in_pane_content()
 }
 
 pub struct App {

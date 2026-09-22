@@ -2,9 +2,9 @@
 //! cubes.
 //!
 //! Pull-based, exactly like the rest of the renderer's overlay state: the host
-//! hands over a [`ManipulatorState`] (or `None`) and the renderer draws it. The
-//! desktop shell never calls it, so the desktop is unaffected until it wants the
-//! same feature, at which point it wires the same three pieces.
+//! hands over a [`ManipulatorState`] (or `None`) and the renderer draws it. Both
+//! shells wire the same three pieces: the solver in the shared host, a drive
+//! loop of their own over the engine, and this overlay.
 //!
 //! Geometry is generated on the CPU into the existing [`GizmoVertex`] format and
 //! drawn through the existing gizmo shader, so this adds no shader and no bind

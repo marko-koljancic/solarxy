@@ -1,6 +1,6 @@
 use solarxy_core::preferences::{
-    self, MAX_RECENT_FILES_CAP, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
-    MIN_WINDOW_WIDTH, Preferences, ThemeChoice,
+    self, GizmoOrientation, MAX_RECENT_FILES_CAP, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH,
+    MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Preferences, ThemeChoice,
 };
 
 /// The modal's tabs.
@@ -80,6 +80,7 @@ impl PreferencesModal {
             }
             PrefsTab::View => {
                 self.draft.display.background = defaults.display.background;
+                self.draft.viewport = defaults.viewport;
             }
             PrefsTab::Interface => {
                 self.draft.ui.max_recent_files = defaults.ui.max_recent_files;
@@ -310,6 +311,60 @@ fn draw_view_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             .small()
             .weak(),
     );
+
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new("Transform handles").strong());
+    // The browser's rows, over the same preference the orientation key and
+    // the viewport menu write: the frame the Move and Rotate handles align
+    // to (Scale is always local), and what a drag snaps to while the snap
+    // modifier is held.
+    egui::Grid::new("prefs_transform_handles")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Handle orientation");
+            let current = draft.viewport.orientation;
+            egui::ComboBox::from_id_salt("prefs_handle_orientation")
+                .selected_text(current.label())
+                .show_ui(ui, |ui| {
+                    for choice in [GizmoOrientation::World, GizmoOrientation::Local] {
+                        ui.selectable_value(
+                            &mut draft.viewport.orientation,
+                            choice,
+                            choice.label(),
+                        );
+                    }
+                });
+            ui.end_row();
+
+            ui.label("Snap: move (m)")
+                .on_hover_text("World units a move drag snaps to while the snap modifier is held");
+            ui.add(
+                egui::DragValue::new(&mut draft.viewport.snap_translate)
+                    .speed(0.1)
+                    .range(0.0..=f32::MAX),
+            );
+            ui.end_row();
+
+            ui.label("Snap: rotate (deg)")
+                .on_hover_text("Degrees a rotate drag snaps to while the snap modifier is held");
+            ui.add(
+                egui::DragValue::new(&mut draft.viewport.snap_rotate)
+                    .speed(1.0)
+                    .range(0.0..=f32::MAX),
+            );
+            ui.end_row();
+
+            ui.label("Snap: scale").on_hover_text(
+                "The increment a scale drag snaps to while the snap modifier is held",
+            );
+            ui.add(
+                egui::DragValue::new(&mut draft.viewport.snap_scale)
+                    .speed(0.05)
+                    .range(0.0..=f32::MAX),
+            );
+            ui.end_row();
+        });
 }
 
 fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {

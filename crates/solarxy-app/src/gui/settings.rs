@@ -15,8 +15,9 @@
 //! `texel_density_target` round-tripped through it without a single widget
 //! ever writing it, which is a hazard wearing a feature's clothes.
 
-use solarxy_core::preferences::IblMode;
+use solarxy_core::preferences::{GizmoOrientation, IblMode};
 use solarxy_graph::engine::CookMode;
+use solarxy_host::gizmo::{ALL_TOOLS, ToolMode};
 use solarxy_renderer::frame::PostProcessing;
 
 use crate::state::view_state::{DisplaySettings, PaneDisplaySettings};
@@ -76,6 +77,34 @@ pub(crate) struct ClipboardReadout {
     pub in_container: bool,
 }
 
+/// What the tool column, the context menu and the viewport menu show about
+/// the transform tools, read from the shell each frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ToolReadout<'a> {
+    /// The armed tool.
+    pub tool: ToolMode,
+    /// Which of [`ALL_TOOLS`] the selection can take, in that order. All
+    /// true with nothing selected, which narrows nothing.
+    pub applies: [bool; ALL_TOOLS.len()],
+    /// Which frame the Move and Rotate handles align to.
+    pub orientation: GizmoOrientation,
+    /// The live delta of the drag in flight, or nothing.
+    pub readout: Option<&'a str>,
+    /// Whether a drag is in flight, for the escape ladder's first rung.
+    pub dragging: bool,
+}
+
+impl ToolReadout<'_> {
+    /// Whether a tool applies to the selection, so a column button and a
+    /// context menu row cannot disagree.
+    pub(crate) fn applies_to(&self, tool: ToolMode) -> bool {
+        ALL_TOOLS
+            .iter()
+            .position(|t| *t == tool)
+            .is_none_or(|i| self.applies[i])
+    }
+}
+
 /// The display state the panels draw from, borrowed rather than copied.
 #[derive(Clone, Copy)]
 pub(crate) struct PanelSettings<'a> {
@@ -97,6 +126,8 @@ pub(crate) struct PanelSettings<'a> {
     /// rather than anything about the document, which is why they sit
     /// with the display settings and persist with them.
     pub canvas: solarxy_core::preferences::CanvasPrefs,
+    /// The transform tools: what is armed, what applies, which frame.
+    pub tools: ToolReadout<'a>,
 }
 
 impl PanelSettings<'_> {
