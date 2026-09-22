@@ -81,21 +81,6 @@ pub struct ModelStats {
     pub verts: usize,
 }
 
-/// Build a [`model::TextureThumbnail`] from one role's source slots and
-/// move the bytes out so the raw material drops cheaply. Returns `None`
-/// when the role has no source texture; the path is cloned so the
-/// caller's GPU upload retains its own copy. Used by `upload_model`.
-fn take_thumbnail(
-    data: &mut Option<std::sync::Arc<solarxy_core::RawImageData>>,
-    path: Option<&std::path::PathBuf>,
-) -> Option<model::TextureThumbnail> {
-    let image = data.take()?;
-    Some(model::TextureThumbnail {
-        image,
-        source_path: path.cloned(),
-    })
-}
-
 /// A content-addressed GPU texture cache keyed by `(RawImageData.hash,
 /// linear)`. Owned by `SceneObjects` for the engine-driven path so a
 /// material-node factor drag (which rebuilds the material but reuses the
@@ -134,7 +119,7 @@ impl TextureCache {
 /// `load_model_any` is the filesystem wrapper over it.
 #[allow(clippy::unnecessary_wraps)]
 pub fn upload_model(
-    mut raw: RawModelData,
+    raw: RawModelData,
     file_path: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -160,8 +145,7 @@ pub fn upload_model(
     let (mesh_vertices, mesh_indices, bounds, per_mesh_bounds, normals_geo) =
         geometry::process_raw_model(&raw);
     let mut gpu_materials = Vec::new();
-    let mut material_thumbnails: Vec<model::MaterialThumbnails> = Vec::new();
-    for (mat_idx, mat) in raw.materials.iter_mut().enumerate() {
+    for (mat_idx, mat) in raw.materials.iter().enumerate() {
         let diffuse_texture = load_or_fallback_texture(
             device,
             queue,
@@ -206,40 +190,6 @@ pub fn upload_model(
             uniform,
             layout,
         ));
-
-        // CPU-side copy of the material's source textures. `take` moves the
-        // decoded bytes out of the raw material (which is about to drop
-        // anyway) into an Arc so a reader can hold a cheap reference; paths
-        // are cloned because both the GPU upload and the cache need them.
-        // Built for the desktop's material inspector, which was withdrawn in
-        // 0.10.0; nothing in the workspace reads it now.
-        material_thumbnails.push(model::MaterialThumbnails {
-            albedo: take_thumbnail(
-                &mut mat.diffuse_texture_data,
-                mat.diffuse_texture_path.as_ref(),
-            ),
-            normal: take_thumbnail(
-                &mut mat.normal_texture_data,
-                mat.normal_texture_path.as_ref(),
-            ),
-            metallic_roughness: take_thumbnail(
-                &mut mat.metallic_roughness_texture_data,
-                mat.metallic_roughness_texture_path.as_ref(),
-            ),
-            occlusion: take_thumbnail(
-                &mut mat.occlusion_texture_data,
-                mat.occlusion_texture_path.as_ref(),
-            ),
-            emissive: take_thumbnail(
-                &mut mat.emissive_texture_data,
-                mat.emissive_texture_path.as_ref(),
-            ),
-            base_color: [
-                mat.base_color_factor[0],
-                mat.base_color_factor[1],
-                mat.base_color_factor[2],
-            ],
-        });
     }
 
     if gpu_materials.is_empty() {
@@ -257,14 +207,6 @@ pub fn upload_model(
             material::MaterialUniform::default(),
             layout,
         ));
-        material_thumbnails.push(model::MaterialThumbnails {
-            albedo: None,
-            normal: None,
-            metallic_roughness: None,
-            occlusion: None,
-            emissive: None,
-            base_color: [0.8, 0.8, 0.8],
-        });
     }
 
     let mut gpu_meshes = Vec::new();
@@ -484,7 +426,6 @@ pub fn upload_model(
             bounds,
             mesh_bounds: gpu_mesh_bounds,
             cpu_meshes,
-            material_thumbnails,
             has_uvs,
         },
         normals_geo,
@@ -494,11 +435,9 @@ pub fn upload_model(
 }
 
 /// Upload GPU materials for cooked geometry (`solarxy_core::scene`).
-/// Mirrors `upload_model`'s material loop minus the Material-Inspector
-/// thumbnail capture (cooked materials arrive `Arc`-shared, so the
-/// thumbnail bytes cannot be moved out; the inspector pipeline for
-/// engine-driven objects comes with the asset milestone). Falls back to
-/// the clay default when `materials` is empty, exactly like model loads.
+/// Mirrors `upload_model`'s material loop over `Arc`-shared materials,
+/// through the content-addressed texture cache. Falls back to the clay
+/// default when `materials` is empty, exactly like model loads.
 pub(crate) fn upload_cooked_materials(
     materials: &[std::sync::Arc<RawMaterialData>],
     device: &wgpu::Device,

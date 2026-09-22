@@ -635,31 +635,6 @@ impl SceneObjects {
             &layouts.texture,
             &mut self.texture_cache,
         )?;
-        let material_thumbnails = cooked
-            .materials
-            .iter()
-            .map(|m| crate::model::MaterialThumbnails {
-                albedo: None,
-                normal: None,
-                metallic_roughness: None,
-                occlusion: None,
-                emissive: None,
-                base_color: m.diffuse.unwrap_or([0.8, 0.8, 0.8]),
-            })
-            .chain(
-                cooked
-                    .materials
-                    .is_empty()
-                    .then_some(crate::model::MaterialThumbnails {
-                        albedo: None,
-                        normal: None,
-                        metallic_roughness: None,
-                        occlusion: None,
-                        emissive: None,
-                        base_color: [0.8, 0.8, 0.8],
-                    }),
-            )
-            .collect();
 
         let mut meshes = Vec::with_capacity(built.len());
         let mut caps = Vec::with_capacity(built.len());
@@ -804,7 +779,6 @@ impl SceneObjects {
             bounds: cooked.bounds,
             mesh_bounds: built.iter().map(|b| b.bounds).collect(),
             cpu_meshes: built.iter().map(BuiltMesh::cpu_mesh).collect(),
-            material_thumbnails,
             has_uvs: built.iter().any(|b| b.has_uvs),
         };
 
