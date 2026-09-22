@@ -471,17 +471,16 @@ fn draw_display_menu(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
             PaneChange::ShowGrid as fn(bool) -> PaneChange,
         ),
         (pane.show_axis_gizmo, "Axes", PaneChange::ShowAxisGizmo),
+        (
+            pane.show_light_markers,
+            "Light markers",
+            PaneChange::ShowLightMarkers,
+        ),
     ] {
         if let Some(v) = check(ui, current, label, "") {
             intents.pane(index, make(v));
         }
     }
-
-    // The field is real and per pane, but this shell draws no marker channel
-    // yet, so an enabled toggle would report a state nothing shows.
-    let mut markers = pane.show_light_markers;
-    ui.add_enabled(false, egui::Checkbox::new(&mut markers, "Light markers"))
-        .on_disabled_hover_text("Light markers arrive with the viewport's transform tools.");
 
     if let Some(v) = check(ui, pane.show_validation, "Validation overlay", "") {
         intents.pane(index, PaneChange::ShowValidation(v));

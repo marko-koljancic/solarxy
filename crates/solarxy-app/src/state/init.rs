@@ -186,11 +186,9 @@ impl State {
                         uv_zoom: 1.0,
                         show_uv_overlap: false,
                         show_validation: false,
-                        // Off on the desktop, and not a policy disagreement
-                        // with the browser: this shell draws no light marker
-                        // channel at all, because it has no viewport gizmo to
-                        // aim with yet. It turns on with that shell's canvas.
-                        show_light_markers: false,
+                        // On, as the browser seeds it and as the field's own
+                        // default says: a light with no marker is invisible.
+                        show_light_markers: true,
                         turntable_active: false,
                         pane_engine: solarxy_core::view_config::PaneEngine::Raster,
                     };

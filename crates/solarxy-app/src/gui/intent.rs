@@ -122,6 +122,9 @@ pub(crate) enum PaneChange {
     LineWeight(LineWeight),
     ShowGrid(bool),
     ShowAxisGizmo(bool),
+    /// The screen-constant marker at every light, per pane because its
+    /// size depends on the pane's camera.
+    ShowLightMarkers(bool),
     ShowValidation(bool),
     UvBackground(UvMapBackground),
     ShowUvOverlap(bool),

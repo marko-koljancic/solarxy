@@ -83,6 +83,15 @@ impl State {
         let panes = self.compute_panes();
         let is_split = panes.len() > 1;
 
+        // A screenshot is the frame it is taken on, so the furniture is
+        // cleared before the panes render rather than in an offscreen pass
+        // as the browser does: a delivered image carries no gizmo, no
+        // helper and no marker on either shell. The frame the user sees is
+        // the same one, bare for that one frame.
+        if self.capture_requested {
+            self.renderer.clear_viewport_furniture();
+        }
+
         for (i, pane) in panes.iter().enumerate() {
             self.render_pane(i, pane, &surface_view, is_split);
         }
@@ -160,6 +169,21 @@ impl State {
             let ppp = self.window.scale_factor() as f32;
             self.renderer
                 .write_manipulator(&self.queue, &cam_data, pane.height / ppp);
+            // Markers are per pane for the same reason the manipulator is:
+            // screen-constant means a pane's own camera and height decide the
+            // world size. Written only when the pane draws them, and the
+            // draw is gated on the same flag.
+            if pds.show_light_markers {
+                let selected = self.selected_object;
+                let lights = self.raster.scene().lights().map(<[_]>::to_vec);
+                self.renderer.write_light_markers(
+                    &self.queue,
+                    lights.as_deref().unwrap_or(&[]),
+                    &cam_data,
+                    pane.height / ppp,
+                    selected,
+                );
+            }
         }
 
         let background = Self::resolve_background(&pds);

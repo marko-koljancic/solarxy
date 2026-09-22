@@ -357,6 +357,14 @@ impl State {
         let Some(background_mode) = self.still.as_ref().map(|s| s.background) else {
             return;
         };
+        // A still is a photograph of the scene. `for_still` states that for
+        // everything a pane flag reaches; the manipulator, both helper
+        // channels and the light markers are host-fed and reach none of
+        // them, so they hold whatever the last ordinary frame left in them
+        // and the per-frame gizmo sync keeps refilling one. Cleared every
+        // pump rather than once, for that reason, and repopulated by the
+        // next ordinary frame.
+        self.renderer.clear_viewport_furniture();
         let pds = PaneDisplaySettings::for_still(background_mode);
         let background = Self::resolve_background(&pds);
         let bounds = self.scene_bounds();

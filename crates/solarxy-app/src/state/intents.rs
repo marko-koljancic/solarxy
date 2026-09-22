@@ -240,6 +240,7 @@ impl Recompute {
                 | PaneChange::BoundsMode(_)
                 | PaneChange::ShowGrid(_)
                 | PaneChange::ShowAxisGizmo(_)
+                | PaneChange::ShowLightMarkers(_)
                 | PaneChange::ShowValidation(_)
                 | PaneChange::UvBackground(_)
                 | PaneChange::ShowUvOverlap(_)
@@ -300,6 +301,7 @@ fn apply_pane_change(pds: &mut crate::state::view_state::PaneDisplaySettings, ch
         PaneChange::LineWeight(v) => pds.line_weight = v,
         PaneChange::ShowGrid(v) => pds.show_grid = v,
         PaneChange::ShowAxisGizmo(v) => pds.show_axis_gizmo = v,
+        PaneChange::ShowLightMarkers(v) => pds.show_light_markers = v,
         PaneChange::ShowValidation(v) => pds.show_validation = v,
         PaneChange::UvBackground(v) => pds.uv_bg = v,
         PaneChange::ShowUvOverlap(v) => pds.show_uv_overlap = v,
@@ -976,6 +978,9 @@ mod tests {
             }),
             (PaneChange::ShowAxisGizmo(true), |p, b| {
                 p.show_axis_gizmo = b.show_axis_gizmo;
+            }),
+            (PaneChange::ShowLightMarkers(true), |p, b| {
+                p.show_light_markers = b.show_light_markers;
             }),
             (PaneChange::ShowValidation(true), |p, b| {
                 p.show_validation = b.show_validation;
