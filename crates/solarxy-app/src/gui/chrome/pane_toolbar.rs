@@ -104,6 +104,9 @@ pub(crate) struct PaneToolbarData<'a> {
     pub cameras: &'a [(u64, String)],
     /// Which camera each pane looks through, mirroring the state field.
     pub look_through: [Option<u64>; 4],
+    /// Whether each bound pane is locked to its camera, as the shared rule
+    /// answers it: never true for a free view.
+    pub camera_locked: [bool; 4],
     /// The scene-global turntable speed, which the Display menu's speed
     /// submenu both reads and writes. Global because it is global in the
     /// browser too; see [`TURNTABLE_SPEEDS`].
@@ -111,11 +114,14 @@ pub(crate) struct PaneToolbarData<'a> {
 }
 
 /// A toolbar's requested look-through change for one pane: bind to a
-/// camera node, or return to a free view.
+/// camera node, return to a free view, or lock the bound camera.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LookThroughChange {
     Bind(u64),
     Free,
+    /// Lock or unlock the bound camera to the view, so navigating the pane
+    /// writes its pose back to the node.
+    Lock(bool),
 }
 
 /// A toolbar's requested framing for one pane, from its Views label.
@@ -178,6 +184,7 @@ pub(in crate::gui) fn draw_pane_toolbars(
                             uv_overlap_pct,
                             cameras: data.cameras,
                             bound_camera,
+                            camera_locked: data.camera_locked.get(i).copied().unwrap_or(false),
                             turntable_rpm: data.turntable_rpm,
                         },
                         intents,
@@ -228,6 +235,7 @@ struct PaneControls<'a> {
     uv_overlap_pct: Option<f32>,
     cameras: &'a [(u64, String)],
     bound_camera: Option<u64>,
+    camera_locked: bool,
     turntable_rpm: f32,
 }
 
@@ -388,13 +396,14 @@ fn heading(ui: &mut egui::Ui, text: &str) {
 
 /// Body of the camera label's menu.
 ///
-/// Camera lock, the bookmark jumps and create-from-view join this once the
-/// pieces they need exist once rather than in the browser alone.
+/// Free view, the look-through list, the lock, the bookmark jumps and
+/// create-from-view, in the browser's order.
 fn draw_camera_menu(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Intents) {
     let PaneControls {
         index,
         cameras,
         bound_camera,
+        camera_locked,
         ..
     } = cx;
     if ui.radio(bound_camera.is_none(), "Free view").clicked() && bound_camera.is_some() {
@@ -418,15 +427,22 @@ fn draw_camera_menu(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inten
     }
 
     // The lock is what gates writing a navigated pose back onto the camera
-    // node. Without that write-back there is nothing for it to gate, and a
-    // toggle that remembers a state nothing reads is worse than one that
-    // says why it is off.
-    let mut locked = false;
-    ui.add_enabled(
-        false,
-        egui::Checkbox::new(&mut locked, "Lock camera to view"),
-    )
-    .on_disabled_hover_text("Locking arrives with camera write-back, in the viewport work.");
+    // node, so it means nothing on a free view. The browser hides the entry
+    // then; here it is drawn disabled with the reason, so the menu's shape
+    // does not depend on the pane.
+    let mut locked = camera_locked;
+    let lock = ui
+        .add_enabled(
+            bound_camera.is_some(),
+            egui::Checkbox::new(&mut locked, "Lock camera to view"),
+        )
+        .on_disabled_hover_text("Look through a camera to lock it to the view");
+    if lock.changed() {
+        intents.raise(Intent::LookThrough {
+            pane: index,
+            change: LookThroughChange::Lock(locked),
+        });
+    }
 
     // Guarded on there being a camera, unlike the browser's, whose heading
     // renders over an empty list in a scene with none.

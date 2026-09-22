@@ -246,6 +246,12 @@ impl State {
                 self.input.nav_button_down = pressed;
             }
             self.for_each_target_cam(|cam| cam.handle_mouse_button(mapped, pressed));
+            // A reframe of a locked camera ends when the navigation button
+            // lifts: the pose is committed to the node as one undo step and
+            // the follow resumes.
+            if !pressed && matches!(mapped, PointerButton::Left | PointerButton::Middle) {
+                self.end_camera_gesture();
+            }
 
             if mapped == PointerButton::Left {
                 let cursor = self.input.cursor_pos;
@@ -342,6 +348,13 @@ impl State {
         } else {
             self.release_look_through_for_gesture();
             self.for_each_target_cam(|cam| cam.handle_scroll(delta));
+            // A dolly on a locked pane reframes the bound camera, and a wheel
+            // has no release to commit on, so each notch commits.
+            let active = self.view.active_pane;
+            if self.is_locked_look_through(active) {
+                self.camera_editing[active] = false;
+                self.commit_pane_camera_to_node(active);
+            }
         }
     }
 }

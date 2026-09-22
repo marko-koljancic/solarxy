@@ -45,7 +45,6 @@ mod app;
 // The no-movement guard on a locked look-through camera commit. Both targets,
 // unlike the host that calls it, so native CI runs its tests; it cannot move
 // to `solarxy-host`, which has no `solarxy-graph` dependency by design.
-mod camera_commit;
 
 // What a still asks the tracer for, from what the render node says. Both
 // targets for the same reason as above, and it cannot move to `solarxy-host`

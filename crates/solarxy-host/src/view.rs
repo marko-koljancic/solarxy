@@ -1,25 +1,22 @@
 //! The per-session view state both shells own.
 //!
-//! Five fields, and only five, but the reason has changed and the shape has
-//! not yet caught up.
-//!
 //! These were the fields both shells had, against a desktop with no camera
 //! nodes. That desktop is gone: it holds an engine, and it tracks which
 //! `camera` node each pane looks through exactly as the web shell does, in
-//! its own array of its own id type. So the look-through binding is now
+//! its own array of its own id type. So the look-through binding is
 //! **duplicated rather than shell-specific**, and the only thing keeping it
 //! out of here is that the two shells name the node with different types and
 //! this crate may not see the engine's.
 //!
-//! What genuinely does stay on the web shell: whether a bound pane is locked,
-//! whether it is mid-navigation, and each pane's own look. The lock's *rule*
-//! is shared, as [`crate::cameras::CameraLocks`]; the flags are not, because
-//! the desktop cannot act on one until it can write a pose back to a node.
-//! The mid-navigation flag exists only to serve that write-back and has
-//! nothing to suppress without it.
+//! The lock on a bound pane moved here once both shells wrote a pose back to
+//! a node; its rule is [`crate::cameras::CameraLocks`]. What stays on each
+//! shell is the mid-navigation flag, which exists only to hold the follow
+//! off during a gesture and is a fact about that shell's pointer.
 
 use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings};
 use solarxy_renderer::camera_state::CameraState;
+
+use crate::cameras::CameraLocks;
 
 /// The view state a shell hands to the shared pane orchestration.
 pub struct HostViewState {
@@ -38,9 +35,13 @@ pub struct HostViewState {
     pub active_pane: usize,
     /// Whether navigating one pane navigates them all.
     ///
-    /// **No constructor sets this**, deliberately. The desktop shell starts
-    /// linked and the web shell starts unlinked, so a `new()` that picked one
-    /// would quietly change the other the day it was called. Both shells build
-    /// the struct literally and say what they mean.
+    /// **No constructor sets this**, deliberately. Both shells start unlinked
+    /// since 0.10.0 and nothing on either links them, but the field stays a
+    /// literal each shell writes rather than a default one inherits, so a
+    /// shell that wants the other answer has to say so.
     pub cameras_linked: bool,
+    /// Whether each bound pane is locked, so that navigating it writes the
+    /// pose back to its camera node. The type carries the rule that a lock
+    /// means nothing on a pane that is not bound, so no shell restates it.
+    pub camera_locked: CameraLocks,
 }

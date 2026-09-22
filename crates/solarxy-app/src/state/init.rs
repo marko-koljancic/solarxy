@@ -214,6 +214,7 @@ impl State {
                 // counterpart and went, and leaving this true would have
                 // linked every split view for good.
                 cameras_linked: false,
+                camera_locked: solarxy_host::cameras::CameraLocks::default(),
             },
             gui,
             engine: None,
@@ -235,6 +236,7 @@ impl State {
             tracer: None,
             traced_env_dirty: false,
             look_through: [None; 4],
+            camera_editing: [false; 4],
             unresolved_binding: [false; 4],
             raster,
             env,

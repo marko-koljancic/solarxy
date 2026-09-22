@@ -459,7 +459,13 @@ impl State {
                 apply_camera_json(&mut cam.camera, &pane.camera);
             }
             // Restored unchecked: the camera it names has not cooked yet.
+            // The lock beside it rides the same rule the browser reads it
+            // through, which ignores a lock on a pane that is not bound.
             self.look_through[i] = restored_binding(pane);
+            self.view
+                .camera_locked
+                .set(i, pane.camera_locked, self.look_through[i].is_some());
+            self.camera_editing[i] = false;
             self.unresolved_binding[i] = self.look_through[i].is_some();
         }
         self.ensure_pane_cameras();
@@ -610,7 +616,7 @@ impl State {
                 BindingResolution::Keep => self.unresolved_binding[i] = false,
                 BindingResolution::Wait => {}
                 BindingResolution::Release => {
-                    self.look_through[i] = None;
+                    self.unbind_pane(i);
                     self.unresolved_binding[i] = false;
                 }
             }
@@ -635,7 +641,9 @@ impl State {
     fn install_engine(&mut self, engine: Box<Engine>, info: EngineSceneInfo) {
         self.clear_scene_objects();
         self.environment.invalidate();
-        self.look_through = [None; 4];
+        for pane in 0..4 {
+            self.unbind_pane(pane);
+        }
         self.unresolved_binding = [false; 4];
         self.cook_health.clear();
         self.cancel_still_render();

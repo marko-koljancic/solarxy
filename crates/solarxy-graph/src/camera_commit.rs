@@ -1,14 +1,16 @@
 //! The no-movement guard on a locked look-through pane's camera commit.
 //!
-//! A module compiled on both targets deliberately: the host that calls it
-//! only compiles for wasm32, and keeping the comparison here lets native CI
-//! run its tests without a wasm toolchain. It cannot follow the other shared
-//! helpers into `solarxy-host`, because that crate has no `solarxy-graph`
-//! dependency by design and this guard reads the engine's param types.
+//! Both graphical shells write a navigated pose back to the bound `camera`
+//! node as one undo step, and both have to know when a press and release
+//! moved nothing, because an unconditional commit pushes an undo step that
+//! changes nothing and, on the browser, swallows the click that should have
+//! picked. The guard reads the node's own parameters, so it lives here with
+//! them rather than in the shared host, which has no engine dependency by
+//! design; it was the browser's alone until the desktop wrote poses back.
 
 use std::collections::BTreeMap;
 
-use solarxy_graph::params::{ParamSource, ParamValue};
+use crate::params::{ParamSource, ParamValue};
 
 /// Whether the pose a locked look-through pane would commit is already the
 /// one on its bound camera node.
@@ -23,8 +25,8 @@ use solarxy_graph::params::{ParamSource, ParamValue};
 /// A node missing either param, or holding an expression, compares as
 /// changed: the commit then writes the literal pose, which is what a gesture
 /// on such a pane has to mean.
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(crate) fn pose_unchanged(
+#[must_use]
+pub fn pose_unchanged(
     params: &BTreeMap<String, ParamSource>,
     eye: [f32; 3],
     target: [f32; 3],
@@ -35,7 +37,6 @@ pub(crate) fn pose_unchanged(
 // The exact comparison IS the design: see the doc comment above. A tolerance
 // is what the lint wants and what this guard must not have.
 #[allow(clippy::float_cmp)]
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn stored_matches(stored: Option<&ParamSource>, live: [f32; 3]) -> bool {
     match stored.and_then(ParamSource::literal) {
         Some(ParamValue::Vec3(v)) => [v[0] as f32, v[1] as f32, v[2] as f32] == live,

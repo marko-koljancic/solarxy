@@ -82,6 +82,10 @@ pub(super) struct PaneSource<'a> {
     pub settings: &'a PaneDisplaySettings,
     /// The `camera` node this pane looks through, by id.
     pub look_through: Option<u64>,
+    /// Whether that camera is locked to the view, so navigating the pane
+    /// writes its pose back. Meaningless without a binding, and written as
+    /// the shared rule answers it rather than as the raw flag.
+    pub camera_locked: bool,
 }
 
 /// The saved view: layout, active pane, divider, and every pane's camera,
@@ -89,8 +93,6 @@ pub(super) struct PaneSource<'a> {
 ///
 /// A pane with no camera writes the default, whose zero distance is what
 /// the reader treats as "frame this pane on open" (`apply_scene_view`).
-/// The camera lock beside the binding is the write-back this shell does not
-/// do, so it is written false.
 pub(super) fn view_json(
     layout: ViewLayout,
     active_pane: usize,
@@ -118,7 +120,7 @@ pub(super) fn view_json(
                 camera,
                 display,
                 look_through: pane.look_through,
-                camera_locked: false,
+                camera_locked: pane.camera_locked,
                 ..solarxy_scenefile::PaneJson::default()
             }
         })
@@ -213,6 +215,7 @@ impl State {
             camera: self.view.cameras[i].as_ref().map(|c| &c.camera),
             settings: &self.view.pane_settings[i],
             look_through: self.look_through[i].map(|id| id.0),
+            camera_locked: self.is_locked_look_through(i),
         });
         view_json(
             self.view.display.layout,
@@ -526,21 +529,25 @@ mod tests {
                 camera: Some(&cams[0]),
                 settings: &settings[0],
                 look_through: None,
+                camera_locked: false,
             },
             PaneSource {
                 camera: Some(&cams[1]),
                 settings: &settings[1],
                 look_through: Some(7),
+                camera_locked: true,
             },
             PaneSource {
                 camera: Some(&cams[2]),
                 settings: &settings[2],
                 look_through: None,
+                camera_locked: false,
             },
             PaneSource {
                 camera: None,
                 settings: &settings[3],
                 look_through: None,
+                camera_locked: false,
             },
         ];
         let view = view_json(ViewLayout::Quad, 2, 0.35, panes);
@@ -573,9 +580,10 @@ mod tests {
             Some(settings[3].show_grid)
         );
         assert!(
-            !view.panes[1].camera_locked,
-            "the lock is the write-back this shell lacks"
+            view.panes[1].camera_locked,
+            "a bound pane's lock is written beside its binding"
         );
+        assert!(!view.panes[0].camera_locked);
     }
 
     /// An authored document saved with this shell's sidecar reopens as the
@@ -615,6 +623,7 @@ mod tests {
             camera: (i == 0).then_some(&cam),
             settings: &settings[i],
             look_through: None,
+            camera_locked: false,
         });
         let sidecar = SceneSidecar {
             generator: "solarxy test".to_string(),

@@ -1224,8 +1224,9 @@ rather than an aspiration.
 
 **Gaps, named.**
 
-- **`crates/solarxy-web/src/app/` has zero tests**, and the crate around it has eleven, all in
-  `camera_commit.rs` and `trace_settings.rs`. The 0.10.0 split addressed the file's size and
+- **`crates/solarxy-web/src/app/` has zero tests**, and the crate around it has seven, all in
+  `trace_settings.rs`; the no-movement guard and its four tests moved to
+  `solarxy-graph::camera_commit` once both shells wrote a pose back. The 0.10.0 split addressed the file's size and
   deliberately did not add tests, because a pure move that also added assertions would no longer
   be provable as a pure move. The seams it created are what makes them affordable next. Untested by consequence: the still-render pump and
   its image encoding, the gizmo drag lifecycle including rollback, all four worker pumps and

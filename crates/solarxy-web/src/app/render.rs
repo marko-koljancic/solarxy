@@ -788,7 +788,8 @@ impl SolarxyApp {
     /// Whether pane `pane` is a locked look-through pane (navigation reframes
     /// its bound camera node).
     pub(super) fn is_locked_look_through(&self, pane: usize) -> bool {
-        self.camera_locked
+        self.view
+            .camera_locked
             .is_locked(pane, pane < 4 && self.look_through[pane].is_some())
     }
 
@@ -811,7 +812,7 @@ impl SolarxyApp {
         // comparison space is the guard's to explain.
         if let Ok(graph) = self.engine.document().graph(GraphContext::Root)
             && let Some(data) = graph.node(node)
-            && crate::camera_commit::pose_unchanged(
+            && solarxy_graph::camera_commit::pose_unchanged(
                 &data.params,
                 [eye.x, eye.y, eye.z],
                 [target.x, target.y, target.z],
@@ -1412,7 +1413,7 @@ impl SolarxyApp {
             pane_rects: self.pane_rects_css(),
             pane_looks: self.pane_looks,
             pane_look_through,
-            pane_camera_locked: self.camera_locked.flags(),
+            pane_camera_locked: self.view.camera_locked.flags(),
             pane_gate_aspect,
             attr_viz: self.attr_viz.clone(),
         }

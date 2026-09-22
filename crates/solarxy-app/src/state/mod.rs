@@ -226,19 +226,23 @@ pub struct State {
     pub(super) traced_env_dirty: bool,
     /// The scene camera each pane looks through, or `None` for a free view.
     ///
-    /// Viewer-scoped look-through: a bound pane follows the camera node's
-    /// pose each frame and composites with the camera's look, and any local
-    /// navigation releases the pane back to a free view rather than writing
-    /// the pose back to the node the way the web's locked mode does. That
-    /// write-back is authoring machinery, and it waits for the desktop node
-    /// canvas.
+    /// A bound pane follows the camera node's pose each frame and composites
+    /// with the camera's look. Navigating it does one of two things, decided
+    /// by the lock on the shared view state: a locked pane writes its pose
+    /// back to the node as one undo step, the browser's rule; an unlocked
+    /// pane is released to a free view, which the browser does not do (its
+    /// follow snaps an unlocked pane straight back) and which is recorded as
+    /// a divergence rather than copied.
     ///
-    /// Restored from a scene file's per-pane `look_through` on open, because
-    /// a binding is part of how the scene was authored rather than of how
-    /// this window is arranged; never written, because this shell has no
-    /// save. The web persists the binding and its lock; only the binding
-    /// crosses here, since the lock is the write-back this shell lacks.
+    /// Saved with the scene beside its lock, and restored from a scene file
+    /// on open, because a binding is part of how the scene was authored
+    /// rather than of how this window is arranged.
     pub(super) look_through: [Option<solarxy_core::scene::SceneObjectId>; 4],
+    /// A locked pane is mid-navigation, so the node-to-pane follow is held
+    /// off until the gesture commits; it would otherwise fight the live
+    /// orbit. A fact about this shell's pointer, so it stays here rather
+    /// than on the shared view state.
+    pub(super) camera_editing: [bool; 4],
     /// Panes whose restored binding has not yet been checked against the
     /// cooked scene.
     ///

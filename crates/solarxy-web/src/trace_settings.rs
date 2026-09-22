@@ -1,8 +1,7 @@
 //! The tracer configured the way the render node asks for.
 //!
-//! Outside the wasm cfg for the reason `camera_commit` is: the host that calls
-//! it is wasm-only, and a mapping nothing can run natively is a mapping nothing
-//! checks. It cannot move to `solarxy-host` either, which has no
+//! Outside the wasm cfg deliberately: the host that calls it is wasm-only,
+//! and a mapping nothing can run natively is a mapping nothing checks. It cannot move to `solarxy-host` either, which has no
 //! `solarxy-graph` dependency by design, and it cannot move to the engine,
 //! which must not see the renderer. So each of the three shells carries its
 //! own, and each one carries the guard below.

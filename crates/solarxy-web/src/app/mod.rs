@@ -183,13 +183,12 @@ fn default_display_settings() -> DisplaySettings {
 /// no such key.
 const PANE_LOOK_KEY: &str = "look";
 
-// This shell's view state is `solarxy_host::HostViewState` plus four fields
-// held directly on `SolarxyApp`: `pane_looks`, `look_through`, `camera_locked`
-// and `camera_editing`. Those four describe panes looking through `camera`
-// nodes, and the desktop shell has no camera nodes until it gains an engine,
-// so they stay here rather than sitting on the shared type as fields one
-// consumer sets and the other never reads. Same judgement the shared crate
-// makes about a renderer trait: one consumer is not yet something to share.
+// This shell's view state is `solarxy_host::HostViewState` plus three fields
+// held directly on `SolarxyApp`: `pane_looks`, `look_through` and
+// `camera_editing`. The binding names the engine's node type, which the
+// shared crate may not see; the editing flag is a fact about this shell's
+// pointer; the looks wait on the desktop storing one per pane. The lock
+// left for the shared type once both shells wrote a pose back.
 
 mod assets;
 mod capture;
@@ -460,10 +459,6 @@ pub struct SolarxyApp {
     pane_looks: [PaneLook; 4],
     /// Which `camera` node each pane looks through (`None` = free view).
     look_through: [Option<NodeId>; 4],
-    /// Whether a look-through pane is locked so navigation reframes the camera
-    /// node. The type carries the rule that a lock means nothing on a pane
-    /// that is not bound, so no call site here restates it.
-    camera_locked: solarxy_host::cameras::CameraLocks,
     /// Transient: a locked look-through pane is mid-navigation, so the
     /// node-to-pane follow is suppressed until the gesture commits (it would
     /// otherwise fight live navigation). Not persisted.

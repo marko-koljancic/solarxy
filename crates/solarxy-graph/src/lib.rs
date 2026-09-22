@@ -43,6 +43,7 @@
 )]
 
 pub mod assets;
+pub mod camera_commit;
 pub mod cook;
 pub mod document;
 pub mod engine;

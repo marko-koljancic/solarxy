@@ -80,19 +80,23 @@ impl State {
                 Intent::CreateCameraFromView { pane } => self.create_camera_from_view(pane),
                 Intent::Viewport(action) => self.handle_viewport_action(action),
                 Intent::Tool(intent) => self.handle_tool_intent(intent),
-                Intent::LookThrough { pane, change } => {
-                    // The pose lands on the next frame's follow, one frame
-                    // after the click.
-                    if let Some(slot) = self.look_through.get_mut(pane) {
-                        *slot = match change {
-                            LookThroughChange::Bind(id) => Some(SceneObjectId(id)),
-                            LookThroughChange::Free => None,
-                        };
-                        // Picked from the cameras that exist, so there is
-                        // nothing left to check, whatever an open left flagged.
-                        self.unresolved_binding[pane] = false;
+                Intent::LookThrough { pane, change } => match change {
+                    LookThroughChange::Lock(locked) => self.set_pane_camera_lock(pane, locked),
+                    LookThroughChange::Bind(_) | LookThroughChange::Free => {
+                        // The pose lands on the next frame's follow, one frame
+                        // after the click. Rebinding, to another camera or to
+                        // none, releases the lock as the browser's does.
+                        if pane < 4 {
+                            self.unbind_pane(pane);
+                            if let LookThroughChange::Bind(id) = change {
+                                self.look_through[pane] = Some(SceneObjectId(id));
+                            }
+                            // Picked from the cameras that exist, so there is
+                            // nothing left to check, whatever an open left flagged.
+                            self.unresolved_binding[pane] = false;
+                        }
                     }
-                }
+                },
                 Intent::File(intent) => self.apply_file_intent(intent),
                 Intent::Edit(EditIntent::Undo) => self.undo(),
                 Intent::Edit(EditIntent::Redo) => self.redo(),

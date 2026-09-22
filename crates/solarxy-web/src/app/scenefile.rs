@@ -191,7 +191,7 @@ impl SolarxyApp {
                     camera,
                     display,
                     look_through: self.look_through[i].map(|n| n.0),
-                    camera_locked: self.camera_locked.flags()[i],
+                    camera_locked: self.view.camera_locked.flags()[i],
                     ..solarxy_scenefile::PaneJson::default()
                 }
             })
@@ -248,7 +248,8 @@ impl SolarxyApp {
             // The binding is written first: a lock is only accepted on a
             // bound pane, so restoring them the other way round would drop
             // every saved lock.
-            self.camera_locked
+            self.view
+                .camera_locked
                 .set(i, pane.camera_locked, self.look_through[i].is_some());
             self.camera_editing[i] = false;
         }

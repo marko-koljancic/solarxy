@@ -664,6 +664,7 @@ impl State {
             uv_overlap_pct,
             cameras: &scene_cameras,
             look_through: look_through_mirror,
+            camera_locked: std::array::from_fn(|i| self.is_locked_look_through(i)),
             turntable_rpm: self.view.display.turntable_rpm,
         };
         self.gui.render_ui(

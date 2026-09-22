@@ -48,7 +48,7 @@ impl SolarxyApp {
                 None
             };
             if self.look_through[pane].is_none() {
-                self.camera_locked.release(pane);
+                self.view.camera_locked.release(pane);
             }
             self.camera_editing[pane] = false;
         }
@@ -59,7 +59,8 @@ impl SolarxyApp {
     /// navigation reframes the bound camera). No effect on a free view.
     pub fn set_pane_camera_lock(&mut self, pane: usize, locked: bool) -> Result<JsValue, JsError> {
         if pane < 4 {
-            self.camera_locked
+            self.view
+                .camera_locked
                 .set(pane, locked, self.look_through[pane].is_some());
             self.camera_editing[pane] = false;
         }

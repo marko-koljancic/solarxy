@@ -194,17 +194,20 @@ impl State {
     /// Snap every bound pane's camera to its camera node's current pose.
     ///
     /// The body is [`solarxy_host::cameras::follow_camera_bindings`], shared
-    /// with the web shell. This shell suppresses no pane: it has neither of
-    /// the two states the browser holds the follow off for, so the mask is
-    /// all false and every bound pane follows every frame.
+    /// with the web shell, and so is the suppression: a locked pane
+    /// mid-navigation, so the follow never fights a live orbit before the
+    /// gesture commits, and a pane whose turntable is spinning its camera.
     fn follow_look_through_cameras(&mut self) {
         let Some(defs) = self.raster.scene().cameras() else {
             return;
         };
+        let suppressed: [bool; 4] = std::array::from_fn(|i| {
+            self.camera_editing[i] || self.view.pane_settings[i].turntable_active
+        });
         solarxy_host::cameras::follow_camera_bindings(
             defs,
             &self.look_through,
-            &[false; 4],
+            &suppressed,
             &mut self.view.cameras,
         );
     }
