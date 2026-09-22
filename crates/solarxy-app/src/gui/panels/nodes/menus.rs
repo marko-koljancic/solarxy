@@ -277,7 +277,11 @@ mod tests {
 
     /// A node added from the menu lands where the user is looking, and a
     /// run of them fans out and then starts over.
+    ///
+    /// Exact comparison on purpose: the placement is a whole-pixel step
+    /// added to a whole-pixel centre, so any drift is a real change.
     #[test]
+    #[allow(clippy::float_cmp)]
     fn a_menu_add_lands_in_view_and_fans_out() {
         let center = [400.0, -120.0];
         assert_eq!(menu_placement(center, 0), center);

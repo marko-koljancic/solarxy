@@ -1595,13 +1595,13 @@ view_layout = "splitVertical"
     /// one would be told about keys they never had.
     #[test]
     fn a_configuration_written_before_the_shared_keymap_has_not_been_told() {
-        let older = r#"
+        let older = r"
             config_version = 1
 
             [ui]
             max_recent_files = 12
             status_bar_visible = false
-        "#;
+        ";
         let prefs: Preferences = toml::from_str(older).expect("an older file still loads");
         assert!(!prefs.ui.keymap_notice_seen);
         assert_eq!(prefs.ui.max_recent_files, 12);

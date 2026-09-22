@@ -372,10 +372,12 @@ mod tests {
     /// them: a reset on any tab has to leave what the file carried alone.
     #[test]
     fn no_tab_resets_the_fields_that_have_no_editor() {
-        let mut prefs = Preferences::default();
-        prefs.updater = UpdaterPrefs {
-            check_on_launch: true,
-            channel: UpdaterChannel::Prerelease,
+        let prefs = Preferences {
+            updater: UpdaterPrefs {
+                check_on_launch: true,
+                channel: UpdaterChannel::Prerelease,
+            },
+            ..Default::default()
         };
         let mut m = PreferencesModal::default();
         m.open_with(prefs.clone());
