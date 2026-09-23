@@ -41,7 +41,7 @@ use solarxy_core::preferences::{
     BackgroundMode, GizmoOrientation, IblMode, InspectionMode, LineWeight, MaterialOverride,
     NormalsMode, PaneMode, ProjectionMode, UvMapBackground, ViewMode,
 };
-use solarxy_core::view_config::{PaneLook, PostStrengths};
+use solarxy_core::view_config::PaneLook;
 
 use crate::state::view_state::{BoundsMode, ViewLayout};
 
@@ -92,8 +92,6 @@ pub(crate) enum Intent {
     Pane { pane: usize, change: PaneChange },
     /// One scene-global display setting.
     Display(DisplayChange),
-    /// One post-processing setting.
-    Post(PostChange),
     /// The per-pane look editor: opening one, and what it writes.
     PaneLook(PaneLookIntent),
     /// The image-based lighting mode.
@@ -143,23 +141,11 @@ pub(crate) enum PaneChange {
 /// One scene-global display setting.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum DisplayChange {
-    TurntableActive(bool),
+    /// The turntable's speed. The *toggle* is per pane and travels as a
+    /// [`PaneChange`]; the speed is scene-global on both shells.
     TurntableRpm(f32),
-    LightsLocked(bool),
-    RoughnessScale(f32),
-    MetallicScale(f32),
     HdriRotation(f32),
     HdriIntensity(f32),
-}
-
-/// One post-processing setting.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum PostChange {
-    Bloom(bool),
-    Ssao(bool),
-    /// The three intensities together, because they reach the renderer
-    /// through one setter that clamps them and pushes both passes.
-    Strengths(PostStrengths),
 }
 
 /// The per-pane look editor.
@@ -402,11 +388,7 @@ impl Intent {
             // applied in field order, and no two of them can be raised in a
             // frame anyway, so a key each would invent an order rather than
             // preserve one.
-            Self::Pane { .. }
-            | Self::Display(_)
-            | Self::Post(_)
-            | Self::PaneLook(_)
-            | Self::Ibl(_) => 2,
+            Self::Pane { .. } | Self::Display(_) | Self::PaneLook(_) | Self::Ibl(_) => 2,
             Self::File(_) => 3,
             Self::Edit(_) => 4,
             Self::Capture(_) => 5,
@@ -513,7 +495,7 @@ mod tests {
         });
         intents.raise(Intent::Layout(LayoutIntent::OpenArrangementSave));
         intents.raise(Intent::File(FileIntent::Quit));
-        intents.raise(Intent::Post(PostChange::Bloom(true)));
+        intents.raise(Intent::Display(DisplayChange::TurntableRpm(6.0)));
         intents.raise(Intent::PaneProjection {
             pane: 0,
             mode: ProjectionMode::Orthographic,

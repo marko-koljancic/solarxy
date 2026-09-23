@@ -32,7 +32,7 @@ impl State {
                 ],
             });
             self.gui
-                .set_toast("Dev objects removed", ToastSeverity::Success);
+                .set_toast("Dev objects removed", ToastSeverity::Info);
             return;
         }
 
@@ -73,7 +73,7 @@ impl State {
         });
         self.gui.set_toast(
             "Dev objects: two cubes with independent transforms",
-            ToastSeverity::Success,
+            ToastSeverity::Info,
         );
     }
 
@@ -111,7 +111,7 @@ impl State {
             } else {
                 "Dev environment cleared"
             },
-            ToastSeverity::Success,
+            ToastSeverity::Info,
         );
     }
 }

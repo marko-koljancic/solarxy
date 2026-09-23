@@ -196,9 +196,19 @@ impl State {
                 },
                 display: DisplaySettings {
                     point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
-                    turntable_active: preferences.display.turntable_active,
+                    // The global flag has no reader on either shell since the
+                    // spin moved to the per-pane toggle: the browser seeds it
+                    // false and never consults it, and this shell now does the
+                    // same. The per-pane flags above start false, which is the
+                    // session-temporary rule both shells apply.
+                    turntable_active: false,
                     turntable_rpm: preferences.display.turntable_rpm,
-                    lights_locked: preferences.lighting.lock,
+                    // Seeded false regardless of the stored preference, the
+                    // rule the withdrawn overlays took: the control that wrote
+                    // it left with the Sidebar, and reading the preference here
+                    // would leave someone who once ticked it with the lights
+                    // held and nothing anywhere to release them.
+                    lights_locked: false,
                     layout: ViewLayout::default(),
                     split_ratio: DisplaySettings::DEFAULT_SPLIT_RATIO,
                     roughness_scale: 1.0,

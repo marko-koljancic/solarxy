@@ -96,7 +96,7 @@ impl State {
                 ViewLayout::Quad => "Quad",
                 ViewLayout::ThreeLeftBig => "Three-Left-Big",
             };
-            self.gui.set_toast(msg, ToastSeverity::Success);
+            self.gui.set_toast(msg, ToastSeverity::Info);
         }
     }
 }

@@ -52,7 +52,6 @@ use super::theme::Theme;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum SolarxyTab {
     Viewport,
-    Sidebar,
     ReviewPanel,
     /// Hosts the parameter panel, under the name the browser's panel has.
     Properties,
@@ -83,7 +82,6 @@ impl SolarxyTab {
     pub(crate) fn slug(self) -> &'static str {
         match self {
             Self::Viewport => "viewport",
-            Self::Sidebar => "sidebar",
             Self::ReviewPanel => "review-panel",
             Self::Properties => "properties",
             Self::Tree => "tree",
@@ -100,7 +98,7 @@ impl SolarxyTab {
 
 /// The layout a new installation opens in, and what a layout that cannot be
 /// restored falls back to: the `Default` arrangement, which is the
-/// browser's. Three panels and the Sidebar; every other panel is one toggle
+/// browser's. Three panels; every other panel is one toggle
 /// away and reopens beside its natural neighbour (see [`toggle_tab`]).
 ///
 /// Until 0.10.0 this mounted every panel, on the principle that the layout
@@ -148,7 +146,6 @@ impl TabViewer for SolarxyTabViewer<'_> {
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab {
             SolarxyTab::Viewport => "Viewport".into(),
-            SolarxyTab::Sidebar => "Sidebar".into(),
             SolarxyTab::ReviewPanel => format!("Review ({})", self.review.annotations.len()).into(),
             SolarxyTab::Properties => "Properties".into(),
             SolarxyTab::Tree => "Tree".into(),
@@ -240,13 +237,6 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.theme,
                 );
                 ui.allocate_space(ui.available_size());
-            }
-            SolarxyTab::Sidebar => {
-                super::panels::sidebar::draw_sidebar_content(
-                    ui,
-                    self.sources.settings,
-                    self.intents,
-                );
             }
             SolarxyTab::ReviewPanel => {
                 super::panels::review::panel::draw_review_panel_content(
@@ -685,7 +675,6 @@ mod tests {
                 SolarxyTab::Viewport,
                 SolarxyTab::Nodes,
                 SolarxyTab::Properties,
-                SolarxyTab::Sidebar,
             ])
         );
     }
@@ -728,7 +717,6 @@ mod tests {
     fn the_core_panels_reopen_in_their_own_leaves() {
         let mut dock = default_dock_state();
         toggle_tab(&mut dock, SolarxyTab::Properties);
-        toggle_tab(&mut dock, SolarxyTab::Sidebar);
         toggle_tab(&mut dock, SolarxyTab::Nodes);
         assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
 
@@ -834,6 +822,24 @@ mod tests {
         assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
     }
 
+    /// And for the Sidebar, which shipped in the default layout right up to
+    /// its withdrawal, so its name is in essentially every arrangement any
+    /// user has saved. Losing that one panel is the whole cost; the rest of
+    /// the layout has to come back intact.
+    #[test]
+    fn a_layout_naming_the_sidebar_restores_without_it() {
+        let blob = LAYOUT_BEFORE_NODE_TREE.replace("\"Outliner\"", "\"Sidebar\"");
+        assert_ne!(blob, LAYOUT_BEFORE_NODE_TREE, "the fixture names Outliner");
+        let mut dock: DockState<SolarxyTab> =
+            serde_json::from_str(&blob).expect("a blob naming the Sidebar must still deserialize");
+        assert_eq!(
+            sweep_retired(&mut dock),
+            2,
+            "the Sidebar and the Console both go"
+        );
+        assert_eq!(membership(&dock), HashSet::from([SolarxyTab::Viewport]));
+    }
+
     fn technical() -> Dock {
         let arrangement = super::super::arrangement::BUILT_IN
             .iter()
@@ -922,7 +928,6 @@ mod tests {
 
         assert!(!can_close(SolarxyTab::Viewport));
         for tab in [
-            SolarxyTab::Sidebar,
             SolarxyTab::ReviewPanel,
             SolarxyTab::Properties,
             SolarxyTab::Tree,
@@ -1062,8 +1067,8 @@ mod tests {
     fn toggle_tab_is_idempotent() {
         let mut dock = default_dock_state();
         let initial = membership(&dock);
-        toggle_tab(&mut dock, SolarxyTab::Sidebar);
-        toggle_tab(&mut dock, SolarxyTab::Sidebar);
+        toggle_tab(&mut dock, SolarxyTab::Properties);
+        toggle_tab(&mut dock, SolarxyTab::Properties);
         assert_eq!(initial, membership(&dock), "two toggles must round-trip");
     }
 
@@ -1071,18 +1076,18 @@ mod tests {
     fn toggle_tab_removes_duplicates() {
         let mut dock = default_dock_state();
         dock.main_surface_mut()
-            .push_to_first_leaf(SolarxyTab::Sidebar);
+            .push_to_first_leaf(SolarxyTab::Properties);
         let dup_count = dock
             .iter_all_tabs()
-            .filter(|(_, t)| **t == SolarxyTab::Sidebar)
+            .filter(|(_, t)| **t == SolarxyTab::Properties)
             .count();
-        assert_eq!(dup_count, 2, "fixture should have 2 Sidebar tabs");
+        assert_eq!(dup_count, 2, "fixture should have 2 Properties tabs");
 
-        toggle_tab(&mut dock, SolarxyTab::Sidebar);
+        toggle_tab(&mut dock, SolarxyTab::Properties);
 
         let remaining = dock
             .iter_all_tabs()
-            .filter(|(_, t)| **t == SolarxyTab::Sidebar)
+            .filter(|(_, t)| **t == SolarxyTab::Properties)
             .count();
         assert_eq!(remaining, 0, "toggle must sweep all duplicates");
     }

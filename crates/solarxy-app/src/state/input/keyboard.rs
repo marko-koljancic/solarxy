@@ -20,7 +20,7 @@ use solarxy_renderer::input::CameraKey;
 use solarxy_core::preferences::{InspectionMode, PaneMode, ProjectionMode};
 
 use super::keymap::{self, Action, Binding, Chord, Claim, KeyScope};
-use crate::state::{CompositeLook, State, ViewLayout};
+use crate::state::{State, ViewLayout};
 
 /// winit-to-renderer input mapping: the renderer is windowing-agnostic and
 /// consumes its own [`CameraKey`] / [`PointerButton`] enums.
@@ -182,12 +182,12 @@ impl State {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
                 if pds.pane_mode == PaneMode::UvMap {
                     pds.pane_mode = PaneMode::Scene3D;
-                    self.gui.set_toast("3D View", ToastSeverity::Success);
+                    self.gui.set_toast("3D View", ToastSeverity::Info);
                 } else {
                     pds.pane_mode = PaneMode::UvMap;
                     pds.uv_offset = [0.0, 0.0];
                     pds.uv_zoom = 1.0;
-                    self.gui.set_toast("UV Map", ToastSeverity::Success);
+                    self.gui.set_toast("UV Map", ToastSeverity::Info);
                 }
             }
             Action::InspectTexelDensity => {
@@ -282,7 +282,7 @@ impl State {
         pds.pane_mode = PaneMode::Scene3D;
         pds.inspection_mode = mode;
         self.gui
-            .set_toast(&format!("Inspection: {label}"), ToastSeverity::Success);
+            .set_toast(&format!("Inspection: {label}"), ToastSeverity::Info);
     }
 
     /// The UV pane's overlap toggle, which sits on the projection keys.
@@ -302,21 +302,8 @@ impl State {
             self.renderer.uv_overlap.stats_dirty = true;
         }
         let msg = if on { "Overlap: On" } else { "Overlap: Off" };
-        self.gui.set_toast(msg, ToastSeverity::Success);
+        self.gui.set_toast(msg, ToastSeverity::Info);
         true
-    }
-
-    pub(in crate::state) fn write_composite_params(&self) {
-        let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
-        self.renderer.post.composite.write_params(
-            &self.queue,
-            self.renderer.post.bloom_enabled,
-            self.renderer.post.ssao_enabled,
-            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
-            &self.renderer.post.luts,
-            active_inspection,
-            false,
-        );
     }
 }
 

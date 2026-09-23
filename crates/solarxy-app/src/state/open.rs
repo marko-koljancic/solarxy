@@ -285,10 +285,8 @@ impl State {
                 if let Some(first) = opened.warnings.first() {
                     self.gui.set_toast(first, ToastSeverity::Warning);
                 } else {
-                    self.gui.set_toast(
-                        &format!("Opened {}", pending.filename),
-                        ToastSeverity::Success,
-                    );
+                    self.gui
+                        .set_toast(&format!("Opened {}", pending.filename), ToastSeverity::Info);
                 }
             }
             Ok(Err(message)) => {
@@ -400,7 +398,7 @@ impl State {
             );
         } else {
             self.gui
-                .set_toast(&format!("Opened {filename}"), ToastSeverity::Success);
+                .set_toast(&format!("Opened {filename}"), ToastSeverity::Info);
         }
         true
     }
@@ -751,7 +749,9 @@ impl State {
         pane.show_validation = false;
         self.renderer.uv_overlap.overlap_pct = None;
         self.renderer.uv_overlap.stats_dirty = false;
-        self.view.display.turntable_active = self.preferences.display.turntable_active;
+        // The per-pane toggle above is what the spin reads, and it is
+        // session-temporary on both shells, so a new document starts still.
+        self.view.display.turntable_active = false;
     }
 }
 

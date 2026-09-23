@@ -408,7 +408,7 @@ impl State {
         self.mark_saved();
         self.refresh_title();
         self.gui
-            .set_toast(&format!("Saved {filename}"), ToastSeverity::Success);
+            .set_toast(&format!("Saved {filename}"), ToastSeverity::Info);
         true
     }
 
@@ -422,7 +422,7 @@ impl State {
     pub(super) fn new_scene_now(&mut self) {
         if self.adopt_untitled_document() {
             self.reset_pane_zero_for_new_document();
-            self.gui.set_toast("New scene", ToastSeverity::Success);
+            self.gui.set_toast("New scene", ToastSeverity::Info);
         }
     }
 }

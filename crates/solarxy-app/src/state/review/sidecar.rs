@@ -47,10 +47,8 @@ impl State {
                     count,
                     path.display()
                 );
-                self.gui.set_toast(
-                    &format!("Saved {count} annotations"),
-                    ToastSeverity::Success,
-                );
+                self.gui
+                    .set_toast(&format!("Saved {count} annotations"), ToastSeverity::Info);
             }
             Err(e) => {
                 self.gui

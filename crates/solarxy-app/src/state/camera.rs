@@ -223,10 +223,8 @@ impl State {
         };
         self.look_through[pane] = Some(solarxy_core::scene::SceneObjectId(node.0));
         self.unresolved_binding[pane] = true;
-        self.gui.set_toast(
-            "Camera created from view",
-            crate::gui::ToastSeverity::Success,
-        );
+        self.gui
+            .set_toast("Camera created from view", crate::gui::ToastSeverity::Info);
     }
 
     /// Fly the active pane's camera to frame the mesh a validation issue

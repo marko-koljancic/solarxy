@@ -370,7 +370,7 @@ impl State {
         self.saved_revision = NEVER_SAVED;
         self.refresh_title();
         self.gui
-            .set_toast("Recovered unsaved work", ToastSeverity::Success);
+            .set_toast("Recovered unsaved work", ToastSeverity::Info);
     }
 }
 

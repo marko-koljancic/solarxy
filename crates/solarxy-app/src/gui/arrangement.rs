@@ -54,11 +54,6 @@ pub(crate) struct Recipe {
     pub attributes_pct: u8,
     /// The texture viewer, tabbed behind the parameter panel.
     pub texture: bool,
-    /// The Sidebar, tabbed behind the parameter panel. The browser has no
-    /// such panel, so no recipe of its own sets this; it holds the
-    /// scene-global display controls until the per-pane look editor takes
-    /// them, and leaves with the panel.
-    pub sidebar: bool,
 }
 
 const SPLIT_MIN_PCT: u8 = 20;
@@ -80,7 +75,6 @@ impl Recipe {
         attributes: false,
         attributes_pct: 30,
         texture: false,
-        sidebar: false,
     };
 
     /// The same recipe with its two percentages inside the ranges the
@@ -109,9 +103,6 @@ impl Recipe {
         let viewport_share = f32::from(recipe.split_pct) / 100.0;
 
         let mut properties_tabs = vec![SolarxyTab::Properties];
-        if recipe.sidebar {
-            properties_tabs.push(SolarxyTab::Sidebar);
-        }
         if recipe.review {
             properties_tabs.push(SolarxyTab::ReviewPanel);
         }
@@ -182,10 +173,7 @@ impl Arrangement {
 pub(crate) const BUILT_IN: &[Arrangement] = &[
     Arrangement {
         name: "Default",
-        recipe: Recipe {
-            sidebar: true,
-            ..Recipe::BASE
-        },
+        recipe: Recipe::BASE,
         grid: true,
         minimap: false,
         controls: true,
@@ -416,7 +404,6 @@ mod tests {
                 (recipe.review, SolarxyTab::ReviewPanel),
                 (recipe.attributes, SolarxyTab::Attributes),
                 (recipe.texture, SolarxyTab::Texture),
-                (recipe.sidebar, SolarxyTab::Sidebar),
             ] {
                 if on {
                     expected.insert(tab);
@@ -444,11 +431,6 @@ mod tests {
         assert_eq!(
             leaf_of(&lookdev, SolarxyTab::Texture),
             [SolarxyTab::Properties, SolarxyTab::Texture]
-        );
-        let default = default_arrangement().recipe.build();
-        assert_eq!(
-            leaf_of(&default, SolarxyTab::Sidebar),
-            [SolarxyTab::Properties, SolarxyTab::Sidebar]
         );
     }
 
@@ -850,15 +832,5 @@ mod tests {
         );
         let here: Vec<Declared> = BUILT_IN.iter().map(as_declared).collect();
         assert_eq!(here, browser);
-    }
-
-    #[test]
-    fn only_the_first_arrangement_carries_the_sidebar() {
-        let with: Vec<&str> = BUILT_IN
-            .iter()
-            .filter(|a| a.recipe.sidebar)
-            .map(|a| a.name)
-            .collect();
-        assert_eq!(with, ["Default"]);
     }
 }

@@ -2,6 +2,10 @@ use solarxy_core::preferences::{
     self, GizmoOrientation, MAX_RECENT_FILES_CAP, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH,
     MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Preferences, ThemeChoice,
 };
+use solarxy_core::view_config::{
+    MAX_BLOOM_STRENGTH, MAX_BLOOM_THRESHOLD, MAX_SSAO_STRENGTH, MIN_BLOOM_STRENGTH,
+    MIN_BLOOM_THRESHOLD, MIN_SSAO_STRENGTH,
+};
 
 /// The modal's tabs.
 ///
@@ -81,6 +85,11 @@ impl PreferencesModal {
             PrefsTab::View => {
                 self.draft.display.background = defaults.display.background;
                 self.draft.viewport = defaults.viewport;
+                self.draft.display.bloom_enabled = defaults.display.bloom_enabled;
+                self.draft.display.ssao_enabled = defaults.display.ssao_enabled;
+                self.draft
+                    .display
+                    .set_post_strengths(defaults.display.post_strengths());
             }
             PrefsTab::Interface => {
                 self.draft.ui.max_recent_files = defaults.ui.max_recent_files;
@@ -362,6 +371,73 @@ fn draw_view_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
                 egui::DragValue::new(&mut draft.viewport.snap_scale)
                     .speed(0.05)
                     .range(0.0..=f32::MAX),
+            );
+            ui.end_row();
+        });
+
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new("Post-processing").strong());
+    // The browser's rows, in its order and over the same fields. Its own doc
+    // strings say these apply immediately and renderer-wide; here they apply
+    // on OK, because this dialog is draft-and-commit for every row it has, so
+    // that half of the sentence is dropped rather than made untrue.
+    egui::Grid::new("prefs_post")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Ambient occlusion").on_hover_text(
+                "Screen-space ambient occlusion: darkens creases and contact areas in \
+                 shaded views, and is what the AO Preview inspection mode shows.",
+            );
+            ui.checkbox(&mut draft.display.ssao_enabled, "");
+            ui.end_row();
+
+            let ssao_on = draft.display.ssao_enabled;
+            ui.add_enabled_ui(ssao_on, |ui| {
+                ui.label("Occlusion strength").on_hover_text(
+                    "How far the composite blends towards the occlusion buffer. The AO \
+                     Preview inspection mode shows the raw buffer and is deliberately \
+                     unaffected by this.",
+                );
+            });
+            ui.add_enabled(
+                ssao_on,
+                egui::DragValue::new(&mut draft.display.ssao_strength)
+                    .speed(0.05)
+                    .range(MIN_SSAO_STRENGTH..=MAX_SSAO_STRENGTH),
+            );
+            ui.end_row();
+
+            ui.label("Bloom")
+                .on_hover_text("Glow on emissive and very bright surfaces.");
+            ui.checkbox(&mut draft.display.bloom_enabled, "");
+            ui.end_row();
+
+            let bloom_on = draft.display.bloom_enabled;
+            ui.add_enabled_ui(bloom_on, |ui| {
+                ui.label("Bloom strength").on_hover_text(
+                    "How much of the blurred bright pass is added back on top of the image.",
+                );
+            });
+            ui.add_enabled(
+                bloom_on,
+                egui::DragValue::new(&mut draft.display.bloom_strength)
+                    .speed(0.1)
+                    .range(MIN_BLOOM_STRENGTH..=MAX_BLOOM_STRENGTH),
+            );
+            ui.end_row();
+
+            ui.add_enabled_ui(bloom_on, |ui| {
+                ui.label("Bloom threshold").on_hover_text(
+                    "Luminance a pixel has to exceed before it contributes to the glow. \
+                     Lower blooms more of the image.",
+                );
+            });
+            ui.add_enabled(
+                bloom_on,
+                egui::DragValue::new(&mut draft.display.bloom_threshold)
+                    .speed(0.1)
+                    .range(MIN_BLOOM_THRESHOLD..=MAX_BLOOM_THRESHOLD),
             );
             ui.end_row();
         });

@@ -19,7 +19,6 @@ use solarxy_core::preferences::{GizmoOrientation, IblMode};
 use solarxy_graph::engine::CookMode;
 use solarxy_graph::runtime::LoopMode;
 use solarxy_host::gizmo::{ALL_TOOLS, ToolMode};
-use solarxy_renderer::frame::PostProcessing;
 
 use crate::state::view_state::{DisplaySettings, PaneDisplaySettings};
 
@@ -142,7 +141,6 @@ pub(crate) struct PanelSettings<'a> {
     pub panes: &'a [PaneDisplaySettings; 4],
     pub active: usize,
     pub display: &'a DisplaySettings,
-    pub post: &'a PostProcessing,
     pub ibl_mode: IblMode,
     /// The header strip's cook readout, refreshed from the engine each frame.
     pub cook: CookReadout,

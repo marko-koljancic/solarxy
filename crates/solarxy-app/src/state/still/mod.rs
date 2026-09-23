@@ -609,7 +609,7 @@ impl State {
                     n => format!("Saved {name} and {n} passes beside it"),
                 };
                 self.gui
-                    .set_toast(&message, crate::gui::ToastSeverity::Success);
+                    .set_toast(&message, crate::gui::ToastSeverity::Info);
             }
             Err(e) => {
                 self.gui.set_toast(

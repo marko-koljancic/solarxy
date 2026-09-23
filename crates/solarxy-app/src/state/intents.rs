@@ -17,7 +17,7 @@ use super::State;
 use crate::gui::{
     CanvasAction, CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent,
     Intent, Intents, LayoutIntent, LookThroughChange, TreeAction, PaneChange, PanelIntent,
-    PaneLookIntent, PaneView, PostChange, ReviewIntent, ToastSeverity, ToolIntent, TransportIntent,
+    PaneLookIntent, PaneView, ReviewIntent, ToastSeverity, ToolIntent, TransportIntent,
 };
 
 impl State {
@@ -42,7 +42,6 @@ impl State {
                     }
                 }
                 Intent::Display(change) => apply_display_change(&mut self.view.display, change),
-                Intent::Post(change) => apply_post_change(&mut self.renderer.post, change),
                 Intent::PaneLook(PaneLookIntent::Open(pane)) => self.gui.open_look_editor(pane),
                 Intent::PaneLook(PaneLookIntent::Set { pane, look }) => {
                     if let Some(slot) = self.view.pane_looks.get_mut(pane) {
@@ -176,9 +175,6 @@ impl State {
         if let Some(pane) = recompute.wireframe_only() {
             self.update_wireframe_params(pane);
         }
-        if recompute.composite {
-            self.apply_composite_params();
-        }
         if recompute.ibl {
             self.apply_ibl_change();
         }
@@ -190,11 +186,7 @@ fn apply_display_change(
     change: DisplayChange,
 ) {
     match change {
-        DisplayChange::TurntableActive(v) => display.turntable_active = v,
         DisplayChange::TurntableRpm(v) => display.turntable_rpm = v,
-        DisplayChange::LightsLocked(v) => display.lights_locked = v,
-        DisplayChange::RoughnessScale(v) => display.roughness_scale = v,
-        DisplayChange::MetallicScale(v) => display.metallic_scale = v,
         DisplayChange::HdriRotation(v) => display.hdri_rotation = v,
         DisplayChange::HdriIntensity(v) => display.hdri_intensity = v,
     }
@@ -216,7 +208,6 @@ struct Recompute {
     /// the first and invisible only because the per-pane write rewrites the
     /// shared buffer before each pane's passes.
     wireframe: Option<usize>,
-    composite: bool,
     ibl: bool,
 }
 
@@ -264,18 +255,10 @@ impl Recompute {
             // chokepoint. Rotation does not: it rides the per-pane camera
             // uniform, which is written every frame anyway.
             Intent::Display(DisplayChange::HdriIntensity(_)) | Intent::Ibl(_) => self.ibl = true,
-            Intent::Post(_) => self.composite = true,
             // The remaining scene-global settings are read where they are used
             // and need nothing pushed, and everything below them is an action
             // rather than a setting, pushing whatever it needs itself.
-            Intent::Display(
-                DisplayChange::TurntableActive(_)
-                | DisplayChange::TurntableRpm(_)
-                | DisplayChange::LightsLocked(_)
-                | DisplayChange::RoughnessScale(_)
-                | DisplayChange::MetallicScale(_)
-                | DisplayChange::HdriRotation(_),
-            )
+            Intent::Display(DisplayChange::TurntableRpm(_) | DisplayChange::HdriRotation(_))
             | Intent::PaneProjection { .. }
             | Intent::PaneView { .. }
             | Intent::CreateCameraFromView { .. }
@@ -325,17 +308,6 @@ fn apply_pane_change(pds: &mut crate::state::view_state::PaneDisplaySettings, ch
     }
 }
 
-/// The post settings reach two passes through one setter that clamps, so
-/// every arm here writes through the renderer's own accessors rather than its
-/// fields.
-fn apply_post_change(post: &mut solarxy_renderer::frame::PostProcessing, change: PostChange) {
-    match change {
-        PostChange::Bloom(v) => post.bloom_enabled = v,
-        PostChange::Ssao(v) => post.ssao_enabled = v,
-        PostChange::Strengths(v) => post.set_strengths(v),
-    }
-}
-
 impl State {
     fn apply_file_intent(&mut self, intent: FileIntent) {
         match intent {
@@ -369,8 +341,7 @@ impl State {
             // that owns it. What is left is the toast, which is the shell's
             // to give rather than a panel's.
             ReviewIntent::Exited => {
-                self.gui
-                    .set_toast("Review mode: Off", ToastSeverity::Success);
+                self.gui.set_toast("Review mode: Off", ToastSeverity::Info);
             }
             ReviewIntent::ReanchorCancelled => {
                 self.gui
@@ -463,7 +434,7 @@ impl State {
     /// view is snapshotted into it on the way.
     fn write_arrangements(&mut self, done: &str) {
         match solarxy_core::preferences::save(&self.preferences) {
-            Ok(()) => self.gui.set_toast(done, ToastSeverity::Success),
+            Ok(()) => self.gui.set_toast(done, ToastSeverity::Info),
             Err(e) => self
                 .gui
                 .set_toast(&format!("Save failed: {e}"), ToastSeverity::Error),
@@ -576,10 +547,6 @@ impl State {
         self.rebuild_light_bind_group();
     }
 
-    pub(super) fn apply_composite_params(&self) {
-        self.write_composite_params();
-    }
-
     pub(super) fn apply_ibl_change(&mut self) {
         self.rebuild_light_bind_group();
     }
@@ -611,7 +578,7 @@ impl State {
         } else {
             "Review mode: Off"
         };
-        self.gui.set_toast(msg, ToastSeverity::Success);
+        self.gui.set_toast(msg, ToastSeverity::Info);
     }
 
     /// Drop the loaded HDRI (Properties → HDRI → Clear). Full revert:
@@ -636,7 +603,7 @@ impl State {
         self.environment.invalidate();
         self.rebuild_light_bind_group();
         self.gui.clear_hdri_info();
-        self.gui.set_toast("HDRI cleared", ToastSeverity::Success);
+        self.gui.set_toast("HDRI cleared", ToastSeverity::Info);
     }
 
     /// Apply a Node Tree row click: select the node engine-side, and
@@ -939,7 +906,6 @@ impl State {
 mod tests {
     use super::*;
     use solarxy_core::preferences::{BackgroundMode, IblMode, LineWeight};
-    use solarxy_core::view_config::PostStrengths;
 
     /// The five tests below are the retired mirror's diff tests, re-expressed
     /// against the rule that replaced it. They ask the same question: which
@@ -1054,7 +1020,6 @@ mod tests {
         let r = marked(&[]);
         assert!(!r.background);
         assert!(r.wireframe.is_none());
-        assert!(!r.composite);
         assert!(!r.ibl);
     }
 
@@ -1069,34 +1034,7 @@ mod tests {
             let r = marked(std::slice::from_ref(&intent));
             assert!(!r.background, "{intent:?}");
             assert!(r.wireframe.is_none(), "{intent:?}");
-            assert!(!r.composite, "{intent:?}");
             assert!(!r.ibl, "{intent:?}");
-        }
-    }
-
-    #[test]
-    fn a_bloom_toggle_marks_the_composite() {
-        let r = marked(&[Intent::Post(PostChange::Bloom(true))]);
-        assert!(r.composite);
-        assert!(!r.background);
-        assert!(!r.ibl);
-    }
-
-    #[test]
-    fn every_post_setting_marks_the_composite() {
-        // One case each: they reach the uniform by different routes, the
-        // composite writing the two switches and the bloom pass the
-        // strengths, so a rule that noticed only one would still look like
-        // it worked.
-        for change in [
-            PostChange::Bloom(true),
-            PostChange::Ssao(true),
-            PostChange::Strengths(PostStrengths::default()),
-        ] {
-            let r = marked(&[Intent::Post(change)]);
-            assert!(r.composite, "{change:?} must mark the composite");
-            assert!(!r.background);
-            assert!(!r.ibl);
         }
     }
 
@@ -1108,7 +1046,6 @@ mod tests {
         ] {
             let r = marked(std::slice::from_ref(&intent));
             assert!(r.ibl, "{intent:?} must mark the lighting");
-            assert!(!r.composite);
         }
     }
 
@@ -1118,7 +1055,6 @@ mod tests {
     fn an_hdri_rotation_marks_nothing() {
         let r = marked(&[Intent::Display(DisplayChange::HdriRotation(0.5))]);
         assert!(!r.ibl);
-        assert!(!r.composite);
     }
 
     #[test]

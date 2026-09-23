@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::state::hdri_info::HdriInfo;
 use solarxy_core::preferences::PaneMode;
@@ -331,7 +331,7 @@ impl EguiRenderer {
 
     const TOAST_QUEUE_CAP: usize = 5;
 
-    fn push_toast(&mut self, severity: ToastSeverity, message: String, duration: Duration) {
+    fn push_toast(&mut self, severity: ToastSeverity, message: String) {
         match severity {
             ToastSeverity::Error => {
                 tracing::error!(target: "solarxy::toast", "{message}");
@@ -339,7 +339,7 @@ impl EguiRenderer {
             ToastSeverity::Warning => {
                 tracing::warn!(target: "solarxy::toast", "{message}");
             }
-            ToastSeverity::Info | ToastSeverity::Success => {
+            ToastSeverity::Info => {
                 tracing::info!(target: "solarxy::toast", "{message}");
             }
         }
@@ -352,20 +352,20 @@ impl EguiRenderer {
             message,
             severity,
             created: Instant::now(),
-            duration,
         });
     }
 
     pub fn set_toast(&mut self, msg: &str, severity: ToastSeverity) {
-        self.push_toast(severity, msg.to_string(), Duration::from_secs(5));
+        self.push_toast(severity, msg.to_string());
     }
 
+    /// A capture landed on disk.
+    ///
+    /// No dwell of its own since 0.10.0: it had two seconds where everything
+    /// else had five, and the browser gives a saved-file notice the same time
+    /// it gives any other ordinary one.
     pub fn set_capture_message(&mut self, filename: String) {
-        self.push_toast(
-            ToastSeverity::Success,
-            format!("Saved {filename}"),
-            Duration::from_secs(2),
-        );
+        self.push_toast(ToastSeverity::Info, format!("Saved {filename}"));
     }
 
     pub fn set_loading_message(&mut self, msg: &str) {
@@ -379,7 +379,7 @@ impl EguiRenderer {
     pub fn clear_expired_toasts(&mut self) {
         let now = Instant::now();
         self.toasts
-            .retain(|t| now.duration_since(t.created) < t.duration);
+            .retain(|t| now.duration_since(t.created) < t.severity.dwell());
     }
 
     pub fn open_shortcuts_modal(&mut self) {

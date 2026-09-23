@@ -179,7 +179,7 @@ impl State {
                     .and_then(|n| n.to_str())
                     .unwrap_or(&result.filename);
                 self.gui
-                    .set_toast(&format!("Exported {name}"), ToastSeverity::Success);
+                    .set_toast(&format!("Exported {name}"), ToastSeverity::Info);
             }
             Err(e) => self.gui.set_toast(
                 &format!("Could not write {}: {e}", path.display()),

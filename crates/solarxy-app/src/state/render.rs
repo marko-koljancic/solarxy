@@ -443,7 +443,6 @@ impl State {
             panes: &self.view.pane_settings,
             active: ap,
             display: &self.view.display,
-            post: &self.renderer.post,
             ibl_mode: self.renderer.ibl_res.ibl_mode,
             cook: self.cook_readout,
             history: self.history_readout(),
@@ -800,8 +799,18 @@ impl State {
             // The handle frame and the snaps reach the solver through the
             // same re-read the key and the viewport menu use.
             self.apply_gizmo_prefs();
+            // Bloom and ambient occlusion are edited here since the Sidebar
+            // went, so a commit has to reach the passes. Nothing else pushed
+            // display preferences into the renderer before this: they were
+            // read once at startup and the panel wrote the live state
+            // directly.
+            self.renderer.post.bloom_enabled = self.preferences.display.bloom_enabled;
+            self.renderer.post.ssao_enabled = self.preferences.display.ssao_enabled;
+            self.renderer
+                .post
+                .set_strengths(self.preferences.display.post_strengths());
             self.gui
-                .set_toast("Preferences saved", crate::gui::ToastSeverity::Success);
+                .set_toast("Preferences saved", crate::gui::ToastSeverity::Info);
         }
 
         let capture = if self.capture_requested {

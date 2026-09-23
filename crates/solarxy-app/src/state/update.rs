@@ -464,7 +464,7 @@ impl State {
                 self.environment.invalidate();
                 self.rebuild_light_bind_group();
                 self.gui.clear_loading_message();
-                self.gui.set_toast("HDRI loaded", ToastSeverity::Success);
+                self.gui.set_toast("HDRI loaded", ToastSeverity::Info);
             }
             Some(Ok(Err(e))) => {
                 self.pending_hdri.take();
@@ -499,15 +499,21 @@ impl State {
         self.ensure_pane_cameras();
         self.apply_pending_frame();
 
-        if self.view.display.turntable_active {
-            let speed = self.view.display.turntable_rpm * std::f32::consts::TAU / 60.0;
-            let yaw = speed * self.dt;
-            let linked = self.view.cameras_linked;
-            let active = self.view.active_pane;
-            for (i, slot) in self.view.cameras.iter_mut().enumerate() {
-                if let Some(cam) = slot
-                    && (i == active || linked)
-                    && !cam.is_orbiting()
+        // Live turntable spin: a constant angular velocity on each pane whose
+        // own toggle is on. The rpm is the global display setting; the spin is
+        // session-temporary and drives the pane's scratch camera.
+        //
+        // The toggle is read **per pane**, which is what the pane Display menu
+        // has always written and what the browser has always spun on. This
+        // read the global flag until 0.10.0, and the only surface that wrote
+        // that flag was the Sidebar, so the menu entry a user actually reaches
+        // did nothing and the spin left with the panel that fed it.
+        let rpm = self.view.display.turntable_rpm;
+        if rpm.abs() > 1e-6 {
+            let yaw = rpm * std::f32::consts::TAU / 60.0 * self.dt;
+            for i in 0..self.view.cameras.len() {
+                if self.view.pane_settings[i].turntable_active
+                    && let Some(cam) = self.view.cameras[i].as_mut()
                 {
                     cam.inject_orbit_yaw(yaw);
                 }

@@ -457,7 +457,7 @@ fn draw_desks_menu(
         ui.separator();
         // Presence in the dock is the open state, so a tick cannot disagree
         // with what is on screen.
-        for (tab, label) in PANEL_TOGGLES.iter().chain([&SIDEBAR_TOGGLE]) {
+        for (tab, label) in PANEL_TOGGLES {
             if check_entry(ui, present(*tab), label, None).clicked() {
                 intents.raise(Intent::Layout(LayoutIntent::ToggleTab(*tab)));
                 ui.close();
@@ -605,12 +605,6 @@ const PANEL_TOGGLES: &[(SolarxyTab, &str)] = &[
     (SolarxyTab::Texture, "Texture Viewer"),
     (SolarxyTab::Attributes, "Attributes Panel"),
 ];
-
-/// The one toggle the browser does not have, because it has no such panel.
-/// The Sidebar holds the scene-global display controls until the per-pane
-/// look editor takes them, and without a toggle a closed Sidebar would have
-/// no way back. It leaves with the panel.
-const SIDEBAR_TOGGLE: (SolarxyTab, &str) = (SolarxyTab::Sidebar, "Sidebar");
 
 #[cfg(test)]
 mod tests {
@@ -805,10 +799,8 @@ mod tests {
     #[test]
     fn every_closeable_panel_has_a_toggle_and_the_viewport_has_none() {
         let mut toggled: Vec<SolarxyTab> = PANEL_TOGGLES.iter().map(|(tab, _)| *tab).collect();
-        toggled.push(SIDEBAR_TOGGLE.0);
         toggled.push(SolarxyTab::ReviewPanel); // in the Review menu
         for tab in [
-            SolarxyTab::Sidebar,
             SolarxyTab::ReviewPanel,
             SolarxyTab::Properties,
             SolarxyTab::Tree,
