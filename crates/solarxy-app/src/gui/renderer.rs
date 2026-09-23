@@ -22,6 +22,7 @@ use super::panels::review::panel::draw_delete_confirm_modal;
 use super::panels::review::popup::draw_review_popup;
 use super::modals::screenshot::{ScreenshotModal, draw_screenshot_modal};
 use super::modals::still::{StillRenderModal, draw_still_modal};
+use super::modals::turntable::{TurntableModal, TurntableRequest, draw_turntable_modal};
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
 use super::modals::keymap_change::{KeymapNoticeState, draw_keymap_notice};
 use super::modals::recovery::{RecoveryChoice, RecoveryModalState, draw_recovery_modal};
@@ -47,6 +48,7 @@ pub struct EguiRenderer {
     environment_open: bool,
     screenshot_modal: ScreenshotModal,
     still_modal: StillRenderModal,
+    turntable_modal: TurntableModal,
     tree: TreeState,
     assets: AssetsState,
     /// The asset the preview tab shows, by hash and name.
@@ -138,6 +140,7 @@ impl EguiRenderer {
             environment_open: false,
             screenshot_modal: ScreenshotModal::default(),
             still_modal: StillRenderModal::default(),
+            turntable_modal: TurntableModal::default(),
             tree: TreeState::default(),
             assets: AssetsState::default(),
             asset_preview: None,
@@ -825,6 +828,9 @@ impl EguiRenderer {
             // Drawn ahead of the escape chain below: while a render runs,
             // Escape cancels it before it dismisses anything else.
             draw_still_modal(ctx, &mut self.still_modal, &self.theme);
+            // Ahead of it for the same reason, and after the still so that a
+            // still's Escape wins when both are somehow up.
+            draw_turntable_modal(ctx, &mut self.turntable_modal, &self.theme);
             // Ahead of the escape chain for the same reason: while the
             // question is up, Escape answers it.
             draw_unsaved_modal(ctx, &mut self.unsaved_modal, &self.theme);
@@ -1259,5 +1265,49 @@ impl EguiRenderer {
     /// Take the finished still out and close the modal.
     pub fn take_still_image(&mut self) -> Option<image::RgbaImage> {
         self.still_modal.take_image()
+    }
+
+    /// Open the turntable export dialog.
+    pub fn open_turntable_modal(&mut self) {
+        self.turntable_modal.open_dialog();
+    }
+
+    /// Drain a request to start an export, with everything it was asked for.
+    pub(crate) fn take_turntable_start(&mut self) -> Option<TurntableRequest> {
+        self.turntable_modal.take_start_request()
+    }
+
+    pub fn take_turntable_cancel(&mut self) -> bool {
+        self.turntable_modal.take_cancel_request()
+    }
+
+    /// Drain a request for the folder picker, which the state layer owns
+    /// because the native dialog blocks and the interface pass must not.
+    pub fn take_turntable_folder_request(&mut self) -> bool {
+        self.turntable_modal.take_folder_request()
+    }
+
+    pub fn set_turntable_folder(&mut self, folder: std::path::PathBuf) {
+        self.turntable_modal.set_folder(folder);
+    }
+
+    pub fn begin_turntable(&mut self, total: u32) {
+        self.turntable_modal.begin(total);
+    }
+
+    pub fn set_turntable_progress(&mut self, written: u32, total: u32) {
+        self.turntable_modal.set_progress(written, total);
+    }
+
+    pub fn finish_turntable(&mut self) {
+        self.turntable_modal.finish();
+    }
+
+    pub fn mark_turntable_cancelled(&mut self, written: u32) {
+        self.turntable_modal.mark_cancelled(written);
+    }
+
+    pub fn fail_turntable(&mut self, why: &str) {
+        self.turntable_modal.fail(why);
     }
 }

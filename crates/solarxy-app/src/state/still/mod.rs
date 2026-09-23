@@ -36,7 +36,9 @@ use super::update::find_node_name;
 
 // `pixels` rather than `image`: a module of that name shadows the crate of
 // that name in every sibling, and the two are used side by side here.
-mod pixels;
+// `pub(super)` rather than private: the turntable export assembles its frames
+// through the same blit, because a frame of a turn is a still by another name.
+pub(super) mod pixels;
 mod settings;
 
 use pixels::{blit_rect, blit_tile, preview_of, still_filename, write_exr, write_passes_beside};

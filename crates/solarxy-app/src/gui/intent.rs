@@ -210,6 +210,9 @@ pub(crate) enum EditIntent {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CaptureIntent {
     Screenshot,
+    /// Open the turntable export dialog. The export itself starts from the
+    /// dialog, which is where the folder and the frame count are chosen.
+    Turntable,
 }
 
 /// The scene clock's controls. The first five are session state and never

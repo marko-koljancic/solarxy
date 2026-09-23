@@ -12,13 +12,14 @@
 //! order. An entry typed straight into the draw could drift and nothing
 //! would say so.
 //!
-//! One entry is listed and cannot be used yet: the turntable export, which
-//! waits on work this release files for later, and says so.
+//! Every entry here can act. The turntable export was the last one that could
+//! not, and it exports an image sequence rather than a video because encoding
+//! one needs a browser's encoder.
 
 use solarxy_core::preferences::GizmoOrientation;
 use solarxy_core::view_config::ViewLayout;
 
-use super::menu_items::{check_entry, entry, waiting_entry};
+use super::menu_items::{check_entry, entry};
 use super::pane_toolbar::PaneView;
 use super::panel_bar::{MAXIMIZE_LABEL, maximize_entry, panel_bar};
 use crate::gui::dock::SolarxyTab;
@@ -178,11 +179,10 @@ fn draw_item(ui: &mut egui::Ui, item: Item, settings: PanelSettings<'_>, intents
             }
         }
         Item::Turntable => {
-            waiting_entry(
-                ui,
-                label,
-                "Turntable export is not on this shell yet; it renders as an image sequence when it arrives",
-            );
+            if entry(ui, label, None).clicked() {
+                intents.raise(Intent::Capture(CaptureIntent::Turntable));
+                ui.close();
+            }
         }
         Item::Maximize => maximize_entry(ui, SolarxyTab::Viewport, intents),
     }

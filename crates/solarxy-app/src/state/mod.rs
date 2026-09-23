@@ -66,6 +66,7 @@ mod render;
 pub(crate) mod review;
 pub(crate) mod samples;
 mod still;
+mod turntable;
 mod update;
 pub(crate) mod view_state;
 mod visibility;
@@ -212,6 +213,10 @@ pub struct State {
     /// The still render in flight, if any. While it runs it owns the
     /// shared render targets, so panes are not rendered.
     pub(super) still: Option<still::StillState>,
+    /// The turntable export in flight, if any. It owns the frame the same
+    /// way a still does, and for the same reason: it drives the same tiled
+    /// job, once per frame of the turn.
+    pub(super) turntable: Option<turntable::TurntableState>,
     /// The render node whose own action opened the still dialog, so the
     /// still renders that node rather than the document's single one. Set by
     /// the action, cleared when the menu opens the dialog and when the

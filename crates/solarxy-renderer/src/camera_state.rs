@@ -122,6 +122,20 @@ impl CameraState {
         }
 
         self.controller.update_camera(&mut self.camera);
+        self.upload_pose(queue);
+    }
+
+    /// Write the current pose to the GPU, running neither the controller nor
+    /// a transition.
+    ///
+    /// [`CameraState::update`] is the per-frame path and folds in both. A job
+    /// that sets a pose itself and renders it once wants neither, and reaching
+    /// for `update` there would make the upload depend on the controller
+    /// happening to be idle. The turntable export is that caller: it writes a
+    /// fresh pose per frame of the turn, and without this the uniform would
+    /// still hold whatever [`CameraState::from_camera`] wrote at construction,
+    /// so every frame of the sequence would be the same picture.
+    pub fn upload_pose(&mut self, queue: &wgpu::Queue) {
         self.uniform.update_view_proj(&self.camera);
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
     }

@@ -88,7 +88,7 @@ pub(super) fn write_exr(
 }
 
 /// Copy one cropped tile into its place in the assembled picture.
-pub(super) fn blit_tile(image: &mut [u8], image_width: u32, tile: &StillTile) {
+pub(in crate::state) fn blit_tile(image: &mut [u8], image_width: u32, tile: &StillTile) {
     blit_rect(image, image_width, tile.rect, &tile.pixels);
 }
 

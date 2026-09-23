@@ -14,4 +14,5 @@ pub(crate) mod recovery;
 pub(in crate::gui) mod screenshot;
 pub(in crate::gui) mod shortcuts;
 pub(in crate::gui) mod still;
+pub(in crate::gui) mod turntable;
 pub(crate) mod unsaved;

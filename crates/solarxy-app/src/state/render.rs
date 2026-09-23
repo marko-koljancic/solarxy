@@ -45,9 +45,10 @@ impl State {
         }
 
         self.gui.clear_expired_toasts();
-        // A running still owns the shared render targets; resizing them
-        // back to the panes every frame would fight its per-tile sizing.
-        if self.still.is_none() {
+        // A running still or turntable owns the shared render targets;
+        // resizing them back to the panes every frame would fight the
+        // per-tile sizing of whichever is running.
+        if self.still.is_none() && self.turntable.is_none() {
             self.sync_render_target_dims();
         }
 
@@ -66,6 +67,16 @@ impl State {
         // where the modal's progress and cancel live.
         if self.still.is_some() {
             self.pump_still_render();
+            self.clear_surface(&surface_view);
+            self.render_gui_overlay(&output, &[], false);
+            output.present();
+            return Ok(());
+        }
+
+        // A turntable export owns the frame for the same reason, once per
+        // frame of the turn rather than once per tile of one picture.
+        if self.turntable.is_some() {
+            self.pump_turntable_export();
             self.clear_surface(&surface_view);
             self.render_gui_overlay(&output, &[], false);
             output.present();
@@ -814,6 +825,7 @@ impl State {
 
         self.handle_screenshot_modal();
         self.handle_still_modal();
+        self.handle_turntable_modal();
     }
 
     /// Build the per-pane data the egui review overlay needs: one

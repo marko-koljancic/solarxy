@@ -233,6 +233,7 @@ impl State {
             cook_health: super::cook_health::CookHealth::default(),
             cook_readout: crate::gui::CookReadout::default(),
             still: None,
+            turntable: None,
             still_target: None,
             finished_float: None,
             finished_passes: None,

@@ -115,6 +115,7 @@ impl State {
                     self.capture_requested = true;
                     self.screenshot_expand_review = false;
                 }
+                Intent::Capture(CaptureIntent::Turntable) => self.open_turntable_dialog(),
                 Intent::Cook(CookIntent::SetMode(mode)) => self.set_cook_mode(mode),
                 Intent::Cook(CookIntent::CookNow) => self.cook_now(),
                 Intent::Review(intent) => self.apply_review_intent(intent),

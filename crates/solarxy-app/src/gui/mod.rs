@@ -73,6 +73,7 @@ pub(crate) use settings::{
     ClipboardReadout, CookReadout, HistoryReadout, PanelSettings, ToolReadout, TransportReadout,
 };
 pub(crate) use modals::still::StillOpening;
+pub(crate) use modals::turntable::{TurntableIncludes, TurntableRequest, azimuth_deg, frame_count};
 pub(crate) use intent::{
     CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
     LayoutIntent, PaneChange, PanelIntent, PostChange, ReviewIntent, ToolIntent, TransportIntent,
