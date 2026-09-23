@@ -39,7 +39,13 @@ impl State {
     /// Returns `Err` if the surface texture is unavailable (e.g. the window
     /// was minimised between frames) or if the GPU device is lost.
     pub fn render(&mut self) -> anyhow::Result<()> {
-        self.window.request_redraw();
+        // Each frame asks for the next, which is what makes the loop
+        // continuous, except while the window is out of view: then nobody
+        // sees a frame, and a traced pane accumulating for nobody is the
+        // cost the occlusion event exists to stop. Coming back asks again.
+        if !self.occluded {
+            self.window.request_redraw();
+        }
         if !self.is_surface_configured {
             return Ok(());
         }
@@ -60,6 +66,9 @@ impl State {
         self.poll_pending_capture();
 
         self.apply_pending_scene_deltas();
+        // After the deltas and before any pane encodes, as the browser has
+        // it: a watched tracer's environment follows the scene's here.
+        self.feed_traced_environment();
 
         // A running still renders instead of the panes: the job and the
         // viewport would otherwise fight over the shared render targets
@@ -253,6 +262,9 @@ impl State {
             && !is_uv_map
             && cam_data.is_some()
             && self.tracer.is_some();
+        if traced {
+            self.prepare_traced_pane(i);
+        }
 
         let mut encoder = self
             .device
@@ -346,6 +358,9 @@ impl State {
         }
         for delta in std::mem::take(&mut self.pending_scene_deltas) {
             self.raster.apply(&self.device, &self.queue, &delta);
+            // The same delta reaches a watched tracer, whose mean was of
+            // the scene before it and starts over.
+            self.feed_traced_scene_delta(&delta);
             // The backend collects upload failures rather than logging them:
             // it has no logging facility and this shell is the layer that
             // knows where a message belongs.
@@ -839,6 +854,9 @@ impl State {
             self.renderer
                 .post
                 .set_strengths(self.preferences.display.post_strengths());
+            // The defaults may steer the traced preview, so every
+            // accumulation starts over under the new terms.
+            self.traced_defaults_changed();
             self.gui
                 .set_toast("Preferences saved", crate::gui::ToastSeverity::Info);
         }

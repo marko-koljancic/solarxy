@@ -155,6 +155,11 @@ impl ApplicationHandler<State> for App {
             // folder of models is one gesture rather than a document replaced
             // once per file.
             WindowEvent::DroppedFile(path) => state.drop_path(path),
+            // Out of view, the frame loop stops asking for the next frame;
+            // back in view, or focused, it asks for one. Focus is the safety
+            // valve for a platform whose occlusion report is unreliable.
+            WindowEvent::Occluded(occluded) => state.set_occluded(occluded),
+            WindowEvent::Focused(true) => state.window.request_redraw(),
             WindowEvent::RedrawRequested => {
                 self.frame_count = self.frame_count.wrapping_add(1);
                 state.update();

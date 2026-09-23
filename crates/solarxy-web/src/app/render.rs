@@ -143,7 +143,9 @@ impl SolarxyApp {
         // authors its own settings on the same backend and whichever ran
         // last would otherwise win.
         if let Some(t) = self.tracer.as_mut() {
-            t.set_settings(preview_trace_settings(self.preview_denoise));
+            t.set_settings(solarxy_host::traced_preview::preview_trace_settings(
+                self.preview_denoise,
+            ));
             // The filter's steering, for the same reason and it is newly load
             // bearing: a still authored from a render node now writes these
             // four, so without this a preview would inherit whatever the last
@@ -169,7 +171,7 @@ impl SolarxyApp {
         let Some(cam) = self.view.cameras.get(i).and_then(Option::as_ref) else {
             return;
         };
-        let key = camera_key(&cam.camera);
+        let key = solarxy_host::traced_preview::camera_key(&cam.camera);
         if self.traced_cam_keys.get(i).copied().flatten() != Some(key) {
             if let Some(t) = self.tracer.as_mut() {
                 t.invalidate_pane(i);

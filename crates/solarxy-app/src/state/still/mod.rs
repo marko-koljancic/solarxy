@@ -281,6 +281,13 @@ impl State {
                 self.gui.set_toast(&note, ToastSeverity::Warning);
             }
             self.sync_traced_environment();
+            // The pane path owes an install from the moment the still takes
+            // the shared backend, or a traced pane resuming afterwards keeps
+            // the still's lighting. Set here rather than where the job
+            // finishes so that a cancelled or failed render restores the
+            // panes too; the pane path holds off while the job runs.
+            self.traced_env_dirty = true;
+            self.traced_cam_keys = [None; 4];
             let shot_camera = camera.camera;
             self.light_traced_still_camera(&shot_camera);
             if let Some(t) = self.tracer.as_mut() {

@@ -52,7 +52,7 @@ use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::backend::{FrameCtx, FrameOutcome, PaneContent, RenderBackend, UvSource};
-use solarxy_renderer::pathtrace::backend::{PathBackend, TraceSettings};
+use solarxy_renderer::pathtrace::backend::PathBackend;
 use solarxy_renderer::pathtrace::denoise::DenoiseSettings;
 use solarxy_renderer::capture::CaptureTarget;
 use solarxy_renderer::frame::{Renderer, RendererInit};
@@ -649,11 +649,6 @@ struct PaneInputs {
     traced: bool,
 }
 
-/// What the traced preview converges to. High enough that a resting pane
-/// keeps improving for minutes at one sample per frame, low enough that
-/// the counter's target still means something.
-const PREVIEW_TARGET_SAMPLES: u32 = 4096;
-
 /// The largest floating-point still the browser will assemble, in pixels.
 ///
 /// Not the eight-bit limit, which stays at the job's own 8192 edge. A float
@@ -689,50 +684,6 @@ const MAX_PASS_PLANE_BYTES: u64 = 192 * 1024 * 1024;
 #[allow(clippy::cast_precision_loss)]
 fn megapixels(pixels: u64) -> f64 {
     pixels as f64 / 1_000_000.0
-}
-
-/// The traced preview's settings: one sample per animation frame (the
-/// pacing that keeps the page responsive), half resolution, and the
-/// edge-aware filter, which defaults on because a one-sample frame is
-/// unusable without it. Asserted before every preview encode rather than
-/// held, since the still job authors its own settings on the same backend.
-///
-/// The filter is the one value a person can turn off, and the reason to is
-/// judging what the tracer actually produced rather than what the filter
-/// made of it, which matters most at the sample counts where the filter is
-/// doing the most work.
-fn preview_trace_settings(denoise: bool) -> TraceSettings {
-    TraceSettings {
-        samples: PREVIEW_TARGET_SAMPLES,
-        chunk: 1,
-        denoise,
-        resolution_scale: 0.5,
-        ..TraceSettings::default()
-    }
-}
-
-/// The fields of a camera a traced accumulation is valid under. Aspect
-/// included, because a resize reshapes every ray; the projection kind
-/// rides as a discriminant.
-fn camera_key(c: &Camera) -> [f32; 13] {
-    [
-        c.eye.x,
-        c.eye.y,
-        c.eye.z,
-        c.target.x,
-        c.target.y,
-        c.target.z,
-        c.up.x,
-        c.up.y,
-        c.up.z,
-        c.fovy,
-        c.aspect,
-        c.ortho_scale,
-        match c.projection {
-            solarxy_core::preferences::ProjectionMode::Perspective => 0.0,
-            solarxy_core::preferences::ProjectionMode::Orthographic => 1.0,
-        },
-    ]
 }
 
 fn gizmo_pose(t: &GizmoTarget) -> GizmoPose {

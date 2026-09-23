@@ -248,6 +248,17 @@ pub struct State {
     /// the one entry drawn absent rather than disabled, as the browser has
     /// it, because a device that cannot trace has nothing to sequence.
     pub(super) tracing_available: bool,
+    /// The camera each traced pane last accumulated under, as the shared
+    /// key; a mismatch at encode drops that pane's mean. `None` after any
+    /// reset, so the next encode re-anchors the pose.
+    pub(super) traced_cam_keys: [Option<[f32; 13]>; 4],
+    /// The environment scalars (intensity, rotation) the tracer last had;
+    /// a move re-syncs it and drops every accumulation.
+    pub(super) traced_env_params: (f32, f32),
+    /// Whether the window is hidden from view. While it is, no frame asks
+    /// for the next, so nothing draws, cooks or traces for nobody; the next
+    /// un-occlusion or focus asks for one and the loop resumes.
+    pub(super) occluded: bool,
     /// The scene camera each pane looks through, or `None` for a free view.
     ///
     /// A bound pane follows the camera node's pose each frame and composites

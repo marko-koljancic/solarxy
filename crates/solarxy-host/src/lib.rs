@@ -170,6 +170,7 @@ pub mod preview;
 pub mod raster;
 pub mod review_markers;
 pub mod still;
+pub mod traced_preview;
 pub mod view;
 pub mod visualization;
 
