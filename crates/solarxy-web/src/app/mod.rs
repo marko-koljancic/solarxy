@@ -29,7 +29,7 @@ use solarxy_core::validation::{
     ValidationConfig, ValidationResult, ValidationThresholds, validate_raw_model_with_config,
 };
 use solarxy_core::view_config::{
-    DisplaySettings, PaneDisplaySettings, PaneEngine, PaneLook, ViewLayout,
+    DisplaySettings, PANE_LOOK_KEY, PaneDisplaySettings, PaneEngine, PaneLook, ViewLayout,
 };
 use solarxy_core::AABB;
 use solarxy_graph::assets::AssetTable;
@@ -174,21 +174,12 @@ fn default_display_settings() -> DisplaySettings {
     }
 }
 
-/// The key a pane's look rides under inside `PaneJson::display`.
-///
-/// That field is declared opaque and round-tripped uninterpreted by the
-/// scene file, which makes it the right place for pane state the schema
-/// does not name: persisting here costs no `schema_version` bump and no
-/// `min_reader` gate, and a scene written before this existed simply has
-/// no such key.
-const PANE_LOOK_KEY: &str = "look";
-
-// This shell's view state is `solarxy_host::HostViewState` plus three fields
-// held directly on `SolarxyApp`: `pane_looks`, `look_through` and
-// `camera_editing`. The binding names the engine's node type, which the
-// shared crate may not see; the editing flag is a fact about this shell's
-// pointer; the looks wait on the desktop storing one per pane. The lock
-// left for the shared type once both shells wrote a pose back.
+// This shell's view state is `solarxy_host::HostViewState` plus two fields
+// held directly on `SolarxyApp`: `look_through` and `camera_editing`. The
+// binding names the engine's node type, which the shared crate may not see;
+// the editing flag is a fact about this shell's pointer. The lock left for
+// the shared type once both shells wrote a pose back, and the per-pane looks
+// left once the desktop stored one.
 
 mod assets;
 mod capture;
@@ -453,10 +444,6 @@ pub struct SolarxyApp {
     /// The bounds `env` was last built for (grid/floor/shadow fit).
     env_bounds: AABB,
     view: HostViewState,
-    /// Each pane's own rendering intent, used when the pane is a free view. A
-    /// pane looking through a camera composites with that camera's look
-    /// instead; see `SolarxyApp::pane_look`.
-    pane_looks: [PaneLook; 4],
     /// Which `camera` node each pane looks through (`None` = free view).
     look_through: [Option<NodeId>; 4],
     /// Transient: a locked look-through pane is mid-navigation, so the

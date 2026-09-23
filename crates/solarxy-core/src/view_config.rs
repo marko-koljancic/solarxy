@@ -272,18 +272,18 @@ impl Default for PaneLook {
     }
 }
 
-impl PaneLook {
-    /// Seed from the host's global tone mapper and exposure, which is what
-    /// the desktop shell's sidebar and its `E` / `Shift+T` keys drive.
-    #[must_use]
-    pub fn from_tone(tone_mode: ToneMode, exposure: f32) -> Self {
-        Self {
-            exposure,
-            tone_mode,
-            ..Self::default()
-        }
-    }
-}
+/// The key a pane's look rides under inside the scene file's pane `display`
+/// blob.
+///
+/// That field is declared opaque and round-tripped uninterpreted by the scene
+/// file, which makes it the right place for pane state the schema does not
+/// name: persisting here costs no `schema_version` bump and no `min_reader`
+/// gate, and a scene written before this existed simply has no such key.
+///
+/// Here rather than in either shell because both write it and a document has
+/// to round-trip between them: two copies of one string is how a look saved in
+/// one shell becomes invisible in the other.
+pub const PANE_LOOK_KEY: &str = "look";
 
 impl PaneDisplaySettings {
     /// The view a delivered still is drawn with: the scene, and nothing that

@@ -31,7 +31,7 @@
 use std::path::PathBuf;
 
 use solarxy_core::preferences::PaneMode;
-use solarxy_core::view_config::{PaneDisplaySettings, PaneLook};
+use solarxy_core::view_config::PaneDisplaySettings;
 use solarxy_host::still::{StillEngine, StillReadback, StillSpec, StillStep, TILE_BUDGET_PIXELS};
 use solarxy_host::{StillCtx, StillRenderJob};
 use solarxy_renderer::camera::Camera;
@@ -158,10 +158,7 @@ impl State {
             self.look_through[pane_index.min(3)],
         )
         .cloned();
-        let look = resolve_look(
-            cam_look.as_ref(),
-            &PaneLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
-        );
+        let look = resolve_look(cam_look.as_ref(), &self.view.pane_looks[pane_index.min(3)]);
         solarxy_host::cameras::bind_look_luts(
             &self.device,
             &self.queue,

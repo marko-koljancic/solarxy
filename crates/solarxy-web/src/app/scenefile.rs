@@ -178,7 +178,7 @@ impl SolarxyApp {
                     .ok()
                     .and_then(|v| {
                         if let serde_json::Value::Object(mut map) = v {
-                            if let Ok(look) = serde_json::to_value(self.pane_looks[i]) {
+                            if let Ok(look) = serde_json::to_value(self.view.pane_looks[i]) {
                                 map.insert(PANE_LOOK_KEY.to_string(), look);
                             }
                             Some(map.into_iter().collect())
@@ -219,7 +219,7 @@ impl SolarxyApp {
                 let value = serde_json::Value::Object(pane.display.clone().into_iter().collect());
                 // Absent on any scene saved before the look existed, which
                 // is the whole reason it defaults rather than failing.
-                self.pane_looks[i] = pane
+                self.view.pane_looks[i] = pane
                     .display
                     .get(PANE_LOOK_KEY)
                     .and_then(|v| serde_json::from_value::<PaneLook>(v.clone()).ok())

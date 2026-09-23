@@ -20,7 +20,7 @@
 //! check lives. `pixels` is what happens to the pixels once they arrive.
 
 use solarxy_core::preferences::BackgroundMode;
-use solarxy_core::view_config::{PaneDisplaySettings, PaneLook};
+use solarxy_core::view_config::PaneDisplaySettings;
 use solarxy_graph::nodes::{RenderEngine, RenderSettings};
 use solarxy_host::still::{StillEngine, StillPasses, StillSpec, StillStep, TILE_BUDGET_PIXELS};
 use solarxy_host::{StillCtx, StillRenderJob};
@@ -235,9 +235,10 @@ impl State {
         // shot's grading tables bound for the job's composites. A free
         // shot leaves the strengths at zero, so identity tables cost
         // nothing.
-        let pane_look =
-            PaneLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure);
-        let look = resolve_look(cam_look.as_ref(), &pane_look);
+        // The shot's pane, so a still from a split view carries the look of
+        // the pane it was framed in rather than one derived from scene-global
+        // state that no pane necessarily shows.
+        let look = resolve_look(cam_look.as_ref(), &self.view.pane_looks[ap.min(3)]);
         solarxy_host::cameras::bind_look_luts(
             &self.device,
             &self.queue,

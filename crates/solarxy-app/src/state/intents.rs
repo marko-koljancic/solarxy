@@ -326,8 +326,6 @@ fn apply_post_change(post: &mut solarxy_renderer::frame::PostProcessing, change:
         PostChange::Bloom(v) => post.bloom_enabled = v,
         PostChange::Ssao(v) => post.ssao_enabled = v,
         PostChange::Strengths(v) => post.set_strengths(v),
-        PostChange::ToneMode(v) => post.tone_mode = v,
-        PostChange::Exposure(v) => post.exposure = v,
     }
 }
 
@@ -933,7 +931,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solarxy_core::preferences::{BackgroundMode, IblMode, LineWeight, ToneMode};
+    use solarxy_core::preferences::{BackgroundMode, IblMode, LineWeight};
     use solarxy_core::view_config::PostStrengths;
 
     /// The five tests below are the retired mirror's diff tests, re-expressed
@@ -1080,14 +1078,13 @@ mod tests {
     #[test]
     fn every_post_setting_marks_the_composite() {
         // One case each: they reach the uniform by different routes, the
-        // composite writing two of them and the bloom pass the third, so a
-        // rule that noticed only one would still look like it worked.
+        // composite writing the two switches and the bloom pass the
+        // strengths, so a rule that noticed only one would still look like
+        // it worked.
         for change in [
             PostChange::Bloom(true),
             PostChange::Ssao(true),
             PostChange::Strengths(PostStrengths::default()),
-            PostChange::ToneMode(ToneMode::Reinhard),
-            PostChange::Exposure(1.4),
         ] {
             let r = marked(&[Intent::Post(change)]);
             assert!(r.composite, "{change:?} must mark the composite");

@@ -1135,7 +1135,7 @@ impl SolarxyApp {
 
     /// The resolved look a pane composites with.
     pub(super) fn pane_look(&self, pane: usize) -> CompositeLook {
-        let fallback = self.pane_looks.get(pane).copied().unwrap_or_default();
+        let fallback = self.view.pane_looks.get(pane).copied().unwrap_or_default();
         solarxy_renderer::composite::resolve_look(self.pane_camera_look(pane), &fallback)
     }
 
@@ -1179,6 +1179,7 @@ impl SolarxyApp {
             })
             .or_else(|| self.pane_camera_look(self.view.active_pane).cloned());
         let pane_fallback = self
+            .view
             .pane_looks
             .get(self.view.active_pane)
             .copied()
@@ -1265,7 +1266,7 @@ impl SolarxyApp {
             display: self.view.display,
             pane_projections: projections,
             pane_rects: self.pane_rects_css(),
-            pane_looks: self.pane_looks,
+            pane_looks: self.view.pane_looks,
             pane_look_through,
             pane_camera_locked: self.view.camera_locked.flags(),
             pane_gate_aspect,

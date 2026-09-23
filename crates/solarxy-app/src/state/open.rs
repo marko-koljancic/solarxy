@@ -435,6 +435,18 @@ impl State {
         for (i, pane) in view.panes.iter().take(4).enumerate() {
             if !pane.display.is_empty() {
                 let value = serde_json::Value::Object(pane.display.clone().into_iter().collect());
+                // Read before the settings decode, as the browser reads it:
+                // the look rides as an extra key inside the same blob, and it
+                // is absent on any scene saved before the look existed, which
+                // is the whole reason it defaults rather than failing.
+                self.view.pane_looks[i] = pane
+                    .display
+                    .get(solarxy_core::view_config::PANE_LOOK_KEY)
+                    .and_then(|v| {
+                        serde_json::from_value::<solarxy_core::view_config::PaneLook>(v.clone())
+                            .ok()
+                    })
+                    .unwrap_or_default();
                 if let Ok(mut settings) =
                     serde_json::from_value::<solarxy_core::view_config::PaneDisplaySettings>(value)
                 {

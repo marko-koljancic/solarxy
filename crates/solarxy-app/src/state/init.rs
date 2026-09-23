@@ -215,6 +215,9 @@ impl State {
                 // linked every split view for good.
                 cameras_linked: false,
                 camera_locked: solarxy_host::cameras::CameraLocks::default(),
+                // Neutral, and neutral is bit-identical, so a fresh session
+                // composites exactly as it did before a look was stored.
+                pane_looks: [solarxy_core::view_config::PaneLook::default(); 4],
             },
             gui,
             engine: None,

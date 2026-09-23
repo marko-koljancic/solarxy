@@ -1,4 +1,4 @@
-use solarxy_core::preferences::{MaterialOverride, ToneMode};
+use solarxy_core::preferences::MaterialOverride;
 use solarxy_core::view_config::{
     MAX_BLOOM_STRENGTH, MAX_BLOOM_THRESHOLD, MAX_SSAO_STRENGTH, MIN_BLOOM_STRENGTH,
     MIN_BLOOM_THRESHOLD, MIN_SSAO_STRENGTH,
@@ -132,29 +132,6 @@ pub(in crate::gui) fn draw_sidebar_content(
                         intents.raise(Intent::Post(PostChange::Strengths(next)));
                     }
                 });
-                if let Some(mode) = crate::gui::widgets::combo_with_tooltip(
-                    ui,
-                    "Tone Map",
-                    "How highlights are rolled off into what the display can show",
-                    post.tone_mode,
-                    ToneMode::ALL,
-                ) {
-                    intents.raise(Intent::Post(PostChange::ToneMode(mode)));
-                }
-                let mut exposure = post.exposure;
-                let row = ui.horizontal(|ui| {
-                    ui.add(
-                        egui::Slider::new(&mut exposure, 0.1..=10.0)
-                            .text("Exposure")
-                            .logarithmic(true),
-                    )
-                    .changed()
-                });
-                row.response
-                    .on_hover_text("How bright the scene is before it is tone mapped");
-                if row.inner {
-                    intents.raise(Intent::Post(PostChange::Exposure(exposure)));
-                }
             });
 
         ui.separator();

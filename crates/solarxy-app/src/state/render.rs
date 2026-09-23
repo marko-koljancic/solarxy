@@ -209,18 +209,12 @@ impl State {
             self.look_through[i.min(3)],
         )
         .cloned();
-        // The camera's look wins where it has one; what it falls back to is
-        // the one thing the two shells still answer differently. The browser
-        // falls back to the pane's own look, and this shell derives one from
-        // the global tone and exposure, because it has no per-pane look to
-        // fall back to yet. The two converge when per-pane look replaces the
-        // global post state here and the Sidebar is retired with it.
+        // The camera's look wins where it has one, and a free pane falls back
+        // to its own, which is what both shells now do. The precedence itself
+        // is `resolve_look` and is not restated here.
         let look = solarxy_renderer::composite::resolve_look(
             cam_look.as_ref(),
-            &solarxy_core::view_config::PaneLook::from_tone(
-                self.renderer.post.tone_mode,
-                self.renderer.post.exposure,
-            ),
+            &self.view.pane_looks[i.min(3)],
         );
         solarxy_host::cameras::bind_look_luts(
             &self.device,

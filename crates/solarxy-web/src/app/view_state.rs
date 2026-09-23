@@ -246,7 +246,7 @@ impl SolarxyApp {
     pub fn set_pane_look(&mut self, pane: usize, look: JsValue) -> Result<JsValue, JsError> {
         let look: PaneLook = serde_wasm_bindgen::from_value(look)
             .map_err(|e| JsError::new(&format!("bad pane look: {e}")))?;
-        if let Some(slot) = self.pane_looks.get_mut(pane) {
+        if let Some(slot) = self.view.pane_looks.get_mut(pane) {
             *slot = look;
         }
         self.view_state()

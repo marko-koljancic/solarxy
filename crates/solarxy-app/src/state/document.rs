@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use solarxy_core::view_config::PaneDisplaySettings;
+use solarxy_core::view_config::{PANE_LOOK_KEY, PaneDisplaySettings, PaneLook};
 use solarxy_graph::engine::SceneSidecar;
 use solarxy_renderer::camera::Camera;
 
@@ -86,6 +86,8 @@ pub(super) struct PaneSource<'a> {
     /// writes its pose back. Meaningless without a binding, and written as
     /// the shared rule answers it rather than as the raw flag.
     pub camera_locked: bool,
+    /// The pane's own look, which a free pane composites with.
+    pub look: PaneLook,
 }
 
 /// The saved view: layout, active pane, divider, and every pane's camera,
@@ -109,11 +111,25 @@ pub(super) fn view_json(
             let camera = pane
                 .camera
                 .map_or_else(solarxy_scenefile::CameraJson::default, camera_to_json);
+            // The pane's look rides inside the display blob rather than
+            // taking a schema field of its own. `PaneJson::display` is
+            // declared opaque and round-tripped uninterpreted, and
+            // `PaneDisplaySettings` ignores keys it does not know, so this
+            // persists a free pane's exposure and grade with no scene-schema
+            // change and no reader-version gate. The browser writes the same
+            // key from the same constant, which is what lets a document carry
+            // its looks between the two shells.
             let display = serde_json::to_value(pane.settings)
                 .ok()
-                .and_then(|v| match v {
-                    serde_json::Value::Object(map) => Some(map.into_iter().collect()),
-                    _ => None,
+                .and_then(|v| {
+                    if let serde_json::Value::Object(mut map) = v {
+                        if let Ok(look) = serde_json::to_value(pane.look) {
+                            map.insert(PANE_LOOK_KEY.to_string(), look);
+                        }
+                        Some(map.into_iter().collect())
+                    } else {
+                        None
+                    }
                 })
                 .unwrap_or_default();
             solarxy_scenefile::PaneJson {
@@ -216,6 +232,7 @@ impl State {
             settings: &self.view.pane_settings[i],
             look_through: self.look_through[i].map(|id| id.0),
             camera_locked: self.is_locked_look_through(i),
+            look: self.view.pane_looks[i],
         });
         view_json(
             self.view.display.layout,
@@ -530,24 +547,28 @@ mod tests {
                 settings: &settings[0],
                 look_through: None,
                 camera_locked: false,
+                look: PaneLook::default(),
             },
             PaneSource {
                 camera: Some(&cams[1]),
                 settings: &settings[1],
                 look_through: Some(7),
                 camera_locked: true,
+                look: PaneLook::default(),
             },
             PaneSource {
                 camera: Some(&cams[2]),
                 settings: &settings[2],
                 look_through: None,
                 camera_locked: false,
+                look: PaneLook::default(),
             },
             PaneSource {
                 camera: None,
                 settings: &settings[3],
                 look_through: None,
                 camera_locked: false,
+                look: PaneLook::default(),
             },
         ];
         let view = view_json(ViewLayout::Quad, 2, 0.35, panes);
@@ -584,6 +605,73 @@ mod tests {
             "a bound pane's lock is written beside its binding"
         );
         assert!(!view.panes[0].camera_locked);
+    }
+
+    /// Each pane's look rides in its own display blob, under the key the
+    /// browser writes, so a document carries four looks rather than one.
+    #[test]
+    fn every_pane_writes_its_own_look_under_the_shared_key() {
+        let settings =
+            [PaneDisplaySettings::for_still(solarxy_core::preferences::BackgroundMode::GRADIENT);
+                4];
+        // Four distinguishable looks, so a writer that wrote one pane's look
+        // into every slot would be caught rather than merely suspected.
+        let looks: [PaneLook; 4] = std::array::from_fn(|i| PaneLook {
+            exposure: 1.0 + i as f32,
+            ..PaneLook::default()
+        });
+        let panes = std::array::from_fn(|i| PaneSource {
+            camera: None,
+            settings: &settings[i],
+            look_through: None,
+            camera_locked: false,
+            look: looks[i],
+        });
+        let view = view_json(ViewLayout::Quad, 0, 0.5, panes);
+
+        for (i, expected) in looks.iter().enumerate() {
+            let raw = view.panes[i]
+                .display
+                .get(PANE_LOOK_KEY)
+                .expect("the look rides in the display blob");
+            let read: PaneLook =
+                serde_json::from_value(raw.clone()).expect("the look reads back as a look");
+            assert!(
+                (read.exposure - expected.exposure).abs() < f32::EPSILON,
+                "pane {i} exposure {} is not {}",
+                read.exposure,
+                expected.exposure
+            );
+        }
+    }
+
+    /// The look travels as an extra key inside the settings blob, so the
+    /// settings still decode from the same object. This is what makes the
+    /// persistence cost no schema bump: a reader that knows nothing of the
+    /// key ignores it, and one that does reads it out first.
+    #[test]
+    fn the_look_key_does_not_disturb_the_settings_it_rides_with() {
+        let mut settings =
+            PaneDisplaySettings::for_still(solarxy_core::preferences::BackgroundMode::GRADIENT);
+        settings.show_grid = true;
+        let panes = std::array::from_fn(|_| PaneSource {
+            camera: None,
+            settings: &settings,
+            look_through: None,
+            camera_locked: false,
+            look: PaneLook {
+                exposure: 4.0,
+                ..PaneLook::default()
+            },
+        });
+        let view = view_json(ViewLayout::Single, 0, 0.5, panes);
+
+        let blob = &view.panes[0].display;
+        assert!(blob.contains_key(PANE_LOOK_KEY));
+        let value = serde_json::Value::Object(blob.clone().into_iter().collect());
+        let decoded: PaneDisplaySettings =
+            serde_json::from_value(value).expect("the settings still decode beside the look");
+        assert!(decoded.show_grid, "the settings survive the extra key");
     }
 
     /// An authored document saved with this shell's sidecar reopens as the
@@ -624,6 +712,7 @@ mod tests {
             settings: &settings[i],
             look_through: None,
             camera_locked: false,
+            look: PaneLook::default(),
         });
         let sidecar = SceneSidecar {
             generator: "solarxy test".to_string(),

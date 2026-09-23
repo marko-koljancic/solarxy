@@ -39,7 +39,7 @@
 
 use solarxy_core::preferences::{
     BackgroundMode, GizmoOrientation, IblMode, InspectionMode, LineWeight, MaterialOverride,
-    NormalsMode, PaneMode, ProjectionMode, ToneMode, UvMapBackground, ViewMode,
+    NormalsMode, PaneMode, ProjectionMode, UvMapBackground, ViewMode,
 };
 use solarxy_core::view_config::PostStrengths;
 
@@ -158,8 +158,6 @@ pub(crate) enum PostChange {
     /// The three intensities together, because they reach the renderer
     /// through one setter that clamps them and pushes both passes.
     Strengths(PostStrengths),
-    ToneMode(ToneMode),
-    Exposure(f32),
 }
 
 /// The File menu.

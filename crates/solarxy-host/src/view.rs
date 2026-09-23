@@ -9,11 +9,13 @@
 //! this crate may not see the engine's.
 //!
 //! The lock on a bound pane moved here once both shells wrote a pose back to
-//! a node; its rule is [`crate::cameras::CameraLocks`]. What stays on each
-//! shell is the mid-navigation flag, which exists only to hold the follow
-//! off during a gesture and is a fact about that shell's pointer.
+//! a node; its rule is [`crate::cameras::CameraLocks`]. The per-pane look
+//! moved here once the desktop stored one, which is what made it a fact about
+//! a pane rather than about one shell. What stays on each shell is the
+//! mid-navigation flag, which exists only to hold the follow off during a
+//! gesture and is a fact about that shell's pointer.
 
-use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings};
+use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings, PaneLook};
 use solarxy_renderer::camera_state::CameraState;
 
 use crate::cameras::CameraLocks;
@@ -44,4 +46,12 @@ pub struct HostViewState {
     /// pose back to its camera node. The type carries the rule that a lock
     /// means nothing on a pane that is not bound, so no shell restates it.
     pub camera_locked: CameraLocks,
+    /// Each pane's own rendering intent, used when the pane is a free view.
+    ///
+    /// A pane looking through a camera composites with that camera's look
+    /// instead, and which of the two wins is
+    /// [`solarxy_renderer::composite::resolve_look`] rather than anything
+    /// stated here: a shell that re-derived the precedence would be the second
+    /// answer to a question that already has one.
+    pub pane_looks: [PaneLook; 4],
 }
