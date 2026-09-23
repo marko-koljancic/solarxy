@@ -119,10 +119,10 @@ impl SolarxyApp {
     /// Marker pin positions in PANE-RELATIVE CSS pixels (the DOM overlay
     /// clips one absolutely-positioned box per pane, so pins offset from
     /// their pane's origin), one entry per visible (marker x 3D pane) pair,
-    /// resolved through each pane's camera (the desktop projection: clip ->
-    /// NDC -> pane pixel, small NDC slack). Called once per animation frame
-    /// by the host loop and applied to the DOM imperatively; markers absent
-    /// from the list are hidden. UV panes carry no markers.
+    /// resolved through each pane's camera by the projection both shells
+    /// share (`solarxy_host::review_markers`). Called once per animation
+    /// frame by the host loop and applied to the DOM imperatively; markers
+    /// absent from the list are hidden. UV panes carry no markers.
     pub fn review_markers(&self) -> Result<JsValue, JsError> {
         let mut out: Vec<MarkerScreenDto> = Vec::new();
         if self.player_mode {
@@ -147,25 +147,20 @@ impl SolarxyApp {
             let vp = cam.build_view_projection_matrix();
             for m in &markers {
                 let Some(world) = m.world else { continue };
-                let clip = vp * cgmath::Vector4::new(world[0], world[1], world[2], 1.0);
-                if clip.w <= 0.0 {
+                // The shared projection answers in the pane's physical
+                // pixels; the DOM overlay wants CSS pixels.
+                let Some((x, y)) = solarxy_host::review_markers::project_to_pane(
+                    &vp,
+                    world,
+                    (pane.width, pane.height),
+                ) else {
                     continue;
-                }
-                let ndc = (clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
-                // Same culls as the attribute pins; the z range is what
-                // rejects behind-camera markers under orthographic
-                // projection (clip.w is a constant 1 there).
-                if ndc.0.abs() > NDC_XY_SLACK
-                    || ndc.1.abs() > NDC_XY_SLACK
-                    || !(NDC_Z_MIN..=NDC_Z_MAX).contains(&ndc.2)
-                {
-                    continue;
-                }
+                };
                 out.push(MarkerScreenDto {
                     id: m.id.0 as f64,
                     pane: i,
-                    x: f32::midpoint(ndc.0, 1.0) * pane.width / self.dpr,
-                    y: (1.0 - ndc.1) * 0.5 * pane.height / self.dpr,
+                    x: x / self.dpr,
+                    y: y / self.dpr,
                 });
             }
         }

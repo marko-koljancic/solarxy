@@ -9,14 +9,18 @@
 //! a win for readability (the old SDF shapes competed with bloom).
 //!
 //! Per-pane plumbing comes from `state::render`: each entry pairs a 3D
-//! pane's egui-logical rect with the matching camera's `view * proj`
-//! matrix. UV panes are filtered out upstream. The notes themselves are the
-//! engine's snapshot for the frame, with the staleness it derived.
+//! pane's egui-logical rect with the markers already projected into it,
+//! from the world points the engine resolved this frame through the
+//! projection both shells share. UV panes are filtered out upstream. The
+//! notes themselves are the engine's snapshot for the frame, with the
+//! staleness it derived; a marker whose anchor no longer resolves draws at
+//! its fallback point with the stale dot, and a node-only note, which has
+//! no point at all, lists in the panel and draws nothing here.
 
 use std::borrow::Cow;
 
-use cgmath::{Matrix4, Vector4};
-use solarxy_graph::engine::AnnotationSnapshot;
+use cgmath::Matrix4;
+use solarxy_graph::engine::{AnnotationSnapshot, ReviewMarkerWorld};
 use solarxy_graph::review::AnnotationId;
 
 use crate::gui::panels::review::visuals::{category_color, category_label, category_letter};
@@ -24,13 +28,50 @@ use crate::gui::theme::Theme;
 use crate::state::review::ReviewState;
 
 /// Per-3D-pane data the overlay needs: the egui-logical rect the pane
-/// occupies in window space, plus the camera's `view_proj` matrix. The
-/// state layer builds one of these per active 3D pane and passes a slice
-/// into [`draw_review_overlay`].
-#[derive(Debug, Clone, Copy)]
+/// occupies in window space, and the markers projected into it. The state
+/// layer builds one of these per active 3D pane and passes a slice into
+/// [`draw_review_overlay`].
+#[derive(Debug, Clone)]
 pub(crate) struct ReviewPaneOverlay {
     pub egui_rect: egui::Rect,
-    pub view_proj: Matrix4<f32>,
+    pub markers: Vec<ProjectedMarker>,
+}
+
+/// One marker's pin position in a pane, in window-space logical pixels.
+/// Only the identity rides here: the note it marks is looked up in the
+/// frame's snapshot, so the pin and the card read one record.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ProjectedMarker {
+    pub id: AnnotationId,
+    pub pos: egui::Pos2,
+}
+
+/// Project the engine's markers into one pane through the shared
+/// projection. `pane_size` is the pane in physical pixels, the unit the
+/// projection answers in, and `ppp` scales the answer into the logical
+/// pixels egui draws in, offset into the window by `egui_rect`. A marker
+/// with no world point (a node-only note) yields no pin; the panel still
+/// lists it, which is what makes re-anchoring discoverable rather than the
+/// note reading as lost.
+pub(crate) fn project_review_markers(
+    markers: &[ReviewMarkerWorld],
+    view_proj: &Matrix4<f32>,
+    pane_size: (f32, f32),
+    ppp: f32,
+    egui_rect: egui::Rect,
+) -> Vec<ProjectedMarker> {
+    markers
+        .iter()
+        .filter_map(|m| {
+            let world = m.world?;
+            let (x, y) =
+                solarxy_host::review_markers::project_to_pane(view_proj, world, pane_size)?;
+            Some(ProjectedMarker {
+                id: m.id,
+                pos: egui::pos2(egui_rect.min.x + x / ppp, egui_rect.min.y + y / ppp),
+            })
+        })
+        .collect()
 }
 
 const PIN_RADIUS: f32 = 6.0;
@@ -91,16 +132,14 @@ pub(crate) fn draw_review_overlay(
     for pane in panes {
         let painter = ctx.layer_painter(layer).with_clip_rect(pane.egui_rect);
         let mut visible: Vec<VisiblePin<'_>> = Vec::new();
-        for note in notes {
-            if note.annotation.reply_to.is_some() {
-                continue;
-            }
-            let Some(world) = note.annotation.anchor.world_fallback else {
-                continue;
-            };
-            let Some(pos) = project_to_pane(&pane.view_proj, world, pane.egui_rect) else {
+        for marker in &pane.markers {
+            // The engine's marker list and the snapshot are read in the same
+            // frame, so a marker without its note is a note deleted between
+            // the two reads, which the next frame settles.
+            let Some(note) = notes.iter().find(|n| n.annotation.id == marker.id) else {
                 continue;
             };
+            let pos = marker.pos;
             // The card sizes to its text: lay the body galley out up front
             // so its measured height drives `compute_card_rect` (and the
             // hover hit-test, which keys off `card_rect`).
@@ -108,17 +147,12 @@ pub(crate) fn draw_review_overlay(
             let reply_count = reply_count(notes, note.annotation.id);
             let card_height = card_height_for(&body_galley, reply_count > 0);
             let card_rect = compute_card_rect(pos, pane.egui_rect, card_height);
-            // Dimming a marker whose mesh is hidden needs the engine's own
-            // visibility answer; it arrives with the engine-resolved marker
-            // positions, which drop a hidden node's markers outright.
-            let mesh_hidden = false;
             visible.push(VisiblePin {
                 note,
                 pos,
                 card_rect,
                 body_galley,
                 reply_count,
-                mesh_hidden,
             });
         }
 
@@ -204,10 +238,6 @@ struct VisiblePin<'a> {
     body_galley: std::sync::Arc<egui::Galley>,
     /// Direct replies, counted once per pin for the card's badge.
     reply_count: usize,
-    /// The mesh this annotation is anchored to is hidden, so the pin
-    /// renders dimmed, like a resolved one. Always `false` until the
-    /// positions come from the engine, which answers visibility itself.
-    mesh_hidden: bool,
 }
 
 impl VisiblePin<'_> {
@@ -242,39 +272,10 @@ fn card_height_for(body: &egui::Galley, has_replies: bool) -> f32 {
         .clamp(CARD_MIN_HEIGHT, CARD_MAX_HEIGHT)
 }
 
-/// Project a world point through `view_proj` and into the pane's
-/// egui-logical pixel coordinates. Returns `None` when the point is
-/// behind the camera or falls outside the pane's clip rect.
-fn project_to_pane(
-    view_proj: &Matrix4<f32>,
-    world_pos: [f32; 3],
-    pane_rect: egui::Rect,
-) -> Option<egui::Pos2> {
-    let [x, y, z] = world_pos;
-    let clip = view_proj * Vector4::new(x, y, z, 1.0);
-    if clip.w <= 0.0 {
-        return None;
-    }
-    let ndc_x = clip.x / clip.w;
-    let ndc_y = clip.y / clip.w;
-    let ndc_z = clip.z / clip.w;
-    if !(-1.0..=1.0).contains(&ndc_z) {
-        return None;
-    }
-    let px = pane_rect.min.x + f32::midpoint(ndc_x, 1.0) * pane_rect.width();
-    let py = pane_rect.min.y + (1.0 - ndc_y) * 0.5 * pane_rect.height();
-    if !pane_rect
-        .expand(PIN_HIT_RADIUS)
-        .contains(egui::pos2(px, py))
-    {
-        return None;
-    }
-    Some(egui::pos2(px, py))
-}
-
 /// Render a single category-colored pin. Selected pins gain a yellow
-/// (Ayu accent) outline; resolved pins and pins on hidden meshes drop
-/// alpha; stale pins get a dashed/dotted ring drawn manually.
+/// (Ayu accent) outline; resolved pins drop alpha; stale pins get a warning
+/// dot. A hidden node has no pins at all: the engine drops them before the
+/// projection, as the browser's list does.
 fn draw_pin(
     painter: &egui::Painter,
     pin: &VisiblePin<'_>,
@@ -285,7 +286,7 @@ fn draw_pin(
     let ann = &pin.note.annotation;
     let mut fill = category_color(theme, ann.category);
     let mut ring = theme.bg;
-    if ann.resolved || pin.mesh_hidden {
+    if ann.resolved {
         fill = with_alpha(fill, RESOLVED_ALPHA);
         ring = with_alpha(ring, RESOLVED_ALPHA);
     }
@@ -522,29 +523,45 @@ mod tests {
         )
     }
 
-    fn unit_pane() -> egui::Rect {
-        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 200.0))
+    fn marker(id: u64, world: Option<[f32; 3]>) -> ReviewMarkerWorld {
+        ReviewMarkerWorld {
+            id: AnnotationId(id),
+            world,
+            category: solarxy_graph::review::ReviewCategory::Question,
+            resolved: false,
+            needs_reanchor: false,
+        }
     }
 
     #[test]
-    fn project_to_pane_centers_origin_under_identity_view_proj() {
-        let pos = project_to_pane(&identity_view_proj(), [0.0, 0.0, 0.0], unit_pane());
-        let p = pos.expect("origin projects inside the pane");
-        assert!((p.x - 100.0).abs() < 1e-3, "x = {}", p.x);
-        assert!((p.y - 100.0).abs() < 1e-3, "y = {}", p.y);
+    fn a_marker_without_a_world_point_draws_no_pin() {
+        // A node-only note lists in the panel and pins nowhere; a marker with
+        // a point pins at the pane's centre for the origin under identity.
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 50.0));
+        let pins = project_review_markers(
+            &[marker(1, None), marker(2, Some([0.0, 0.0, 0.0]))],
+            &identity_view_proj(),
+            (200.0, 100.0),
+            2.0,
+            rect,
+        );
+        assert_eq!(pins.len(), 1, "the node-only note has no pin");
+        assert_eq!(pins[0].id, AnnotationId(2));
+        assert!((pins[0].pos.x - 60.0).abs() < 1e-3, "x = {}", pins[0].pos.x);
+        assert!((pins[0].pos.y - 45.0).abs() < 1e-3, "y = {}", pins[0].pos.y);
     }
 
     #[test]
-    fn project_to_pane_returns_none_for_point_behind_camera() {
-        let mut m = identity_view_proj();
-        m[3][3] = -1.0;
-        assert!(project_to_pane(&m, [0.0, 0.0, 0.0], unit_pane()).is_none());
-    }
-
-    #[test]
-    fn project_to_pane_returns_none_for_point_outside_clip_z() {
-        let pos = project_to_pane(&identity_view_proj(), [0.0, 0.0, 2.0], unit_pane());
-        assert!(pos.is_none());
+    fn a_marker_the_shared_projection_culls_draws_no_pin() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 200.0));
+        let pins = project_review_markers(
+            &[marker(1, Some([0.0, 0.0, 2.0]))],
+            &identity_view_proj(),
+            (200.0, 200.0),
+            1.0,
+            rect,
+        );
+        assert!(pins.is_empty(), "past the far plane");
     }
 
     #[test]

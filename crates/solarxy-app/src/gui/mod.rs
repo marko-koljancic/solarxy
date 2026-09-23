@@ -90,7 +90,7 @@ pub(crate) use panels::nodes::{
 };
 pub(crate) use panels::params::{ParamPanelSource, ParamScene, ResolvedParams};
 pub(crate) use chrome::pane_toolbar::{LookThroughChange, PaneToolbarData, PaneView};
-pub(crate) use panels::review::overlay::ReviewPaneOverlay;
+pub(crate) use panels::review::overlay::{ReviewPaneOverlay, project_review_markers};
 pub(crate) use chrome::overlays::HudInfo;
 pub(crate) use chrome::attr_column::AttrColumnSource;
 pub(crate) use chrome::viewport_context_menu::{

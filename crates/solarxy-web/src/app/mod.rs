@@ -1039,16 +1039,6 @@ fn read_files(files: &JsValue) -> Result<Vec<(String, Vec<u8>)>, JsError> {
 // ---- boundary DTOs (camelCase; the engine/scene-file types stay
 // snake_case on disk, so these bridge to the JS convention) ----
 
-/// Screen-edge slack shared by the review-marker DOM projection: a little
-/// beyond the frustum so pins fade at the edge instead of popping exactly
-/// on it.
-const NDC_XY_SLACK: f32 = 1.05;
-/// The wgpu clip-space depth range with the same slack; the z cull is
-/// what rejects behind-camera points under orthographic projection,
-/// where `clip.w` is a constant 1.
-const NDC_Z_MIN: f32 = -0.05;
-const NDC_Z_MAX: f32 = 1.05;
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ViewStateDto {

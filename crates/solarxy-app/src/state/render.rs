@@ -857,18 +857,25 @@ impl State {
     }
 
     /// Build the per-pane data the egui review overlay needs: one
-    /// `ReviewPaneOverlay` per `Scene3D` pane, pairing the pane's
-    /// egui-logical rect with the pane camera's `view * proj` matrix.
-    /// UV panes are skipped (markers never render on UV map panes).
+    /// `ReviewPaneOverlay` per `Scene3D` pane, with the engine's
+    /// world-resolved markers projected into the pane through the
+    /// projection both shells share. The engine has already dropped replies
+    /// and the markers of hidden nodes, and answers a stale note with its
+    /// fallback point. UV panes are skipped (markers never render on UV map
+    /// panes).
     fn build_review_panes(&self, panes: &[Pane], ppp: f32) -> Vec<crate::gui::ReviewPaneOverlay> {
+        let Some(engine) = self.engine.as_deref() else {
+            return Vec::new();
+        };
+        let markers = engine.review_markers_world();
         let mut out = Vec::with_capacity(panes.len());
         for (i, pane) in panes.iter().enumerate() {
             let pds = self.view.pane_settings[i];
             if pds.pane_mode != PaneMode::Scene3D {
                 continue;
             }
-            // The 3D scene now fills the whole pane (the toolbar labels
-            // float over it), so markers project against the full rect.
+            // The 3D scene fills the whole pane (the toolbar labels float
+            // over it), so markers project against the full rect.
             let pane_aspect = if pane.height > 0.0 {
                 pane.width / pane.height
             } else {
@@ -885,7 +892,13 @@ impl State {
             );
             out.push(crate::gui::ReviewPaneOverlay {
                 egui_rect,
-                view_proj,
+                markers: crate::gui::project_review_markers(
+                    &markers,
+                    &view_proj,
+                    (pane.width, pane.height),
+                    ppp,
+                    egui_rect,
+                ),
             });
         }
         out
