@@ -76,7 +76,8 @@ pub(crate) use modals::still::StillOpening;
 pub(crate) use modals::turntable::{TurntableIncludes, TurntableRequest, azimuth_deg, frame_count};
 pub(crate) use intent::{
     CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
-    LayoutIntent, PaneChange, PanelIntent, PostChange, ReviewIntent, ToolIntent, TransportIntent,
+    LayoutIntent, PaneChange, PaneLookIntent, PanelIntent, PostChange, ReviewIntent, ToolIntent,
+    TransportIntent,
 };
 pub(crate) use panels::asset_preview::PreviewView;
 pub(crate) use panels::assets::AssetsSource;

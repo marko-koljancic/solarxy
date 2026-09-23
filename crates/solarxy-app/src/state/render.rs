@@ -438,6 +438,8 @@ impl State {
         // Borrowed rather than copied: the panels read the real settings and
         // ask for changes, so there is nothing to write back afterwards.
         let settings = PanelSettings {
+            looks: &self.view.pane_looks,
+            pane_bound: std::array::from_fn(|i| self.look_through[i].is_some()),
             panes: &self.view.pane_settings,
             active: ap,
             display: &self.view.display,

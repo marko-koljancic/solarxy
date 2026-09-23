@@ -23,6 +23,7 @@ use super::panels::review::popup::draw_review_popup;
 use super::modals::screenshot::{ScreenshotModal, draw_screenshot_modal};
 use super::modals::still::{StillRenderModal, draw_still_modal};
 use super::modals::turntable::{TurntableModal, TurntableRequest, draw_turntable_modal};
+use super::modals::look::{LookEditors, draw_look_editors};
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
 use super::modals::keymap_change::{KeymapNoticeState, draw_keymap_notice};
 use super::modals::recovery::{RecoveryChoice, RecoveryModalState, draw_recovery_modal};
@@ -49,6 +50,10 @@ pub struct EguiRenderer {
     screenshot_modal: ScreenshotModal,
     still_modal: StillRenderModal,
     turntable_modal: TurntableModal,
+    /// Which panes have a look editor open. Modeless and one per pane, so
+    /// two can be up at once, which is what makes the editor usable for
+    /// matching one pane to another.
+    look_editors: LookEditors,
     tree: TreeState,
     assets: AssetsState,
     /// The asset the preview tab shows, by hash and name.
@@ -141,6 +146,7 @@ impl EguiRenderer {
             screenshot_modal: ScreenshotModal::default(),
             still_modal: StillRenderModal::default(),
             turntable_modal: TurntableModal::default(),
+            look_editors: LookEditors::default(),
             tree: TreeState::default(),
             assets: AssetsState::default(),
             asset_preview: None,
@@ -831,6 +837,17 @@ impl EguiRenderer {
             // Ahead of it for the same reason, and after the still so that a
             // still's Escape wins when both are somehow up.
             draw_turntable_modal(ctx, &mut self.turntable_modal, &self.theme);
+            // Modeless, so it is drawn with the windows rather than with the
+            // dialogs and it consumes no Escape: the point of it is that the
+            // viewport underneath stays live while a value is dragged.
+            draw_look_editors(
+                ctx,
+                &mut self.look_editors,
+                sources.settings.looks,
+                sources.settings.pane_bound,
+                intents,
+                &self.theme,
+            );
             // Ahead of the escape chain for the same reason: while the
             // question is up, Escape answers it.
             draw_unsaved_modal(ctx, &mut self.unsaved_modal, &self.theme);
@@ -1265,6 +1282,13 @@ impl EguiRenderer {
     /// Take the finished still out and close the modal.
     pub fn take_still_image(&mut self) -> Option<image::RgbaImage> {
         self.still_modal.take_image()
+    }
+
+    /// Show the look editor for a pane.
+    pub fn open_look_editor(&mut self, pane: usize) {
+        if let Some(slot) = self.look_editors.get_mut(pane) {
+            *slot = true;
+        }
     }
 
     /// Open the turntable export dialog.

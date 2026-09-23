@@ -34,7 +34,7 @@ use solarxy_core::view_config::PANE_TOOLBAR_HEIGHT;
 use solarxy_core::scene::SceneObjectId;
 use solarxy_host::cameras::StandardView;
 
-use crate::gui::intent::{DisplayChange, Intent, Intents, PaneChange};
+use crate::gui::intent::{DisplayChange, Intent, Intents, PaneChange, PaneLookIntent};
 use crate::gui::settings::PanelSettings;
 use crate::gui::theme::Theme;
 use crate::state::view_state::{BoundsMode, PaneDisplaySettings};
@@ -477,8 +477,14 @@ fn draw_display_menu(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
         ..
     } = cx;
 
-    ui.add_enabled(false, egui::Button::new("Look..."))
-        .on_disabled_hover_text("The per-pane look editor arrives with per-pane look.");
+    if ui
+        .button("Look\u{2026}")
+        .on_hover_text("Exposure, tone mapping and the grade, for this pane")
+        .clicked()
+    {
+        intents.raise(Intent::PaneLook(PaneLookIntent::Open(index)));
+        ui.close();
+    }
 
     for (current, label, make) in [
         (

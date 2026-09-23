@@ -17,7 +17,7 @@ use super::State;
 use crate::gui::{
     CanvasAction, CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent,
     Intent, Intents, LayoutIntent, LookThroughChange, TreeAction, PaneChange, PanelIntent,
-    PaneView, PostChange, ReviewIntent, ToastSeverity, ToolIntent, TransportIntent,
+    PaneLookIntent, PaneView, PostChange, ReviewIntent, ToastSeverity, ToolIntent, TransportIntent,
 };
 
 impl State {
@@ -43,6 +43,12 @@ impl State {
                 }
                 Intent::Display(change) => apply_display_change(&mut self.view.display, change),
                 Intent::Post(change) => apply_post_change(&mut self.renderer.post, change),
+                Intent::PaneLook(PaneLookIntent::Open(pane)) => self.gui.open_look_editor(pane),
+                Intent::PaneLook(PaneLookIntent::Set { pane, look }) => {
+                    if let Some(slot) = self.view.pane_looks.get_mut(pane) {
+                        *slot = look;
+                    }
+                }
                 Intent::Ibl(mode) => self.renderer.ibl_res.ibl_mode = mode,
                 Intent::PaneProjection { pane, mode } => {
                     // A projection picked on a bound pane takes the view over;
@@ -280,6 +286,7 @@ impl Recompute {
             | Intent::LookThrough { .. }
             | Intent::File(_)
             | Intent::Edit(_)
+            | Intent::PaneLook(_)
             | Intent::Capture(_)
             | Intent::Cook(_)
             | Intent::Review(_)

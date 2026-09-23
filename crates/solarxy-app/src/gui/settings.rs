@@ -161,6 +161,11 @@ pub(crate) struct PanelSettings<'a> {
     pub transport: TransportReadout,
     /// Whether the playbar is shown under the viewport, a saved preference.
     pub transport_bar: bool,
+    /// Every pane's own look, which the look editor draws against.
+    pub looks: &'a [solarxy_core::view_config::PaneLook; 4],
+    /// Whether each pane is bound to a camera, which decides whether the
+    /// look editor says the pane is compositing with the camera instead.
+    pub pane_bound: [bool; 4],
 }
 
 impl PanelSettings<'_> {

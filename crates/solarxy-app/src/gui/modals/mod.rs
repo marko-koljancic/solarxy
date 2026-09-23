@@ -9,6 +9,7 @@ pub(in crate::gui) mod about;
 pub(in crate::gui) mod arrangement_save;
 pub(in crate::gui) mod environment;
 pub(crate) mod keymap_change;
+pub(in crate::gui) mod look;
 pub(in crate::gui) mod preferences;
 pub(crate) mod recovery;
 pub(in crate::gui) mod screenshot;

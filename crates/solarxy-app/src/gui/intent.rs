@@ -41,7 +41,7 @@ use solarxy_core::preferences::{
     BackgroundMode, GizmoOrientation, IblMode, InspectionMode, LineWeight, MaterialOverride,
     NormalsMode, PaneMode, ProjectionMode, UvMapBackground, ViewMode,
 };
-use solarxy_core::view_config::PostStrengths;
+use solarxy_core::view_config::{PaneLook, PostStrengths};
 
 use crate::state::view_state::{BoundsMode, ViewLayout};
 
@@ -94,6 +94,8 @@ pub(crate) enum Intent {
     Display(DisplayChange),
     /// One post-processing setting.
     Post(PostChange),
+    /// The per-pane look editor: opening one, and what it writes.
+    PaneLook(PaneLookIntent),
     /// The image-based lighting mode.
     Ibl(IblMode),
     /// The File menu.
@@ -158,6 +160,17 @@ pub(crate) enum PostChange {
     /// The three intensities together, because they reach the renderer
     /// through one setter that clamps them and pushes both passes.
     Strengths(PostStrengths),
+}
+
+/// The per-pane look editor.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PaneLookIntent {
+    /// Show the editor for this pane, from that pane's Display menu.
+    Open(usize),
+    /// The whole look, replaced. The editor sends the value it drew rather
+    /// than the field that moved, so two fields dragged in one frame cannot
+    /// have the second overwrite the first from a stale copy.
+    Set { pane: usize, look: PaneLook },
 }
 
 /// The File menu.
@@ -389,7 +402,11 @@ impl Intent {
             // applied in field order, and no two of them can be raised in a
             // frame anyway, so a key each would invent an order rather than
             // preserve one.
-            Self::Pane { .. } | Self::Display(_) | Self::Post(_) | Self::Ibl(_) => 2,
+            Self::Pane { .. }
+            | Self::Display(_)
+            | Self::Post(_)
+            | Self::PaneLook(_)
+            | Self::Ibl(_) => 2,
             Self::File(_) => 3,
             Self::Edit(_) => 4,
             Self::Capture(_) => 5,
