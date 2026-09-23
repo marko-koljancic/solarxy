@@ -102,7 +102,7 @@ impl std::fmt::Display for ViewMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Shaded => write!(f, "Shaded"),
-            Self::ShadedWireframe => write!(f, "Shaded+Wire"),
+            Self::ShadedWireframe => write!(f, "Shaded + Wire"),
             Self::WireframeOnly => write!(f, "Wireframe"),
             Self::Ghosted => write!(f, "Ghosted"),
         }

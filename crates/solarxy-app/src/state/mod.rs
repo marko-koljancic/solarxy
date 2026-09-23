@@ -66,6 +66,7 @@ mod render;
 pub(crate) mod review;
 pub(crate) mod samples;
 mod still;
+mod traced;
 mod turntable;
 mod update;
 pub(crate) mod view_state;
@@ -233,13 +234,20 @@ pub struct State {
     /// any: what the Showing combo replays and what Save All writes beside
     /// the picture. Kept with the float image, for the same reason.
     pub(super) finished_passes: Option<solarxy_host::still::StillPasses>,
-    /// The traced backend, built on the first traced still and kept for
-    /// the session. It sees no per-frame deltas (those feed the raster
-    /// backend alone), so every still start snapshots the scene into it.
+    /// The traced backend, built the first time a pane or a still asks for
+    /// it and kept for the session, shared by both. A pane flipped to it
+    /// snapshots the scene into it, and so does every still start: the
+    /// per-frame delta feed reaches it only while a pane is traced, so a
+    /// scene edited with every pane raster has moved on without it.
     pub(super) tracer: Option<solarxy_renderer::pathtrace::backend::PathBackend>,
     /// Whether the tracer's environment lags the scene's. Set when an
     /// HDRI is installed or cleared, or when the tracer is first built.
     pub(super) traced_env_dirty: bool,
+    /// Whether this device can build the tracer at all, asked of its limits
+    /// once at startup. The pane menu offers `Path Traced` only when it can:
+    /// the one entry drawn absent rather than disabled, as the browser has
+    /// it, because a device that cannot trace has nothing to sequence.
+    pub(super) tracing_available: bool,
     /// The scene camera each pane looks through, or `None` for a free view.
     ///
     /// A bound pane follows the camera node's pose each frame and composites

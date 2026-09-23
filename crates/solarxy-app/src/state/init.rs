@@ -64,6 +64,10 @@ impl State {
         // default for an uncaptured error is a panic, so the process died
         // on any validation error with nothing a user could read.
         let gpu_faults = solarxy_renderer::faults::install(&device);
+        // Asked of the limits rather than of a built tracer: a constant here
+        // once said yes on a device that could not have run it.
+        let tracing_available =
+            solarxy_renderer::pathtrace::device_supports_tracing(&device.limits());
 
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
@@ -252,6 +256,7 @@ impl State {
             finished_passes: None,
             tracer: None,
             traced_env_dirty: false,
+            tracing_available,
             look_through: [None; 4],
             camera_editing: [false; 4],
             unresolved_binding: [false; 4],

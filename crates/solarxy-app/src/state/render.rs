@@ -246,14 +246,22 @@ impl State {
             },
         };
 
+        // A traced 3D pane goes to the tracer instead of the rasterizer;
+        // everything around the encode (the pane context, the composite,
+        // the look) is shared, which is the backend contract's point.
+        let traced = pds.pane_engine == solarxy_core::view_config::PaneEngine::Traced
+            && !is_uv_map
+            && cam_data.is_some()
+            && self.tracer.is_some();
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Pane Encoder"),
             });
         let target = self.renderer.targets.hdr_resolve_view.clone();
-        let _outcome = self.raster.encode(
-            &mut FrameCtx {
+        let _outcome = {
+            let mut ctx = FrameCtx {
                 device: &self.device,
                 queue: &self.queue,
                 renderer: &mut self.renderer,
@@ -277,13 +285,36 @@ impl State {
                 // a larger picture. Only the still render sets this.
                 window: None,
                 content,
-            },
-            &target,
-        );
-        let encoded = self.raster.encoded(i).unwrap_or(EncodedPane {
-            is_uv_map: false,
-            scene_present: false,
-        });
+            };
+            if traced {
+                self.tracer
+                    .as_mut()
+                    .map_or(solarxy_renderer::backend::FrameOutcome::Complete, |t| {
+                        t.encode(&mut ctx, &target)
+                    })
+            } else {
+                self.raster.encode(&mut ctx, &target)
+            }
+        };
+        // Capability, never identity: the composite asks what the backend
+        // that just encoded can do, which is what keeps a traced pane from
+        // multiplying by an occlusion buffer another pane wrote.
+        let caps = if traced {
+            solarxy_renderer::pathtrace::backend::PathBackend::CAPS
+        } else {
+            solarxy_host::RasterBackend::CAPS
+        };
+        let encoded = if traced {
+            EncodedPane {
+                is_uv_map: false,
+                scene_present,
+            }
+        } else {
+            self.raster.encoded(i).unwrap_or(EncodedPane {
+                is_uv_map: false,
+                scene_present: false,
+            })
+        };
 
         solarxy_host::composite_and_submit(
             &self.queue,
@@ -298,9 +329,7 @@ impl State {
                 is_uv_map: encoded.is_uv_map,
                 scene_present: encoded.scene_present,
                 outline,
-                // Every desktop pane rasterizes; the shell's traced path is
-                // the still render, which resolves this for itself.
-                writes_occlusion: solarxy_host::RasterBackend::CAPS.writes_occlusion,
+                writes_occlusion: caps.writes_occlusion,
             },
         );
     }
@@ -684,6 +713,7 @@ impl State {
             look_through: look_through_mirror,
             camera_locked: std::array::from_fn(|i| self.is_locked_look_through(i)),
             turntable_rpm: self.view.display.turntable_rpm,
+            tracing_available: self.tracing_available,
         };
         self.gui.render_ui(
             crate::gui::FramePaint {

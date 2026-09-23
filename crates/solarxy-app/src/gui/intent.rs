@@ -136,6 +136,10 @@ pub(crate) enum PaneChange {
     /// Per-pane turntable spin. The *speed* is deliberately not here: it is
     /// scene-global on both shells, so it travels as a [`DisplayChange`].
     TurntableActive(bool),
+    /// Which backend draws the pane's 3D content. Picking a view mode
+    /// returns the pane to the rasterizer, which is the browser's way of
+    /// leaving the tracer, so this variant only ever carries `Traced`.
+    Engine(solarxy_core::view_config::PaneEngine),
 }
 
 /// One scene-global display setting.

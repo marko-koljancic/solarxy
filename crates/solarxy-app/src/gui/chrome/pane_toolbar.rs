@@ -17,14 +17,19 @@
 //! projection, camera, views, display. Seven rather than three, and that
 //! is the point rather than an arrangement preference: one label showing
 //! whichever of three settings is non-default cannot show the other two,
-//! so a 4-up quad was unreadable at a glance. A UV pane keeps an inert
-//! `[ UV Map ]` label beside `[ Display ]`, with its overlap percentage in
-//! a separate readout rather than folded into a label.
+//! so a 4-up quad was unreadable at a glance. The view-mode label reads
+//! `Path Traced` while the pane traces, and its menu offers that row after
+//! the four view modes. A UV pane keeps an inert `[ UV Map ]` label beside
+//! `[ Display ]`, with its overlap percentage in a separate readout rather
+//! than folded into a label.
 //!
 //! Entries whose capability is not built yet are drawn **disabled with a
 //! tooltip naming what they wait for**, rather than omitted. An absent row
 //! reads as unbuilt; a disabled one reads as sequenced, and the surface
-//! comparison this shell is held to is checked row by row.
+//! comparison this shell is held to is checked row by row. The one ruled
+//! exception is the `Path Traced` row, absent when the device cannot build
+//! the tracer: that is the browser's gate, and a device that cannot trace
+//! has nothing to sequence.
 
 use solarxy_core::preferences::{
     BackgroundMode, BuiltinBg, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
@@ -111,6 +116,10 @@ pub(crate) struct PaneToolbarData<'a> {
     /// submenu both reads and writes. Global because it is global in the
     /// browser too; see [`TURNTABLE_SPEEDS`].
     pub turntable_rpm: f32,
+    /// Whether the device can build the tracer, which decides whether the
+    /// view-mode menu offers `Path Traced` at all. Capability rather than
+    /// identity, as the backend contract states it.
+    pub tracing_available: bool,
 }
 
 /// A toolbar's requested look-through change for one pane: bind to a
@@ -186,6 +195,7 @@ pub(in crate::gui) fn draw_pane_toolbars(
                             bound_camera,
                             camera_locked: data.camera_locked.get(i).copied().unwrap_or(false),
                             turntable_rpm: data.turntable_rpm,
+                            tracing_available: data.tracing_available,
                         },
                         intents,
                     );
@@ -237,7 +247,12 @@ struct PaneControls<'a> {
     bound_camera: Option<u64>,
     camera_locked: bool,
     turntable_rpm: f32,
+    tracing_available: bool,
 }
+
+/// The view-mode label while a pane traces, and its menu row. The browser's
+/// literal, held to it by the parity test below.
+const PATH_TRACED: &str = "Path Traced";
 
 /// A row of radio buttons over a variant set, returning what the user picked.
 ///
@@ -297,14 +312,37 @@ fn draw_scene_labels(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
         pane,
         projection,
         bound_camera,
+        tracing_available,
         ..
     } = cx;
 
-    label_menu(ui, (index, "vm"), &pane.view_mode.to_string(), |ui| {
-        if let Some(v) = radio_pick(ui, pane.view_mode, ViewMode::ALL.iter().copied(), |v| {
-            v.to_string()
-        }) {
-            intents.pane(index, PaneChange::ViewMode(v));
+    // The label reads the engine while the pane traces, since no view mode
+    // is what it is showing. The four view-mode rows stay radio rows, and
+    // each returns a traced pane to the rasterizer through the drain; the
+    // traced row sits after them, and only when the device can build the
+    // tracer, which is the browser's gate and the one entry drawn absent
+    // rather than disabled: a device that cannot trace has nothing to
+    // sequence.
+    let traced = pane.pane_engine == solarxy_core::view_config::PaneEngine::Traced;
+    let view_label = if traced {
+        PATH_TRACED.to_string()
+    } else {
+        pane.view_mode.to_string()
+    };
+    label_menu(ui, (index, "vm"), &view_label, |ui| {
+        for mode in ViewMode::ALL.iter().copied() {
+            let checked = !traced && pane.view_mode == mode;
+            if ui.radio(checked, mode.to_string()).clicked() && !checked {
+                intents.pane(index, PaneChange::ViewMode(mode));
+                ui.close();
+            }
+        }
+        if tracing_available && ui.radio(traced, PATH_TRACED).clicked() && !traced {
+            intents.pane(
+                index,
+                PaneChange::Engine(solarxy_core::view_config::PaneEngine::Traced),
+            );
+            ui.close();
         }
     });
 
@@ -688,5 +726,52 @@ mod tests {
             })
             .collect();
         assert_eq!(here, browser);
+    }
+
+    fn browser_pane_toolbar() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../web/src/components/PaneToolbar.tsx");
+        std::fs::read_to_string(&path).expect("the browser's pane toolbar reads")
+    }
+
+    /// The browser's view-mode list, as `(stored name, label)` pairs in its
+    /// order, read from the table its menu is drawn from.
+    fn browser_view_modes(source: &str) -> Vec<(String, String)> {
+        let table = source
+            .split_once("const VIEW_MODES = [")
+            .and_then(|(_, rest)| rest.split_once("] as const;"))
+            .map(|(table, _)| table)
+            .expect("the browser's pane toolbar has its view-mode table");
+        table
+            .lines()
+            .filter_map(|line| {
+                let mut quoted = line.split('"').skip(1).step_by(2);
+                Some((quoted.next()?.to_string(), quoted.next()?.to_string()))
+            })
+            .collect()
+    }
+
+    /// The view-mode menu lists what the browser's does, in its order and
+    /// under its labels, and the traced row that follows them carries the
+    /// browser's literal. The traced row is not in the browser's table: it
+    /// is a separate row under the same label, present only when the device
+    /// can trace, so it is held here by its literal rather than by a table.
+    #[test]
+    fn the_view_mode_list_is_the_browsers() {
+        let source = browser_pane_toolbar();
+        let browser = browser_view_modes(&source);
+        assert_eq!(browser.len(), 4, "the reader found the browser's four");
+        let here: Vec<(String, String)> = ViewMode::ALL
+            .iter()
+            .map(|mode| {
+                let stored = serde_json::to_string(mode).expect("a view mode serializes");
+                (stored.trim_matches('"').to_string(), mode.to_string())
+            })
+            .collect();
+        assert_eq!(here, browser);
+        assert!(
+            source.contains(&format!("label=\"{PATH_TRACED}\"")),
+            "the browser's traced row carries the same label"
+        );
     }
 }

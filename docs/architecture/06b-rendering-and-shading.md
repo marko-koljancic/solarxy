@@ -1257,9 +1257,6 @@ Recorded here rather than answered, because the code does not settle them.
   or hemisphere light, vertex colours, more than eight lights, or a stylized shading model the
   other engine would drop? `BackendCaps` exists for exactly this and carries six fields of which
   three are consulted.
-- Was the desktop viewport's inability to show a traced pane a deliberate scope cut or an
-  unfinished adoption of the backend trait? The browser does it per pane; the desktop calls the
-  raster backend unconditionally, and nothing records which it is.
 - Was the absence of GPU timestamp queries a decision, on browser support or added complexity,
   or simply never reached?
 - Is multisampling at two samples supported on the adapters Solarxy ships to? The preference

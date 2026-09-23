@@ -37,8 +37,17 @@ impl State {
             recompute.mark(&intent, self.view.active_pane);
             match intent {
                 Intent::Pane { pane, change } => {
-                    if let Some(pds) = self.view.pane_settings.get_mut(pane) {
+                    // The engine flip has side effects beyond the field (a
+                    // tracer to build, a scene to hand it, an accumulation
+                    // to drop), so it is noticed here rather than inside
+                    // the pure write.
+                    let flipped = self.view.pane_settings.get_mut(pane).and_then(|pds| {
+                        let before = pds.pane_engine;
                         apply_pane_change(pds, change);
+                        (pds.pane_engine != before).then_some(pds.pane_engine)
+                    });
+                    if let Some(engine) = flipped {
+                        self.flip_pane_engine(pane, engine);
                     }
                 }
                 Intent::Display(change) => apply_display_change(&mut self.view.display, change),
@@ -248,7 +257,8 @@ impl Recompute {
                 | PaneChange::ShowValidation(_)
                 | PaneChange::UvBackground(_)
                 | PaneChange::ShowUvOverlap(_)
-                | PaneChange::TurntableActive(_) => {}
+                | PaneChange::TurntableActive(_)
+                | PaneChange::Engine(_) => {}
             },
             // Intensity joins the mode below because both are IBL-derived
             // uniforms that reach the GPU only through the lighting
@@ -291,7 +301,13 @@ impl Recompute {
 fn apply_pane_change(pds: &mut crate::state::view_state::PaneDisplaySettings, change: PaneChange) {
     match change {
         PaneChange::PaneMode(v) => pds.pane_mode = v,
-        PaneChange::ViewMode(v) => pds.view_mode = v,
+        // A view mode is a raster mode, so picking one returns the pane to
+        // the rasterizer: the browser's way of leaving the tracer, where
+        // each view-mode row writes both fields.
+        PaneChange::ViewMode(v) => {
+            pds.view_mode = v;
+            pds.pane_engine = solarxy_core::view_config::PaneEngine::Raster;
+        }
         PaneChange::InspectionMode(v) => pds.inspection_mode = v,
         PaneChange::MaterialOverride(v) => pds.material_override = v,
         PaneChange::BackgroundMode(v) => pds.background_mode = v,
@@ -305,6 +321,7 @@ fn apply_pane_change(pds: &mut crate::state::view_state::PaneDisplaySettings, ch
         PaneChange::UvBackground(v) => pds.uv_bg = v,
         PaneChange::ShowUvOverlap(v) => pds.show_uv_overlap = v,
         PaneChange::TurntableActive(v) => pds.turntable_active = v,
+        PaneChange::Engine(v) => pds.pane_engine = v,
     }
 }
 
@@ -1035,6 +1052,12 @@ mod tests {
             (PaneChange::TurntableActive(true), |p, b| {
                 p.turntable_active = b.turntable_active;
             }),
+            (
+                PaneChange::Engine(solarxy_core::view_config::PaneEngine::Traced),
+                |p, b| {
+                    p.pane_engine = b.pane_engine;
+                },
+            ),
         ];
 
         for (change, restore) in cases {
@@ -1044,6 +1067,26 @@ mod tests {
             restore(&mut pds, &base);
             assert_eq!(pds, base, "{change:?} wrote a field it does not name");
         }
+    }
+
+    /// The one deliberate exception to the rule above: a view mode is a
+    /// raster mode, so picking one also returns a traced pane to the
+    /// rasterizer, as every view-mode row does in the browser.
+    #[test]
+    fn picking_a_view_mode_returns_the_pane_to_the_rasterizer() {
+        use solarxy_core::preferences::ViewMode;
+        use solarxy_core::view_config::{PaneDisplaySettings, PaneEngine};
+
+        let mut pds = PaneDisplaySettings::for_still(BackgroundMode::GRADIENT);
+        apply_pane_change(&mut pds, PaneChange::Engine(PaneEngine::Traced));
+        assert_eq!(pds.pane_engine, PaneEngine::Traced);
+        apply_pane_change(&mut pds, PaneChange::ViewMode(ViewMode::Ghosted));
+        assert_eq!(pds.view_mode, ViewMode::Ghosted);
+        assert_eq!(
+            pds.pane_engine,
+            PaneEngine::Raster,
+            "a view mode is a raster mode"
+        );
     }
 
     #[test]

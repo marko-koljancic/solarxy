@@ -621,10 +621,12 @@ impl State {
     }
 
     /// Bring the tracer's environment up to date with the scene's, which
-    /// is what makes a traced still light the way the viewport does. The
-    /// traced scene cache deliberately drops the environment op, so this
-    /// is the host half of that decision, mirrored from the web shell.
-    fn sync_traced_environment(&mut self) {
+    /// is what makes a traced still, and a traced pane, light the way the
+    /// viewport does. The traced scene cache deliberately drops the
+    /// environment op, so this is the host half of that decision, mirrored
+    /// from the web shell. Shared with the pane path, which is why it is
+    /// visible beyond the still.
+    pub(in crate::state) fn sync_traced_environment(&mut self) {
         if self.tracer.is_none() {
             return;
         }
