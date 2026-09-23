@@ -135,6 +135,11 @@ pub(crate) enum Action {
     ToolRotate,
     ToolScale,
     ToggleGizmoOrientation,
+    // Playback
+    PlayPause,
+    StepBack,
+    StepForward,
+    GoToStart,
     // Review
     ToggleReviewMode,
     ToggleReviewPanel,
@@ -207,6 +212,10 @@ impl Action {
             Self::ToolRotate => "tool-rotate",
             Self::ToolScale => "tool-scale",
             Self::ToggleGizmoOrientation => "gizmo-orientation",
+            Self::PlayPause => "play-pause",
+            Self::StepBack => "step-back",
+            Self::StepForward => "step-forward",
+            Self::GoToStart => "go-to-start",
             Self::ToggleReviewMode => "review-mode",
             Self::ToggleReviewPanel => "review-panel",
             Self::ReviewCancel => "review-cancel",
@@ -713,6 +722,39 @@ pub(crate) static BINDINGS: &[Binding] = &[
         KeyGroup::ViewportAndLayout,
         "Toggle gizmo orientation (world / local)",
     ),
+    // Playback, on the browser's keys: the space bar, the bare comma and
+    // period, and Home, none of which anything else binds. Global, so the
+    // clock answers wherever the pointer is; a focused text field still
+    // keeps its space, because the window dispatches nothing while the
+    // interface wants text.
+    b(
+        Action::PlayPause,
+        "space",
+        KeyScope::Global,
+        KeyGroup::Playback,
+        "Play / pause the scene clock",
+    ),
+    b(
+        Action::StepBack,
+        ",",
+        KeyScope::Global,
+        KeyGroup::Playback,
+        "Step back one frame",
+    ),
+    b(
+        Action::StepForward,
+        ".",
+        KeyScope::Global,
+        KeyGroup::Playback,
+        "Step forward one frame",
+    ),
+    b(
+        Action::GoToStart,
+        "home",
+        KeyScope::Global,
+        KeyGroup::Playback,
+        "Stop and rewind to the range start",
+    ),
     // Consumed inside the interface pass, which is the only place that
     // knows which panel the pointer is over.
     with_note(
@@ -1059,12 +1101,7 @@ mod drift {
     /// Every one is a capability this release builds later, so the list
     /// empties as the release proceeds and an empty list at release is
     /// itself the proof that the two maps agree.
-    const UNBUILT: &[(&str, &str)] = &[
-        ("play-pause", "the transport bar"),
-        ("step-back", "the transport bar"),
-        ("step-forward", "the transport bar"),
-        ("go-to-start", "the transport bar"),
-    ];
+    const UNBUILT: &[(&str, &str)] = &[];
 
     /// A binding this shell has and the browser does not, with the reason.
     const DESKTOP_ONLY: &[(&str, &str)] = &[

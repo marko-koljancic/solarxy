@@ -17,6 +17,7 @@
 
 use solarxy_core::preferences::{GizmoOrientation, IblMode};
 use solarxy_graph::engine::CookMode;
+use solarxy_graph::runtime::LoopMode;
 use solarxy_host::gizmo::{ALL_TOOLS, ToolMode};
 use solarxy_renderer::frame::PostProcessing;
 
@@ -105,6 +106,34 @@ impl ToolReadout<'_> {
     }
 }
 
+/// What the playbar shows about the scene clock, read from the engine
+/// each frame rather than mirrored from events.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TransportReadout {
+    /// Whether a document is open at all. The bar draws disabled otherwise.
+    pub open: bool,
+    pub playing: bool,
+    pub frame: i64,
+    pub start: i64,
+    pub end: i64,
+    pub fps: f64,
+    pub loop_mode: LoopMode,
+}
+
+impl Default for TransportReadout {
+    fn default() -> Self {
+        Self {
+            open: false,
+            playing: false,
+            frame: solarxy_graph::runtime::DEFAULT_START,
+            start: solarxy_graph::runtime::DEFAULT_START,
+            end: solarxy_graph::runtime::DEFAULT_END,
+            fps: solarxy_graph::runtime::DEFAULT_FPS,
+            loop_mode: LoopMode::default(),
+        }
+    }
+}
+
 /// The display state the panels draw from, borrowed rather than copied.
 #[derive(Clone, Copy)]
 pub(crate) struct PanelSettings<'a> {
@@ -128,6 +157,10 @@ pub(crate) struct PanelSettings<'a> {
     pub canvas: solarxy_core::preferences::CanvasPrefs,
     /// The transform tools: what is armed, what applies, which frame.
     pub tools: ToolReadout<'a>,
+    /// The scene clock, for the playbar.
+    pub transport: TransportReadout,
+    /// Whether the playbar is shown under the viewport, a saved preference.
+    pub transport_bar: bool,
 }
 
 impl PanelSettings<'_> {

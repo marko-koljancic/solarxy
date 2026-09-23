@@ -13,7 +13,7 @@
 
 use winit::keyboard::KeyCode;
 
-use crate::gui::{ToastSeverity, ToolIntent};
+use crate::gui::{ToastSeverity, ToolIntent, TransportIntent};
 use solarxy_host::cameras::StandardView;
 use solarxy_host::gizmo::ToolMode;
 use solarxy_renderer::input::CameraKey;
@@ -240,6 +240,21 @@ impl State {
             Action::ToggleGizmoOrientation => {
                 self.handle_tool_intent(ToolIntent::ToggleOrientation);
             }
+
+            // Playback, through the same arm the playbar reaches. Read at
+            // press time rather than closed over: the clock also stops
+            // itself at the end of a once-through range.
+            Action::PlayPause => {
+                let playing = self.engine.as_deref().is_some_and(|e| e.clock().playing);
+                self.handle_transport_intent(if playing {
+                    TransportIntent::Pause
+                } else {
+                    TransportIntent::Play
+                });
+            }
+            Action::StepBack => self.handle_transport_intent(TransportIntent::Step(-1)),
+            Action::StepForward => self.handle_transport_intent(TransportIntent::Step(1)),
+            Action::GoToStart => self.handle_transport_intent(TransportIntent::Stop),
 
             // Review.
             Action::ToggleReviewMode => self.toggle_review_mode(),

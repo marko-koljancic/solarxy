@@ -75,6 +75,11 @@ pub(crate) enum Intent {
     /// viewport menu and the keys, and every one of them lands in the same
     /// arm so the four cannot disagree.
     Tool(ToolIntent),
+    /// The attribute strip's whole state, replaced: the toggles, the picked
+    /// lane and the settings travel together, as the browser sends them.
+    AttrViz(solarxy_host::attr_viz::AttrVizState),
+    /// The scene clock, from the playbar and the playback keys.
+    Transport(TransportIntent),
     /// A pane's own framing, from that pane's Views menu or the viewport's
     /// View menu. It writes the pane it names and nothing else.
     PaneView { pane: usize, view: PaneView },
@@ -205,6 +210,28 @@ pub(crate) enum EditIntent {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CaptureIntent {
     Screenshot,
+}
+
+/// The scene clock's controls. The first five are session state and never
+/// undo; the range, the rate and the loop are document state and do.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum TransportIntent {
+    Play,
+    Pause,
+    /// Stop and rewind to the range start.
+    Stop,
+    /// Step by a signed number of frames.
+    Step(i64),
+    /// Seek, from the frame field or a scrub; no undo step.
+    SetFrame(i64),
+    SetRange {
+        start: i64,
+        end: i64,
+    },
+    SetFps(f64),
+    SetLoop(solarxy_graph::runtime::LoopMode),
+    /// Show or hide the playbar, a saved preference.
+    ToggleBar,
 }
 
 /// The transform tools and the frame their handles align to.
@@ -374,7 +401,7 @@ impl Intent {
             // The tools share the context menu's key: a tool is armed from
             // the menu as readily as from the column, and only one of the
             // two can be clicked in a frame.
-            Self::Viewport(_) | Self::Tool(_) => 13,
+            Self::Viewport(_) | Self::Tool(_) | Self::AttrViz(_) | Self::Transport(_) => 13,
             // The two graph surfaces share a key: they raise the same
             // kind of change to the same document, and only one of them
             // can be under the pointer in a frame.

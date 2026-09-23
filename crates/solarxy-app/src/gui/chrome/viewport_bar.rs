@@ -12,8 +12,8 @@
 //! order. An entry typed straight into the draw could drift and nothing
 //! would say so.
 //!
-//! Two entries are listed and cannot be used yet. Each waits on work this
-//! release does later or files for later, and each says which.
+//! One entry is listed and cannot be used yet: the turntable export, which
+//! waits on work this release files for later, and says so.
 
 use solarxy_core::preferences::GizmoOrientation;
 use solarxy_core::view_config::ViewLayout;
@@ -22,7 +22,9 @@ use super::menu_items::{check_entry, entry, waiting_entry};
 use super::pane_toolbar::PaneView;
 use super::panel_bar::{MAXIMIZE_LABEL, maximize_entry, panel_bar};
 use crate::gui::dock::SolarxyTab;
-use crate::gui::intent::{CaptureIntent, FileIntent, Intent, Intents, LayoutIntent, ToolIntent};
+use crate::gui::intent::{
+    CaptureIntent, FileIntent, Intent, Intents, LayoutIntent, ToolIntent, TransportIntent,
+};
 use crate::gui::settings::PanelSettings;
 use crate::gui::theme::Theme;
 use crate::state::keymap::Action;
@@ -155,11 +157,13 @@ fn draw_item(ui: &mut egui::Ui, item: Item, settings: PanelSettings<'_>, intents
             });
         }
         Item::Playbar => {
-            waiting_entry(
-                ui,
-                label,
-                "Arrives with the transport bar, which this shell does not have yet",
-            );
+            // Writes the saved preference directly, like Gizmo Orientation
+            // above: one source of truth, so the menu tick and the
+            // Preferences row can never disagree.
+            if check_entry(ui, settings.transport_bar, label, None).clicked() {
+                intents.raise(Intent::Transport(TransportIntent::ToggleBar));
+                ui.close();
+            }
         }
         Item::Environment => {
             if entry(ui, label, None).clicked() {

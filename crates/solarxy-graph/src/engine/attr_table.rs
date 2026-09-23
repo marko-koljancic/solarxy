@@ -6,7 +6,7 @@
 //! engine contract.
 
 use serde::Serialize;
-use solarxy_kernel::{AttributeData, GeometrySet, KernelMesh};
+use solarxy_kernel::{GeometrySet, KernelMesh};
 
 /// The hard ceiling on one page. Small enough that a page is a few KB of
 /// JSON; a virtualized table fetches windows, never the whole geometry.
@@ -69,15 +69,6 @@ pub struct AttributePage {
     pub rows: Vec<Vec<Option<f64>>>,
 }
 
-fn lane_ty(data: &AttributeData) -> &'static str {
-    match data {
-        AttributeData::Float(_) => "float",
-        AttributeData::Vec2(_) => "vec2",
-        AttributeData::Vec3(_) => "vec3",
-        AttributeData::Vec4(_) => "vec4",
-    }
-}
-
 fn ty_components(ty: &str) -> u8 {
     match ty {
         "float" => 1,
@@ -95,105 +86,11 @@ fn domain_len(mesh: &KernelMesh, domain: AttributeDomain) -> usize {
     }
 }
 
-/// One point-domain lane resolved by name on one mesh: a MAP lane, or a
-/// fixed reserved buffer exposed as a pseudo-lane (`N` = `mesh.normals`,
-/// `uv` = `mesh.tex_coords`). Producers split between the two storages
-/// (`uv_project`/`compute_normals`/imports write the fixed buffers,
-/// `scatter` and the attribute nodes write the map), so every consumer of
-/// named lanes resolves through here rather than reading the map alone.
-#[derive(Clone, Copy)]
-pub enum LaneRef<'a> {
-    Map(&'a AttributeData),
-    Normals(&'a [[f32; 3]]),
-    Uvs(&'a [[f32; 2]]),
-}
-
-/// Resolves `name` against `mesh`'s POINT domain: the map lane when
-/// present (the map shadows the fixed buffers on a name collision), else
-/// the matching fixed buffer for the reserved names.
-#[must_use]
-pub fn resolve_lane<'a>(mesh: &'a KernelMesh, name: &str) -> Option<LaneRef<'a>> {
-    if let Some(data) = mesh.attributes.get(name) {
-        return Some(LaneRef::Map(data));
-    }
-    if name == solarxy_kernel::reserved::NORMAL {
-        return mesh.normals.as_deref().map(|n| LaneRef::Normals(n));
-    }
-    if name == solarxy_kernel::reserved::UV {
-        return mesh.tex_coords.as_deref().map(|uv| LaneRef::Uvs(uv));
-    }
-    None
-}
-
-impl LaneRef<'_> {
-    #[must_use]
-    pub fn ty(&self) -> &'static str {
-        match self {
-            LaneRef::Map(data) => lane_ty(data),
-            LaneRef::Normals(_) => "vec3",
-            LaneRef::Uvs(_) => "vec2",
-        }
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        match self {
-            LaneRef::Map(data) => data.len(),
-            LaneRef::Normals(v) => v.len(),
-            LaneRef::Uvs(v) => v.len(),
-        }
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Component `c` of element `i` under the declared column type `ty`;
-    /// `None` on a type conflict (the page's null-not-zero rule) or out
-    /// of range.
-    #[must_use]
-    pub fn component(&self, ty: &str, i: usize, c: usize) -> Option<f64> {
-        if self.ty() != ty {
-            return None;
-        }
-        match self {
-            LaneRef::Map(AttributeData::Float(v)) => v.get(i).map(|x| f64::from(*x)),
-            LaneRef::Map(AttributeData::Vec2(v)) => v.get(i).map(|x| f64::from(x[c])),
-            LaneRef::Map(AttributeData::Vec3(v)) => v.get(i).map(|x| f64::from(x[c])),
-            LaneRef::Map(AttributeData::Vec4(v)) => v.get(i).map(|x| f64::from(x[c])),
-            LaneRef::Normals(v) => v.get(i).map(|x| f64::from(x[c])),
-            LaneRef::Uvs(v) => v.get(i).map(|x| f64::from(x[c])),
-        }
-    }
-
-    /// Every component of element `i` (the pin value labels).
-    #[must_use]
-    pub fn components(&self, i: usize) -> Option<Vec<f32>> {
-        match self {
-            LaneRef::Map(AttributeData::Float(v)) => v.get(i).map(|x| vec![*x]),
-            LaneRef::Map(AttributeData::Vec2(v)) => v.get(i).map(|x| x.to_vec()),
-            LaneRef::Map(AttributeData::Vec3(v)) => v.get(i).map(|x| x.to_vec()),
-            LaneRef::Map(AttributeData::Vec4(v)) => v.get(i).map(|x| x.to_vec()),
-            LaneRef::Normals(v) => v.get(i).map(|x| x.to_vec()),
-            LaneRef::Uvs(v) => v.get(i).map(|x| x.to_vec()),
-        }
-    }
-
-    /// The xyz arrow direction of element `i`: `Some` for vec3 lanes and
-    /// vec4 lanes (w dropped); `None` for float/vec2 (no spatial reading).
-    #[must_use]
-    pub fn direction(&self, i: usize) -> Option<[f32; 3]> {
-        match self {
-            LaneRef::Map(AttributeData::Vec3(v)) => v.get(i).copied(),
-            LaneRef::Map(AttributeData::Vec4(v)) => v.get(i).map(|x| [x[0], x[1], x[2]]),
-            LaneRef::Normals(v) => v.get(i).copied(),
-            LaneRef::Map(AttributeData::Float(_) | AttributeData::Vec2(_)) | LaneRef::Uvs(_) => {
-                None
-            }
-        }
-    }
-}
+/// A named lane resolved on one mesh, whichever storage holds it. Lives
+/// with the geometry since the attribute channel both shells draw reads
+/// lanes the same way; re-exported here so the nodes and the table keep
+/// their paths.
+pub use solarxy_kernel::lane::{LaneRef, resolve_lane};
 
 /// The fixed-buffer pseudo-lanes of one mesh (Point domain only), skipping
 /// any name a map lane shadows.
@@ -220,7 +117,9 @@ fn lanes(set: &GeometrySet, domain: AttributeDomain) -> Vec<AttrLane> {
         std::collections::BTreeMap::new();
     for mesh in &set.meshes {
         for (name, data) in mesh.domain_attributes(domain) {
-            let entry = merged.entry(name).or_insert((lane_ty(data), 0));
+            let entry = merged
+                .entry(name)
+                .or_insert((solarxy_kernel::lane::type_name(data), 0));
             // The first-seen type names the lane; a conflicting mesh still
             // counts its elements (the page shows nulls there instead).
             entry.1 += data.len() as u64;
@@ -349,6 +248,7 @@ mod tests {
     #![allow(clippy::float_cmp)] // exact values constructed by the tests
 
     use super::*;
+    use solarxy_kernel::AttributeData;
     use std::sync::Arc;
 
     fn pts(name: &str, positions: Vec<[f32; 3]>) -> KernelMesh {

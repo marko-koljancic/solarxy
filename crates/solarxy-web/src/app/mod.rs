@@ -43,7 +43,7 @@ use solarxy_renderer::manipulator::{self, ManipulatorState};
 
 use solarxy_host::{HostViewState, RasterBackend};
 use solarxy_host::still::StillPasses;
-use solarxy_host::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
+use solarxy_host::attr_viz::AttrVizState;
 use solarxy_host::display_defaults::{self, DisplayDefaults};
 use solarxy_core::gizmo::TransformParams;
 use solarxy_host::gizmo::{self, GizmoPose, GizmoState, ToolMode};

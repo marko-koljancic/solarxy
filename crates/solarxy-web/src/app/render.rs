@@ -533,180 +533,34 @@ impl SolarxyApp {
         });
     }
 
-    /// Rebuilds the GPU label set from a deterministic stride sample of
-    /// every displayed geometry's points (all of them up to the budget):
-    /// world-space anchors plus per-label glyph words, uploaded once here
-    /// and projected in the vertex shader thereafter. Returns
-    /// `(capacity, total displayed points)` for the sampling notice.
-    pub(super) fn rebuild_attr_labels(&mut self) -> (u32, usize) {
-        use cgmath::{Matrix4, Transform};
-        if !self.attr_viz.pins_wanted() {
-            self.renderer
-                .set_attr_labels(&self.device, &self.queue, &[], &[]);
-            return (0, 0);
-        }
-        let lane = self
-            .attr_viz
-            .name
-            .as_deref()
-            .filter(|_| self.attr_viz.labels);
-        let geos = self.engine.display_geometries();
-        let total: usize = geos
-            .iter()
-            .flat_map(|(_, set, _)| set.meshes.iter())
-            .map(solarxy_kernel::KernelMesh::vertex_count)
-            .sum();
-        if total == 0 {
-            self.renderer
-                .set_attr_labels(&self.device, &self.queue, &[], &[]);
-            return (0, 0);
-        }
-        let cap = self.attr_viz.effective_cap(total);
-        let stride = total.div_ceil(cap).max(1);
+    /// The displayed geometries as the shared attribute channel takes them:
+    /// each cooked set with the world matrix its object is placed by.
+    fn displayed_geometries(&self) -> Vec<solarxy_host::attr_channel::DisplayedGeometry> {
+        self.engine
+            .display_geometries()
+            .into_iter()
+            .map(|(_node, set, m)| (set, m))
+            .collect()
+    }
 
-        let mut candidates: Vec<solarxy_host::attr_labels::LabelCandidate> =
-            Vec::with_capacity(cap);
-        let mut global = 0usize;
-        for (_node, set, m) in &geos {
-            let matrix = Matrix4::from(*m);
-            let mut ptnum: u64 = 0;
-            for mesh in &set.meshes {
-                let len = mesh.vertex_count();
-                let values =
-                    lane.and_then(|n| solarxy_graph::engine::attr_table::resolve_lane(mesh, n));
-                let first = global.next_multiple_of(stride);
-                let mut g = first;
-                while g < global + len {
-                    let i = g - global;
-                    let tp = matrix.transform_point(Point3::from(mesh.positions[i]));
-                    candidates.push(solarxy_host::attr_labels::LabelCandidate {
-                        world: [tp.x, tp.y, tp.z],
-                        ptnum: ptnum + i as u64,
-                        value: values.map(|l| l.components(i).unwrap_or_default()),
-                    });
-                    g += stride;
-                }
-                ptnum += len as u64;
-                global += len;
-            }
-        }
-        let (instances, words) = solarxy_host::attr_labels::build_labels(
-            &candidates,
-            self.attr_viz.labels,
-            self.attr_viz.points,
-            self.attr_viz.label_decimals,
+    /// Rebuilds the GPU label set from the shared stride sample of every
+    /// displayed geometry's points, uploaded once here and projected in
+    /// the vertex shader thereafter. Returns `(capacity, total displayed
+    /// points)` for the sampling notice.
+    pub(super) fn rebuild_attr_labels(&mut self) -> (u32, usize) {
+        let (instances, words, cap, total) = solarxy_host::attr_channel::build_label_set(
+            &self.displayed_geometries(),
+            &self.attr_viz,
         );
         self.renderer
             .set_attr_labels(&self.device, &self.queue, &instances, &words);
-        (cap as u32, total)
+        (cap, total)
     }
 
-    /// World-space arrow segments for the picked point lane (vec3, or the
-    /// xyz of vec4; map lane or the fixed `N` buffer), over
-    /// every displayed geometry: positions through the object matrix,
-    /// directions through the normal matrix for the reserved `N` lane
-    /// (bivector semantics under nonuniform scale) and the plain linear
-    /// part for everything else. Length is the bounds-derived factor
-    /// times the strip's scale multiplier, over the value (or its unit
-    /// direction under normalize); color is the uniform pick, or the
-    /// cold-to-warm ramp over this frame's magnitude range.
+    /// World-space arrow segments for the picked point lane over every
+    /// displayed geometry, assembled by the shared channel.
     pub(super) fn build_attr_vector_lines(&self) -> Vec<GizmoVertex> {
-        use cgmath::{InnerSpace, Matrix3, Matrix4, SquareMatrix, Transform};
-        let Some(name) = self.attr_viz.name.as_deref() else {
-            return Vec::new();
-        };
-        let is_normal_lane = name == solarxy_kernel::reserved::NORMAL;
-        let multiplier = self.attr_viz.scale_multiplier();
-        let normalize = self.attr_viz.normalize;
-
-        // First pass: world-space segments plus each arrow's magnitude
-        // (pre-normalization), so the ramp can span the real range.
-        let mut segments: Vec<([f32; 3], [f32; 3], f32)> = Vec::new();
-        for (_node, set, m) in self.engine.display_geometries() {
-            let matrix = Matrix4::from(m);
-            let linear = Matrix3::from_cols(
-                matrix.x.truncate(),
-                matrix.y.truncate(),
-                matrix.z.truncate(),
-            );
-            let dir_matrix = if is_normal_lane {
-                linear
-                    .invert()
-                    .map_or(linear, |inv| cgmath::Matrix::transpose(&inv))
-            } else {
-                linear
-            };
-            let scale = {
-                let d = set.bounds.diagonal();
-                if d > 1e-10 { d * 0.05 } else { 0.1 }
-            } * multiplier;
-            for mesh in &set.meshes {
-                // Vec3 and vec4 (xyz) lanes draw, map or fixed-buffer N;
-                // float/vec2 lanes have no spatial reading and skip.
-                let Some(lane) = solarxy_graph::engine::attr_table::resolve_lane(mesh, name) else {
-                    continue;
-                };
-                for (i, p) in mesh.positions.iter().enumerate() {
-                    let Some(v) = lane.direction(i) else { continue };
-                    let tp = matrix.transform_point(Point3::from(*p));
-                    let mut dir = dir_matrix * Vector3::from(v);
-                    let magnitude = dir.magnitude();
-                    if normalize {
-                        if magnitude <= 1e-10 {
-                            continue;
-                        }
-                        dir /= magnitude;
-                    }
-                    segments.push((
-                        [tp.x, tp.y, tp.z],
-                        [
-                            tp.x + dir.x * scale,
-                            tp.y + dir.y * scale,
-                            tp.z + dir.z * scale,
-                        ],
-                        magnitude,
-                    ));
-                }
-            }
-        }
-
-        // Second pass: colors. Flat per arrow (both vertices alike) so
-        // direction stays readable under the ramp.
-        let color_for: Box<dyn Fn(f32) -> [f32; 3]> = match self.attr_viz.color_mode {
-            AttrColorMode::Uniform => {
-                let c = self.attr_viz.color;
-                Box::new(move |_| c)
-            }
-            AttrColorMode::Ramp => {
-                let (min, max) = segments
-                    .iter()
-                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), (_, _, m)| {
-                        (lo.min(*m), hi.max(*m))
-                    });
-                if max - min <= 1e-10 {
-                    // A degenerate range has nothing to rank; fall back
-                    // to the uniform color.
-                    let c = self.attr_viz.color;
-                    Box::new(move |_| c)
-                } else {
-                    let preset = self.attr_viz.ramp_preset;
-                    Box::new(move |m: f32| {
-                        let t = ((m - min) / (max - min)).clamp(0.0, 1.0);
-                        ramp_color(preset, t)
-                    })
-                }
-            }
-        };
-        segments
-            .into_iter()
-            .flat_map(|(a, b, magnitude)| {
-                let color = color_for(magnitude);
-                [
-                    GizmoVertex { position: a, color },
-                    GizmoVertex { position: b, color },
-                ]
-            })
-            .collect()
+        solarxy_host::attr_channel::build_vector_lines(&self.displayed_geometries(), &self.attr_viz)
     }
 
     pub(super) fn sync_env_bounds(&mut self) {

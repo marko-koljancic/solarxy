@@ -331,7 +331,9 @@ impl State {
         // The per-mesh overlay buffers are baked geometry rather than a pass
         // over the live scene, so they are rebuilt from what just landed
         // rather than per frame: a delta is the only thing that changes them.
+        // The attribute channels are baked the same way.
         self.viz_dirty = true;
+        self.attr_dirty = true;
     }
 
     /// Whether this frame has scene content: at least
@@ -446,6 +448,8 @@ impl State {
                 &self.preferences.viewport,
                 self.gizmo_readout.as_deref(),
             ),
+            transport: self.transport_readout(),
+            transport_bar: self.preferences.ui.transport_bar,
         };
         let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
         let active_pane_mode = self.view.pane_settings[self.view.active_pane].pane_mode;
@@ -614,6 +618,13 @@ impl State {
         );
 
         let recent_files = self.preferences.history.recent_files.clone();
+        // The lanes the attribute strip can offer, only while the viewport
+        // is up to draw it: a walk over the displayed geometries' summaries.
+        let scene_lanes = if self.gui.viewport_tab_present() {
+            self.scene_lanes()
+        } else {
+            Vec::new()
+        };
         let arrangements: Vec<String> = self
             .preferences
             .dock
@@ -726,6 +737,12 @@ impl State {
                 params_floating: params_floating_source,
                 recent_files: &recent_files,
                 arrangements: &arrangements,
+                attr: crate::gui::AttrColumnSource {
+                    viz: &self.attr_viz,
+                    lanes: &scene_lanes,
+                    capacity: self.attr_pin_stats.0,
+                    total: self.attr_pin_stats.1,
+                },
             },
             &mut self.review,
             &mut intents,

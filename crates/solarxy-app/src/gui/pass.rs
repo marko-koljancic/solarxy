@@ -88,6 +88,9 @@ pub(crate) struct PanelSources<'a> {
     /// the menu that lists them and the dialog that warns of a replacement.
     /// Names only: the layouts behind them are the state layer's to read.
     pub arrangements: &'a [String],
+    /// The attribute strip's state, the lanes it can offer and its
+    /// sampling facts, when the Viewport tab is mounted.
+    pub attr: super::chrome::attr_column::AttrColumnSource<'a>,
 }
 
 /// The per-panel interface state the dock's tabs write directly: folds,

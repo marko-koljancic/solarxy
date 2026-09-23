@@ -1003,6 +1003,11 @@ pub struct UiPrefs {
     /// fresh installation writes it set, because there is nothing to be told.
     #[serde(default)]
     pub keymap_notice_seen: bool,
+    /// The playbar, the scene-clock strip under the viewport. Hidden, the
+    /// viewport reclaims its height; the playback keys still work, so hiding
+    /// it gives up the readout, not the clock. The browser's `transportBar`.
+    #[serde(default = "default_true")]
+    pub transport_bar: bool,
 }
 
 fn default_max_recent_files() -> usize {
@@ -1016,6 +1021,7 @@ impl Default for UiPrefs {
             status_bar_visible: true,
             theme: ThemeChoice::default(),
             keymap_notice_seen: false,
+            transport_bar: true,
         }
     }
 }
@@ -1375,6 +1381,7 @@ mod tests {
                 status_bar_visible: false,
                 theme: ThemeChoice::Light,
                 keymap_notice_seen: true,
+                transport_bar: false,
             },
             updater: UpdaterPrefs {
                 check_on_launch: true,

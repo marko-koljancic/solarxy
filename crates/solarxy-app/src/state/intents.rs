@@ -17,7 +17,7 @@ use super::State;
 use crate::gui::{
     CanvasAction, CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent,
     Intent, Intents, LayoutIntent, LookThroughChange, TreeAction, PaneChange, PanelIntent,
-    PaneView, PostChange, ReviewIntent, ToastSeverity, ToolIntent,
+    PaneView, PostChange, ReviewIntent, ToastSeverity, ToolIntent, TransportIntent,
 };
 
 impl State {
@@ -80,6 +80,8 @@ impl State {
                 Intent::CreateCameraFromView { pane } => self.create_camera_from_view(pane),
                 Intent::Viewport(action) => self.handle_viewport_action(action),
                 Intent::Tool(intent) => self.handle_tool_intent(intent),
+                Intent::AttrViz(viz) => self.set_attr_viz(viz),
+                Intent::Transport(intent) => self.handle_transport_intent(intent),
                 Intent::LookThrough { pane, change } => match change {
                     LookThroughChange::Lock(locked) => self.set_pane_camera_lock(pane, locked),
                     LookThroughChange::Bind(_) | LookThroughChange::Free => {
@@ -272,6 +274,8 @@ impl Recompute {
             | Intent::CreateCameraFromView { .. }
             | Intent::Viewport(_)
             | Intent::Tool(_)
+            | Intent::AttrViz(_)
+            | Intent::Transport(_)
             | Intent::LookThrough { .. }
             | Intent::File(_)
             | Intent::Edit(_)
@@ -481,6 +485,33 @@ impl State {
                 self.gui
                     .set_toast(&format!("Gizmo: {}", next.label()), ToastSeverity::Info);
             }
+        }
+    }
+
+    /// The scene clock, from whichever of its two surfaces asked. Each
+    /// control is one engine command; the engine decides which are undo
+    /// steps, which is what keeps a scrub from minting one per tick.
+    pub(super) fn handle_transport_intent(&mut self, intent: TransportIntent) {
+        use solarxy_graph::Command;
+        let command = match intent {
+            TransportIntent::Play => Command::Play,
+            TransportIntent::Pause => Command::Pause,
+            TransportIntent::Stop => Command::Stop,
+            TransportIntent::Step(delta) => Command::StepFrame { delta },
+            TransportIntent::SetFrame(frame) => Command::SetFrame { frame },
+            TransportIntent::SetRange { start, end } => Command::SetFrameRange { start, end },
+            TransportIntent::SetFps(fps) => Command::SetFps { fps },
+            TransportIntent::SetLoop(mode) => Command::SetLoopMode { mode },
+            TransportIntent::ToggleBar => {
+                self.preferences.ui.transport_bar = !self.preferences.ui.transport_bar;
+                return;
+            }
+        };
+        let Some(engine) = self.engine.as_deref_mut() else {
+            return;
+        };
+        if let Err(e) = engine.apply(command) {
+            tracing::warn!("Could not drive the scene clock: {e}");
         }
     }
 

@@ -184,7 +184,27 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 // What is left under the bar is what the scene renders
                 // into. Recording the whole tab would put the top of the
                 // render behind the bar.
-                let viewport = ui.available_rect_before_wrap();
+                // The playbar takes the bottom of the tab when it is shown,
+                // and the render gets what is left: one clock, so one strip
+                // under the whole region rather than one per pane.
+                let mut viewport = ui.available_rect_before_wrap();
+                if self.sources.settings.transport_bar {
+                    let strip = egui::Rect::from_min_max(
+                        egui::pos2(
+                            viewport.left(),
+                            viewport.bottom() - super::chrome::transport_bar::TRANSPORT_BAR_HEIGHT,
+                        ),
+                        viewport.max,
+                    );
+                    viewport.max.y = strip.top();
+                    super::chrome::transport_bar::draw_transport_bar(
+                        ui,
+                        strip,
+                        self.sources.settings.transport,
+                        self.intents,
+                        self.theme,
+                    );
+                }
                 *self.viewport_rect_out = Some(viewport);
                 super::chrome::pane_toolbar::draw_pane_toolbars(
                     ui,
@@ -194,8 +214,9 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.theme,
                 );
                 // The furniture over the render: the tool column at the left
-                // edge, which takes clicks and so records its rect, and the
-                // drag readout at the bottom, which takes none.
+                // edge and the attribute strip at the right, which take
+                // clicks and so record their rects, and the drag readout at
+                // the bottom, which takes none.
                 let column = super::chrome::tool_column::draw_tool_column(
                     ui,
                     viewport,
@@ -204,6 +225,14 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.theme,
                 );
                 self.chrome_rects_out.push(column);
+                let strip = super::chrome::attr_column::draw_attr_column(
+                    ui,
+                    viewport,
+                    self.sources.attr,
+                    self.intents,
+                    self.theme,
+                );
+                self.chrome_rects_out.push(strip);
                 super::chrome::gizmo_readout::draw_gizmo_readout(
                     ui,
                     viewport,

@@ -65,10 +65,12 @@
 //! **Single-consumer code here is legitimate and is not an oversight.**
 //! `gizmo.rs`, `attr_viz.rs` and `attr_labels.rs` were placed here read only
 //! by the browser, for 0.10.0 to light them up from the desktop, and rule 1's
-//! second clause is written for exactly them. The solver has both readers now;
-//! the attribute channel still waits on its desktop caller. A tidy-up that
-//! moves a single-consumer module back would be undoing the work rather than
-//! finishing it.
+//! second clause is written for exactly them. Both shells read all three now,
+//! and `attr_channel.rs` joined them when the desktop drew the channel: the
+//! label walk and the arrow builder had stayed in the browser host because
+//! they read the engine, until the lane resolver moved down to the kernel.
+//! A tidy-up that moves a single-consumer module back would be undoing the
+//! work rather than finishing it.
 //!
 //! # The exceptions, and why each one resists the rule
 //!
@@ -153,6 +155,7 @@
     clippy::wildcard_imports
 )]
 
+pub mod attr_channel;
 pub mod attr_labels;
 pub mod attr_viz;
 pub mod cameras;

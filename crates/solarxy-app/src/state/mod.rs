@@ -35,6 +35,7 @@
 //!   the node that produced what is under the cursor.
 
 mod actions;
+pub(crate) mod attr;
 mod autosave;
 mod camera;
 mod capture;
@@ -190,6 +191,17 @@ pub struct State {
     /// menu to draw the rest unavailable; `None` with nothing selected,
     /// which narrows nothing.
     pub(super) tools_available: Option<Vec<solarxy_host::gizmo::ToolMode>>,
+    /// The attribute strip's state: the three toggles, the picked lane and
+    /// the settings behind the gear. Session-only and scene-wide, never in
+    /// the file and never in undo, as the browser holds it.
+    pub(super) attr_viz: solarxy_host::attr_viz::AttrVizState,
+    /// Whether the label set and the arrow lines are stale against the
+    /// scene or the strip. Set by a scene delta, an overlay rebuild and a
+    /// strip change; cleared by the one rebuild that consumes it.
+    pub(super) attr_dirty: bool,
+    /// The sampling facts the strip's notice reports: the pin capacity and
+    /// the total displayed points.
+    pub(super) attr_pin_stats: (u32, usize),
     /// Which nodes' cooks are failing, absorbed from the engine's event
     /// stream each frame. Fresh failures toast; the standing map is what
     /// the still render consults before reporting success.

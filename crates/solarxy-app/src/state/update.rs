@@ -160,6 +160,8 @@ impl State {
             Some(&normals),
             grid_color,
         );
+        // The rebuilt state's arrow channel is empty; refill it.
+        self.attr_dirty = true;
     }
 
     /// Apply any `SceneOp::SetEnvironment` in a drained delta.
@@ -486,6 +488,7 @@ impl State {
         self.gui.set_scene_open(self.engine.is_some());
         self.sync_env_bounds();
         self.sync_visualization();
+        self.sync_attr_channels();
         self.sync_gizmo();
 
         let now = Instant::now();

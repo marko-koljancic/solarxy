@@ -172,6 +172,24 @@ impl EguiRenderer {
         apply_theme(&self.ctx, &self.theme);
     }
 
+    /// The three colours the attribute labels wear, as the browser reads
+    /// them off its theme: the text, the elevated background for the chip,
+    /// and the accent for the dot. Unit-range sRGB, the renderer's input.
+    pub fn label_colors(&self) -> [[f32; 3]; 3] {
+        let unit = |c: egui::Color32| {
+            [
+                f32::from(c.r()) / 255.0,
+                f32::from(c.g()) / 255.0,
+                f32::from(c.b()) / 255.0,
+            ]
+        };
+        [
+            unit(self.theme.fg),
+            unit(self.theme.bg_elevated),
+            unit(self.theme.accent),
+        ]
+    }
+
     /// Cache the loaded HDRI's metadata for the Properties panel.
     pub(crate) fn update_hdri_info(&mut self, info: HdriInfo) {
         self.hdri_info = Some(info);

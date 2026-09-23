@@ -69,11 +69,13 @@ pub(crate) use arrangement::{
 };
 pub(crate) use dock::SolarxyTab;
 pub(crate) use pass::{CaptureFrame, FramePaint, PanelSources, ViewportChrome};
-pub(crate) use settings::{ClipboardReadout, CookReadout, HistoryReadout, PanelSettings, ToolReadout};
+pub(crate) use settings::{
+    ClipboardReadout, CookReadout, HistoryReadout, PanelSettings, ToolReadout, TransportReadout,
+};
 pub(crate) use modals::still::StillOpening;
 pub(crate) use intent::{
     CaptureIntent, CookIntent, DisplayChange, EditIntent, FileIntent, HelpIntent, Intent, Intents,
-    LayoutIntent, PaneChange, PanelIntent, PostChange, ReviewIntent, ToolIntent,
+    LayoutIntent, PaneChange, PanelIntent, PostChange, ReviewIntent, ToolIntent, TransportIntent,
 };
 pub(crate) use panels::asset_preview::PreviewView;
 pub(crate) use panels::assets::AssetsSource;
@@ -88,6 +90,7 @@ pub(crate) use panels::params::{ParamPanelSource, ParamScene, ResolvedParams};
 pub(crate) use chrome::pane_toolbar::{LookThroughChange, PaneToolbarData, PaneView};
 pub(crate) use panels::review::overlay::ReviewPaneOverlay;
 pub(crate) use chrome::overlays::HudInfo;
+pub(crate) use chrome::attr_column::AttrColumnSource;
 pub(crate) use chrome::viewport_context_menu::{
     ContextTarget, ToolRows, ViewportAction, ViewportContextMenu,
 };

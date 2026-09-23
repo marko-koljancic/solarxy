@@ -1,4 +1,5 @@
-//! The glyphs the viewport's tool column draws, one per transform tool.
+//! The glyphs the viewport's two columns draw: one per transform tool on
+//! the left, one per attribute control on the right.
 //!
 //! Art is what a shell can draw, which is the one duplication the release's
 //! exit criteria sanction: the browser's are React components over mixed
@@ -93,6 +94,64 @@ pub(in crate::gui) fn paint_tool(painter: &Painter, rect: Rect, tool: ToolMode, 
             painter.line_segment([at(8.0, 12.4), at(8.0, 14.6)], stroke);
             painter.line_segment([at(1.4, 8.0), at(3.6, 8.0)], stroke);
             painter.line_segment([at(12.4, 8.0), at(14.6, 8.0)], stroke);
+        }
+    }
+}
+
+/// The attribute strip's four glyphs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::gui) enum AttrIcon {
+    /// A value tag beside its anchor point: the labels mode.
+    Labels,
+    /// Two arrows leaving their points: the vector mode.
+    Vectors,
+    /// Numbered points: the point-marker mode.
+    Points,
+    /// A slider pair: the settings popover.
+    Settings,
+}
+
+/// Paint one attribute glyph into `rect`, in `color`.
+pub(in crate::gui) fn paint_attr(painter: &Painter, rect: Rect, icon: AttrIcon, color: Color32) {
+    let scale = rect.width().min(rect.height()) / BOX;
+    let origin = rect.center() - vec2(BOX, BOX) * scale * 0.5;
+    let at = |x: f32, y: f32| origin + vec2(x, y) * scale;
+    let stroke = Stroke::new((1.5 * scale).max(1.0), color);
+    let dot = |x: f32, y: f32, r: f32| painter.circle_filled(at(x, y), r * scale, color);
+    match icon {
+        AttrIcon::Labels => {
+            dot(3.6, 12.4, 1.4);
+            painter.line_segment([at(6.0, 10.5), at(8.2, 8.3)], stroke);
+            painter.rect_stroke(
+                Rect::from_min_size(at(7.0, 3.0), vec2(7.0, 5.2) * scale),
+                1.0 * scale,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            painter.line_segment([at(8.6, 5.6), at(12.4, 5.6)], stroke);
+        }
+        AttrIcon::Vectors => {
+            dot(4.0, 12.0, 1.3);
+            painter.line_segment([at(5.0, 11.0), at(10.4, 5.6)], stroke);
+            painter.line_segment([at(10.4, 5.6), at(7.8, 5.6)], stroke);
+            painter.line_segment([at(10.4, 5.6), at(10.4, 8.2)], stroke);
+            dot(11.6, 12.6, 1.3);
+            painter.line_segment([at(11.6, 11.4), at(11.6, 7.0)], stroke);
+            painter.line_segment([at(11.6, 7.0), at(10.0, 8.7)], stroke);
+            painter.line_segment([at(11.6, 7.0), at(13.2, 8.7)], stroke);
+        }
+        AttrIcon::Points => {
+            dot(4.4, 4.6, 1.5);
+            dot(11.4, 6.4, 1.5);
+            dot(6.4, 11.6, 1.5);
+            painter.line_segment([at(12.6, 11.0), at(14.6, 11.0)], stroke);
+            painter.line_segment([at(13.6, 10.0), at(13.6, 12.0)], stroke);
+        }
+        AttrIcon::Settings => {
+            painter.line_segment([at(2.5, 5.5), at(13.5, 5.5)], stroke);
+            painter.line_segment([at(2.5, 10.5), at(13.5, 10.5)], stroke);
+            dot(6.0, 5.5, 1.7);
+            dot(10.5, 10.5, 1.7);
         }
     }
 }

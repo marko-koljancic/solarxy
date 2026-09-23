@@ -61,6 +61,7 @@ pub mod deform_ops;
 pub mod delete;
 pub mod edges_to_geo;
 mod error;
+pub mod lane;
 pub mod merge;
 pub mod mirror;
 pub mod points_from_geo;

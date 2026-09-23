@@ -384,6 +384,11 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             ui.checkbox(&mut draft.autosave.enabled, "");
             ui.end_row();
 
+            ui.label("Playbar")
+                .on_hover_text("The scene-clock strip under the viewport");
+            ui.checkbox(&mut draft.ui.transport_bar, "");
+            ui.end_row();
+
             ui.label("Autosave after")
                 .on_hover_text("Seconds of quiet before a recovery copy is written; one is forced every 15 seconds while editing");
             ui.add_enabled(
