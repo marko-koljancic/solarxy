@@ -14,7 +14,7 @@ Solarxy is a cross-platform 3D model viewer, validator, renderer, and browser-ba
 
 The same Rust core powers three surfaces:
 
-- **`solarxy`** - the native GUI viewer: window, PBR rendering, split viewports, sidebar, inspection overlays, review system, and **`Render -> Render Still...`** for a path-traced still. Opens `.slxy` scenes as well as model files, and can look through a scene camera.
+- **`solarxy`** - the native GUI viewer: window, PBR rendering, split viewports with a path-traced pane, inspection overlays, review on any scene, and a path-traced still from the render node. Opens `.slxy` scenes as well as model files, and can look through a scene camera.
 - **`solarxy-cli`** - the terminal companion. `analyze` produces a model report as a tiled terminal workspace, plain text, or JSON; **`render`** takes a scene or a model and writes an image, with a live dashboard while it converges; `view` launches the GUI. Plus `--update`.
 - **[Solarxy Web](https://solarxy.koljam.com)** - the viewer, validator, and review toolset in the browser on WebGPU, plus **node-based parametric modeling** on the same core. It is a public beta: nothing to install, nothing uploaded to a server.
 
@@ -68,12 +68,12 @@ engineering standards, and the decision record.
 ### Rendering and inspection
 
 - **Real-time PBR rendering** - Cook-Torrance BRDF, normal mapping, shadow mapping, IBL (diffuse + specular), SSAO, bloom, selectable tone mapping (Reinhard, ACES Filmic, Linear, None), alpha blending, multi-light direct lighting, 4x MSAA.
-- **Path-traced rendering** - a GPU compute path tracer on core WebGPU: global illumination, soft area-light shadows, optical depth of field, and an unbounded light count. It runs on the same scene as the raster viewport, and an a-trous filter cleans up the result. Available in the browser as a converging preview, in the desktop app via `Render -> Render Still...`, and headlessly through `solarxy-cli render`.
+- **Path-traced rendering** - a GPU compute path tracer on core WebGPU: global illumination, soft area-light shadows, optical depth of field, and an unbounded light count. It runs on the same scene as the raster viewport, and an a-trous filter cleans up the result. Available as a converging viewport preview in both the browser and the desktop app, as a finished still from the render node on both, and headlessly through `solarxy-cli render`.
 - **Split viewport** - side-by-side, stacked, quad, or three-left-big panes with independent cameras and display settings per pane. A pane shows either the 3D scene or the UV layout, with overlap detection.
 - **Inspection modes** - Shaded, Material ID, Texel Density heat map, Depth, Overdraw heat map, AO Preview.
 - **Material overrides** - Clay Light, Clay Dark, Chrome (IBL-only reflective black), and Silhouette (flat black) for surface inspection.
 - **Validation overlay** - color-coded 3D visualization of validation issues (flipped normals, non-manifold edges, triangle-budget overruns, degenerate triangles, missing UVs, bad material refs).
-- **Review System** - place spatially-anchored annotations on a model's surface (desktop saves a `<model>.solarxy-review.json` sidecar; web keeps them in the `.slxy` document), categories (Info / Warning / Question / Change), threaded replies, re-anchoring, cascade-delete confirm. Toggle via `Shift+R`.
+- **Review System** - place spatially-anchored annotations on any scene's geometry; they live in the `.slxy` document on both shells (the desktop imports and exports the older `<model>.solarxy-review.json` sidecar), with categories (Info / Warning / Question / Change), threaded replies, re-anchoring once the geometry beneath a note changes, and a delete confirm. Toggle via `Shift+R`.
 
 ### Validation and tooling
 

@@ -49,12 +49,17 @@ None of these has a key since the two shells came to share one keymap. Each is r
 labels across the top of a pane.
 
 - [ ] Wireframe and ghosted-wireframe, from the pane's view-mode menu.
+- [ ] `Path Traced`, from the same menu, on a device that traces: the label reads it, the image
+      converges, the readout beside the labels says `tracing...` and then climbs to `4096 spp`
+      and parks, orbiting restarts it, and picking any view mode returns the pane to the
+      rasterizer with its camera where it was.
 - [ ] Normals, Bounds and Wireframe weight, from the Display menu's submenus.
 - [ ] Grid and Axes toggle from the Display menu.
 - [ ] Material overrides from the pane's material menu: Clay, Clay Dark, Chrome, Silhouette.
 - [ ] Background lists six in this order: Gradient, White, Dark, Ayu, Black, HDRI Sky. With no HDRI
       loaded, HDRI Sky is greyed and says why on hover.
-- [ ] `Look...` and `Light markers` are present and greyed, each with a reason on hover.
+- [ ] `Look...` opens the pane's look editor, modeless and one per pane; `Light markers` toggles
+      the pane's markers.
 - [ ] **Validation overlay**: issues highlight, and the non-manifold **edge lines do not z-fight** with the surface. (WebGPU forbids `depthBias` on line topologies, so the depth bias was removed from that pipeline in Phase 0. If z-fighting is visible, the fix is a clip-space nudge in `vs_validation`.)
 
 ## 4. Layouts and cameras
@@ -65,6 +70,8 @@ labels across the top of a pane.
 - [ ] The active pane follows the cursor; per-pane inspection modes are independent.
 - [ ] Each pane's camera moves alone. Nothing links them, and none starts linked.
 - [ ] `Z` fits the view, `T` `F` `L` `B` snap to a side, `P` and `O` switch projection.
+- [ ] One pane of a split traced beside a raster pane: orbiting the raster pane leaves the traced
+      pane's accumulation alone, and minimizing the window stops GPU work until it is restored.
 
 ## 5. Lighting
 
@@ -92,13 +99,14 @@ labels across the top of a pane.
       and the text panel (File, View).
 - [ ] The node panel's Add menu lists the node types of the network being looked at, by category,
       and a node added from it lands in view.
-- [ ] The viewport's `Gizmo Orientation`, `Playbar` and `Export Turntable...` are present and
-      greyed, each with a reason.
+- [ ] The viewport's `Gizmo Orientation`, `Playbar` and `Export Turntable...` each act.
+- [ ] The Review menu's `Import Review Notes...` is enabled with a document open and
+      `Export Review Notes...` once a note exists; each opens a native dialog.
 
 ## 8. Panels and arrangements
 
 - [ ] The Desks menu toggles seven panels (Nodes, Properties, Tree, Text, Assets, Texture Viewer,
-      Attributes) plus the Sidebar, and a tick always agrees with what is on screen.
+      Attributes), and a tick always agrees with what is on screen. There is no Sidebar.
 - [ ] The Viewport tab has no close button and cannot be dragged out into a window.
 - [ ] A closed panel comes back beside a sensible neighbour rather than in a corner.
 - [ ] Each of the six built-in arrangements applies: Default, Modeling, Review, Technical,
@@ -118,11 +126,20 @@ labels across the top of a pane.
 
 ## 9. Review system
 
-Review cannot arm in 0.10.0. It anchored against a file-loaded model's meshes, and the one
-document root supplies none. It returns when review is repointed at the document.
+Review arms on any open document: the notes are the document's, the same ones the browser shows,
+and every change is one undo step.
 
-- [ ] `Shift+R` over the viewport says so in a toast and changes nothing else.
+- [ ] `Shift+R` over the viewport enters review mode, opens the panel, and a click on geometry
+      opens the note popup; Save adds the note and `Cmd/Ctrl+Z` removes it in one step.
 - [ ] `N` toggles the review panel, from anywhere.
+- [ ] Clicking a marker selects its note in the panel, in any mode. The selected note offers
+      Complete, Reply, Edit, Re-place and Delete; Delete asks first, even with no replies.
+- [ ] Translate the node under a note and the marker follows; change the geometry beneath it and
+      the note lists under `Needs re-anchor` with the warning dot; Re-place clears both.
+- [ ] Hide the node and the pin goes; show it and the pin returns.
+- [ ] `Export Review Notes...` writes the sidecar beside the scene; `Import Review Notes...` of a
+      file from an earlier release brings every note, reply, author and resolved state, and a
+      second import of the same file adds none.
 
 ## 10. Screenshot
 
