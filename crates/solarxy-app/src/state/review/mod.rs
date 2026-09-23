@@ -11,13 +11,6 @@
 //!
 //! The sidecar half lives in `sidecar.rs`, the only part that touches disk.
 
-// Three fields describe the sidecar a file-loaded model kept beside it, which
-// nothing writes now that the document carries the notes. They go with the
-// import and export work, and the allowance goes with them.
-#![allow(dead_code)]
-
-use std::path::PathBuf;
-
 use solarxy_graph::Command;
 use solarxy_graph::review::{Annotation, AnnotationId, ReviewAnchor, ReviewCategory};
 
@@ -38,17 +31,6 @@ pub struct ReviewState {
     /// Popup state while the user is writing a new note, a reply, or an
     /// edit of an existing note. `None` means no popup is open.
     pub editing: Option<EditDraft>,
-
-    /// SHA-256 of the model file at load time, from before the document
-    /// carried the notes. Nothing writes it.
-    pub model_hash: Option<String>,
-
-    /// Per-mesh SHA-256 of a file-loaded model, from before the document
-    /// carried the notes. Nothing writes it.
-    pub mesh_hashes: Vec<String>,
-
-    /// The sidecar a file-loaded model kept beside it. Nothing writes it.
-    pub sidecar_path: Option<PathBuf>,
 
     /// Mirror of `Preferences::review.author`; cached here so the draft
     /// commit does not thread through the preferences each frame. Refreshed
@@ -113,9 +95,6 @@ impl Default for ReviewState {
             active: false,
             selected: None,
             editing: None,
-            model_hash: None,
-            mesh_hashes: Vec::new(),
-            sidecar_path: None,
             author: None,
             panel_open: false,
             category_filters: [true; 4],
