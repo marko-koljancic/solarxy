@@ -40,6 +40,24 @@ fn environment_install_due(
     !job_running && (dirty || params != last_params)
 }
 
+/// What a traced pane's readout holds after an encode: the count and the
+/// target while converging; parked at the target once complete, from the
+/// last pair seen, so a converged pane keeps a number rather than losing
+/// it; nothing when the pane completed without ever reporting a count.
+fn next_pane_samples(
+    outcome: solarxy_renderer::backend::FrameOutcome,
+    last: Option<(u32, u32)>,
+) -> Option<(u32, u32)> {
+    use solarxy_renderer::backend::FrameOutcome;
+    match outcome {
+        FrameOutcome::Converging {
+            samples,
+            target_samples,
+        } => Some((samples, target_samples)),
+        FrameOutcome::Complete => last.map(|(_, target)| (target, target)),
+    }
+}
+
 impl State {
     /// Whether any pane in the layout traces, which is what every piece of
     /// housekeeping here is gated on: a session that never traces pays one
@@ -93,6 +111,25 @@ impl State {
         }
         if let Some(slot) = self.traced_cam_keys.get_mut(pane) {
             *slot = None;
+        }
+        if let Some(slot) = self.last_pane_samples.get_mut(pane) {
+            *slot = None;
+        }
+    }
+
+    /// Record a traced pane's sample counter after its encode. A `Complete`
+    /// outcome is a converged pane: the count parks at the target instead
+    /// of vanishing, so the readout keeps saying what the image is.
+    pub(in crate::state) fn push_pane_samples(
+        &mut self,
+        i: usize,
+        outcome: solarxy_renderer::backend::FrameOutcome,
+    ) {
+        let last = self.last_pane_samples.get(i).copied().flatten();
+        if let Some(counts) = next_pane_samples(outcome, last)
+            && let Some(slot) = self.last_pane_samples.get_mut(i)
+        {
+            *slot = Some(counts);
         }
     }
 
@@ -154,8 +191,11 @@ impl State {
         // last would otherwise win. `set_settings` drops every accumulation
         // only when the settings actually differ, which is what lets a pane
         // keep converging frame after frame.
+        let denoise = self.preferences.display.preview_denoise;
         if let Some(t) = self.tracer.as_mut() {
-            t.set_settings(solarxy_host::traced_preview::preview_trace_settings(true));
+            t.set_settings(solarxy_host::traced_preview::preview_trace_settings(
+                denoise,
+            ));
             // The filter's steering, for the same reason: a still authored
             // from a render node writes these four, so without this a
             // preview would inherit whatever the last still asked for. The
@@ -222,6 +262,26 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_readout_follows_the_count_and_parks_at_the_target_once_complete() {
+        use solarxy_renderer::backend::FrameOutcome;
+        let converging = FrameOutcome::Converging {
+            samples: 17,
+            target_samples: 4096,
+        };
+        assert_eq!(next_pane_samples(converging, None), Some((17, 4096)));
+        assert_eq!(
+            next_pane_samples(FrameOutcome::Complete, Some((4095, 4096))),
+            Some((4096, 4096)),
+            "a converged pane parks at its target"
+        );
+        assert_eq!(
+            next_pane_samples(FrameOutcome::Complete, None),
+            None,
+            "complete with no count ever reported is nothing to show"
+        );
+    }
 
     #[test]
     fn the_environment_installs_when_flagged_or_moved_and_never_under_a_job() {

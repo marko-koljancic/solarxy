@@ -90,6 +90,7 @@ impl PreferencesModal {
                 self.draft
                     .display
                     .set_post_strengths(defaults.display.post_strengths());
+                self.draft.display.preview_denoise = defaults.display.preview_denoise;
             }
             PrefsTab::Interface => {
                 self.draft.ui.max_recent_files = defaults.ui.max_recent_files;
@@ -440,6 +441,16 @@ fn draw_view_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
                     .range(MIN_BLOOM_THRESHOLD..=MAX_BLOOM_THRESHOLD),
             );
             ui.end_row();
+
+            // The browser's last row of this section, in its words.
+            ui.label("Denoise traced preview").on_hover_text(
+                "Runs the edge-aware filter on the path-traced viewport preview, which is \
+                 unusable without it at one sample per frame. Turn it off to judge what \
+                 the tracer produced rather than what the filter made of it. A still \
+                 render's own denoise is set on the render node.",
+            );
+            ui.checkbox(&mut draft.display.preview_denoise, "");
+            ui.end_row();
         });
 }
 
@@ -544,6 +555,24 @@ mod tests {
         m.cancel();
         assert!(!m.open);
         assert_eq!(m.draft, Preferences::default());
+    }
+
+    /// The traced preview's filter is a View-tab row, so the View reset
+    /// restores it and no other tab's reset touches it.
+    #[test]
+    fn the_view_reset_restores_the_preview_filter() {
+        let mut m = PreferencesModal::default();
+        m.open_with(Preferences::default());
+        m.draft.display.preview_denoise = false;
+        m.active_tab = PrefsTab::Startup;
+        m.reset_active_tab();
+        assert!(!m.draft.display.preview_denoise, "another tab leaves it");
+        m.active_tab = PrefsTab::View;
+        m.reset_active_tab();
+        assert!(
+            m.draft.display.preview_denoise,
+            "the View reset restores it"
+        );
     }
 
     #[test]

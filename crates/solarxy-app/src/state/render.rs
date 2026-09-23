@@ -272,7 +272,7 @@ impl State {
                 label: Some("Pane Encoder"),
             });
         let target = self.renderer.targets.hdr_resolve_view.clone();
-        let _outcome = {
+        let outcome = {
             let mut ctx = FrameCtx {
                 device: &self.device,
                 queue: &self.queue,
@@ -308,6 +308,9 @@ impl State {
                 self.raster.encode(&mut ctx, &target)
             }
         };
+        if traced {
+            self.push_pane_samples(i, outcome);
+        }
         // Capability, never identity: the composite asks what the backend
         // that just encoded can do, which is what keeps a traced pane from
         // multiplying by an occlusion buffer another pane wrote.
@@ -729,6 +732,7 @@ impl State {
             camera_locked: std::array::from_fn(|i| self.is_locked_look_through(i)),
             turntable_rpm: self.view.display.turntable_rpm,
             tracing_available: self.tracing_available,
+            pane_samples: self.last_pane_samples,
         };
         self.gui.render_ui(
             crate::gui::FramePaint {

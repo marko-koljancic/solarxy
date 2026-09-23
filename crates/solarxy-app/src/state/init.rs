@@ -259,6 +259,7 @@ impl State {
             tracing_available,
             traced_cam_keys: [None; 4],
             traced_env_params: (0.0, 0.0),
+            last_pane_samples: [None; 4],
             occluded: false,
             look_through: [None; 4],
             camera_editing: [false; 4],

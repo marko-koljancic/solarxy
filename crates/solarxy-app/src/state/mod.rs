@@ -255,6 +255,10 @@ pub struct State {
     /// The environment scalars (intensity, rotation) the tracer last had;
     /// a move re-syncs it and drops every accumulation.
     pub(super) traced_env_params: (f32, f32),
+    /// Each traced pane's last sample count and target, for the readout
+    /// beside its labels. `None` before the first count and after a reset;
+    /// a converged pane parks at its target rather than vanishing.
+    pub(super) last_pane_samples: [Option<(u32, u32)>; 4],
     /// Whether the window is hidden from view. While it is, no frame asks
     /// for the next, so nothing draws, cooks or traces for nobody; the next
     /// un-occlusion or focus asks for one and the loop resumes.

@@ -18,10 +18,13 @@
 //! is the point rather than an arrangement preference: one label showing
 //! whichever of three settings is non-default cannot show the other two,
 //! so a 4-up quad was unreadable at a glance. The view-mode label reads
-//! `Path Traced` while the pane traces, and its menu offers that row after
-//! the four view modes. A UV pane keeps an inert `[ UV Map ]` label beside
+//! `Path Traced` while the pane traces, its menu offers that row after the
+//! four view modes, and a samples-per-pixel readout sits beside the labels
+//! while the pane traces. A UV pane keeps an inert `[ UV Map ]` label beside
 //! `[ Display ]`, with its overlap percentage in a separate readout rather
-//! than folded into a label.
+//! than folded into a label; the two readouts take the same shape, beside
+//! the labels rather than inside one, because each has to report that it is
+//! waiting before a number exists.
 //!
 //! Entries whose capability is not built yet are drawn **disabled with a
 //! tooltip naming what they wait for**, rather than omitted. An absent row
@@ -120,6 +123,9 @@ pub(crate) struct PaneToolbarData<'a> {
     /// view-mode menu offers `Path Traced` at all. Capability rather than
     /// identity, as the backend contract states it.
     pub tracing_available: bool,
+    /// Each traced pane's sample count and target, for the readout beside
+    /// its labels. `None` before the first count and after a reset.
+    pub pane_samples: [Option<(u32, u32)>; 4],
 }
 
 /// A toolbar's requested look-through change for one pane: bind to a
@@ -196,6 +202,7 @@ pub(in crate::gui) fn draw_pane_toolbars(
                             camera_locked: data.camera_locked.get(i).copied().unwrap_or(false),
                             turntable_rpm: data.turntable_rpm,
                             tracing_available: data.tracing_available,
+                            pane_samples: data.pane_samples.get(i).copied().flatten(),
                         },
                         intents,
                     );
@@ -248,11 +255,22 @@ struct PaneControls<'a> {
     camera_locked: bool,
     turntable_rpm: f32,
     tracing_available: bool,
+    pane_samples: Option<(u32, u32)>,
 }
 
 /// The view-mode label while a pane traces, and its menu row. The browser's
 /// literal, held to it by the parity test below.
 const PATH_TRACED: &str = "Path Traced";
+
+/// What the readout beside a traced pane's labels says: the samples landed
+/// so far, or that tracing has started and no count has come back yet. The
+/// browser's two strings; the target is kept but not shown, as there.
+fn samples_readout(samples: Option<(u32, u32)>) -> String {
+    samples.map_or_else(
+        || "tracing...".to_string(),
+        |(samples, _)| format!("{samples} spp"),
+    )
+}
 
 /// A row of radio buttons over a variant set, returning what the user picked.
 ///
@@ -313,6 +331,7 @@ fn draw_scene_labels(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
         projection,
         bound_camera,
         tracing_available,
+        pane_samples,
         ..
     } = cx;
 
@@ -425,6 +444,15 @@ fn draw_scene_labels(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
     label_menu(ui, (index, "disp"), "Display", |ui| {
         draw_display_menu(ui, cx, intents);
     });
+
+    // Beside the labels rather than inside one, like the UV overlap
+    // readout and for the same reason: it has to say that tracing has
+    // started before any count exists.
+    if traced {
+        ui.label(samples_readout(pane_samples)).on_hover_text(
+            "Samples accumulated by the path-traced preview; the image is still converging",
+        );
+    }
 }
 
 /// A dropdown section heading, for the two menus the browser groups.
@@ -726,6 +754,20 @@ mod tests {
             })
             .collect();
         assert_eq!(here, browser);
+    }
+
+    /// The readout says what the browser's says: the count with its unit,
+    /// or that tracing has started, in the browser's own two strings.
+    #[test]
+    fn the_samples_readout_is_the_browsers() {
+        assert_eq!(samples_readout(None), "tracing...");
+        assert_eq!(samples_readout(Some((17, 4096))), "17 spp");
+        let source = browser_pane_toolbar();
+        assert!(source.contains("} spp`"), "the browser's unit");
+        assert!(
+            source.contains("\"tracing...\""),
+            "the browser's waiting string"
+        );
     }
 
     fn browser_pane_toolbar() -> String {

@@ -890,6 +890,13 @@ pub struct DisplayPrefs {
     pub bloom_threshold: f32,
     #[serde(default = "default_ssao_strength")]
     pub ssao_strength: f32,
+    /// Whether the path-traced viewport preview runs the edge-aware filter.
+    /// On by default, because a one-sample frame is unusable without it;
+    /// off is for judging what the tracer produced rather than what the
+    /// filter made of it. A still render's own filter is set on the render
+    /// node. A preference rather than a per-pane setting, as in the browser.
+    #[serde(default = "default_true")]
+    pub preview_denoise: bool,
 }
 
 impl DisplayPrefs {
@@ -1207,6 +1214,7 @@ impl Default for DisplayPrefs {
             bloom_strength: crate::view_config::DEFAULT_BLOOM_STRENGTH,
             bloom_threshold: crate::view_config::DEFAULT_BLOOM_THRESHOLD,
             ssao_strength: crate::view_config::DEFAULT_SSAO_STRENGTH,
+            preview_denoise: true,
         }
     }
 }
@@ -1362,6 +1370,7 @@ mod tests {
                 bloom_strength: 1.25,
                 bloom_threshold: 0.4,
                 ssao_strength: 0.6,
+                preview_denoise: false,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,
@@ -1886,6 +1895,10 @@ view_layout = "splitVertical"
         let parsed: Preferences = toml::from_str(toml_str).unwrap();
         assert_eq!(parsed.ui, UiPrefs::default());
         assert_eq!(parsed.updater, UpdaterPrefs::default());
+        assert!(
+            parsed.display.preview_denoise,
+            "a file from before the traced preview filters it, as the browser does"
+        );
     }
 
     #[test]
