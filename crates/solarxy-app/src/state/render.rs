@@ -780,11 +780,6 @@ impl State {
         if let Some(id) = self.review.focus_request.take() {
             self.focus_review_annotation(id);
         }
-        // Review panel Save button.
-        if self.review.save_requested {
-            self.review.save_requested = false;
-            self.save_review_sidecar();
-        }
 
         if let Some(new_prefs) = self.gui.take_committed_prefs() {
             let theme_changed = self.preferences.ui.theme != new_prefs.ui.theme;

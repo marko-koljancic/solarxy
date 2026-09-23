@@ -224,7 +224,9 @@ pub struct AnchorPosition {
     /// Triangle index within that mesh (triangle = 3 consecutive indices).
     pub face_index: u32,
 
-    /// Barycentric `[u, v, w]` (sum ≈ 1) — for sub-face accuracy.
+    /// Barycentric weights on the face (sum near 1), element k weighting the
+    /// face's k-th vertex, for sub-face accuracy. The same array the engine's
+    /// anchor and a detailed pick carry, copied through unchanged.
     pub barycentric: [f32; 3],
 
     /// World-space position at creation. Used to render the marker when the

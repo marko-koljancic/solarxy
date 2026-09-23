@@ -83,7 +83,8 @@ enum Entry {
     ReviewMode,
     ReviewPanel,
     ShowMarkers,
-    SaveReviewNotes,
+    ImportReviewNotes,
+    ExportReviewNotes,
     // Help
     Shortcuts,
     Tour,
@@ -114,7 +115,8 @@ impl Entry {
             Self::ReviewMode => "Review Mode",
             Self::ReviewPanel => "Review Panel",
             Self::ShowMarkers => "Show Markers",
-            Self::SaveReviewNotes => "Save Review Notes",
+            Self::ImportReviewNotes => "Import Review Notes\u{2026}",
+            Self::ExportReviewNotes => "Export Review Notes\u{2026}",
             Self::Shortcuts => "Keyboard Shortcuts",
             Self::Tour => "Take a Tour",
             Self::Wiki => "Wiki",
@@ -146,7 +148,8 @@ impl Entry {
             | Self::Quit
             | Self::DeleteSelection
             | Self::ShowMarkers
-            | Self::SaveReviewNotes
+            | Self::ImportReviewNotes
+            | Self::ExportReviewNotes
             | Self::Tour
             | Self::Wiki
             | Self::About => None,
@@ -189,7 +192,8 @@ const REVIEW_MENU: &[Row] = &[
     Item(Entry::ReviewPanel),
     Item(Entry::ShowMarkers),
     Divider,
-    Item(Entry::SaveReviewNotes),
+    Item(Entry::ImportReviewNotes),
+    Item(Entry::ExportReviewNotes),
 ];
 
 const HELP_MENU: &[Row] = &[
@@ -328,10 +332,15 @@ fn draw_entry(
             Intent::Edit(EditIntent::DeleteSelection),
         )),
         Entry::Preferences => Some((true, "", Intent::Edit(EditIntent::OpenPreferences))),
-        Entry::SaveReviewNotes => Some((
+        Entry::ImportReviewNotes => Some((
+            cx.review_available,
+            NO_DOCUMENT,
+            Intent::Review(ReviewIntent::ImportNotes),
+        )),
+        Entry::ExportReviewNotes => Some((
             cx.review_has_notes,
-            "There are no review notes to save",
-            Intent::Review(ReviewIntent::SaveNotes),
+            "There are no review notes to export",
+            Intent::Review(ReviewIntent::ExportNotes),
         )),
         Entry::Shortcuts => Some((true, "", Intent::Help(HelpIntent::Shortcuts))),
         Entry::Wiki => Some((true, "", Intent::Help(HelpIntent::Wiki))),
@@ -625,8 +634,12 @@ mod tests {
         ),
         ("Quit", "a native application is quit from its own menu"),
         (
-            "Save Review Notes",
-            "becomes an export when review is repointed at the document",
+            "Import Review Notes...",
+            "reads the sidecar an earlier release kept beside a model; the browser has no files to read",
+        ),
+        (
+            "Export Review Notes...",
+            "writes that sidecar back so an earlier release can read the notes",
         ),
     ];
 

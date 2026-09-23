@@ -164,11 +164,11 @@ pub(in crate::gui) fn draw_review_panel_content(
                 )));
             }
             if ui
-                .add_enabled(!notes.is_empty(), egui::Button::new("Save").small())
+                .add_enabled(!notes.is_empty(), egui::Button::new("Export").small())
                 .on_hover_text("Write the review notes to a sidecar file beside the scene")
                 .clicked()
             {
-                review.save_requested = true;
+                intents.raise(Intent::Review(ReviewIntent::ExportNotes));
             }
             // Markers toggle — suppresses the 3D viewport overlay while
             // the panel keeps listing every annotation.

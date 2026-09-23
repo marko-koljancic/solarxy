@@ -94,10 +94,6 @@ pub struct ReviewState {
     /// then clears it.
     pub focus_request: Option<AnnotationId>,
 
-    /// One-shot: set by the panel's Save button; the state layer writes the
-    /// sidecar and clears it.
-    pub save_requested: bool,
-
     /// The marker under the cursor, if any. Written by the overlay's hover
     /// pass from what it drew, read by the click ladder so a click on a pin
     /// selects it rather than picking through it. `None` when the cursor is
@@ -130,7 +126,6 @@ impl Default for ReviewState {
             reanchor_target: None,
             scroll_to_selected: false,
             focus_request: None,
-            save_requested: false,
             hovered: None,
             next_draft_seq: 0,
         }

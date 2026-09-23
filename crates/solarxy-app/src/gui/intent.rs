@@ -261,7 +261,10 @@ pub(crate) enum ToolIntent {
 pub(crate) enum ReviewIntent {
     ToggleMode,
     ToggleMarkers,
-    SaveNotes,
+    /// Write the notes to the sidecar an earlier release reads.
+    ExportNotes,
+    /// Read a sidecar's notes into the document, as one undo step.
+    ImportNotes,
     /// The popup's Save: the open draft becomes an add or an edit.
     CommitDraft,
     /// The panel's Complete checkbox.

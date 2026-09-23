@@ -336,7 +336,8 @@ impl State {
             ReviewIntent::ToggleMarkers => {
                 self.review.markers_hidden = !self.review.markers_hidden;
             }
-            ReviewIntent::SaveNotes => self.save_review_sidecar(),
+            ReviewIntent::ExportNotes => self.export_review_notes(),
+            ReviewIntent::ImportNotes => self.import_review_notes(),
             ReviewIntent::CommitDraft => {
                 let now = crate::state::review::ReviewState::now_rfc3339();
                 if let Some(command) = self.review.take_draft_command(now) {
