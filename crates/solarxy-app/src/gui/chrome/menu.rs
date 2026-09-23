@@ -45,7 +45,8 @@ pub(in crate::gui) struct MenuContext<'a> {
     pub review_available: bool,
     pub review_active: bool,
     pub review_markers_hidden: bool,
-    pub review_dirty: bool,
+    /// Whether the document holds any annotation, which is what a save needs.
+    pub review_has_notes: bool,
     pub theme: Theme,
 }
 
@@ -328,8 +329,8 @@ fn draw_entry(
         )),
         Entry::Preferences => Some((true, "", Intent::Edit(EditIntent::OpenPreferences))),
         Entry::SaveReviewNotes => Some((
-            cx.review_dirty,
-            "There are no unsaved review notes",
+            cx.review_has_notes,
+            "There are no review notes to save",
             Intent::Review(ReviewIntent::SaveNotes),
         )),
         Entry::Shortcuts => Some((true, "", Intent::Help(HelpIntent::Shortcuts))),

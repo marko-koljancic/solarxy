@@ -10,12 +10,14 @@
 //!
 //! Per-pane plumbing comes from `state::render`: each entry pairs a 3D
 //! pane's egui-logical rect with the matching camera's `view * proj`
-//! matrix. UV panes are filtered out upstream.
+//! matrix. UV panes are filtered out upstream. The notes themselves are the
+//! engine's snapshot for the frame, with the staleness it derived.
 
 use std::borrow::Cow;
 
 use cgmath::{Matrix4, Vector4};
-use solarxy_core::review::ReviewAnnotation;
+use solarxy_graph::engine::AnnotationSnapshot;
+use solarxy_graph::review::AnnotationId;
 
 use crate::gui::panels::review::visuals::{category_color, category_label, category_letter};
 use crate::gui::theme::Theme;
@@ -53,7 +55,9 @@ const TEXT_TRUNCATE_CHARS: usize = 240;
 
 /// Paint review markers + expand-on-hover/select cards across the supplied
 /// 3D panes. Reads from + writes to `review.hovered`; does not change any
-/// other field.
+/// other field. The hover it writes is what the click ladder reads, so a
+/// click on a drawn pin selects it: the hit test and the drawing are one
+/// pass over one list.
 ///
 /// Pass `suppress` = `true` to skip the overlay entirely (e.g. when a
 /// blocking modal is open — markers as filled blobs in the canvas center
@@ -61,6 +65,7 @@ const TEXT_TRUNCATE_CHARS: usize = 240;
 pub(crate) fn draw_review_overlay(
     ctx: &egui::Context,
     panes: &[ReviewPaneOverlay],
+    notes: &[AnnotationSnapshot],
     review: &mut ReviewState,
     suppress: bool,
     theme: Theme,
@@ -69,14 +74,14 @@ pub(crate) fn draw_review_overlay(
     if suppress {
         return;
     }
-    if panes.is_empty() || review.annotations.iter().all(|a| a.reply_to.is_some()) {
+    if panes.is_empty() || notes.iter().all(|n| n.annotation.reply_to.is_some()) {
         review.hovered = None;
         return;
     }
 
     let cursor_pos = ctx.input(|i| i.pointer.hover_pos());
-    let prev_hovered = review.hovered.clone();
-    let mut closest_hovered: Option<(f32, String)> = None;
+    let prev_hovered = review.hovered;
+    let mut closest_hovered: Option<(f32, AnnotationId)> = None;
 
     let layer = egui::LayerId::new(
         egui::Order::Foreground,
@@ -86,35 +91,33 @@ pub(crate) fn draw_review_overlay(
     for pane in panes {
         let painter = ctx.layer_painter(layer).with_clip_rect(pane.egui_rect);
         let mut visible: Vec<VisiblePin<'_>> = Vec::new();
-        for ann in &review.annotations {
-            if ann.reply_to.is_some() {
+        for note in notes {
+            if note.annotation.reply_to.is_some() {
                 continue;
             }
-            let Some(pos) = project_to_pane(
-                &pane.view_proj,
-                ann.anchor.world_pos_fallback,
-                pane.egui_rect,
-            ) else {
+            let Some(world) = note.annotation.anchor.world_fallback else {
+                continue;
+            };
+            let Some(pos) = project_to_pane(&pane.view_proj, world, pane.egui_rect) else {
                 continue;
             };
             // The card sizes to its text: lay the body galley out up front
             // so its measured height drives `compute_card_rect` (and the
             // hover hit-test, which keys off `card_rect`).
-            let body_galley = layout_card_body(&painter, ann, theme);
-            let has_replies = review.reply_count(&ann.id) > 0;
-            let card_height = card_height_for(&body_galley, has_replies);
+            let body_galley = layout_card_body(&painter, note, theme);
+            let reply_count = reply_count(notes, note.annotation.id);
+            let card_height = card_height_for(&body_galley, reply_count > 0);
             let card_rect = compute_card_rect(pos, pane.egui_rect, card_height);
-            // Dimming a marker whose mesh is hidden needs a mesh-level
-            // visibility flag the shell no longer owns; visibility is a
-            // parameter on a node now, and the anchor addresses a mesh index
-            // into a model that is re-derived on every cook. This comes back
-            // with the review repointing.
+            // Dimming a marker whose mesh is hidden needs the engine's own
+            // visibility answer; it arrives with the engine-resolved marker
+            // positions, which drop a hidden node's markers outright.
             let mesh_hidden = false;
             visible.push(VisiblePin {
-                ann,
+                note,
                 pos,
                 card_rect,
                 body_galley,
+                reply_count,
                 mesh_hidden,
             });
         }
@@ -126,26 +129,26 @@ pub(crate) fn draw_review_overlay(
                 let d = pin.pos.distance(cursor);
                 if d <= PIN_HIT_RADIUS && closest_hovered.as_ref().is_none_or(|(best, _)| d < *best)
                 {
-                    closest_hovered = Some((d, pin.ann.id.clone()));
+                    closest_hovered = Some((d, pin.id()));
                 }
             }
             if closest_hovered.is_none()
-                && let Some(prev_id) = prev_hovered.as_deref()
-                && let Some(pin) = visible.iter().find(|p| p.ann.id == prev_id)
+                && let Some(prev_id) = prev_hovered
+                && let Some(pin) = visible.iter().find(|p| p.id() == prev_id)
                 && let Some(card) = pin.card_rect
                 && card.contains(cursor)
             {
-                closest_hovered = Some((0.0, pin.ann.id.clone()));
+                closest_hovered = Some((0.0, pin.id()));
             }
         }
 
-        let hovered_id = closest_hovered.as_ref().map(|(_, id)| id.as_str());
-        let selected_id = review.selected.as_deref();
+        let hovered_id = closest_hovered.as_ref().map(|(_, id)| *id);
+        let selected_id = review.selected;
 
         let mut featured: Option<&VisiblePin<'_>> = None;
         for pin in &visible {
-            let is_hovered = hovered_id == Some(pin.ann.id.as_str());
-            let is_selected = selected_id == Some(pin.ann.id.as_str());
+            let is_hovered = hovered_id == Some(pin.id());
+            let is_selected = selected_id == Some(pin.id());
             if is_hovered || is_selected {
                 featured = Some(pin);
                 continue;
@@ -153,28 +156,26 @@ pub(crate) fn draw_review_overlay(
             draw_pin(&painter, pin, false, false, theme);
         }
         if let Some(pin) = featured {
-            let is_hovered = hovered_id == Some(pin.ann.id.as_str());
-            let is_selected = selected_id == Some(pin.ann.id.as_str());
+            let is_hovered = hovered_id == Some(pin.id());
+            let is_selected = selected_id == Some(pin.id());
             draw_pin(&painter, pin, is_hovered, is_selected, theme);
         }
 
         if force_expand_all {
             // Screenshot capture — every annotation card open at once.
             for pin in &visible {
-                let is_selected = selected_id == Some(pin.ann.id.as_str());
-                draw_card(&painter, pin, is_selected, review, theme);
+                let is_selected = selected_id == Some(pin.id());
+                draw_card(&painter, pin, is_selected, theme);
             }
         } else {
+            if let Some(pin) = visible.iter().find(|p| selected_id == Some(p.id())) {
+                draw_card(&painter, pin, true, theme);
+            }
             if let Some(pin) = visible
                 .iter()
-                .find(|p| selected_id == Some(p.ann.id.as_str()))
+                .find(|p| hovered_id == Some(p.id()) && selected_id != Some(p.id()))
             {
-                draw_card(&painter, pin, true, review, theme);
-            }
-            if let Some(pin) = visible.iter().find(|p| {
-                hovered_id == Some(p.ann.id.as_str()) && selected_id != Some(p.ann.id.as_str())
-            }) {
-                draw_card(&painter, pin, false, review, theme);
+                draw_card(&painter, pin, false, theme);
             }
         }
     }
@@ -182,21 +183,37 @@ pub(crate) fn draw_review_overlay(
     review.hovered = closest_hovered.map(|(_, id)| id);
 }
 
+/// How many direct replies a note has in the frame's snapshot.
+fn reply_count(notes: &[AnnotationSnapshot], parent: AnnotationId) -> usize {
+    notes
+        .iter()
+        .filter(|n| n.annotation.reply_to == Some(parent))
+        .count()
+}
+
 /// One annotation projected into a pane's egui-logical coordinate space,
 /// pre-paired with the rect the card would occupy if expanded. `card_rect`
 /// is `None` when neither side of the pin has enough room to fit a
 /// readable card (we suppress the card and show only the pin).
 struct VisiblePin<'a> {
-    ann: &'a ReviewAnnotation,
+    note: &'a AnnotationSnapshot,
     pos: egui::Pos2,
     card_rect: Option<egui::Rect>,
     /// Body text pre-laid-out at [`CARD_WIDTH`] — measured once so the
     /// card height matches what `draw_card` paints.
     body_galley: std::sync::Arc<egui::Galley>,
+    /// Direct replies, counted once per pin for the card's badge.
+    reply_count: usize,
     /// The mesh this annotation is anchored to is hidden, so the pin
-    /// renders dimmed, like a resolved one. Always `false` until review is
-    /// repointed at the document, where hiding is a node's parameter.
+    /// renders dimmed, like a resolved one. Always `false` until the
+    /// positions come from the engine, which answers visibility itself.
     mesh_hidden: bool,
+}
+
+impl VisiblePin<'_> {
+    fn id(&self) -> AnnotationId {
+        self.note.annotation.id
+    }
 }
 
 /// Lay out an annotation's body text at the card's content width. The
@@ -204,10 +221,10 @@ struct VisiblePin<'a> {
 /// [`draw_card`] so layout and paint never disagree.
 fn layout_card_body(
     painter: &egui::Painter,
-    ann: &ReviewAnnotation,
+    note: &AnnotationSnapshot,
     theme: Theme,
 ) -> std::sync::Arc<egui::Galley> {
-    let body = truncate_with_ellipsis(&ann.text, TEXT_TRUNCATE_CHARS);
+    let body = truncate_with_ellipsis(&note.annotation.text, TEXT_TRUNCATE_CHARS);
     painter.layout(
         body.into_owned(),
         egui::FontId::proportional(CARD_BODY_FONT),
@@ -265,9 +282,10 @@ fn draw_pin(
     is_selected: bool,
     theme: Theme,
 ) {
-    let mut fill = category_color(theme, pin.ann.category);
+    let ann = &pin.note.annotation;
+    let mut fill = category_color(theme, ann.category);
     let mut ring = theme.bg;
-    if pin.ann.resolved || pin.mesh_hidden {
+    if ann.resolved || pin.mesh_hidden {
         fill = with_alpha(fill, RESOLVED_ALPHA);
         ring = with_alpha(ring, RESOLVED_ALPHA);
     }
@@ -285,7 +303,7 @@ fn draw_pin(
             egui::Stroke::new(1.6_f32, theme.review.selection_accent),
         );
     }
-    if pin.ann.stale {
+    if pin.note.needs_reanchor {
         painter.circle_filled(
             pin.pos + egui::vec2(radius * 0.7, -radius * 0.7),
             2.5,
@@ -335,17 +353,12 @@ fn compute_card_rect(
 /// Render the expanded annotation card with a leader line back to the pin.
 /// `is_selected` toggles the brighter accent outline (sticky vs transient).
 /// Silently no-ops when `pin.card_rect` is `None` (pane too small).
-fn draw_card(
-    painter: &egui::Painter,
-    pin: &VisiblePin<'_>,
-    is_selected: bool,
-    review: &ReviewState,
-    theme: Theme,
-) {
+fn draw_card(painter: &egui::Painter, pin: &VisiblePin<'_>, is_selected: bool, theme: Theme) {
     let Some(card_rect) = pin.card_rect else {
         return;
     };
-    let color = category_color(theme, pin.ann.category);
+    let ann = &pin.note.annotation;
+    let color = category_color(theme, ann.category);
 
     let leader_target = nearest_edge_point(card_rect, pin.pos);
     painter.line_segment(
@@ -375,16 +388,16 @@ fn draw_card(
     painter.text(
         chip_center,
         egui::Align2::CENTER_CENTER,
-        category_letter(pin.ann.category),
+        category_letter(ann.category),
         egui::FontId::proportional(10.0),
         egui::Color32::BLACK,
     );
 
     let header_label = format!(
         "{}{}{}",
-        category_label(pin.ann.category),
-        author_segment(pin.ann.author.as_deref()),
-        time_segment(&pin.ann.updated_at),
+        category_label(ann.category),
+        author_segment(ann.author.as_deref()),
+        time_segment(&ann.updated_at),
     );
     painter.text(
         egui::pos2(chip_center.x + chip_radius + 6.0, header_y + 1.0),
@@ -399,7 +412,7 @@ fn draw_card(
     let body_min = egui::pos2(card_rect.min.x + CARD_PADDING, header_y + CARD_HEADER_H);
     painter.galley(body_min, pin.body_galley.clone(), theme.fg);
 
-    let reply_count = review.reply_count(&pin.ann.id);
+    let reply_count = pin.reply_count;
     if reply_count > 0 {
         let badge_text = format!(
             "{reply_count} {}",

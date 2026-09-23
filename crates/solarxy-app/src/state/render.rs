@@ -412,6 +412,7 @@ impl State {
         };
 
         let review_panes = self.build_review_panes(panes, ppp);
+        let review_notes = self.review_notes();
 
         let pane_rects: Vec<egui::Rect> = panes
             .iter()
@@ -749,6 +750,10 @@ impl State {
                     capacity: self.attr_pin_stats.0,
                     total: self.attr_pin_stats.1,
                 },
+                review: crate::gui::ReviewSource {
+                    notes: &review_notes,
+                    available: self.engine.is_some(),
+                },
             },
             &mut self.review,
             &mut intents,
@@ -771,9 +776,9 @@ impl State {
         // until the next one, and the pre-pass reconciliation would undo it.
         self.review.panel_open = self.gui.tab_present(crate::gui::SolarxyTab::ReviewPanel);
 
-        // Review panel: clicking a note row flies the camera to its anchor.
+        // Review panel: clicking a note row flies the camera to its marker.
         if let Some(id) = self.review.focus_request.take() {
-            self.focus_review_annotation(&id);
+            self.focus_review_annotation(id);
         }
         // Review panel Save button.
         if self.review.save_requested {
@@ -831,6 +836,24 @@ impl State {
         self.handle_screenshot_modal();
         self.handle_still_modal();
         self.handle_turntable_modal();
+    }
+
+    /// The document's annotations as the review surfaces read them this
+    /// frame: each with the staleness the engine derived after the last
+    /// cook. The browser's structure channel, built the same way.
+    fn review_notes(&self) -> Vec<solarxy_graph::engine::AnnotationSnapshot> {
+        let Some(engine) = self.engine.as_deref() else {
+            return Vec::new();
+        };
+        engine
+            .document()
+            .review()
+            .iter()
+            .map(|a| solarxy_graph::engine::AnnotationSnapshot {
+                needs_reanchor: engine.annotation_stale(a.id),
+                annotation: a.clone(),
+            })
+            .collect()
     }
 
     /// Build the per-pane data the egui review overlay needs: one

@@ -118,12 +118,14 @@ which is correct with one step defined and wrong with two.
 
 ### R10. Two review models, both maintained, no adapter
 
-**Impact.** Moderate. A review authored on one shell is not readable by the other, and both
-models are actively maintained, so the divergence grows.
+**Impact.** Moderate. A review authored on one shell was not readable by the other, and both
+models were actively maintained, so the divergence grew.
 
-**Likelihood.** Certain, present.
+**Likelihood.** Closed in 0.10.0. The desktop's review surfaces read the engine's store, so a
+note is the document's on both shells; the sidecar format survives as an import and export
+path rather than as a store.
 
-**Mitigation.** F4, which is blocked on a ruling rather than on effort.
+**Mitigation.** Done, by the ruling that the engine model wins.
 
 ### R11. Silent cache and dependency leaks in the cook
 
@@ -181,9 +183,10 @@ Nothing in the code indicates which. The answer decides whether Group E is a pre
 the desktop editor or runs beside it, which is the difference between one large sequence and
 two smaller ones.
 
-**Q2. Which review model wins, the sidecar or the engine model?** Both are actively maintained,
-neither has an adapter to the other, and each is used by exactly one shell. Only a decision
-closes this; the code argues both ways because both work.
+**Q2. Which review model wins, the sidecar or the engine model?** Answered in 0.10.0: the
+engine model. The desktop's panel, overlay and popup read the document's annotations through
+the engine's snapshot and change them through its commands, and the sidecar is a way in and a
+way out rather than a store.
 
 **Q3. Are the two shells' preference stores meant to converge?** There is no migration path and
 no shared schema either way, so the current state does not indicate an intent. A browser session
@@ -193,9 +196,9 @@ being deliberately independent of a desktop installation is a defensible answer.
 shared render host?** Its own header argues only why it owns its device, which is a narrower
 question than whether it should remain a separate GPU host.
 
-**Q5. Is the desktop's file-loaded scene representation intended to survive?** The still-render
-path already routes a file load through the document path, which suggests not, but nothing
-states it.
+**Q5. Is the desktop's file-loaded scene representation intended to survive?** Answered in
+0.10.0: no. Every desktop open synthesises a document, a model file through the same path the
+still render uses, and the second root and its adapter are gone.
 
 ### The engine and the cook
 

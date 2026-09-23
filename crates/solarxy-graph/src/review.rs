@@ -48,7 +48,10 @@ pub struct ReviewAnchor {
     /// Triangle index within that mesh (triangle = 3 consecutive indices).
     #[serde(default)]
     pub face: Option<u32>,
-    /// Barycentric `[u, v, w]` (sum ~ 1) on the face, for sub-face accuracy.
+    /// Barycentric weights on the face (sum ~ 1), for sub-face accuracy:
+    /// element k weights the face's k-th vertex. The same array a detailed
+    /// pick answers with, copied through unchanged; the two used to be
+    /// documented with different letters for the same three numbers.
     #[serde(default)]
     pub barycentric: Option<[f32; 3]>,
     /// World-space position at pin time: the marker's position while the

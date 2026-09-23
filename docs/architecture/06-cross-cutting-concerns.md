@@ -601,18 +601,16 @@ hand rather than through the framework's initializer, because that initializer h
 restore and its panic hook to standard output, and the render dashboard can paint on standard
 error so it coexists with JSON output.
 
-**The toast rule, and the one place it is broken.** `EguiRenderer::push_toast`
-(`crates/solarxy-app/src/gui/renderer.rs:177-188`) emits a `tracing` event on
-`target: "solarxy::toast"` for every toast, at the level matching the severity. The rule
-recorded at `crates/solarxy-app/src/gui/mod.rs:21` is that callers must not also emit their own
-log for the same message, or the log records it twice.
+**The toast rule.** `EguiRenderer::push_toast`
+(`crates/solarxy-app/src/gui/renderer.rs`) emits a `tracing` event on
+`target: "solarxy::toast"` for every toast, at the level matching the severity. The rule is
+that callers must not also emit their own log for the same message, or the log records it twice.
 
-There is exactly one violation, and it is real.
-`crates/solarxy-app/src/state/review/sidecar.rs:92-102` emits
-`tracing::info!(target: "solarxy::toast", "Saved {} annotations to {}", count, path.display())`
-and then calls `self.gui.set_toast(&format!("Saved {count} annotations"), ...)`. `set_toast`
-(`gui/renderer.rs:202-204`) routes straight through `push_toast`. Saving review notes therefore
-writes two log lines with different text for one event. Nothing enforces the rule
+There was exactly one violation: the review sidecar save in
+`crates/solarxy-app/src/state/review/sidecar.rs` logged
+`"Saved {} annotations to {}"` and then toasted `"Saved {count} annotations"`, two log lines
+with different text for one event. It went when the save was repointed at the document's own
+annotations in 0.10.0; the rewritten save toasts and nothing else. Nothing enforces the rule
 mechanically; a lint or a source-scan test in the style of the existing drift tests would.
 
 **The browser** has the opposite coupling. `pushToast` (`web/src/store/toasts.ts`) writes to a

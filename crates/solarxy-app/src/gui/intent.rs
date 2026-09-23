@@ -252,11 +252,27 @@ pub(crate) enum ToolIntent {
 }
 
 /// Review mode and its notes.
+///
+/// The notes are the document's, so a change to one is an engine command:
+/// the three variants that carry an id or a draft are drained into one
+/// command each, and each is one undo step. Placing and re-anchoring do not
+/// pass through here, because both start from a click the state layer owns.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ReviewIntent {
     ToggleMode,
     ToggleMarkers,
     SaveNotes,
+    /// The popup's Save: the open draft becomes an add or an edit.
+    CommitDraft,
+    /// The panel's Complete checkbox.
+    Resolve {
+        id: solarxy_graph::review::AnnotationId,
+        resolved: bool,
+    },
+    /// The confirmation's Delete; the engine cascades to the replies.
+    Delete {
+        id: solarxy_graph::review::AnnotationId,
+    },
     /// The mode was left through the escape chain or the status badge. The
     /// state that ends it is already written; this asks only for the toast,
     /// which is the shell's to give rather than a panel's.

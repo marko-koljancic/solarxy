@@ -280,15 +280,31 @@ impl State {
         }
     }
 
-    /// Fly the active pane's camera to a review annotation's anchor
-    /// (Review panel row click). Frames a small box around the anchor
-    /// point — sized to a fraction of the model — so the marker lands
+    /// Fly the active pane's camera to a review annotation's marker (Review
+    /// panel row click). The point is the engine's live resolution of the
+    /// anchor, or the stored fallback for a stale note and for a reply,
+    /// which draws no marker but sits where its parent does. Frames a small
+    /// box around it, sized to a fraction of the scene, so the marker lands
     /// centered at a consistent, useful zoom.
-    pub(super) fn focus_review_annotation(&mut self, id: &str) {
-        let Some(ann) = self.review.find(id) else {
+    pub(super) fn focus_review_annotation(&mut self, id: solarxy_graph::review::AnnotationId) {
+        let Some(engine) = self.engine.as_deref() else {
             return;
         };
-        let [x, y, z] = ann.anchor.world_pos_fallback;
+        let world = engine
+            .review_markers_world()
+            .into_iter()
+            .find(|m| m.id == id)
+            .and_then(|m| m.world)
+            .or_else(|| {
+                engine
+                    .document()
+                    .review()
+                    .get(id)
+                    .and_then(|a| a.anchor.world_fallback)
+            });
+        let Some([x, y, z]) = world else {
+            return;
+        };
         // A fraction of the scene rather than a fixed size, so the marker
         // lands at the same apparent zoom whatever scale the document is
         // authored at.

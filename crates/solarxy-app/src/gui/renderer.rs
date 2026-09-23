@@ -698,17 +698,12 @@ impl EguiRenderer {
             has_model: self.scene_open,
             recent_files: sources.recent_files,
             arrangements: sources.arrangements,
-            // **Review is off for this release.** It anchors against a
-            // file-loaded model's meshes, and the second root that held one
-            // went away with the one-document-root change; repointing it at
-            // the engine's own review store is its own piece of work. The
-            // menu entries stay visible and disabled rather than vanishing,
-            // so the capability reads as absent rather than as never having
-            // existed.
-            review_available: false,
+            // Review reads the document's own annotations, so it is available
+            // whenever a document is, whatever was opened to produce it.
+            review_available: sources.review.available,
             review_active: review.active,
             review_markers_hidden: review.markers_hidden,
-            review_dirty: review.dirty,
+            review_has_notes: !sources.review.notes.is_empty(),
             theme: self.theme,
         };
         let mut viewport_rect_logical: Option<egui::Rect> = None;
@@ -790,6 +785,7 @@ impl EguiRenderer {
             super::panels::review::overlay::draw_review_overlay(
                 ctx,
                 chrome.review_panes,
+                sources.review.notes,
                 review,
                 suppress_markers,
                 self.theme,
@@ -862,8 +858,8 @@ impl EguiRenderer {
                 &self.theme,
             );
 
-            draw_delete_confirm_modal(ctx, review);
-            draw_review_popup(ctx, review);
+            draw_delete_confirm_modal(ctx, sources.review.notes, review, intents);
+            draw_review_popup(ctx, review, intents);
 
             // Viewport right-click context menu — painted on top; its Esc
             // consume runs before the review-mode Esc chain below.
@@ -922,12 +918,16 @@ impl EguiRenderer {
                 }
             }
 
-            if let Some(target_id) = review.reanchor_target.clone() {
-                let preview = review
-                    .find(&target_id)
-                    .map_or_else(|| "annotation".to_string(), |a| {
-                        crate::state::review::short_text_preview(&a.text)
-                    });
+            if let Some(target_id) = review.reanchor_target {
+                let preview = sources
+                    .review
+                    .notes
+                    .iter()
+                    .find(|n| n.annotation.id == target_id)
+                    .map_or_else(
+                        || "annotation".to_string(),
+                        |n| crate::state::review::short_text_preview(&n.annotation.text),
+                    );
                 let amber_bg = egui::Color32::from_rgba_unmultiplied(0x4A, 0x37, 0x0E, 0xE6);
                 let amber_fg = self.theme.accent;
                 egui::Area::new(egui::Id::new("solarxy_reanchor_banner"))

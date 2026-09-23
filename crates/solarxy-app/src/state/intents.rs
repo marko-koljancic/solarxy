@@ -337,6 +337,20 @@ impl State {
                 self.review.markers_hidden = !self.review.markers_hidden;
             }
             ReviewIntent::SaveNotes => self.save_review_sidecar(),
+            ReviewIntent::CommitDraft => {
+                let now = crate::state::review::ReviewState::now_rfc3339();
+                if let Some(command) = self.review.take_draft_command(now) {
+                    self.apply_node_command(command);
+                }
+            }
+            ReviewIntent::Resolve { id, resolved } => {
+                self.apply_node_command(solarxy_graph::Command::ResolveAnnotation {
+                    id,
+                    resolved,
+                    updated_at: crate::state::review::ReviewState::now_rfc3339(),
+                });
+            }
+            ReviewIntent::Delete { id } => self.delete_review_annotation(id),
             // The state was already written inside the pass, by the widget
             // that owns it. What is left is the toast, which is the shell's
             // to give rather than a panel's.
@@ -551,22 +565,38 @@ impl State {
         self.rebuild_light_bind_group();
     }
 
-    /// Toggle review mode (`Shift+R` or the Review menu) — flips the bit,
-    /// opens the panel on entry, and emits the matching toast.
-    ///
-    /// **Refused outright for this release.** Review anchors against a
-    /// file-loaded model's meshes, and the second root that held one went away
-    /// with the one-document-root change; repointing it at the engine's own
-    /// review store is its own piece of work. Arming a mode that would report
-    /// itself active and then discard every click in silence is the one thing
-    /// worse than not offering it. Turning an already-active mode off stays
-    /// allowed, so a stale bit can never wedge the shell.
+    /// Delete an annotation, cascading to its replies engine-side, and drop
+    /// every piece of interaction state that named one of the swept notes.
+    /// The confirmation closes here rather than in the panel, so it stays up
+    /// until the delete has landed.
+    fn delete_review_annotation(&mut self, id: solarxy_graph::review::AnnotationId) {
+        self.apply_node_command(solarxy_graph::Command::DeleteAnnotation { id });
+        self.review.delete_confirm = None;
+        let alive = |candidate: solarxy_graph::review::AnnotationId| {
+            self.engine
+                .as_deref()
+                .is_some_and(|engine| engine.document().review().get(candidate).is_some())
+        };
+        if self.review.selected.is_some_and(|s| !alive(s)) {
+            self.review.selected = None;
+        }
+        if self.review.hovered.is_some_and(|h| !alive(h)) {
+            self.review.hovered = None;
+        }
+        if self.review.reanchor_target.is_some_and(|r| !alive(r)) {
+            self.review.reanchor_target = None;
+        }
+    }
+
+    /// Toggle review mode (`Shift+R` or the Review menu): flips the bit,
+    /// opens the panel on entry, and emits the matching toast. Review reads
+    /// the document's own annotations, so it needs a document and nothing
+    /// else; turning an active mode off is always allowed, so a stale bit can
+    /// never wedge the shell.
     pub(super) fn toggle_review_mode(&mut self) {
-        if !self.review.active {
-            self.gui.set_toast(
-                "Review is unavailable until it reads the document's own annotations",
-                ToastSeverity::Warning,
-            );
+        if !self.review.active && self.engine.is_none() {
+            self.gui
+                .set_toast("Open or start a scene first", ToastSeverity::Warning);
             return;
         }
         let now_active = self.review.toggle_active();

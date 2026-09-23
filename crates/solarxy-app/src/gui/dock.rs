@@ -146,7 +146,9 @@ impl TabViewer for SolarxyTabViewer<'_> {
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab {
             SolarxyTab::Viewport => "Viewport".into(),
-            SolarxyTab::ReviewPanel => format!("Review ({})", self.review.annotations.len()).into(),
+            SolarxyTab::ReviewPanel => {
+                format!("Review ({})", self.sources.review.notes.len()).into()
+            }
             SolarxyTab::Properties => "Properties".into(),
             SolarxyTab::Tree => "Tree".into(),
             SolarxyTab::Nodes => "Nodes".into(),
@@ -241,6 +243,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
             SolarxyTab::ReviewPanel => {
                 super::panels::review::panel::draw_review_panel_content(
                     ui,
+                    self.sources.review.notes,
                     self.review,
                     self.intents,
                     self.theme,

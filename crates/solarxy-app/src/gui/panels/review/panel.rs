@@ -1,31 +1,111 @@
-//! Side panel for browsing the open `.solarxy-review.json` annotation set.
+//! Side panel for browsing the document's annotations.
 //!
 //! A dock tab like every other panel, so where it sits is the dock's
 //! business. `draw_review_panel_content` draws it and
-//! `draw_delete_confirm_modal` the cascade-delete confirmation. It carries
-//! the four category filter chips, the text filter, the open and resolved
-//! lists with a "Needs re-anchor" badge, a scroll-to-selected jump, and the
-//! inline editor with its resolve toggle, re-anchor cancel and delete.
+//! `draw_delete_confirm_modal` the delete confirmation. It carries the four
+//! category filter chips, the text filter, the three sections in the
+//! browser's order (`Needs re-anchor`, `Open`, `Complete`), a
+//! scroll-to-selected jump, and the selected note's actions: Complete,
+//! Reply, Edit, Re-place and Delete, which are the browser's five.
 //!
-//! Review cannot arm against the one document root this release, so the
-//! panel shows a set authored in an earlier session or nothing. It returns
-//! pointed at the engine's review store, where the browser's already is.
+//! The notes are the engine's snapshot for the frame. A change to one is an
+//! intent the drain turns into a command, so nothing here writes a note;
+//! what the panel writes directly is its own interaction state.
 
-use solarxy_core::review::AnnotationCategory;
+use solarxy_graph::engine::AnnotationSnapshot;
+use solarxy_graph::review::{AnnotationId, ReviewCategory};
 
 use crate::gui::dock::SolarxyTab;
-use crate::gui::intent::{Intent, Intents, LayoutIntent};
-use crate::gui::panels::review::visuals::{category_color, category_letter as category_label_short};
+use crate::gui::intent::{Intent, Intents, LayoutIntent, ReviewIntent};
+use crate::gui::panels::review::visuals::{
+    CATEGORIES, category_color, category_index, category_letter as category_label_short,
+};
 use crate::gui::theme::Theme;
 use crate::state::review::ReviewState;
 
-fn category_index(c: AnnotationCategory) -> usize {
-    match c {
-        AnnotationCategory::Info => 0,
-        AnnotationCategory::Warning => 1,
-        AnnotationCategory::Question => 2,
-        AnnotationCategory::Change => 3,
+/// Which section a top-level note lists under. Resolved wins over stale,
+/// which is the browser's rule: a complete note is complete wherever its
+/// marker is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Section {
+    NeedsReanchor,
+    Open,
+    Complete,
+}
+
+impl Section {
+    const ORDER: [Self; 3] = [Self::NeedsReanchor, Self::Open, Self::Complete];
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::NeedsReanchor => "Needs re-anchor",
+            Self::Open => "Open",
+            Self::Complete => "Complete",
+        }
     }
+}
+
+fn section_of(note: &AnnotationSnapshot) -> Section {
+    if note.annotation.resolved {
+        Section::Complete
+    } else if note.needs_reanchor {
+        Section::NeedsReanchor
+    } else {
+        Section::Open
+    }
+}
+
+/// Whether a top-level note passes the panel's filters. The text filter
+/// matches the note's text, its author, and the text of any reply, as the
+/// browser's does.
+fn passes_filters(
+    note: &AnnotationSnapshot,
+    notes: &[AnnotationSnapshot],
+    needle: &str,
+    category_filters: [bool; 4],
+    show_resolved: bool,
+) -> bool {
+    let ann = &note.annotation;
+    if !category_filters[category_index(ann.category)] {
+        return false;
+    }
+    if ann.resolved && !show_resolved {
+        return false;
+    }
+    if needle.is_empty() {
+        return true;
+    }
+    let lower = |s: &str| s.to_lowercase();
+    lower(&ann.text).contains(needle)
+        || ann
+            .author
+            .as_deref()
+            .is_some_and(|a| lower(a).contains(needle))
+        || notes
+            .iter()
+            .filter(|n| n.annotation.reply_to == Some(ann.id))
+            .any(|n| lower(&n.annotation.text).contains(needle))
+}
+
+/// The browser's delete confirmation message: the reply count named when
+/// there is one, with its plural.
+fn delete_message(reply_count: usize) -> String {
+    match reply_count {
+        0 => "Delete this note?".to_string(),
+        1 => "Delete this note and its 1 reply?".to_string(),
+        n => format!("Delete this note and its {n} replies?"),
+    }
+}
+
+fn find(notes: &[AnnotationSnapshot], id: AnnotationId) -> Option<&AnnotationSnapshot> {
+    notes.iter().find(|n| n.annotation.id == id)
+}
+
+fn reply_count(notes: &[AnnotationSnapshot], parent: AnnotationId) -> usize {
+    notes
+        .iter()
+        .filter(|n| n.annotation.reply_to == Some(parent))
+        .count()
 }
 
 /// Category filter chip. Active = saturated category fill + white text;
@@ -35,7 +115,7 @@ fn category_index(c: AnnotationCategory) -> usize {
 /// teal "selected" fill and made the pastel chip text unreadable.
 fn draw_category_chip(
     ui: &mut egui::Ui,
-    cat: AnnotationCategory,
+    cat: ReviewCategory,
     on: bool,
     text: &str,
     theme: Theme,
@@ -58,22 +138,18 @@ fn draw_category_chip(
     ui.add(btn)
 }
 
-/// Review-panel content for hosting inside an `egui_dock` tab. Header
-/// `×` closes the panel (writes `*visible = false`); dock placement is
-/// owned by `gui::dock`.
+/// Review-panel content for hosting inside an `egui_dock` tab. The header
+/// `×` closes the panel; dock placement is owned by `gui::dock`.
 pub(in crate::gui) fn draw_review_panel_content(
     ui: &mut egui::Ui,
+    notes: &[AnnotationSnapshot],
     review: &mut ReviewState,
     intents: &mut Intents,
     theme: Theme,
 ) {
     ui.horizontal(|ui| {
-        let total = review.annotations.len();
+        let total = notes.len();
         ui.heading(format!("Review ({total})"));
-        if review.dirty {
-            ui.label(egui::RichText::new("\u{25CF}").color(theme.review.selection_accent))
-                .on_hover_text("Unsaved changes");
-        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .small_button("\u{00D7}")
@@ -88,8 +164,8 @@ pub(in crate::gui) fn draw_review_panel_content(
                 )));
             }
             if ui
-                .add_enabled(review.dirty, egui::Button::new("Save").small())
-                .on_hover_text("Write review notes to the sidecar file (Cmd/Ctrl+S)")
+                .add_enabled(!notes.is_empty(), egui::Button::new("Save").small())
+                .on_hover_text("Write the review notes to a sidecar file beside the scene")
                 .clicked()
             {
                 review.save_requested = true;
@@ -110,34 +186,18 @@ pub(in crate::gui) fn draw_review_panel_content(
             }
         });
     });
-
-    // Sidecar location + save state — so it is never a mystery where the
-    // notes live or whether they are persisted.
-    if let Some(path) = &review.sidecar_path {
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("review.json");
-        let prefix = if review.dirty {
-            "Unsaved \u{2014} "
-        } else {
-            "Saved \u{2014} "
-        };
-        ui.label(
-            egui::RichText::new(format!("{prefix}{name}"))
-                .small()
-                .weak(),
-        )
-        .on_hover_text(path.display().to_string());
-    }
     ui.separator();
 
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new("Show:").small().weak());
-        for &cat in AnnotationCategory::ALL {
+        for cat in CATEGORIES {
             let idx = category_index(cat);
             let on = review.category_filters[idx];
-            let chip_text = format!("{} {}", category_label_short(cat), cat);
+            let chip_text = format!(
+                "{} {}",
+                category_label_short(cat),
+                crate::gui::panels::review::visuals::category_label(cat)
+            );
             if draw_category_chip(ui, cat, on, &chip_text, theme).clicked() {
                 review.category_filters[idx] = !on;
             }
@@ -160,7 +220,7 @@ pub(in crate::gui) fn draw_review_panel_content(
     });
     ui.separator();
 
-    if review.annotations.is_empty() {
+    if notes.is_empty() {
         ui.add_space(20.0);
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new("No annotations yet").weak());
@@ -175,92 +235,47 @@ pub(in crate::gui) fn draw_review_panel_content(
     }
 
     let needle = review.text_filter.to_lowercase();
-    let filter_text = !needle.is_empty();
     let show_resolved = review.show_resolved;
     let cat_filters = review.category_filters;
 
-    let mut open_idx: Vec<usize> = Vec::new();
-    let mut resolved_idx: Vec<usize> = Vec::new();
-    let mut stale_idx: Vec<usize> = Vec::new();
-
-    for (i, ann) in review.annotations.iter().enumerate() {
-        if ann.reply_to.is_some() {
+    let mut sections: [Vec<&AnnotationSnapshot>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    for note in notes {
+        if note.annotation.reply_to.is_some() {
             continue;
         }
-        if !cat_filters[category_index(ann.category)] {
+        if !passes_filters(note, notes, &needle, cat_filters, show_resolved) {
             continue;
         }
-        if filter_text && !ann.text.to_lowercase().contains(&needle) {
-            continue;
-        }
-        if ann.stale {
-            stale_idx.push(i);
-        } else if ann.resolved {
-            if show_resolved {
-                resolved_idx.push(i);
-            }
-        } else {
-            open_idx.push(i);
-        }
+        let slot = match section_of(note) {
+            Section::NeedsReanchor => 0,
+            Section::Open => 1,
+            Section::Complete => 2,
+        };
+        sections[slot].push(note);
     }
 
-    let selected_id = review.selected.clone();
-    let reanchor_id = review.reanchor_target.clone();
+    let selected_id = review.selected;
+    let reanchor_id = review.reanchor_target;
     let scroll_to = if review.scroll_to_selected {
-        selected_id.clone()
+        selected_id
     } else {
         None
     };
-    let mut click_target: Option<String> = None;
-    let mut reanchor_click: Option<String> = None;
-    let mut cancel_reanchor_click = false;
+    let mut click_target: Option<AnnotationId> = None;
 
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            draw_section(
-                ui,
-                "Open",
-                &open_idx,
-                &review.annotations,
-                selected_id.as_deref(),
-                reanchor_id.as_deref(),
-                scroll_to.as_deref(),
-                false,
-                &mut click_target,
-                &mut reanchor_click,
-                &mut cancel_reanchor_click,
-                theme,
-            );
-            if !stale_idx.is_empty() {
+            for (section, members) in Section::ORDER.iter().zip(sections.iter()) {
                 draw_section(
                     ui,
-                    "Needs re-anchor",
-                    &stale_idx,
-                    &review.annotations,
-                    selected_id.as_deref(),
-                    reanchor_id.as_deref(),
-                    scroll_to.as_deref(),
-                    true,
+                    section.title(),
+                    members,
+                    notes,
+                    selected_id,
+                    reanchor_id,
+                    scroll_to,
                     &mut click_target,
-                    &mut reanchor_click,
-                    &mut cancel_reanchor_click,
-                    theme,
-                );
-            }
-            if !resolved_idx.is_empty() {
-                draw_section(
-                    ui,
-                    "Complete",
-                    &resolved_idx,
-                    &review.annotations,
-                    selected_id.as_deref(),
-                    reanchor_id.as_deref(),
-                    scroll_to.as_deref(),
-                    false,
-                    &mut click_target,
-                    &mut reanchor_click,
-                    &mut cancel_reanchor_click,
                     theme,
                 );
             }
@@ -271,180 +286,152 @@ pub(in crate::gui) fn draw_review_panel_content(
     }
 
     if let Some(id) = click_target {
-        if review.selected.as_deref() == Some(id.as_str()) {
+        if review.selected == Some(id) {
             review.selected = None;
         } else {
-            review.selected = Some(id.clone());
+            review.selected = Some(id);
             // Fly the active camera to the annotation (drained by the
             // state layer after the egui pass).
             review.focus_request = Some(id);
         }
     }
 
-    if let Some(id) = reanchor_click {
-        review.begin_reanchor(id);
-    }
-    if cancel_reanchor_click {
-        review.cancel_reanchor();
-    }
     if review.selected.is_some() {
-        draw_selected_editor(ui, review, theme);
+        draw_selected_actions(ui, notes, review, intents, theme);
     }
 }
 
-fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState, theme: Theme) {
-    let Some(selected_id) = review.selected.clone() else {
+/// The selected note's actions, the browser's five: Complete, Reply, Edit,
+/// Re-place, Delete. Each is one intent or one draft, so each is one undo
+/// step once it lands.
+fn draw_selected_actions(
+    ui: &mut egui::Ui,
+    notes: &[AnnotationSnapshot],
+    review: &mut ReviewState,
+    intents: &mut Intents,
+    theme: Theme,
+) {
+    let Some(selected_id) = review.selected else {
         return;
     };
-    let Some(idx) = review.annotations.iter().position(|a| a.id == selected_id) else {
+    let Some(note) = find(notes, selected_id) else {
         return;
     };
-    let is_stale = review.annotations[idx].stale;
-    let reanchor_active = review.reanchor_target.as_deref() == Some(selected_id.as_str());
+    let ann = note.annotation.clone();
+    let reanchor_active = review.reanchor_target == Some(selected_id);
 
     ui.separator();
     ui.label(egui::RichText::new("Selected note").small().weak());
-
-    let mut any_change = false;
-    let mut reply_clicked = false;
-    let mut delete_clicked = false;
-    let mut reanchor_click: Option<String> = None;
-    let mut cancel_reanchor_click = false;
-    {
-        let ann = &mut review.annotations[idx];
-
-        ui.horizontal(|ui| {
-            ui.label("Category:");
-            let prev_cat = ann.category;
-            egui::ComboBox::from_id_salt("review_selected_category")
-                .selected_text(
-                    egui::RichText::new(ann.category.to_string())
-                        .color(category_color(theme, ann.category)),
-                )
-                .show_ui(ui, |ui| {
-                    for &cat in AnnotationCategory::ALL {
-                        ui.selectable_value(
-                            &mut ann.category,
-                            cat,
-                            egui::RichText::new(cat.to_string()).color(category_color(theme, cat)),
-                        );
-                    }
-                });
-            if ann.category != prev_cat {
-                any_change = true;
-            }
-        });
-
-        let text_resp = ui.add(
-            egui::TextEdit::multiline(&mut ann.text)
-                .desired_rows(3)
-                .desired_width(f32::INFINITY),
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(crate::gui::panels::review::visuals::category_label(
+                ann.category,
+            ))
+            .color(category_color(theme, ann.category)),
         );
-        if text_resp.changed() {
-            any_change = true;
-        }
+        let author = ann.author.as_deref().unwrap_or("Anonymous");
+        ui.label(
+            egui::RichText::new(format!("{author} \u{00b7} {}", short_time(&ann.created_at)))
+                .small()
+                .weak(),
+        );
+    });
 
-        let prev_resolved = ann.resolved;
-        ui.checkbox(&mut ann.resolved, "Complete");
-        if ann.resolved != prev_resolved {
-            any_change = true;
-        }
+    let mut reply_clicked = false;
+    let mut edit_clicked = false;
+    let mut replace_clicked = false;
+    let mut delete_clicked = false;
 
-        if any_change {
-            ann.updated_at = ReviewState::now_rfc3339();
+    ui.horizontal_wrapped(|ui| {
+        let mut resolved = ann.resolved;
+        if ui.checkbox(&mut resolved, "Complete").changed() {
+            intents.raise(Intent::Review(ReviewIntent::Resolve {
+                id: selected_id,
+                resolved,
+            }));
         }
-
-        ui.horizontal(|ui| {
-            if ui
-                .button("\u{21B3} Reply")
-                .on_hover_text("Add a threaded reply to this note")
+        if ui
+            .button("\u{21B3} Reply")
+            .on_hover_text("Add a threaded reply to this note")
+            .clicked()
+        {
+            reply_clicked = true;
+        }
+        if ann.reply_to.is_none()
+            && ui
+                .button("Edit")
+                .on_hover_text("Change the text or the category")
                 .clicked()
-            {
-                reply_clicked = true;
-            }
-            if is_stale {
-                if reanchor_active {
-                    let amber = theme.review.selection_accent;
-                    if ui
-                        .button(egui::RichText::new("Cancel re-anchor").color(amber))
-                        .on_hover_text("Exit re-anchor sub-mode without changes (Esc)")
-                        .clicked()
-                    {
-                        cancel_reanchor_click = true;
-                    }
-                } else if ui
-                    .button("Re-place here")
-                    .on_hover_text("Then click on the model to set a new anchor")
-                    .clicked()
-                {
-                    reanchor_click = Some(selected_id.clone());
-                }
-            }
-            if ui
-                .button(
-                    egui::RichText::new("Delete").color(egui::Color32::from_rgb(0xE0, 0x6C, 0x6C)),
-                )
-                .on_hover_text("Remove this annotation (cascade-deletes replies)")
+        {
+            edit_clicked = true;
+        }
+        if ann.reply_to.is_none()
+            && ui
+                .add_enabled(!reanchor_active, egui::Button::new("Re-place"))
+                .on_hover_text("Then click on the geometry to move the marker there")
+                .on_disabled_hover_text("Click on the geometry, or press Esc to cancel")
                 .clicked()
-            {
-                delete_clicked = true;
-            }
-        });
-    }
+        {
+            replace_clicked = true;
+        }
+        if ui
+            .button(egui::RichText::new("Delete").color(egui::Color32::from_rgb(0xE0, 0x6C, 0x6C)))
+            .on_hover_text("Remove this note and its replies")
+            .clicked()
+        {
+            delete_clicked = true;
+        }
+    });
 
-    if any_change {
-        review.dirty = true;
-    }
-
+    let center = ui.ctx().content_rect().center();
     if reply_clicked {
-        let center = ui.ctx().content_rect().center();
-        review.open_reply_draft(&selected_id, (center.x, center.y));
+        // A reply to a reply is refused by the engine; offer it on the
+        // parent instead, which is where the thread lives.
+        let parent = ann
+            .reply_to
+            .and_then(|p| find(notes, p))
+            .map_or(&ann, |n| &n.annotation);
+        review.open_reply_draft(parent, (center.x, center.y));
     }
-
+    if edit_clicked {
+        review.open_edit_draft(&ann, (center.x, center.y));
+    }
+    if replace_clicked {
+        review.begin_reanchor(selected_id);
+    }
     if delete_clicked {
-        if review.reply_count(&selected_id) > 0 {
-            review.delete_confirm = Some(selected_id.clone());
-        } else {
-            review.delete_cascade(&selected_id);
-        }
-    }
-
-    if let Some(id) = reanchor_click {
-        review.begin_reanchor(id);
-    }
-    if cancel_reanchor_click {
-        review.cancel_reanchor();
+        review.delete_confirm = Some(selected_id);
     }
 }
 
-/// Confirmation modal for cascade-delete of an annotation that has
-/// replies. Drawn in `gui::renderer::render_ui` after the panel itself
-/// so it overlays correctly. No-op when `review.delete_confirm` is
-/// `None`.
-pub(in crate::gui) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mut ReviewState) {
-    let Some(target_id) = review.delete_confirm.clone() else {
+/// The delete confirmation, drawn in `gui::renderer::render_ui` after the
+/// panel itself so it overlays correctly. No-op when `review.delete_confirm`
+/// is `None`. Delete raises the intent and leaves the confirmation open;
+/// the drain closes it once the delete has landed, so the dialog can never
+/// close on a delete that was refused.
+pub(in crate::gui) fn draw_delete_confirm_modal(
+    ctx: &egui::Context,
+    notes: &[AnnotationSnapshot],
+    review: &mut ReviewState,
+    intents: &mut Intents,
+) {
+    let Some(target_id) = review.delete_confirm else {
         return;
     };
-    let Some(target) = review.find(&target_id) else {
+    let Some(target) = find(notes, target_id) else {
         review.delete_confirm = None;
         return;
     };
-    let preview: String = target
-        .text
-        .lines()
-        .next()
-        .unwrap_or("")
-        .chars()
-        .take(60)
-        .collect();
-    let preview_label = if target.text.is_empty() {
+    let text = &target.annotation.text;
+    let preview: String = text.lines().next().unwrap_or("").chars().take(60).collect();
+    let preview_label = if text.is_empty() {
         "(no text)".to_string()
-    } else if target.text.chars().count() > 60 || target.text.lines().count() > 1 {
-        format!("{preview}…")
+    } else if text.chars().count() > 60 || text.lines().count() > 1 {
+        format!("{preview}\u{2026}")
     } else {
         preview
     };
-    let reply_count = review.reply_count(&target_id);
+    let message = delete_message(reply_count(notes, target_id));
 
     let mut do_delete = false;
     let mut do_cancel = false;
@@ -453,7 +440,7 @@ pub(in crate::gui) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mu
         do_cancel = true;
     }
 
-    egui::Window::new("Delete annotation?")
+    egui::Window::new("Delete note")
         .id(egui::Id::new("solarxy_review_delete_confirm"))
         .collapsible(false)
         .resizable(false)
@@ -462,11 +449,7 @@ pub(in crate::gui) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mu
             ui.set_min_width(280.0);
             ui.label(format!("\u{201C}{preview_label}\u{201D}"));
             ui.add_space(4.0);
-            ui.label(if reply_count == 1 {
-                "This will also delete 1 reply.".to_string()
-            } else {
-                format!("This will also delete {reply_count} replies.")
-            });
+            ui.label(message);
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.button("Cancel").clicked() {
@@ -487,7 +470,7 @@ pub(in crate::gui) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mu
         });
 
     if do_delete {
-        review.delete_cascade(&target_id);
+        intents.raise(Intent::Review(ReviewIntent::Delete { id: target_id }));
     } else if do_cancel {
         review.delete_confirm = None;
     }
@@ -497,52 +480,31 @@ pub(in crate::gui) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mu
 fn draw_section(
     ui: &mut egui::Ui,
     title: &str,
-    indices: &[usize],
-    annotations: &[solarxy_core::review::ReviewAnnotation],
-    selected: Option<&str>,
-    reanchor_target: Option<&str>,
-    scroll_to: Option<&str>,
-    is_stale_section: bool,
-    click_target: &mut Option<String>,
-    reanchor_click: &mut Option<String>,
-    cancel_reanchor_click: &mut bool,
+    members: &[&AnnotationSnapshot],
+    notes: &[AnnotationSnapshot],
+    selected: Option<AnnotationId>,
+    reanchor_target: Option<AnnotationId>,
+    scroll_to: Option<AnnotationId>,
+    click_target: &mut Option<AnnotationId>,
     theme: Theme,
 ) {
-    egui::CollapsingHeader::new(format!("{title} ({})", indices.len()))
+    egui::CollapsingHeader::new(format!("{title} ({})", members.len()))
         .default_open(true)
         .show(ui, |ui| {
-            for &i in indices {
-                let ann = &annotations[i];
+            for note in members {
                 let row_resp =
-                    draw_annotation_row(ui, ann, selected, reanchor_target, click_target, theme);
-                if scroll_to == Some(ann.id.as_str()) {
+                    draw_annotation_row(ui, note, selected, reanchor_target, click_target, theme);
+                if scroll_to == Some(note.annotation.id) {
                     row_resp.scroll_to_me(Some(egui::Align::Center));
                 }
-                if is_stale_section {
-                    draw_replace_button(
-                        ui,
-                        &ann.id,
-                        reanchor_target,
-                        reanchor_click,
-                        cancel_reanchor_click,
-                        theme,
-                    );
-                }
-                let reply_indices: Vec<usize> = annotations
+                let replies: Vec<&AnnotationSnapshot> = notes
                     .iter()
-                    .enumerate()
-                    .filter_map(|(j, a)| {
-                        if a.reply_to.as_deref() == Some(ann.id.as_str()) {
-                            Some(j)
-                        } else {
-                            None
-                        }
-                    })
+                    .filter(|n| n.annotation.reply_to == Some(note.annotation.id))
                     .collect();
-                if !reply_indices.is_empty() {
-                    ui.indent(format!("replies_{}", ann.id), |ui| {
-                        for j in reply_indices {
-                            draw_reply_row(ui, &annotations[j]);
+                if !replies.is_empty() {
+                    ui.indent(("replies", note.annotation.id.0), |ui| {
+                        for reply in replies {
+                            draw_reply_row(ui, reply, selected, click_target);
                         }
                     });
                 }
@@ -557,10 +519,10 @@ fn draw_section(
 /// author · time line; the row sizes to that content.
 fn draw_annotation_row(
     ui: &mut egui::Ui,
-    ann: &solarxy_core::review::ReviewAnnotation,
-    selected: Option<&str>,
-    reanchor_target: Option<&str>,
-    click_target: &mut Option<String>,
+    note: &AnnotationSnapshot,
+    selected: Option<AnnotationId>,
+    reanchor_target: Option<AnnotationId>,
+    click_target: &mut Option<AnnotationId>,
     theme: Theme,
 ) -> egui::Response {
     const PAD_X: f32 = 6.0;
@@ -569,8 +531,9 @@ fn draw_annotation_row(
     const LINE_GAP: f32 = 2.0;
     const STALE_ORANGE: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x9C, 0x57);
 
-    let is_selected = selected == Some(ann.id.as_str());
-    let is_reanchor = reanchor_target == Some(ann.id.as_str());
+    let ann = &note.annotation;
+    let is_selected = selected == Some(ann.id);
+    let is_reanchor = reanchor_target == Some(ann.id);
     let category_color = category_color(theme, ann.category);
 
     let full_w = ui.available_width();
@@ -586,7 +549,7 @@ fn draw_annotation_row(
     };
     let preview_color = if empty || ann.resolved {
         theme.muted
-    } else if ann.stale {
+    } else if note.needs_reanchor {
         STALE_ORANGE
     } else {
         theme.fg
@@ -612,7 +575,7 @@ fn draw_annotation_row(
     };
     let preview_galley = ui.painter().layout_job(preview_job);
 
-    let author = ann.author.as_deref().unwrap_or("anonymous");
+    let author = ann.author.as_deref().unwrap_or("Anonymous");
     let meta_galley = ui.painter().layout(
         format!("{author} \u{00b7} {}", short_time(&ann.created_at)),
         egui::FontId::proportional(11.0),
@@ -666,70 +629,160 @@ fn draw_annotation_row(
     );
 
     if resp.clicked() {
-        *click_target = Some(ann.id.clone());
+        *click_target = Some(ann.id);
     }
     resp
 }
 
-fn draw_replace_button(
+fn draw_reply_row(
     ui: &mut egui::Ui,
-    annotation_id: &str,
-    reanchor_target: Option<&str>,
-    reanchor_click: &mut Option<String>,
-    cancel_reanchor_click: &mut bool,
-    theme: Theme,
+    note: &AnnotationSnapshot,
+    selected: Option<AnnotationId>,
+    click_target: &mut Option<AnnotationId>,
 ) {
-    let is_active = reanchor_target == Some(annotation_id);
-    ui.horizontal(|ui| {
-        ui.add_space(20.0);
-        if is_active {
-            let amber = theme.review.selection_accent;
-            let btn =
-                egui::Button::new(egui::RichText::new("Cancel re-anchor").color(amber)).small();
-            if ui
-                .add(btn)
-                .on_hover_text("Exit re-anchor sub-mode without changes (Esc)")
-                .clicked()
-            {
-                *cancel_reanchor_click = true;
-            }
-        } else if ui
-            .small_button("Re-place here")
-            .on_hover_text("Then click on the model to set a new anchor")
-            .clicked()
-        {
-            *reanchor_click = Some(annotation_id.to_string());
-        }
-    });
-}
-
-fn draw_reply_row(ui: &mut egui::Ui, ann: &solarxy_core::review::ReviewAnnotation) {
-    ui.horizontal_top(|ui| {
-        ui.label(egui::RichText::new("\u{21B3}").small().weak());
-        ui.vertical(|ui| {
-            let preview: String = ann
-                .text
-                .lines()
-                .next()
-                .unwrap_or("")
-                .chars()
-                .take(80)
-                .collect();
-            let mut t = egui::RichText::new(preview).small();
-            if ann.resolved {
-                t = t.strikethrough().weak();
-            }
-            ui.label(t);
-            let author = ann.author.as_deref().unwrap_or("anonymous");
-            ui.label(
-                egui::RichText::new(format!("{author} · {}", short_time(&ann.created_at)))
+    let ann = &note.annotation;
+    let resp = ui
+        .horizontal_top(|ui| {
+            ui.label(egui::RichText::new("\u{21B3}").small().weak());
+            ui.vertical(|ui| {
+                let preview: String = ann
+                    .text
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(80)
+                    .collect();
+                let mut t = egui::RichText::new(preview).small();
+                if ann.resolved {
+                    t = t.strikethrough().weak();
+                }
+                if selected == Some(ann.id) {
+                    t = t.strong();
+                }
+                ui.label(t);
+                let author = ann.author.as_deref().unwrap_or("Anonymous");
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{author} \u{00b7} {}",
+                        short_time(&ann.created_at)
+                    ))
                     .small()
                     .weak(),
-            );
-        });
-    });
+                );
+            });
+        })
+        .response;
+    if resp.interact(egui::Sense::click()).clicked() {
+        *click_target = Some(ann.id);
+    }
 }
 
 fn short_time(rfc3339: &str) -> String {
     rfc3339.chars().take(16).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use solarxy_graph::document::{GraphContext, NodeId};
+    use solarxy_graph::review::{Annotation, ReviewAnchor};
+
+    use super::*;
+
+    fn note(id: u64, text: &str, resolved: bool, stale: bool) -> AnnotationSnapshot {
+        AnnotationSnapshot {
+            annotation: Annotation {
+                id: AnnotationId(id),
+                anchor: ReviewAnchor {
+                    ctx: GraphContext::Root,
+                    node: NodeId(1),
+                    mesh: Some(0),
+                    face: Some(0),
+                    barycentric: Some([1.0, 0.0, 0.0]),
+                    world_fallback: Some([0.0; 3]),
+                    geometry_hash: None,
+                },
+                text: text.into(),
+                category: ReviewCategory::Question,
+                resolved,
+                author: Some("Mara".into()),
+                created_at: String::new(),
+                updated_at: String::new(),
+                reply_to: None,
+            },
+            needs_reanchor: stale,
+        }
+    }
+
+    fn reply(id: u64, parent: u64, text: &str) -> AnnotationSnapshot {
+        let mut n = note(id, text, false, false);
+        n.annotation.reply_to = Some(AnnotationId(parent));
+        n
+    }
+
+    #[test]
+    fn a_resolved_note_is_complete_even_when_stale() {
+        // The browser's rule: `complete` is filtered first, so a resolved
+        // note never lists under `Needs re-anchor`.
+        assert_eq!(section_of(&note(1, "x", true, true)), Section::Complete);
+        assert_eq!(
+            section_of(&note(1, "x", false, true)),
+            Section::NeedsReanchor
+        );
+        assert_eq!(section_of(&note(1, "x", false, false)), Section::Open);
+        assert_eq!(section_of(&note(1, "x", true, false)), Section::Complete);
+    }
+
+    #[test]
+    fn the_sections_draw_in_the_browsers_order() {
+        let titles: Vec<&str> = Section::ORDER.iter().map(|s| s.title()).collect();
+        assert_eq!(titles, ["Needs re-anchor", "Open", "Complete"]);
+    }
+
+    #[test]
+    fn the_text_filter_matches_text_author_and_replies() {
+        let notes = vec![
+            note(1, "Seam on the lid", false, false),
+            reply(2, 1, "Fixed in the second pass"),
+            note(3, "Other", false, false),
+        ];
+        let all = [true; 4];
+        assert!(passes_filters(&notes[0], &notes, "lid", all, true));
+        assert!(
+            passes_filters(&notes[0], &notes, "mara", all, true),
+            "author"
+        );
+        assert!(
+            passes_filters(&notes[0], &notes, "second pass", all, true),
+            "reply text"
+        );
+        assert!(!passes_filters(&notes[2], &notes, "lid", all, true));
+        assert!(
+            passes_filters(&notes[2], &notes, "", all, true),
+            "no needle passes"
+        );
+    }
+
+    #[test]
+    fn a_hidden_category_and_hidden_resolved_notes_are_filtered() {
+        let notes = vec![note(1, "x", true, false)];
+        let mut filters = [true; 4];
+        assert!(
+            !passes_filters(&notes[0], &notes, "", filters, false),
+            "resolved hidden"
+        );
+        assert!(passes_filters(&notes[0], &notes, "", filters, true));
+        filters[category_index(ReviewCategory::Question)] = false;
+        assert!(
+            !passes_filters(&notes[0], &notes, "", filters, true),
+            "category off"
+        );
+    }
+
+    #[test]
+    fn the_delete_message_is_the_browsers_with_its_plural() {
+        assert_eq!(delete_message(0), "Delete this note?");
+        assert_eq!(delete_message(1), "Delete this note and its 1 reply?");
+        assert_eq!(delete_message(3), "Delete this note and its 3 replies?");
+    }
 }

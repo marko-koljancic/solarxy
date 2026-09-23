@@ -26,16 +26,6 @@ impl State {
             tracing::warn!("Failed to persist dock layout on exit: {e}");
         }
     }
-
-    /// Flush unsaved review notes to the sidecar on app exit — a data-loss
-    /// safety net so quitting mid-review never silently drops annotations.
-    /// In-session saving stays manual (the Review panel's Save button /
-    /// `Cmd/Ctrl+S`); this only fires when there is something unsaved.
-    pub fn flush_review_on_exit(&mut self) {
-        if self.review.dirty {
-            self.save_review_sidecar();
-        }
-    }
 }
 
 impl State {

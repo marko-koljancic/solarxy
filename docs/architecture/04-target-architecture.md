@@ -1224,17 +1224,10 @@ where they can be run selectively.
 These could not be settled from the code and are recorded here rather than asserted. They are
 carried into [10-risks-and-open-questions.md](10-risks-and-open-questions.md).
 
-- Whether the desktop's file-loaded scene representation is intended to survive at all, or
-  whether every desktop model load should synthesise a one-node document the way the still render
-  already does. The answer decides whether an adapter module that collapses many engine objects
-  back into single-model shapes has a future or is deleted.
 - What the residency ceiling for the cook cache should be on the browser, in bytes. Nothing today
   measures peak residency, so the number cannot be chosen from evidence yet.
 - Whether the terminal shell's window keeps its own device permanently, or routes through the
   shared raster backend once the desktop shell can host a render preview.
-- Which review model wins: the sidecar-file model used only by the desktop, or the engine model
-  used only by the browser. Both are actively maintained, neither has an adapter to the other,
-  and an annotation authored in one shell is invisible in the other.
 - Whether the two shells' preference stores are meant to converge, or whether a browser session is
   deliberately independent of a desktop installation. There is no migration path or shared schema
   either way, so the current state does not indicate an intent.

@@ -91,6 +91,23 @@ pub(crate) struct PanelSources<'a> {
     /// The attribute strip's state, the lanes it can offer and its
     /// sampling facts, when the Viewport tab is mounted.
     pub attr: super::chrome::attr_column::AttrColumnSource<'a>,
+    /// The document's annotations as the review surfaces read them.
+    pub review: ReviewSource<'a>,
+}
+
+/// The document's annotations as the review panel, overlay and popup read
+/// them: the engine's snapshot, rebuilt every frame, plus whether review can
+/// act at all.
+///
+/// Rebuilt rather than cached: the set is a list a person reads, so the
+/// clones are trivial, and a cache would need invalidating on both a review
+/// change and a staleness refresh after a cook.
+#[derive(Clone, Copy)]
+pub(crate) struct ReviewSource<'a> {
+    /// Every annotation with its derived staleness, replies included.
+    pub notes: &'a [solarxy_graph::engine::AnnotationSnapshot],
+    /// Whether a document is open, which is all review needs.
+    pub available: bool,
 }
 
 /// The per-panel interface state the dock's tabs write directly: folds,

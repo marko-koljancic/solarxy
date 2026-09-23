@@ -68,7 +68,7 @@ pub(crate) use arrangement::{
     carry_saved_layout, upsert as upsert_arrangement,
 };
 pub(crate) use dock::SolarxyTab;
-pub(crate) use pass::{CaptureFrame, FramePaint, PanelSources, ViewportChrome};
+pub(crate) use pass::{CaptureFrame, FramePaint, PanelSources, ReviewSource, ViewportChrome};
 pub(crate) use settings::{
     ClipboardReadout, CookReadout, HistoryReadout, PanelSettings, ToolReadout, TransportReadout,
 };

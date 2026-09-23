@@ -2,20 +2,21 @@
 //!
 //! A click that did not travel walks a ladder before it lands, in the
 //! browser's order: a transform drag in flight owns the release, then a
-//! pending re-anchor, then review mode, then an ordinary pick. The drag and
-//! the pick are built; the two review rungs arrive with review, and the
-//! ladder is written so each slots in above the pick rather than around it.
+//! review pin under the pointer, then a pending re-anchor, then review mode,
+//! then an ordinary pick. Each rung slots in above the pick rather than
+//! around it.
 //!
 //! Picking asks the engine, never the shell. The engine answers with the
 //! node that produced what is under the cursor, which is what a selection
 //! is, and a marker pick rides the same call so a light with no geometry is
-//! as clickable as a mesh.
+//! as clickable as a mesh. A note is placed through the detailed pick, which
+//! also answers the face and the weights the anchor stores.
 
 use std::time::Instant;
 
 use winit::event::MouseButton;
 
-use crate::gui::{ContextTarget, ViewportContextMenu};
+use crate::gui::{ContextTarget, ToastSeverity, ViewportContextMenu};
 use solarxy_core::preferences::PaneMode;
 use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_renderer::camera_state::CameraState;
@@ -25,6 +26,7 @@ use solarxy_core::scene::SceneObjectId;
 
 use super::click::{CLICK_SLOP_PX, Click, DOUBLE_CLICK_INTERVAL, DOUBLE_CLICK_PX};
 use crate::state::State;
+use crate::state::review::{EditDraft, ReviewState, anchor_from_pick};
 
 fn to_pointer_button(button: MouseButton) -> PointerButton {
     match button {
@@ -126,6 +128,69 @@ impl State {
         engine.pick(ray.origin, ray.direction, ray.markers)
     }
 
+    /// The detailed pick under the cursor: the node, the mesh and face,
+    /// the weights and the world point, which is what a note is placed on
+    /// and re-placed to. Geometry only; a light marker is not a surface.
+    pub(in crate::state) fn pick_detailed_under_cursor(
+        &self,
+    ) -> Option<solarxy_graph::engine::PickDetail> {
+        let engine = self.engine.as_deref()?;
+        let ray = self.pane_ray()?;
+        engine.pick_detailed(ray.origin, ray.direction)
+    }
+
+    /// The review rungs of the click ladder. Answers whether the click was
+    /// consumed.
+    ///
+    /// A pin under the pointer selects the note it marks and opens the
+    /// panel, in any mode and before anything else: the browser's pin is a
+    /// DOM element that stops the click before the viewport sees it. A
+    /// pending re-anchor consumes the click whether it lands on geometry or
+    /// not, so a miss cannot fall through and select something. Review mode
+    /// places a draft on a hit and lets a miss fall through to the ordinary
+    /// pick, which is the browser's ladder exactly.
+    fn review_click(&mut self) -> bool {
+        if let Some(id) = self.review.hovered {
+            self.review.selected = Some(id);
+            self.review.scroll_to_selected = true;
+            self.review.panel_open = true;
+            return true;
+        }
+        if let Some(id) = self.review.reanchor_target {
+            match self.pick_detailed_under_cursor() {
+                Some(pick) => {
+                    self.apply_node_command(solarxy_graph::Command::ReanchorAnnotation {
+                        id,
+                        anchor: anchor_from_pick(&pick),
+                        updated_at: ReviewState::now_rfc3339(),
+                    });
+                    self.review.reanchor_target = None;
+                    self.gui.set_toast("Marker re-placed", ToastSeverity::Info);
+                }
+                None => self.gui.set_toast(
+                    "Click on geometry to re-place (Esc cancels)",
+                    ToastSeverity::Warning,
+                ),
+            }
+            return true;
+        }
+        if self.review.active
+            && let Some(pick) = self.pick_detailed_under_cursor()
+        {
+            // The popup is placed in logical pixels, beside the click.
+            let ppp = self.window.scale_factor() as f32;
+            let cursor = self.input.cursor_pos;
+            let seq = self.review.alloc_draft_seq();
+            self.review.editing = Some(EditDraft::new_at(
+                seq,
+                anchor_from_pick(&pick),
+                (cursor.0 / ppp, cursor.1 / ppp),
+            ));
+            return true;
+        }
+        false
+    }
+
     /// Open the viewport right-click context menu.
     ///
     /// It opens on empty space too, with only the entries that make sense
@@ -181,6 +246,9 @@ impl State {
     /// a network. The first click of the pair already selected, as the
     /// browser's click and dblclick both fire.
     fn viewport_click(&mut self, click: Click) {
+        if self.review_click() {
+            return;
+        }
         let Some(hit) = self.pick_under_cursor() else {
             return;
         };

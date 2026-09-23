@@ -1,127 +1,113 @@
-//! Review-mode runtime state — the in-memory mirror of one
-//! `.solarxy-review.json` plus transient UI state (selection, editing
-//! draft, panel filters).
+//! Review-mode interaction state: what the interface is doing right now
+//! with the document's annotations, which the engine owns.
 //!
-//! Owns the [`ReviewAnnotation`] set for the currently-loaded model.
-//! Markers are drawn as an egui overlay (see `gui::panels::review::overlay`)
-//! using this state directly — no GPU buffer involved.
+//! The annotations live in the document's review store and reach the panels
+//! as a per-frame snapshot; every change to one is an engine command and one
+//! undo step, so nothing here is a store and nothing here is dirty. What
+//! lives here is the rest: whether the mode is on, which note is selected or
+//! hovered, the draft in the popup, the panel's filters, and a pending
+//! re-anchor. Markers are drawn as an egui overlay (see
+//! `gui::panels::review::overlay`) from the snapshot and this state.
 //!
-//! Persistence lives in `sidecar.rs`, the only half that touches disk; this
-//! module is the in-memory authority.
+//! The sidecar half lives in `sidecar.rs`, the only part that touches disk.
 
-// Several fields here describe a file-loaded model's meshes, which the one
-// document root no longer supplies, so review cannot arm this release and
-// their writers are quiet. Kept, because the repointed review reads the same
-// shape; the allowance goes when it lands.
+// Three fields describe the sidecar a file-loaded model kept beside it, which
+// nothing writes now that the document carries the notes. They go with the
+// import and export work, and the allowance goes with them.
 #![allow(dead_code)]
 
 use std::path::PathBuf;
 
-use solarxy_core::review::{AnchorPosition, AnnotationCategory, ReviewAnnotation};
+use solarxy_graph::Command;
+use solarxy_graph::review::{Annotation, AnnotationId, ReviewAnchor, ReviewCategory};
 
 /// Top-level review-mode state on `State`. Initialized via [`Default`]
-/// (which seeds sensible filter/dock defaults); populated on model load
-/// by the sidecar reader and mutated through the popup and the side panel.
+/// (which seeds the filter defaults) and written by the popup, the panel,
+/// the overlay's hover pass and the pointer ladder.
 #[derive(Debug)]
 pub struct ReviewState {
-    /// True between R-press and R-press-again. Click handling in
-    /// `state::input` consults this to decide whether a left-click
-    /// triggers a raycast or routes to the camera controller.
+    /// True between R-press and R-press-again. The click ladder in
+    /// `state::input` consults this to decide whether a click in a pane
+    /// places a note.
     pub active: bool,
 
-    /// All annotations for the current model. Top-level entries (no
-    /// `reply_to`) get a 3D marker; replies are list-only.
-    pub annotations: Vec<ReviewAnnotation>,
+    /// The selected annotation, if any. Its marker renders with the accent
+    /// ring and the panel shows its editor.
+    pub selected: Option<AnnotationId>,
 
-    /// `id` of the currently-selected annotation, if any. The marker for
-    /// this annotation renders with a cyan inner ring.
-    pub selected: Option<String>,
-
-    /// Popup state when the user is creating a new annotation or editing
-    /// an existing one. `None` ⇒ no popup open.
+    /// Popup state while the user is writing a new note, a reply, or an
+    /// edit of an existing note. `None` means no popup is open.
     pub editing: Option<EditDraft>,
 
-    /// SHA-256 of the model file at load time. Used by the save path
-    /// in `sidecar.rs` to populate `ReviewFile.model_hash`.
+    /// SHA-256 of the model file at load time, from before the document
+    /// carried the notes. Nothing writes it.
     pub model_hash: Option<String>,
 
-    /// Per-mesh SHA-256 (positions||indices), indexed identically to
-    /// `Model::cpu_meshes`. Empty until the model is loaded.
+    /// Per-mesh SHA-256 of a file-loaded model, from before the document
+    /// carried the notes. Nothing writes it.
     pub mesh_hashes: Vec<String>,
 
-    /// Resolved path of the sidecar for the current model — honors
-    /// `ProjectConfig.review.sidecar_dir` when present, else sibling.
+    /// The sidecar a file-loaded model kept beside it. Nothing writes it.
     pub sidecar_path: Option<PathBuf>,
 
-    /// `true` when in-memory annotations differ from the on-disk file
-    /// (new / edited / deleted / re-anchored). Cleared by save.
-    pub dirty: bool,
-
-    /// Mirror of `Preferences::review.author`; cached here so the popup
-    /// doesn't have to thread through the prefs each render. Refreshed
-    /// when prefs change.
+    /// Mirror of `Preferences::review.author`; cached here so the draft
+    /// commit does not thread through the preferences each frame. Refreshed
+    /// when the preferences change.
     pub author: Option<String>,
 
-    /// Whether the side panel is visible. Mirrors
-    /// `Preferences::review.panel_open` at startup; toggleable via
-    /// `Review > Review Panel` and auto-opens on Shift+R when off.
+    /// Whether the side panel is visible. Mirrors dock membership after the
+    /// drain; entering review mode sets it so the panel opens.
     pub panel_open: bool,
 
-    /// Per-category filter chips on the panel: index by
-    /// `AnnotationCategory as u32` (0=Info, 1=Warning, 2=Question,
-    /// 3=Change). `true` ⇒ category visible in the list. All default
-    /// to true.
+    /// Per-category filter chips on the panel, indexed by the category's
+    /// ordinal (Info, Warning, Question, Change). `true` means visible.
     pub category_filters: [bool; 4],
 
-    /// `true` ⇒ resolved annotations are shown in their own collapsible
-    /// section. `false` ⇒ resolved entries are hidden entirely.
-    /// Default `true` — showing resolved keeps conversation context.
+    /// `true` shows resolved annotations in their own section; `false`
+    /// hides them entirely. Default `true`, since a resolved note keeps the
+    /// conversation's context.
     pub show_resolved: bool,
 
-    /// `true` ⇒ the 3D viewport marker overlay is suppressed; the panel
-    /// still lists every annotation. Session-only — never persisted.
+    /// `true` suppresses the viewport marker overlay; the panel still lists
+    /// every annotation. Session-only, never persisted.
     pub markers_hidden: bool,
 
-    /// Case-insensitive substring filter applied to annotation text.
-    /// Empty ⇒ no filter.
+    /// Case-insensitive substring filter over a note's text, its author and
+    /// its replies. Empty means no filter.
     pub text_filter: String,
 
-    /// `Some(id)` while the cascade-delete confirmation modal is open.
-    /// Cleared on Cancel or after a successful delete.
-    pub delete_confirm: Option<String>,
+    /// `Some(id)` while the delete confirmation is open. Cleared on Cancel,
+    /// and by the drain once the delete has landed.
+    pub delete_confirm: Option<AnnotationId>,
 
     /// `Some(id)` while the user is in the re-anchor sub-mode for that
-    /// annotation. The next valid raycast in review mode writes its
-    /// anchor; Esc cancels.
-    pub reanchor_target: Option<String>,
+    /// annotation. The next click on geometry re-places it; Esc cancels.
+    pub reanchor_target: Option<AnnotationId>,
 
-    /// One-shot flag: when `true`, the side panel scrolls the selected
-    /// row into view next frame, then clears the flag. Set by marker
-    /// hit-test and `begin_reanchor` to keep the panel aligned with the
-    /// 3D selection.
+    /// One-shot flag: when `true`, the panel scrolls the selected row into
+    /// view next frame, then clears it. Set by a pin click and by
+    /// `begin_reanchor` to keep the panel aligned with the viewport.
     pub scroll_to_selected: bool,
 
-    /// One-shot request — `Some(id)` after an annotation row is clicked
-    /// in the panel. The state layer flies the active pane's camera to
-    /// that annotation's anchor, then clears it back to `None`.
-    pub focus_request: Option<String>,
+    /// One-shot request, `Some(id)` after a row is clicked in the panel. The
+    /// state layer flies the active pane's camera to that note's marker,
+    /// then clears it.
+    pub focus_request: Option<AnnotationId>,
 
-    /// One-shot: set by the Review panel's Save button; the state layer
-    /// writes the sidecar and clears it. Keyboard `Cmd/Ctrl+S` calls
-    /// `save_review_sidecar` directly and does not use this flag.
+    /// One-shot: set by the panel's Save button; the state layer writes the
+    /// sidecar and clears it.
     pub save_requested: bool,
 
-    /// `id` of the marker currently under the cursor, if any. Updated
-    /// on mouse-move by `state::input` and consumed by
-    /// `gui::panels::review::overlay` to decide which pin should expand into a
-    /// card. Cleared (set to `None`) when the cursor leaves all pins.
-    pub hovered: Option<String>,
+    /// The marker under the cursor, if any. Written by the overlay's hover
+    /// pass from what it drew, read by the click ladder so a click on a pin
+    /// selects it rather than picking through it. `None` when the cursor is
+    /// over no pin.
+    pub hovered: Option<AnnotationId>,
 
-    /// Monotonically-increasing counter used to key the egui popup window
-    /// by *draft session* (instead of click pixel). Each new draft pulls
-    /// a fresh value via [`alloc_draft_seq`]; the popup uses the seq in
-    /// its `Id` so reopening a popup at a new click position resets
-    /// egui's cached drag position cleanly.
+    /// Monotonically increasing counter keying the popup window by draft
+    /// session rather than by click pixel. Each new draft takes a fresh
+    /// value via [`Self::alloc_draft_seq`] so egui's cached window position
+    /// resets cleanly for a draft opened somewhere else.
     pub next_draft_seq: u64,
 }
 
@@ -129,13 +115,11 @@ impl Default for ReviewState {
     fn default() -> Self {
         Self {
             active: false,
-            annotations: Vec::new(),
             selected: None,
             editing: None,
             model_hash: None,
             mesh_hashes: Vec::new(),
             sidecar_path: None,
-            dirty: false,
             author: None,
             panel_open: false,
             category_filters: [true; 4],
@@ -153,8 +137,8 @@ impl Default for ReviewState {
     }
 }
 
-/// Best-effort first-line preview of annotation text, truncated to ~30
-/// chars with a trailing ellipsis when shortened. Used by toast and
+/// Best-effort first-line preview of annotation text, truncated to about
+/// 30 characters with a trailing ellipsis when shortened. Used by toast and
 /// banner messages.
 pub fn short_text_preview(text: &str) -> String {
     let first: String = text.lines().next().unwrap_or("").chars().take(30).collect();
@@ -165,93 +149,88 @@ pub fn short_text_preview(text: &str) -> String {
     }
 }
 
-/// Popup-form-in-progress state for the new-annotation modal. Created on
-/// a successful raycast in review mode; dismissed by Save (commits to
-/// `annotations`) or Cancel (discards).
+/// The popup's form in progress: a new note, a reply, or an edit. Created
+/// by the click ladder or the panel; committed as one engine command through
+/// [`ReviewState::take_draft_command`], or discarded.
 #[derive(Debug, Clone)]
 pub struct EditDraft {
-    /// Anchor produced by the raycaster. World position is also stored
-    /// in `anchor.world_pos_fallback` for marker rendering.
-    pub anchor: AnchorPosition,
+    /// Where the note is pinned. From the pick for a new note; a reply and
+    /// an edit carry their note's anchor so the popup has one to show, and
+    /// the engine ignores a reply's in favour of the parent's.
+    pub anchor: ReviewAnchor,
 
-    /// Screen-space pixel location of the click that triggered this draft
-    /// — used to position the egui popup near where the user clicked.
-    /// For replies opened via the panel, this is the screen center.
+    /// Logical screen position of the click that opened the draft, used to
+    /// place the popup near it. The viewport centre for drafts opened from
+    /// the panel.
     pub screen_pos: (f32, f32),
 
-    /// In-progress text. Editable via `egui::TextEdit::multiline`.
+    /// The text so far.
     pub text: String,
 
-    /// Selected category. Defaults to Question (the canonical "what
-    /// should change here?" review interaction).
-    pub category: AnnotationCategory,
+    /// The chosen category. A new note starts as a question, the canonical
+    /// "what should change here?"; a reply starts as its parent's.
+    pub category: ReviewCategory,
 
-    /// `Some(id)` when editing an existing annotation; `None` when
-    /// creating a new one.
-    pub editing_id: Option<String>,
+    /// `Some(id)` when editing an existing note; `None` when creating one.
+    pub editing_id: Option<AnnotationId>,
 
-    /// `Some(parent_id)` when the draft is a reply to an existing
-    /// annotation; `None` for top-level notes. Replies share the
-    /// parent's anchor and don't get their own 3D marker (see
-    /// `gui::panels::review::overlay`).
-    pub reply_to: Option<String>,
+    /// `Some(parent)` when the draft is a reply; `None` for a top-level
+    /// note. Replies share the parent's anchor and draw no marker of their
+    /// own.
+    pub reply_to: Option<AnnotationId>,
 
-    /// Unique per-draft-session seq, allocated via
-    /// [`ReviewState::alloc_draft_seq`]. The popup uses this in its
-    /// egui `Id` so each fresh draft gets a clean cached position.
+    /// Unique per draft session, from [`ReviewState::alloc_draft_seq`]; the
+    /// popup keys its window on it.
     pub seq: u64,
 }
 
 impl EditDraft {
-    /// Build a fresh draft for a new top-level annotation at the given
-    /// anchor. `seq` must be allocated via
-    /// [`ReviewState::alloc_draft_seq`] so the popup keys cleanly.
-    pub fn new_at(seq: u64, anchor: AnchorPosition, screen_pos: (f32, f32)) -> Self {
+    /// A fresh draft for a new top-level note at `anchor`.
+    pub fn new_at(seq: u64, anchor: ReviewAnchor, screen_pos: (f32, f32)) -> Self {
         Self {
             anchor,
             screen_pos,
             text: String::new(),
-            category: AnnotationCategory::default(),
+            category: ReviewCategory::Question,
             editing_id: None,
             reply_to: None,
             seq,
         }
     }
 
-    /// Build a draft for a reply to `parent_id` — anchor borrowed from
-    /// the parent, popup positioned at `screen_pos` (typically the
-    /// viewport center when opened via the panel's Reply button).
-    pub fn new_reply(
-        seq: u64,
-        parent_id: String,
-        parent_anchor: AnchorPosition,
-        screen_pos: (f32, f32),
-    ) -> Self {
+    /// A draft replying to `parent`, in the parent's category and at the
+    /// parent's anchor, as the browser opens one.
+    pub fn new_reply(seq: u64, parent: &Annotation, screen_pos: (f32, f32)) -> Self {
         Self {
-            anchor: parent_anchor,
+            anchor: parent.anchor.clone(),
             screen_pos,
             text: String::new(),
-            category: AnnotationCategory::default(),
+            category: parent.category,
             editing_id: None,
-            reply_to: Some(parent_id),
+            reply_to: Some(parent.id),
+            seq,
+        }
+    }
+
+    /// A draft editing `note`, pre-filled with its text and category.
+    pub fn for_edit(seq: u64, note: &Annotation, screen_pos: (f32, f32)) -> Self {
+        Self {
+            anchor: note.anchor.clone(),
+            screen_pos,
+            text: note.text.clone(),
+            category: note.category,
+            editing_id: Some(note.id),
+            reply_to: note.reply_to,
             seq,
         }
     }
 }
 
 impl ReviewState {
-    /// Allocate the next draft session id. Bumps the in-memory counter
-    /// and returns the new value. Wraps on overflow (the counter is
-    /// `u64` — won't realistically hit it).
+    /// Allocate the next draft session id.
     pub fn alloc_draft_seq(&mut self) -> u64 {
         self.next_draft_seq = self.next_draft_seq.wrapping_add(1);
         self.next_draft_seq
-    }
-
-    /// Generate a fresh ULID-as-string. Wraps the workspace `ulid` dep
-    /// so callers don't need to import it.
-    pub fn new_id() -> String {
-        ulid::Ulid::new().to_string()
     }
 
     /// RFC 3339 UTC timestamp ("YYYY-MM-DDTHH:MM:SS.sssZ").
@@ -263,38 +242,28 @@ impl ReviewState {
             .unwrap_or_else(|_| "unknown".to_string())
     }
 
-    /// Commit the open draft as a new annotation (or write back to an
-    /// existing one when `editing_id` is set). Clears the editing slot,
-    /// flips `dirty` on, and returns the new/updated annotation id.
-    pub fn commit_draft(&mut self) -> Option<String> {
+    /// Take the open draft as the engine command it stands for: an add for a
+    /// new note or a reply, an edit when `editing_id` is set. Clears the
+    /// draft. `now` stamps the note; the author is this state's mirror of
+    /// the preference. `None` when no draft is open.
+    pub fn take_draft_command(&mut self, now: String) -> Option<Command> {
         let draft = self.editing.take()?;
-        let now = Self::now_rfc3339();
-
-        if let Some(existing_id) = draft.editing_id {
-            if let Some(ann) = self.annotations.iter_mut().find(|a| a.id == existing_id) {
-                ann.text = draft.text;
-                ann.category = draft.category;
-                ann.updated_at = now;
-            }
-            self.dirty = true;
-            Some(existing_id)
-        } else {
-            let id = Self::new_id();
-            self.annotations.push(ReviewAnnotation {
-                id: id.clone(),
-                created_at: now.clone(),
-                updated_at: now,
-                author: self.author.clone(),
-                anchor: draft.anchor,
-                category: draft.category,
+        Some(match draft.editing_id {
+            Some(id) => Command::EditAnnotation {
+                id,
                 text: draft.text,
+                category: draft.category,
+                updated_at: now,
+            },
+            None => Command::AddAnnotation {
+                anchor: draft.anchor,
+                text: draft.text,
+                category: draft.category,
+                author: self.author.clone(),
+                created_at: now,
                 reply_to: draft.reply_to,
-                resolved: false,
-                stale: false,
-            });
-            self.dirty = true;
-            Some(id)
-        }
+            },
+        })
     }
 
     /// Discard the open draft (Cancel / Esc).
@@ -302,13 +271,12 @@ impl ReviewState {
         self.editing = None;
     }
 
-    /// Toggle review mode. Sets a transient toast via the caller; this
-    /// helper just flips the bit.
+    /// Toggle review mode. The caller gives the toast; this flips the bit.
     pub fn toggle_active(&mut self) -> bool {
         self.active = !self.active;
         // Leaving review mode closes any open draft and collapses any
-        // expanded marker card (B4) — selection/hover are review-mode UI
-        // state with no meaning once the mode is off.
+        // expanded marker card: selection and hover are review-mode
+        // interface state with no meaning once the mode is off.
         if !self.active {
             self.editing = None;
             self.selected = None;
@@ -317,118 +285,68 @@ impl ReviewState {
         self.active
     }
 
-    /// Clear all per-model state (annotations, hashes, sidecar path).
-    /// Called on model close / load-new-model. Active flag is preserved
-    /// (so closing one review-mode-on model and opening another keeps
-    /// review mode active).
-    pub fn clear_for_new_model(&mut self) {
-        self.annotations.clear();
+    /// Drop every piece of interaction state that named a note of the
+    /// document being replaced. The mode and the filters are the user's and
+    /// survive, so closing one scene in review mode and opening another
+    /// keeps review mode on.
+    pub fn clear_for_new_document(&mut self) {
         self.selected = None;
         self.editing = None;
+        self.hovered = None;
         self.focus_request = None;
-        self.model_hash = None;
-        self.mesh_hashes.clear();
-        self.sidecar_path = None;
-        // A fresh model with no annotations has nothing unsaved.
-        // `load_review_for_model` flips this back on only if it reads a
-        // sidecar that then diverges.
-        self.dirty = false;
+        self.reanchor_target = None;
+        self.delete_confirm = None;
+        self.scroll_to_selected = false;
     }
 
-    /// Lookup by id (linear scan — annotation counts are small).
-    pub fn find(&self, id: &str) -> Option<&ReviewAnnotation> {
-        self.annotations.iter().find(|a| a.id == id)
-    }
-
-    /// Number of direct replies an annotation has. `0` for replies and
-    /// for unparented leaves.
-    pub fn reply_count(&self, parent_id: &str) -> usize {
-        self.annotations
-            .iter()
-            .filter(|a| a.reply_to.as_deref() == Some(parent_id))
-            .count()
-    }
-
-    /// Touch `updated_at` on an annotation. No-op if `id` isn't found.
-    /// Doesn't dirty (text edits in the inline editor don't change
-    /// markers); callers flip `dirty` themselves when category /
-    /// resolved / anchor changes.
-    pub fn touch_updated(&mut self, id: &str) {
-        if let Some(ann) = self.annotations.iter_mut().find(|a| a.id == id) {
-            ann.updated_at = Self::now_rfc3339();
-        }
-    }
-
-    /// Delete an annotation and all its direct replies. Returns the
-    /// total count removed. Clears `selected` if it pointed at any
-    /// removed entry. Dirties the marker buffer so the GPU set
-    /// rebuilds next frame.
-    pub fn delete_cascade(&mut self, id: &str) -> usize {
-        let before = self.annotations.len();
-        let target = id.to_string();
-        let was_selected_removed = self
-            .annotations
-            .iter()
-            .any(|a| a.id == target || a.reply_to.as_deref() == Some(&target));
-        self.annotations
-            .retain(|a| a.id != target && a.reply_to.as_deref() != Some(&target));
-        let removed = before - self.annotations.len();
-        if removed > 0 {
-            self.dirty = true;
-        }
-        if was_selected_removed
-            && let Some(sel) = &self.selected
-            && (sel == &target || !self.annotations.iter().any(|a| &a.id == sel))
-        {
-            self.selected = None;
-        }
-        if self.delete_confirm.as_deref() == Some(id) {
-            self.delete_confirm = None;
-        }
-        removed
-    }
-
-    /// Open the popup as a reply to `parent_id`. No-op if the parent
-    /// doesn't exist. `screen_pos` positions the popup; pass the
-    /// viewport center when opening via the panel.
-    pub fn open_reply_draft(&mut self, parent_id: &str, screen_pos: (f32, f32)) {
-        let Some(parent) = self.find(parent_id) else {
-            return;
-        };
-        let parent_anchor = parent.anchor.clone();
-        let parent_id_owned = parent.id.clone();
+    /// Open the popup as a reply to `parent`. `screen_pos` places the popup;
+    /// pass the viewport centre when opening from the panel.
+    pub fn open_reply_draft(&mut self, parent: &Annotation, screen_pos: (f32, f32)) {
         let seq = self.alloc_draft_seq();
-        self.editing = Some(EditDraft::new_reply(
-            seq,
-            parent_id_owned,
-            parent_anchor,
-            screen_pos,
-        ));
+        self.editing = Some(EditDraft::new_reply(seq, parent, screen_pos));
+    }
+
+    /// Open the popup editing `note`, pre-filled.
+    pub fn open_edit_draft(&mut self, note: &Annotation, screen_pos: (f32, f32)) {
+        let seq = self.alloc_draft_seq();
+        self.editing = Some(EditDraft::for_edit(seq, note, screen_pos));
     }
 }
 
 mod anchor;
 mod sidecar;
 
+pub(crate) use anchor::anchor_from_pick;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solarxy_graph::document::{GraphContext, NodeId};
 
-    fn anchor_at(pos: [f32; 3]) -> AnchorPosition {
-        AnchorPosition {
-            mesh_index: 0,
-            face_index: 0,
-            barycentric: [1.0 / 3.0; 3],
-            world_pos_fallback: pos,
+    fn anchor_at(pos: [f32; 3]) -> ReviewAnchor {
+        ReviewAnchor {
+            ctx: GraphContext::Root,
+            node: NodeId(7),
+            mesh: Some(0),
+            face: Some(0),
+            barycentric: Some([1.0 / 3.0; 3]),
+            world_fallback: Some(pos),
+            geometry_hash: None,
         }
     }
 
-    #[test]
-    fn new_id_is_unique_per_call() {
-        let a = ReviewState::new_id();
-        let b = ReviewState::new_id();
-        assert_ne!(a, b, "two consecutive ULIDs should differ");
-        assert_eq!(a.len(), 26, "ULID string is 26 chars (Crockford base-32)");
+    fn note(id: u64, text: &str, category: ReviewCategory) -> Annotation {
+        Annotation {
+            id: AnnotationId(id),
+            anchor: anchor_at([3.5, 1.2, -0.4]),
+            text: text.into(),
+            category,
+            resolved: false,
+            author: Some("Tester".into()),
+            created_at: "2026-07-10T09:00:00Z".into(),
+            updated_at: "2026-07-10T09:00:00Z".into(),
+            reply_to: None,
+        }
     }
 
     fn state_with_draft(draft: EditDraft) -> ReviewState {
@@ -438,77 +356,117 @@ mod tests {
         }
     }
 
-    fn approx_eq_3(a: [f32; 3], b: [f32; 3]) -> bool {
-        a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-5)
-    }
-
     #[test]
-    fn commit_create_pushes_annotation_and_marks_dirty() {
-        let mut state = state_with_draft(EditDraft {
+    fn take_draft_command_for_a_new_note_is_an_add_with_the_drafts_fields() {
+        let mut state = ReviewState {
+            author: Some("Marko".into()),
+            ..Default::default()
+        };
+        state.editing = Some(EditDraft {
             anchor: anchor_at([1.0, 2.0, 3.0]),
             screen_pos: (100.0, 200.0),
             text: "Looks off".into(),
-            category: AnnotationCategory::Warning,
+            category: ReviewCategory::Warning,
             editing_id: None,
             reply_to: None,
             seq: 0,
         });
-        let id = state.commit_draft().expect("commit returns the new id");
-        assert!(state.editing.is_none(), "draft cleared on commit");
-        assert!(state.dirty, "dirty flipped on after create");
-        assert_eq!(state.annotations.len(), 1);
-        let a = &state.annotations[0];
-        assert_eq!(a.id, id);
-        assert_eq!(a.text, "Looks off");
-        assert_eq!(a.category, AnnotationCategory::Warning);
-        assert!(!a.resolved);
-        assert!(a.author.is_none(), "author None when no preference set");
+        let cmd = state
+            .take_draft_command("2026-09-23T10:00:00Z".into())
+            .expect("a draft was open");
+        assert!(state.editing.is_none(), "the draft is taken");
+        match cmd {
+            Command::AddAnnotation {
+                anchor,
+                text,
+                category,
+                author,
+                created_at,
+                reply_to,
+            } => {
+                assert_eq!(anchor, anchor_at([1.0, 2.0, 3.0]));
+                assert_eq!(text, "Looks off");
+                assert_eq!(category, ReviewCategory::Warning);
+                assert_eq!(author.as_deref(), Some("Marko"));
+                assert_eq!(created_at, "2026-09-23T10:00:00Z");
+                assert!(reply_to.is_none());
+            }
+            other => panic!("a new note is an add, got {other:?}"),
+        }
     }
 
     #[test]
-    fn commit_carries_author_from_state() {
-        let mut state = ReviewState {
-            author: Some("Marko".into()),
-            editing: Some(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0))),
-            ..Default::default()
-        };
-        state.commit_draft();
-        assert_eq!(state.annotations[0].author.as_deref(), Some("Marko"));
-    }
-
-    #[test]
-    fn commit_edit_path_mutates_existing_in_place() {
-        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
-        let id = state.commit_draft().unwrap();
-        let created_at = state.annotations[0].created_at.clone();
-
-        state.editing = Some(EditDraft {
-            anchor: anchor_at([0.0; 3]),
-            screen_pos: (0.0, 0.0),
-            text: "Updated text".into(),
-            category: AnnotationCategory::Change,
-            editing_id: Some(id.clone()),
-            reply_to: None,
-            seq: 0,
-        });
-        let returned_id = state.commit_draft().expect("edit returns the same id");
-        assert_eq!(returned_id, id);
-        assert_eq!(state.annotations.len(), 1, "edit does not push a new entry");
-        assert_eq!(state.annotations[0].text, "Updated text");
-        assert_eq!(state.annotations[0].category, AnnotationCategory::Change);
+    fn take_draft_command_for_a_reply_carries_the_parent_id_and_category() {
+        let parent = note(4, "Parent", ReviewCategory::Change);
+        let mut state = ReviewState::default();
+        state.open_reply_draft(&parent, (500.0, 250.0));
+        let draft = state.editing.as_ref().expect("reply draft open");
+        assert_eq!(draft.reply_to, Some(AnnotationId(4)));
+        assert_eq!(draft.screen_pos, (500.0, 250.0));
+        assert!(draft.editing_id.is_none());
         assert_eq!(
-            state.annotations[0].created_at, created_at,
-            "created_at preserved"
+            draft.anchor, parent.anchor,
+            "the draft carries the parent's anchor"
         );
+        assert_eq!(draft.category, ReviewCategory::Change);
+        state.editing.as_mut().unwrap().text = "Fixed in v2".into();
+        match state.take_draft_command("now".into()).unwrap() {
+            Command::AddAnnotation { reply_to, text, .. } => {
+                assert_eq!(reply_to, Some(AnnotationId(4)));
+                assert_eq!(text, "Fixed in v2");
+            }
+            other => panic!("a reply is an add, got {other:?}"),
+        }
     }
 
     #[test]
-    fn cancel_draft_discards_without_creating() {
+    fn take_draft_command_for_an_edit_is_an_edit_of_that_id() {
+        let existing = note(9, "Old text", ReviewCategory::Info);
+        let mut state = ReviewState::default();
+        state.open_edit_draft(&existing, (0.0, 0.0));
+        {
+            let draft = state.editing.as_mut().expect("edit draft open");
+            assert_eq!(draft.text, "Old text", "pre-filled with the note's text");
+            assert_eq!(draft.category, ReviewCategory::Info);
+            draft.text = "Updated text".into();
+            draft.category = ReviewCategory::Change;
+        }
+        match state.take_draft_command("later".into()).unwrap() {
+            Command::EditAnnotation {
+                id,
+                text,
+                category,
+                updated_at,
+            } => {
+                assert_eq!(id, AnnotationId(9));
+                assert_eq!(text, "Updated text");
+                assert_eq!(category, ReviewCategory::Change);
+                assert_eq!(updated_at, "later");
+            }
+            other => panic!("an edit is an edit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn take_draft_command_answers_none_without_a_draft() {
+        let mut state = ReviewState::default();
+        assert!(state.take_draft_command("now".into()).is_none());
+    }
+
+    #[test]
+    fn cancel_draft_discards_without_a_command() {
         let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         state.cancel_draft();
         assert!(state.editing.is_none());
-        assert_eq!(state.annotations.len(), 0);
-        assert!(!state.dirty, "cancel doesn't mark dirty");
+        assert!(state.take_draft_command("now".into()).is_none());
+    }
+
+    #[test]
+    fn a_new_note_starts_as_a_question() {
+        let draft = EditDraft::new_at(1, anchor_at([0.0; 3]), (0.0, 0.0));
+        assert_eq!(draft.category, ReviewCategory::Question);
+        assert!(draft.reply_to.is_none());
+        assert!(draft.editing_id.is_none());
     }
 
     #[test]
@@ -517,126 +475,39 @@ mod tests {
         state.toggle_active();
         assert!(state.active);
         state.editing = Some(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
+        state.selected = Some(AnnotationId(1));
         state.toggle_active();
         assert!(!state.active);
         assert!(state.editing.is_none(), "draft auto-cancelled on exit");
-    }
-
-    #[test]
-    fn commit_draft_with_reply_to_persists_parent_link() {
-        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
-        let parent_id = state.commit_draft().unwrap();
-
-        state.open_reply_draft(&parent_id, (100.0, 100.0));
-        let draft = state.editing.as_mut().expect("reply draft open");
-        draft.text = "Fixed in v2".into();
-        let reply_id = state.commit_draft().unwrap();
-
-        assert_ne!(parent_id, reply_id);
-        let reply = state.find(&reply_id).expect("reply persisted");
-        assert_eq!(reply.reply_to.as_deref(), Some(parent_id.as_str()));
-        assert_eq!(reply.text, "Fixed in v2");
-    }
-
-    #[test]
-    fn open_reply_draft_inherits_parent_anchor_and_sets_reply_to() {
-        let parent_anchor = anchor_at([3.5, 1.2, -0.4]);
-        let mut state = state_with_draft(EditDraft {
-            anchor: parent_anchor.clone(),
-            screen_pos: (0.0, 0.0),
-            text: "Parent".into(),
-            category: AnnotationCategory::Question,
-            editing_id: None,
-            reply_to: None,
-            seq: 0,
-        });
-        let parent_id = state.commit_draft().unwrap();
-        state.open_reply_draft(&parent_id, (500.0, 250.0));
-        let draft = state.editing.as_ref().expect("draft open");
-        assert_eq!(draft.reply_to.as_deref(), Some(parent_id.as_str()));
-        assert_eq!(draft.screen_pos, (500.0, 250.0));
-        assert!(draft.editing_id.is_none());
-        assert!(
-            approx_eq_3(
-                draft.anchor.world_pos_fallback,
-                parent_anchor.world_pos_fallback
-            ),
-            "draft inherits parent anchor"
-        );
-    }
-
-    #[test]
-    fn open_reply_draft_is_noop_for_unknown_parent() {
-        let mut state = ReviewState::default();
-        state.open_reply_draft("nonexistent-id", (0.0, 0.0));
-        assert!(state.editing.is_none());
-    }
-
-    #[test]
-    fn delete_cascade_removes_parent_and_replies() {
-        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
-        let parent_id = state.commit_draft().unwrap();
-
-        for i in 0..2 {
-            state.open_reply_draft(&parent_id, (0.0, 0.0));
-            state.editing.as_mut().unwrap().text = format!("reply {i}");
-            state.commit_draft();
-        }
-
-        state.editing = Some(EditDraft::new_at(0, anchor_at([5.0, 0.0, 0.0]), (0.0, 0.0)));
-        state.editing.as_mut().unwrap().text = "orphan".into();
-        let orphan_id = state.commit_draft().unwrap();
-
-        assert_eq!(state.annotations.len(), 4);
-        let removed = state.delete_cascade(&parent_id);
-        assert_eq!(removed, 3, "parent + 2 replies = 3");
-        assert!(state.find(&parent_id).is_none());
-        assert!(state.find(&orphan_id).is_some(), "orphan untouched");
-        assert!(state.dirty, "marker buffer needs rebuild");
-    }
-
-    #[test]
-    fn delete_cascade_clears_selection_when_target_removed() {
-        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
-        let id = state.commit_draft().unwrap();
-        state.selected = Some(id.clone());
-        state.delete_cascade(&id);
         assert!(state.selected.is_none());
     }
 
     #[test]
-    fn delete_cascade_clears_selection_when_selected_reply_cascades_with_parent() {
-        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
-        let parent_id = state.commit_draft().unwrap();
-        state.open_reply_draft(&parent_id, (0.0, 0.0));
-        state.editing.as_mut().unwrap().text = "reply".into();
-        let reply_id = state.commit_draft().unwrap();
-        state.selected = Some(reply_id.clone());
+    fn clear_for_new_document_keeps_the_mode_and_drops_the_interaction() {
+        let mut state = ReviewState {
+            active: true,
+            selected: Some(AnnotationId(1)),
+            hovered: Some(AnnotationId(1)),
+            focus_request: Some(AnnotationId(2)),
+            reanchor_target: Some(AnnotationId(1)),
+            delete_confirm: Some(AnnotationId(3)),
+            scroll_to_selected: true,
+            category_filters: [true, false, true, true],
+            ..Default::default()
+        };
+        state.editing = Some(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
 
-        state.delete_cascade(&parent_id);
-        assert!(state.selected.is_none(), "cascade swept the selected reply");
-    }
+        state.clear_for_new_document();
 
-    #[test]
-    fn delete_cascade_clears_pending_confirm() {
-        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
-        let id = state.commit_draft().unwrap();
-        state.delete_confirm = Some(id.clone());
-        state.delete_cascade(&id);
+        assert!(state.active, "the mode is the user's");
+        assert_eq!(state.category_filters, [true, false, true, true]);
+        assert!(state.selected.is_none());
+        assert!(state.hovered.is_none());
+        assert!(state.editing.is_none());
+        assert!(state.focus_request.is_none());
+        assert!(state.reanchor_target.is_none());
         assert!(state.delete_confirm.is_none());
-    }
-
-    #[test]
-    fn reply_count_counts_only_direct_children() {
-        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
-        let parent_id = state.commit_draft().unwrap();
-        for _ in 0..3 {
-            state.open_reply_draft(&parent_id, (0.0, 0.0));
-            state.editing.as_mut().unwrap().text = "r".into();
-            state.commit_draft();
-        }
-        assert_eq!(state.reply_count(&parent_id), 3);
-        assert_eq!(state.reply_count("no-such-id"), 0);
+        assert!(!state.scroll_to_selected);
     }
 
     #[test]
@@ -649,39 +520,5 @@ mod tests {
         let multi = short_text_preview("first line\nsecond line");
         assert!(multi.starts_with("first line"));
         assert!(multi.ends_with('\u{2026}'));
-    }
-
-    #[test]
-    fn clear_for_new_model_zeroes_state() {
-        let mut state = ReviewState::default();
-        state.annotations.push(ReviewAnnotation {
-            id: ReviewState::new_id(),
-            created_at: ReviewState::now_rfc3339(),
-            updated_at: ReviewState::now_rfc3339(),
-            author: None,
-            anchor: anchor_at([0.0; 3]),
-            category: AnnotationCategory::Info,
-            text: "x".into(),
-            reply_to: None,
-            resolved: false,
-            stale: false,
-        });
-        state.selected = Some("x".into());
-        state.model_hash = Some("h".into());
-        state.mesh_hashes.push("m0".into());
-        state.sidecar_path = Some(PathBuf::from("/tmp/x.json"));
-        state.dirty = false;
-
-        state.clear_for_new_model();
-
-        assert!(state.annotations.is_empty());
-        assert!(state.selected.is_none());
-        assert!(state.model_hash.is_none());
-        assert!(state.mesh_hashes.is_empty());
-        assert!(state.sidecar_path.is_none());
-        assert!(
-            !state.dirty,
-            "a fresh model with no annotations is not unsaved"
-        );
     }
 }

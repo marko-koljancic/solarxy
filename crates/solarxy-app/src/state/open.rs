@@ -677,6 +677,9 @@ impl State {
         self.history = super::history::UndoContexts::default();
         self.hdri_hash = None;
         self.engine = Some(engine);
+        // Every note the interface was pointing at belonged to the document
+        // that just left; the mode and the filters are the user's and stay.
+        self.review.clear_for_new_document();
         // Identity now; the counters and the merged report fill in as the
         // delta drains.
         self.engine_scene = Some(info);

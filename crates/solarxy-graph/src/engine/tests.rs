@@ -1898,6 +1898,44 @@ fn markers_resolve_through_the_geo_transform_without_flagging_stale() {
 }
 
 #[test]
+fn a_picks_barycentric_resolves_back_to_its_own_world_position() {
+    // An off-centre ray, so the three weights are unequal and reordering
+    // them would move the resolved point. The pick and the anchor name the
+    // same array, and this is what holds them to one meaning: a host that
+    // copies the weights through lands the marker exactly where it picked.
+    let (mut e, ..) = displayed_box();
+    let pd = e
+        .pick_detailed([0.3, -0.2, 10.0], [0.0, 0.0, -1.0])
+        .expect("the displayed box is hit");
+    let w = pd.barycentric;
+    assert!(
+        (w[0] - w[1]).abs() > 1e-3 || (w[1] - w[2]).abs() > 1e-3,
+        "an off-centre hit has unequal weights: {w:?}"
+    );
+    let anchor = crate::review::ReviewAnchor {
+        ctx: GraphContext::Root,
+        node: pd.node,
+        mesh: Some(pd.mesh),
+        face: Some(pd.face),
+        barycentric: Some(pd.barycentric),
+        // No fallback, so the marker below can only come from resolution.
+        world_fallback: None,
+        geometry_hash: None,
+    };
+    add_note(&mut e, anchor, "off-centre", None);
+    let markers = e.review_markers_world();
+    let world = markers[0]
+        .world
+        .expect("resolved from the anchor, not a fallback");
+    for (c, (resolved, picked)) in world.iter().zip(pd.world_pos.iter()).enumerate() {
+        assert!(
+            (resolved - picked).abs() < 1e-4,
+            "axis {c}: resolved {resolved} against picked {picked}"
+        );
+    }
+}
+
+#[test]
 fn pick_detailed_reports_the_mesh_within_a_merged_set() {
     // Subflow: box0 at origin, box1 pushed +3x through a transform, both
     // merged (mesh order = connection order); geo translated +5x.

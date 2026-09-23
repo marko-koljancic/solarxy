@@ -1,25 +1,31 @@
-//! New-annotation / edit-annotation popup. Floating egui window
-//! anchored near the click that triggered it.
+//! New-note, reply and edit popup. A floating egui window anchored near
+//! the click that opened it.
 //!
-//! Driven by [`crate::state::review::EditDraft`]. Two actions exit:
-//! Save (commits via [`ReviewState::commit_draft`]) and Cancel
-//! (discards via [`ReviewState::cancel_draft`]). Cmd/Ctrl+Enter is the
-//! save accelerator, Esc the cancel one.
+//! Driven by [`crate::state::review::EditDraft`]. Two actions exit: Save
+//! raises [`ReviewIntent::CommitDraft`], which the drain turns into the add
+//! or edit command; Cancel discards the draft in place, since a discarded
+//! draft is interface state and nothing else. Cmd/Ctrl+Enter is the save
+//! accelerator, Esc the cancel one.
 
-use solarxy_core::review::AnnotationCategory;
-
+use crate::gui::intent::{Intent, Intents, ReviewIntent};
+use crate::gui::panels::review::visuals::{CATEGORIES, category_label};
 use crate::state::review::ReviewState;
 
-/// Draw the new-annotation popup if a draft is open.
-/// Returns `true` when the user committed a new/updated annotation this
-/// frame — callers use that signal to mark the marker buffer dirty.
-pub(in crate::gui) fn draw_review_popup(ctx: &egui::Context, review: &mut ReviewState) -> bool {
+/// Draw the note popup if a draft is open. Returns `true` when the user
+/// saved or cancelled this frame.
+pub(in crate::gui) fn draw_review_popup(
+    ctx: &egui::Context,
+    review: &mut ReviewState,
+    intents: &mut Intents,
+) -> bool {
     let Some(draft) = review.editing.as_mut() else {
         return false;
     };
 
     let title = if draft.editing_id.is_some() {
         "Edit Review Note"
+    } else if draft.reply_to.is_some() {
+        "Reply"
     } else {
         "New Review Note"
     };
@@ -42,8 +48,8 @@ pub(in crate::gui) fn draw_review_popup(ctx: &egui::Context, review: &mut Review
     let mut want_cancel = esc;
     let mut close_requested = false;
 
-    let popup_id = match draft.editing_id.as_deref() {
-        Some(id) => egui::Id::new(("solarxy_review_popup_edit", id)),
+    let popup_id = match draft.editing_id {
+        Some(id) => egui::Id::new(("solarxy_review_popup_edit", id.0)),
         None => egui::Id::new(("solarxy_review_popup_new", draft.seq)),
     };
 
@@ -58,10 +64,10 @@ pub(in crate::gui) fn draw_review_popup(ctx: &egui::Context, review: &mut Review
             ui.horizontal(|ui| {
                 ui.label("Category:");
                 egui::ComboBox::from_id_salt("solarxy_review_category")
-                    .selected_text(draft.category.to_string())
+                    .selected_text(category_label(draft.category))
                     .show_ui(ui, |ui| {
-                        for &c in AnnotationCategory::ALL {
-                            ui.selectable_value(&mut draft.category, c, c.to_string());
+                        for c in CATEGORIES {
+                            ui.selectable_value(&mut draft.category, c, category_label(c));
                         }
                     });
             });
@@ -101,7 +107,9 @@ pub(in crate::gui) fn draw_review_popup(ctx: &egui::Context, review: &mut Review
     }
 
     if want_save {
-        let _ = review.commit_draft();
+        // The draft stays open until the drain takes it as a command, which
+        // happens after this pass; the popup does not draw again before then.
+        intents.raise(Intent::Review(ReviewIntent::CommitDraft));
         close_requested = true;
     } else if want_cancel {
         review.cancel_draft();
