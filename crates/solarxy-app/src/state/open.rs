@@ -371,7 +371,6 @@ impl State {
         let warnings = loaded.warnings.len();
         let view = loaded.sidecar.view.clone();
         let environment = loaded.sidecar.environment.clone();
-        let created = loaded.sidecar.meta.created.clone();
 
         if display_path.is_empty() {
             self.install_engine(
@@ -381,8 +380,11 @@ impl State {
         } else {
             self.adopt_document(engine, filename, display_path);
         }
+        // What the file carried beside the document rides along to the next
+        // save: the creation stamp, the description, the project and the
+        // canvas viewports, none of which this shell edits.
         if let Some(scene) = &mut self.engine_scene {
-            scene.created = created;
+            scene.carry(&loaded.sidecar);
         }
 
         self.apply_scene_view(&view);

@@ -183,6 +183,47 @@ pub(super) fn with_scene_extension(path: PathBuf) -> PathBuf {
     }
 }
 
+/// The sidecar a save writes, assembled from what the shell knows about the
+/// file and what the file carried in.
+///
+/// A pure function of its inputs so a test can build one without a
+/// window. The name is the file stem; the creation stamp is the loaded one
+/// or, for a document never saved, this save; the description, the project
+/// and the canvas viewports are whatever the file brought, written back
+/// untouched, because this shell edits none of them and a save that dropped
+/// them would make it a place a scene loses things by passing through.
+pub(super) fn sidecar_for(
+    info: Option<&super::engine_scene::EngineSceneInfo>,
+    view: solarxy_scenefile::ViewJson,
+    environment: solarxy_scenefile::EnvironmentJson,
+    now: String,
+) -> SceneSidecar {
+    let name = info.map_or_else(String::new, |s| {
+        Path::new(&s.filename)
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string()
+    });
+    let created = match info.map(|s| s.created.as_str()) {
+        Some(stamp) if !stamp.is_empty() => stamp.to_string(),
+        _ => now.clone(),
+    };
+    SceneSidecar {
+        generator: format!("solarxy {}", env!("CARGO_PKG_VERSION")),
+        view,
+        environment,
+        canvas_viewports: info.map_or_else(BTreeMap::new, |s| s.canvas_viewports.clone()),
+        meta: solarxy_scenefile::MetaJson {
+            name,
+            description: info.map_or_else(String::new, |s| s.description.clone()),
+            project_id: info.map_or_else(String::new, |s| s.project_id.clone()),
+            created,
+            modified: now,
+        },
+    }
+}
+
 /// The present moment as the scene file's metadata writes it.
 fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
@@ -296,36 +337,9 @@ impl State {
 
     /// Everything the scene file carries that is not the document.
     pub(super) fn scene_sidecar(&mut self) -> SceneSidecar {
-        let now = now_rfc3339();
-        let (name, created) = self.engine_scene.as_ref().map_or_else(
-            || (String::new(), String::new()),
-            |s| {
-                let stem = Path::new(&s.filename)
-                    .file_stem()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                (stem, s.created.clone())
-            },
-        );
-        let created = if created.is_empty() {
-            now.clone()
-        } else {
-            created
-        };
-        SceneSidecar {
-            generator: format!("solarxy {}", env!("CARGO_PKG_VERSION")),
-            view: self.view_json_now(),
-            environment: self.environment_json(),
-            canvas_viewports: BTreeMap::new(),
-            meta: solarxy_scenefile::MetaJson {
-                name,
-                description: String::new(),
-                project_id: String::new(),
-                created,
-                modified: now,
-            },
-        }
+        let view = self.view_json_now();
+        let environment = self.environment_json();
+        sidecar_for(self.engine_scene.as_ref(), view, environment, now_rfc3339())
     }
 
     /// Save to the document's own path, or ask for one when it has none.
@@ -729,6 +743,80 @@ mod tests {
         assert_eq!(loaded.sidecar.view.layout, "splitVertical");
         assert!((loaded.sidecar.view.panes[0].camera.distance - 6.5).abs() < 1e-4);
         assert!(loaded.sidecar.view.panes[1].camera.distance.abs() < f32::EPSILON);
+    }
+
+    /// What a scene file carries beside the document survives a desktop
+    /// save: the canvas viewports the browser keys per network, the
+    /// description, the project and the creation stamp all come back out
+    /// as they went in, and only the modification stamp moves.
+    #[test]
+    fn a_scene_carrying_canvas_viewports_and_a_description_keeps_them_across_a_desktop_save() {
+        let mut engine = Engine::new().expect("engine");
+        engine
+            .apply(Command::AddNode {
+                ctx: GraphContext::Root,
+                node_type: "sopnet".to_string(),
+                position: [10.0, 20.0],
+            })
+            .expect("the container adds");
+        let mut viewports = BTreeMap::new();
+        viewports.insert(
+            "root".to_string(),
+            solarxy_scenefile::CanvasViewportJson {
+                x: 12.5,
+                y: -40.0,
+                zoom: 0.75,
+            },
+        );
+        viewports.insert(
+            "3".to_string(),
+            solarxy_scenefile::CanvasViewportJson {
+                x: 0.0,
+                y: 0.0,
+                zoom: 1.5,
+            },
+        );
+        let authored = SceneSidecar {
+            generator: "solarxy-web test".to_string(),
+            canvas_viewports: viewports.clone(),
+            meta: solarxy_scenefile::MetaJson {
+                name: "orrery".to_string(),
+                description: "A model of the inner planets.".to_string(),
+                project_id: "proj-7".to_string(),
+                created: "2026-09-01T09:00:00Z".to_string(),
+                modified: "2026-09-02T09:00:00Z".to_string(),
+            },
+            ..SceneSidecar::default()
+        };
+        let bytes = engine.save_slxy(&authored).expect("the browser's save");
+
+        // The desktop opens it, keeps what the file carried, and saves.
+        let mut desktop = Engine::new().expect("engine");
+        let loaded = desktop.load_slxy(&bytes).expect("the scene opens");
+        let mut info = super::super::engine_scene::EngineSceneInfo::new(
+            "orrery.slxy".to_string(),
+            "/scenes/orrery.slxy".to_string(),
+        );
+        info.carry(&loaded.sidecar);
+        let resaved = sidecar_for(
+            Some(&info),
+            solarxy_scenefile::ViewJson::default(),
+            solarxy_scenefile::EnvironmentJson::default(),
+            "2026-09-24T12:00:00Z".to_string(),
+        );
+        let bytes = desktop.save_slxy(&resaved).expect("the desktop's save");
+
+        let mut again = Engine::new().expect("engine");
+        let back = again.load_slxy(&bytes).expect("the resaved scene opens");
+        assert_eq!(back.sidecar.canvas_viewports, viewports);
+        assert_eq!(back.sidecar.meta.name, "orrery");
+        assert_eq!(
+            back.sidecar.meta.description,
+            "A model of the inner planets."
+        );
+        assert_eq!(back.sidecar.meta.project_id, "proj-7");
+        assert_eq!(back.sidecar.meta.created, "2026-09-01T09:00:00Z");
+        assert_eq!(back.sidecar.meta.modified, "2026-09-24T12:00:00Z");
     }
 
     /// A write that cannot finish leaves nothing behind, and one that can
