@@ -367,10 +367,14 @@ mod tests {
         labels(block)
     }
 
-    /// The browser's entries as `(label, key)` pairs, the key being whatever
-    /// it types beside the entry, or `None` where it types nothing. Each
-    /// entry runs from its own label to the next one, so a key is attributed
-    /// to the entry it was written under.
+    /// The browser's entries as `(label, binding id)` pairs, the id being
+    /// the binding it asks for the key beside the entry, or `None` where it
+    /// shows none. Each entry runs from its own label to the next one, so an
+    /// id is attributed to the entry it was written under.
+    ///
+    /// It asks its own table by id rather than spelling a key, so what is
+    /// compared is which binding each shell names. Comparing the rendered
+    /// key would compare two platform formatters instead.
     fn browser_entries_with_keys(source: &str, decl: &str) -> Vec<(String, Option<String>)> {
         let start = source
             .find(decl)
@@ -384,7 +388,7 @@ mod tests {
                 let label = rest.split('"').next()?.to_string();
                 let body = rest.split("label: \"").next().unwrap_or(rest);
                 let key = body
-                    .split("shortcut: \"")
+                    .split("shortcut: menuHint(\"")
                     .nth(1)
                     .and_then(|k| k.split('"').next())
                     .map(str::to_string);
@@ -392,15 +396,6 @@ mod tests {
             })
             .collect()
     }
-
-    /// An entry whose key this shell and the browser disagree about: what
-    /// the browser shows there, or `None` where it shows nothing, and why.
-    /// Checked in reverse, like every other named difference.
-    const KEYED_DIFFERENTLY: &[(&str, Option<&str>, &str)] = &[(
-        MAXIMIZE_LABEL,
-        Some("Esc to restore"),
-        "the browser names the way back out rather than the key that maximizes, while its own binding table gives the entry the backtick with Escape as a note; this shell shows the key that is bound",
-    )];
 
     /// The same entries in the same order as the browser's View menu, once
     /// the named differences are taken out and put back in its words.
@@ -498,14 +493,15 @@ mod tests {
         let first = entries.first().expect("the browser's first Add entry");
         assert_eq!(SEARCH_NODES.replace('\u{2026}', "..."), *first);
 
-        let key = source
-            .split("shortcut: \"")
+        let named = source
+            .split("shortcut: menuHint(\"")
             .nth(1)
             .and_then(|rest| rest.split('"').next())
-            .expect("the browser's key for it");
-        assert_eq!(
-            hint(Action::OpenNodePalette).expect("the palette is bound"),
-            key
+            .expect("the browser names a binding for it");
+        assert_eq!(Action::OpenNodePalette.id(), named);
+        assert!(
+            hint(Action::OpenNodePalette).is_some(),
+            "and it is bound here"
         );
     }
 
@@ -546,17 +542,8 @@ mod tests {
             let Some((_, theirs)) = browser.iter().find(|(l, _)| *l == spelled) else {
                 continue;
             };
-            let ours = row.action().and_then(hint);
-            if let Some((_, named, _)) = KEYED_DIFFERENTLY.iter().find(|(l, _, _)| *l == label) {
-                assert_eq!(
-                    theirs.as_deref(),
-                    *named,
-                    "{label} no longer shows what this list says it shows"
-                );
-                assert_ne!(ours.as_deref(), *named, "{label} agrees after all");
-                continue;
-            }
-            assert_eq!(ours.as_deref(), theirs.as_deref(), "the key beside {label}");
+            let ours = row.action().map(Action::id);
+            assert_eq!(ours, theirs.as_deref(), "the binding named beside {label}");
         }
     }
 

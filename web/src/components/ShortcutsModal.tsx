@@ -3,7 +3,7 @@
 // modal, preventing the README-vs-code drift Minimystix accumulated).
 // No shortcut strings are hardcoded here or anywhere outside keymap.ts.
 
-import { formatKeys, KEY_GROUPS, KEYMAP, type KeyBinding } from "../input/keymap";
+import { formatKeys, KEY_GROUPS, KEYMAP, type KeyBinding, type KeyGroup } from "../input/keymap";
 import { Modal } from "./Modal";
 
 function Chip({ label }: { label: string }) {
@@ -28,15 +28,28 @@ function Row({ binding }: { binding: KeyBinding }) {
   );
 }
 
-export function ShortcutsModal({ onClose }: { onClose: () => void }) {
-  // Dedupe alternate bindings of the same action (undo/redo-alt style):
-  // one row per description within a group, extra key sets joined.
-  const groups = KEY_GROUPS.map((group) => ({
+/** The sections this reference lists, in KEY_GROUPS order, each holding the
+ * bindings that declare it, with empty groups dropped.
+ *
+ * Pure and exported so the suite can hold it to the table without a DOM:
+ * the modal renders exactly this and nothing else, which is the claim worth
+ * testing. It was inline here, so nothing said a binding could not quietly
+ * stop being listed. */
+export function shortcutGroups(): { group: KeyGroup; bindings: KeyBinding[] }[] {
+  return KEY_GROUPS.map((group) => ({
     group,
     bindings: KEYMAP.filter((b) => b.group === group),
   })).filter((g) => g.bindings.length > 0);
+}
 
-  const notes = KEYMAP.filter((b) => b.note);
+/** The footnotes under the sections: every binding carrying a note. */
+export function shortcutNotes(): KeyBinding[] {
+  return KEYMAP.filter((b) => b.note);
+}
+
+export function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  const groups = shortcutGroups();
+  const notes = shortcutNotes();
 
   return (
     <Modal

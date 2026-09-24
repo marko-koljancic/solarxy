@@ -386,7 +386,7 @@ mod tests {
                     .to_string();
                 let body = rest.split("label: ").next().unwrap_or(rest);
                 let key = body
-                    .split("shortcut: \"")
+                    .split("shortcut: menuHint(\"")
                     .nth(1)
                     .and_then(|k| k.split('"').next())
                     .map(str::to_string);
@@ -394,26 +394,6 @@ mod tests {
             })
             .collect()
     }
-
-    /// An entry whose key this shell and the browser disagree about: what
-    /// the browser shows there, or `None` where it shows nothing, and why.
-    /// Checked in reverse, like every other named difference.
-    ///
-    /// Both rows are the same thing. The browser types each hint beside its
-    /// entry while this shell asks the binding table, which is how a hint
-    /// and a binding come apart, and these are where they have.
-    const KEYED_DIFFERENTLY: &[(&str, Option<&str>, &str)] = &[
-        (
-            MAXIMIZE_LABEL,
-            Some("Esc to restore"),
-            "the browser names the way back out rather than the key that maximizes, while its own binding table gives the entry the backtick with Escape as a note; this shell shows the key that is bound",
-        ),
-        (
-            "Set Display Flag",
-            None,
-            "the browser binds this to the same key in the same scope and types no hint beside the entry; this shell reads the table, so the key it shows is the key that works",
-        ),
-    ];
 
     /// The three menus list the browser's entries, in its order and under
     /// its words.
@@ -466,17 +446,8 @@ mod tests {
             let Some((_, theirs)) = browser.iter().find(|(l, _)| l == label) else {
                 panic!("{label} is in no browser menu");
             };
-            let ours = row.action().and_then(hint);
-            if let Some((_, named, _)) = KEYED_DIFFERENTLY.iter().find(|(l, _, _)| *l == label) {
-                assert_eq!(
-                    theirs.as_deref(),
-                    *named,
-                    "{label} no longer shows what this list says it shows"
-                );
-                assert_ne!(ours.as_deref(), *named, "{label} agrees after all");
-                continue;
-            }
-            assert_eq!(ours.as_deref(), theirs.as_deref(), "the key beside {label}");
+            let ours = row.action().map(Action::id);
+            assert_eq!(ours, theirs.as_deref(), "the binding named beside {label}");
         }
     }
 

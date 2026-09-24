@@ -92,6 +92,7 @@ pub(crate) enum Action {
     Copy,
     Paste,
     Duplicate,
+    DeleteSelection,
     CookNow,
     // The node canvas, every one of them consumed by the node panel.
     Bypass,
@@ -173,6 +174,7 @@ impl Action {
             Self::Copy => "copy",
             Self::Paste => "paste",
             Self::Duplicate => "duplicate",
+            Self::DeleteSelection => "delete",
             Self::CookNow => "cook",
             Self::Bypass => "bypass",
             Self::OpenNodePalette => "palette",
@@ -425,6 +427,20 @@ pub(crate) static BINDINGS: &[Binding] = &[
         KeyGroup::Edit,
         "Duplicate selection",
         Claim::UnlessTyping,
+    ),
+    // Declared rather than dispatched: the canvas consumes both keys in
+    // its own pass, which is where what a delete means is known. It is in
+    // the table so the menus and the reference can name the key, which is
+    // the same reason the browser declares it.
+    with_note(
+        b(
+            Action::DeleteSelection,
+            "backspace",
+            KeyScope::Canvas,
+            KeyGroup::Edit,
+            "Delete selection",
+        ),
+        "Delete does the same; both are handled by the canvas itself rather than dispatched here",
     ),
     claimed(
         Action::CookNow,
@@ -1107,11 +1123,7 @@ mod drift {
     const DESKTOP_ONLY: &[(&str, &str)] = &[
         (
             "new-scene",
-            "the browser shows the hint in its menu and binds no key",
-        ),
-        (
-            "open-scene",
-            "the browser shows the hint in its menu and binds no key",
+            "a browser cannot intercept the platform new-window key, so its menu entry shows no hint either",
         ),
         (
             "save-as",

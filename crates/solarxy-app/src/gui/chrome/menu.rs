@@ -136,6 +136,7 @@ impl Entry {
             Self::Copy => Some(Action::Copy),
             Self::Paste => Some(Action::Paste),
             Self::Duplicate => Some(Action::Duplicate),
+            Self::DeleteSelection => Some(Action::DeleteSelection),
             Self::ToggleBypass => Some(Action::Bypass),
             Self::SetDisplayFlag => Some(Action::DisplayFlag),
             Self::Preferences => Some(Action::OpenPreferences),
@@ -146,7 +147,6 @@ impl Entry {
             | Self::ImportModel
             | Self::RecentFiles
             | Self::Quit
-            | Self::DeleteSelection
             | Self::ShowMarkers
             | Self::ImportReviewNotes
             | Self::ExportReviewNotes
@@ -656,6 +656,14 @@ mod tests {
         "this shell is not the web one",
     )];
 
+    /// An entry both shells offer where only this one binds a key, with the
+    /// reason the browser does not. Checked in reverse, like every other
+    /// named difference: a row that stops applying fails the build.
+    const BOUND_HERE_ONLY: &[(&str, &str)] = &[(
+        "New Scene",
+        "a browser cannot intercept the platform new-window key, so its entry shows no hint",
+    )];
+
     fn browser_source() -> String {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
@@ -732,6 +740,57 @@ mod tests {
         }
     }
 
+    /// Each entry names the same binding the browser names beside the same
+    /// entry, and neither names one the other does not.
+    ///
+    /// The browser asks its own table by id rather than spelling a key, so
+    /// what is compared is which binding each shell names. It was typing
+    /// them by hand until 0.10.0, which is how three came to disagree.
+    #[test]
+    fn the_menus_name_the_browsers_bindings() {
+        let source = browser_source();
+        let named: Vec<(String, String)> = source
+            .split("label: \"")
+            .skip(1)
+            .filter_map(|rest| {
+                let label = rest.split('"').next()?.to_string();
+                let body = rest.split("label: \"").next().unwrap_or(rest);
+                let id = body
+                    .split("shortcut: menuHint(\"")
+                    .nth(1)
+                    .and_then(|k| k.split('"').next())?;
+                Some((label, id.to_string()))
+            })
+            .collect();
+        assert!(
+            named.len() >= 10,
+            "read {} keyed entries from the browser, so the reader is broken",
+            named.len()
+        );
+
+        for rows in [FILE_MENU, EDIT_MENU, REVIEW_MENU, HELP_MENU] {
+            for row in rows {
+                let Item(entry) = row else { continue };
+                let label = entry.label().replace('\u{2026}', "...");
+                let spelled = WORDED_DIFFERENTLY
+                    .iter()
+                    .find(|(here, _, _)| *here == label)
+                    .map_or(label.clone(), |(_, there, _)| (*there).to_string());
+                let theirs = named
+                    .iter()
+                    .find(|(l, _)| *l == spelled)
+                    .map(|(_, id)| id.as_str());
+                let ours = entry.action().map(Action::id);
+                if DESKTOP_ONLY.iter().any(|(only, _)| *only == label)
+                    || BOUND_HERE_ONLY.iter().any(|(only, _)| *only == label)
+                {
+                    continue;
+                }
+                assert_eq!(ours, theirs, "the binding named beside {label}");
+            }
+        }
+    }
+
     /// Every row of the three lists still applies: a desktop-only entry is
     /// really in a menu here and really absent there, and the reverse.
     #[test]
@@ -763,6 +822,16 @@ mod tests {
             assert!(
                 !here.iter().any(|l| l == label),
                 "{label} is in a menu here too"
+            );
+        }
+        for (label, _) in BOUND_HERE_ONLY {
+            assert!(
+                here.iter().any(|l| l == label),
+                "{label} is not in a menu here"
+            );
+            assert!(
+                there.iter().any(|l| l == label),
+                "{label} is not in the browser, so it belongs in DESKTOP_ONLY instead"
             );
         }
         for (ours, theirs, _) in WORDED_DIFFERENTLY {

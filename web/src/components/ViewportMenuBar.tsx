@@ -12,13 +12,14 @@ import { useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { EnvironmentModal } from "./EnvironmentModal";
 import { MenuItem, type MenuEntry } from "./menu/MenuItem";
+import { menuHint } from "../input/keymap";
 
 const PANE_LAYOUTS: { layout: ViewLayout; label: string; shortcut: string }[] = [
-  { layout: "single", label: "Single", shortcut: "F1" },
-  { layout: "splitVertical", label: "Split Vertical", shortcut: "F2" },
-  { layout: "splitHorizontal", label: "Split Horizontal", shortcut: "F3" },
-  { layout: "quad", label: "Quad", shortcut: "F4" },
-  { layout: "threeLeftBig", label: "Three Left Big", shortcut: "F5" },
+  { layout: "single", label: "Single", shortcut: menuHint("layout-single") },
+  { layout: "splitVertical", label: "Split Vertical", shortcut: menuHint("layout-split-v") },
+  { layout: "splitHorizontal", label: "Split Horizontal", shortcut: menuHint("layout-split-h") },
+  { layout: "quad", label: "Quad", shortcut: menuHint("layout-quad") },
+  { layout: "threeLeftBig", label: "Three Left Big", shortcut: menuHint("layout-three") },
 ];
 
 const ORIENTATIONS: { value: GizmoOrientation; label: string }[] = [
@@ -35,7 +36,7 @@ export function ViewportMenuBar() {
   const entries: MenuEntry[] = [
     {
       label: "Fit View",
-      shortcut: "Z",
+      shortcut: menuHint("fit"),
       onClick: () => {
         if (!view) return;
         setActivePane(view.activePane);
@@ -79,7 +80,7 @@ export function ViewportMenuBar() {
     { label: "Environment...", onClick: () => setEnvOpen(true) },
     {
       label: "Save Screenshot...",
-      shortcut: "C",
+      shortcut: menuHint("screenshot"),
       onClick: () => useUi.getState().setScreenshotOpen(true),
     },
     {
@@ -91,7 +92,7 @@ export function ViewportMenuBar() {
       // Real dock maximize, on the viewport's own group. Esc restores
  // (the keymap's cancel ladder). The interim toggle is gone.
       label: "Maximize Panel",
-      shortcut: "Esc to restore",
+      shortcut: menuHint("panel-maximize"),
       onClick: () => toggleMaximize("viewport"),
     },
   ];

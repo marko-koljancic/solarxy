@@ -9,6 +9,7 @@ import { selectGraph, useMirror } from "../../store/mirror";
 import { useRadial } from "../../store/radial";
 import { EDGE_STYLES, EDGE_STYLE_LABELS, useUi } from "../../store/ui";
 import { MenuItem, type MenuEntry } from "./MenuItem";
+import { menuHint } from "../../input/keymap";
 
 export function NodePaneViewMenu() {
   const current = useMirror((s) => s.current);
@@ -22,7 +23,7 @@ export function NodePaneViewMenu() {
   const entries: MenuEntry[] = [
     {
       label: "Canvas Grid",
-      shortcut: "G",
+      shortcut: menuHint("flow-grid"),
       checked: showFlowGrid,
       onClick: () => useUi.getState().toggleFlowChrome("showFlowGrid"),
     },
@@ -33,13 +34,13 @@ export function NodePaneViewMenu() {
     },
     {
       label: "Minimap",
-      shortcut: "M",
+      shortcut: menuHint("flow-minimap"),
       checked: showMinimap,
       onClick: () => useUi.getState().toggleFlowChrome("showMinimap"),
     },
     {
       label: "Canvas Controls",
-      shortcut: "C",
+      shortcut: menuHint("flow-controls"),
       checked: showFlowControls,
       onClick: () => useUi.getState().toggleFlowChrome("showFlowControls"),
     },
@@ -53,7 +54,7 @@ export function NodePaneViewMenu() {
       })),
     },
     { divider: true },
-    { label: "Auto-Layout (Dagre)", shortcut: "L", onClick: () => runLayout("dagre") },
+    { label: "Auto-Layout (Dagre)", shortcut: menuHint("layout-cycle"), onClick: () => runLayout("dagre") },
     { label: "Auto-Layout (ELK)", onClick: () => runLayout("elk") },
     { divider: true },
     {
@@ -61,7 +62,7 @@ export function NodePaneViewMenu() {
       // documents what a node does, so it should not itself require inside
       // knowledge to find.
       label: "Node Info",
-      shortcut: "I",
+      shortcut: menuHint("node-info"),
       disabled: !selection.length,
       onClick: () => {
         const id = selection[0];
@@ -83,12 +84,12 @@ export function NodePaneViewMenu() {
       // The same event the F key and the auto-layout completion fire, so
       // all three routes are literally one behavior.
       label: "Fit Graph",
-      shortcut: "F",
+      shortcut: menuHint("canvas-fit"),
       onClick: () => window.dispatchEvent(new Event("solarxy:fitView")),
     },
     {
       label: "Maximize Panel",
-      shortcut: "Esc to restore",
+      shortcut: menuHint("panel-maximize"),
       onClick: () => toggleMaximize("nodes"),
     },
   ];

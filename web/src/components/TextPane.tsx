@@ -19,6 +19,7 @@ import { useMirror } from "../store/mirror";
 import { usePrefs } from "../store/prefs";
 import { toggleMaximize } from "../dock/api";
 import { MenuItem, type MenuEntry } from "./menu/MenuItem";
+import { menuHint } from "../input/keymap";
 
 const CodeEditor = lazy(() => import("./inputs/CodeEditor"));
 
@@ -139,7 +140,7 @@ export function TextPane() {
   const viewEntries: MenuEntry[] = [
     {
       label: "Maximize Panel",
-      shortcut: "Esc to restore",
+      shortcut: menuHint("panel-maximize"),
       onClick: () => toggleMaximize("text"),
     },
   ];

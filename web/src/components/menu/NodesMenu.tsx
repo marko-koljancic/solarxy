@@ -11,6 +11,7 @@ import { selectGraph, useMirror } from "../../store/mirror";
 import { useUi } from "../../store/ui";
 import { NodeGlyph } from "../NodeGlyph";
 import { MenuItem, type MenuEntry } from "./MenuItem";
+import { menuHint } from "../../input/keymap";
 
 export function NodesMenu() {
   const registry = useMirror((s) => s.registry);
@@ -36,7 +37,7 @@ export function NodesMenu() {
   const entries: MenuEntry[] = [
     {
       label: "Search Nodes...",
-      shortcut: "Tab",
+      shortcut: menuHint("palette"),
       onClick: () => useUi.getState().setPaletteOpen(true),
     },
     { divider: true },

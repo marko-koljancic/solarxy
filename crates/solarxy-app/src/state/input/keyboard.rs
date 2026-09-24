@@ -158,6 +158,7 @@ impl State {
             // and they are grouped rather than spelled out one empty arm at
             // a time because they share one reason.
             Action::OpenPreferences
+            | Action::DeleteSelection
             | Action::OpenNodePalette
             | Action::Bypass
             | Action::DisplayFlag

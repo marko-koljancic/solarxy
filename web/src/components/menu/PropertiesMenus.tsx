@@ -13,6 +13,7 @@ import { selectGraph, useMirror } from "../../store/mirror";
 import { pushToast } from "../../store/toasts";
 import { useUi } from "../../store/ui";
 import { MenuItem, type MenuEntry } from "./MenuItem";
+import { menuHint } from "../../input/keymap";
 
 export function PropertiesMenuBar() {
   const registry = useMirror((s) => s.registry);
@@ -40,7 +41,7 @@ export function PropertiesMenuBar() {
   const nodeEntries: MenuEntry[] = [
     {
       label: "Node Info",
-      shortcut: "I",
+      shortcut: menuHint("node-info"),
       disabled: !node,
       onClick: () => {
         if (!node) return;
@@ -61,12 +62,13 @@ export function PropertiesMenuBar() {
     { divider: true },
     {
       label: "Toggle Bypass",
-      shortcut: "B",
+      shortcut: menuHint("bypass"),
       disabled: !node || desc?.bypass.mode === "notBypassable",
       onClick: () => node && toggleBypass(current, node),
     },
     {
       label: "Set Display Flag",
+      shortcut: menuHint("display-flag"),
       disabled: !node || current === "root",
       onClick: () => node && setDisplayFlag(current, node.id),
     },
@@ -108,14 +110,14 @@ export function PropertiesMenuBar() {
     },
     {
       label: "Floating Properties",
-      shortcut: "P",
+      shortcut: menuHint("floating-props"),
       checked: floating,
       onClick: () => useUi.getState().setFloatingProps(!floating),
     },
     { divider: true },
     {
       label: "Maximize Panel",
-      shortcut: "Esc to restore",
+      shortcut: menuHint("panel-maximize"),
       onClick: () => toggleMaximize("properties"),
     },
   ];

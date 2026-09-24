@@ -247,21 +247,28 @@ mod tests {
         let block = &source[start..];
         let block = &block[..block.find("];").expect("the table's end")];
         let names = labels(block);
-        let keys: Vec<String> = block
-            .split("shortcut: \"")
+        // The browser asks its own table for the key by id rather than
+        // spelling it, so what is compared is which binding each shell
+        // names beside the same layout.
+        let named: Vec<String> = block
+            .split("shortcut: menuHint(\"")
             .skip(1)
             .filter_map(|rest| rest.split('"').next())
             .map(str::to_string)
             .collect();
         assert_eq!(names.len(), 5, "the reader found the five layouts");
+        assert_eq!(named.len(), 5, "and the binding each one names");
 
         let here_names: Vec<&str> = PANE_LAYOUTS.iter().map(|(_, name, _)| *name).collect();
-        let here_keys: Vec<String> = PANE_LAYOUTS
+        let here_ids: Vec<&str> = PANE_LAYOUTS
             .iter()
-            .map(|(_, _, action)| hint(*action).expect("every layout is bound"))
+            .map(|(_, _, action)| action.id())
             .collect();
         assert_eq!(here_names, names);
-        assert_eq!(here_keys, keys);
+        assert_eq!(here_ids, named);
+        for (_, _, action) in PANE_LAYOUTS {
+            assert!(hint(action).is_some(), "and every layout is bound here");
+        }
     }
 
     /// The two handle frames, named as the browser names them and in its

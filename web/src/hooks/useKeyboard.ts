@@ -16,6 +16,7 @@ import {
   dispatch,
   duplicateSelection,
   explicitSave,
+  openScene,
   paste,
   setActivePane,
   setPaneSettings,
@@ -88,10 +89,22 @@ export function useKeyboard(): void {
       const selection = s.contexts[ctxKey]?.selection ?? [];
 
       switch (binding.id) {
+        case "open-scene":
+          // Intercepted the way the save is, and for the same reason: the
+          // browser's own Cmd/Ctrl+O opens a file into the tab, replacing
+          // the app. The menu advertised this key before anything bound it.
+          e.preventDefault();
+          void openScene();
+          break;
         case "save":
           // Spec section 16: Cmd/Ctrl+S is intercepted and saves the scene.
           e.preventDefault();
           void explicitSave();
+          break;
+        case "delete":
+          // Declared so the menus and the reference can name the key, and
+          // handled by the canvas itself, which owns what a delete means
+          // there. Nothing to dispatch.
           break;
         case "shortcuts": {
           const ui = useUi.getState();

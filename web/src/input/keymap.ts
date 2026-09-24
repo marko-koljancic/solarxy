@@ -32,6 +32,7 @@ export interface KeyBinding {
 }
 
 export const KEYMAP: readonly KeyBinding[] = [
+  { id: "open-scene", keys: "mod+o", context: "global", group: "File", description: "Open a scene or a model" },
   { id: "save", keys: "mod+s", context: "global", group: "File", description: "Save the scene (.slxy)", note: "Intercepted from the browser; Cmd/Ctrl+W cannot be (autosave covers it)" },
   { id: "undo", keys: "mod+z", context: "global", group: "Edit", description: "Undo" },
   { id: "redo", keys: "mod+shift+z", context: "global", group: "Edit", description: "Redo" },
@@ -39,6 +40,7 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "copy", keys: "mod+c", context: "global", group: "Edit", description: "Copy selection" },
   { id: "paste", keys: "mod+v", context: "global", group: "Edit", description: "Paste" },
   { id: "duplicate", keys: "mod+d", context: "global", group: "Edit", description: "Duplicate selection" },
+  { id: "delete", keys: "backspace", context: "canvas", group: "Edit", description: "Delete selection", note: "Delete does the same; both are handled by the canvas itself rather than dispatched here" },
   { id: "cook", keys: "mod+enter", context: "global", group: "Edit", description: "Cook now (manual mode)" },
   // Narrowed from global to canvas (the display-flag precedent): bypass was
   // always a Node Canvas action, and freeing B over the viewport is what
@@ -163,4 +165,24 @@ export function formatKeys(keys: string): string[] {
     if (label) return label;
     return part.length === 1 ? part.toUpperCase() : part.toUpperCase();
   });
+}
+
+/** The hint a menu entry shows beside itself, for the binding with this id.
+ *
+ * Menus used to type these by hand, which is how a hint and a binding come
+ * to disagree: two had, one showing a key the table does not bind and one
+ * showing nothing though a binding existed. Asking here means a hint cannot
+ * name a key that does nothing, and `menu_hints_are_never_typed_by_hand`
+ * fails if one is typed beside an entry again.
+ *
+ * Unknown ids return an empty string rather than throwing, because a menu
+ * that loses its hint is a smaller failure than a menu that fails to draw;
+ * `every_menu_hint_names_a_real_binding` is what catches the typo instead. */
+export function menuHint(id: string): string {
+  const binding = KEYMAP.find((b) => b.id === id);
+  if (!binding) return "";
+  // Mac writes its modifiers as glyphs and runs them together; everywhere
+  // else they are words and need the joiner, so "⌘S" there and "Ctrl+S"
+  // here. Typing these by hand had produced both conventions at once.
+  return formatKeys(binding.keys).join(IS_MAC ? "" : "+");
 }

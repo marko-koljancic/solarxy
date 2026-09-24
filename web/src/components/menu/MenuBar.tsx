@@ -27,8 +27,8 @@ import { DeskSaveModal } from "../DeskSaveModal";
 import { WebBundleModal } from "../WebBundleModal";
 import { TOURS } from "../tour/steps";
 import { MenuItem, type MenuEntry } from "./MenuItem";
+import { menuHint } from "../../input/keymap";
 
-const MOD = navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl+";
 
 /** Clears the dirty flag (so the beforeunload guard stays quiet), drops
  * the autosave ring, and reloads into a fresh scene. Confirmation happens
@@ -78,7 +78,7 @@ export function MenuBar() {
         else void newScene();
       },
     },
-    { label: "Open Scene...", shortcut: `${MOD}O`, onClick: () => void openScene() },
+    { label: "Open Scene...", shortcut: menuHint("open-scene"), onClick: () => void openScene() },
     {
       label: "Sample Scenes",
       submenu: SAMPLE_SCENES.map((s) => ({
@@ -89,7 +89,7 @@ export function MenuBar() {
         },
       })),
     },
-    { label: "Save Scene", shortcut: `${MOD}S`, onClick: () => void explicitSave() },
+    { label: "Save Scene", shortcut: menuHint("save"), onClick: () => void explicitSave() },
     { divider: true },
     { label: "Import Model...", onClick: () => importRef.current?.click() },
     { divider: true },
@@ -105,29 +105,29 @@ export function MenuBar() {
   };
 
   const edit: MenuEntry[] = [
-    { label: "Undo", shortcut: `${MOD}Z`, onClick: () => dispatch({ type: "undo" }) },
-    { label: "Redo", shortcut: `${MOD}⇧Z`, onClick: () => dispatch({ type: "redo" }) },
+    { label: "Undo", shortcut: menuHint("undo"), onClick: () => dispatch({ type: "undo" }) },
+    { label: "Redo", shortcut: menuHint("redo"), onClick: () => dispatch({ type: "redo" }) },
     { divider: true },
-    { label: "Copy", shortcut: `${MOD}C`, disabled: !hasSelection, onClick: copySelection },
-    { label: "Paste", shortcut: `${MOD}V`, onClick: paste },
-    { label: "Duplicate", shortcut: `${MOD}D`, disabled: !hasSelection, onClick: duplicateSelection },
+    { label: "Copy", shortcut: menuHint("copy"), disabled: !hasSelection, onClick: copySelection },
+    { label: "Paste", shortcut: menuHint("paste"), onClick: paste },
+    { label: "Duplicate", shortcut: menuHint("duplicate"), disabled: !hasSelection, onClick: duplicateSelection },
     { divider: true },
-    { label: "Toggle Bypass", shortcut: "B", disabled: !hasSelection, onClick: withBypass },
+    { label: "Toggle Bypass", shortcut: menuHint("bypass"), disabled: !hasSelection, onClick: withBypass },
     {
       label: "Set Display Flag",
-      shortcut: "E",
+      shortcut: menuHint("display-flag"),
       disabled: !hasSelection || current === "root",
       onClick: () =>
         dispatch({ type: "setActiveOutput", ctx: current, node: selection[0] }),
     },
     {
       label: "Delete Selection",
-      shortcut: "⌫",
+      shortcut: menuHint("delete"),
       disabled: !hasSelection,
       onClick: () => dispatch({ type: "removeNodes", ctx: current, ids: selection }),
     },
     { divider: true },
-    { label: "Preferences...", shortcut: `${MOD},`, onClick: () => useUi.getState().setPrefsOpen(true) },
+    { label: "Preferences...", shortcut: menuHint("preferences"), onClick: () => useUi.getState().setPrefsOpen(true) },
   ];
 
  // Desks: presets + user-saved dock
@@ -180,13 +180,13 @@ export function MenuBar() {
   const review: MenuEntry[] = [
     {
       label: "Review Mode",
-      shortcut: "⇧R",
+      shortcut: menuHint("review-mode"),
       checked: reviewMode,
       onClick: () => useReview.getState().setReviewMode(!reviewMode),
     },
     {
       label: "Review Panel",
-      shortcut: "N",
+      shortcut: menuHint("review-panel"),
       checked: panelOpen,
       // The dock owns the panel's existence; the store mirrors it.
       onClick: () => setReviewPanelOpen(!panelOpen),
@@ -201,7 +201,7 @@ export function MenuBar() {
   const help: MenuEntry[] = [
     {
       label: "Keyboard Shortcuts",
-      shortcut: "?",
+      shortcut: menuHint("shortcuts"),
       onClick: () => useUi.getState().setShortcutsOpen(true),
     },
     {
