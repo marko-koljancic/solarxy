@@ -60,16 +60,3 @@ pub(in crate::gui) fn entry_if(
     ui.add_enabled(enabled, button(label, action))
         .on_disabled_hover_text(why_not)
 }
-
-/// An entry for something this shell does not do yet. It is listed where
-/// the browser lists it, so the two menus read the same and the capability
-/// reads as not yet here rather than as never having existed, and it says
-/// what it is waiting for.
-pub(in crate::gui) fn waiting_entry(
-    ui: &mut egui::Ui,
-    label: &str,
-    waits_for: &str,
-) -> egui::Response {
-    ui.add_enabled(false, egui::Button::new(label))
-        .on_disabled_hover_text(waits_for)
-}

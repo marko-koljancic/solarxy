@@ -298,6 +298,18 @@ step any more.
     the pane's `Look...` entry opens it). Each owns
     state on the renderer and is drained through a `take_*` accessor rather than the queue: a
     single-value handle is already the right shape.
+  - `tour/` - the guided tour, ported from the browser because a user meeting the node canvas
+    for the first time needs the same introduction whichever shell they opened: `steps` the
+    three tours as data (eighteen steps, held word for word against
+    `web/src/components/tour/steps.ts`), `placement` the card rule, whose fallback orders the
+    sides by room MINUS need rather than by room, and `overlay` the four-rect scrim and the
+    card. **A step names one of eight surfaces rather than a selector**: there is no document
+    here, so the shell supplies each rectangle from the previous pass, the way the maximize key
+    already learns which panel the pointer is over, and a step whose surface is absent is
+    dropped when the tour starts. The first-run offer is two `UiPrefs` fields with serde
+    defaults, so a configuration file written before the tour existed reads as never offered;
+    it is written when the overview STARTS rather than when it ends, because someone who skips
+    it has still been offered it.
   - `widgets.rs` - the helpers more than one of the three uses.
   - `code_editor.rs` - the one editor the Text panel and the parameter panel's Snippet control
     draw: a line-number gutter, the error line from the shared `error_position` rule over the

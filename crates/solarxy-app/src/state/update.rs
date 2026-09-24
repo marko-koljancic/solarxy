@@ -387,6 +387,37 @@ impl State {
         }
     }
 
+    /// The first-run offer, and recording a tour that finished.
+    ///
+    /// Offered once per installation rather than once per launch: the
+    /// preference is written the moment the overview starts, not when it
+    /// ends, because someone who skips it has still been offered it and
+    /// being asked again next launch is the annoyance this guards against.
+    /// Finishing writes the version too, which is what lets a materially
+    /// changed overview be offered again.
+    fn offer_or_record_the_tour(&mut self) {
+        if let Some(id) = self.gui.take_tour_completed()
+            && crate::gui::tour::steps::completion_writes_onboarding(id)
+        {
+            self.preferences.ui.onboarding_version = crate::gui::tour::steps::overview_version();
+            save_prefs(&self.preferences);
+        }
+
+        if self.tour_offered {
+            return;
+        }
+        self.tour_offered = true;
+        if !crate::gui::tour::steps::should_offer(
+            self.preferences.ui.onboarding_seen,
+            self.preferences.ui.onboarding_version,
+        ) {
+            return;
+        }
+        self.preferences.ui.onboarding_seen = true;
+        save_prefs(&self.preferences);
+        self.gui.start_tour("overview");
+    }
+
     pub fn update(&mut self) {
         self.refresh_title();
         if let Some(choice) = self.gui.take_unsaved_choice() {
@@ -401,6 +432,7 @@ impl State {
         self.poll_autosave();
         self.reconcile_history();
         self.poll_preview();
+        self.offer_or_record_the_tour();
         // Uncaptured GPU faults recorded since the last frame. The hook
         // already logged each full message on the `solarxy::gpu` target,
         // which reaches the terminal; the toast is the short pointer, and
@@ -563,4 +595,15 @@ pub(super) fn find_node_name(engine: &solarxy_graph::Engine, id: NodeId) -> Stri
         .chain(doc.subflow_owners().map(GraphContext::Subflow))
         .find_map(|ctx| doc.graph(ctx).ok().and_then(|g| g.node(id)))
         .map_or_else(|| format!("Node {}", id.0), |n| node_name(n, registry))
+}
+
+/// Write the preferences, logging rather than interrupting on failure.
+///
+/// The tour's two writes are the only ones that happen without the user
+/// asking, so a failure here must not put a dialog in front of someone who
+/// did not press anything.
+fn save_prefs(prefs: &solarxy_core::preferences::Preferences) {
+    if let Err(e) = solarxy_core::preferences::save(prefs) {
+        tracing::warn!("could not record the tour state: {e}");
+    }
 }

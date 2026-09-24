@@ -152,6 +152,11 @@ pub(super) struct SolarxyTabViewer<'a> {
     /// The panel the pointer is over, which is what the maximize key acts
     /// on. Only a leaf's front tab is drawn, so the tab names its leaf.
     pub hovered_tab_out: &'a mut Option<SolarxyTab>,
+    /// Where the Properties and Review panel bodies drew, for the two tour
+    /// steps that point at them. Recorded here rather than derived,
+    /// because a docked panel's rect is the dock's answer and nobody
+    /// else's.
+    pub panel_rects_out: &'a mut Vec<(SolarxyTab, egui::Rect)>,
     /// The rects of the furniture drawn over the viewport that takes
     /// clicks, recorded so the pointer routing keeps those clicks from the
     /// camera and the pick.
@@ -252,6 +257,8 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 ui.allocate_space(ui.available_size());
             }
             SolarxyTab::ReviewPanel => {
+                self.panel_rects_out
+                    .push((SolarxyTab::ReviewPanel, ui.max_rect()));
                 super::panels::review::panel::draw_review_panel_content(
                     ui,
                     self.sources.review.notes,
@@ -264,6 +271,8 @@ impl TabViewer for SolarxyTabViewer<'_> {
             // browser's panel has and the name every saved arrangement
             // knows this tab by.
             SolarxyTab::Properties => {
+                self.panel_rects_out
+                    .push((SolarxyTab::Properties, ui.max_rect()));
                 super::panels::params::draw_params_content(
                     ui,
                     self.sources.params,

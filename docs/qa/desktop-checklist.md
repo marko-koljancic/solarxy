@@ -94,7 +94,9 @@ labels across the top of a pane.
 - [ ] The global bar is five menus: File, Edit, Desks, Review, Help. It cannot be hidden.
 - [ ] Every shortcut shown beside an entry does what it says when pressed.
 - [ ] An entry that cannot act is greyed and says why on hover, and none disappears as the scene
-      changes. `Help > Take a Tour` is one.
+      changes. A render action with no render node is one.
+- [ ] `Help > Take a Tour` opens a submenu of three, in the order Overview, Modeling Basics,
+      Review Workflow. Each replays from its first step.
 - [ ] The File menu has no `Close`. A document is left by opening another or by `New Scene`, and
       both ask first when there are unsaved changes.
 - [ ] Each of the four panels with a bar of its own draws it across its top, docked or floated:
@@ -105,6 +107,14 @@ labels across the top of a pane.
 - [ ] The viewport's `Gizmo Orientation`, `Playbar` and `Export Turntable...` each act.
 - [ ] The Review menu's `Import Review Notes...` is enabled with a document open and
       `Export Review Notes...` once a note exists; each opens a native dialog.
+
+- [ ] During a tour: the scrim dims everything but the surface being described, and that surface
+      stays usable underneath. Back, Next and Skip do what they say; the counter reads `n of m`
+      over the steps actually shown. Escape ends it and leaves the interface as it was.
+- [ ] Close the Review panel, then replay the Overview tour: its review step is dropped rather
+      than pointing at nothing, and the counter reads one fewer.
+- [ ] With no configuration file, launch once: the Overview tour is offered unasked. Skip it,
+      quit and relaunch: it is not offered again, and it still replays from the Help menu.
 
 ## 8. Panels and arrangements
 

@@ -31,7 +31,7 @@ use crate::gui::settings::PanelSettings;
 use crate::gui::theme::Theme;
 use crate::state::keymap::{Action, hint};
 
-use super::menu_items::{check_entry, entry, entry_if, waiting_entry};
+use super::menu_items::{check_entry, entry, entry_if};
 
 /// What the menu bar needs to know about the shell to draw itself, as
 /// against what it asks the shell to do, which travels as an [`Intent`].
@@ -217,8 +217,9 @@ pub(in crate::gui) fn draw_menu_bar(
     intents: &mut Intents,
     present: &dyn Fn(SolarxyTab) -> bool,
     cx: MenuContext<'_>,
-) {
-    egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+) -> egui::Rect {
+    egui::TopBottomPanel::top("menu_bar")
+        .show(ctx, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
             for (title, rows) in [(MENU_TITLES[0], FILE_MENU), (MENU_TITLES[1], EDIT_MENU)] {
                 ui.menu_button(title, |ui| {
@@ -245,7 +246,11 @@ pub(in crate::gui) fn draw_menu_bar(
             draw_history_strip(ui, settings.history, intents);
             draw_cook_strip(ui, settings.cook, intents);
         });
-    });
+        })
+        // The bar's own rectangle, which two tour steps point at. The
+        // response is the panel; its inner response is the bar contents.
+        .response
+        .rect
 }
 
 fn draw_rows(
@@ -411,7 +416,16 @@ fn draw_entry(
             }
         }
         Entry::Tour => {
-            waiting_entry(ui, label, "The guided tour has not come to this shell yet");
+            // One row per tour, in the order the catalogue lists them,
+            // which is the order the browser's submenu lists them in.
+            ui.menu_button(label, |ui| {
+                for tour in crate::gui::tour::steps::TOURS {
+                    if entry(ui, tour.title, None).clicked() {
+                        intents.raise(Intent::Help(HelpIntent::Tour(tour.id)));
+                        ui.close();
+                    }
+                }
+            });
         }
         _ => {}
     }

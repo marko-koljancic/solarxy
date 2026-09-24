@@ -320,6 +320,8 @@ pub(crate) enum HelpIntent {
     Wiki,
     Shortcuts,
     About,
+    /// Replay a tour from the Help submenu, by its id.
+    Tour(&'static str),
 }
 
 /// Cook mode and the explicit cook, raised from the header strip. The engine

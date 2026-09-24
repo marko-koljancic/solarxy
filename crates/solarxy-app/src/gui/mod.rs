@@ -47,6 +47,7 @@ mod pass;
 mod renderer;
 mod settings;
 mod theme;
+pub(crate) mod tour;
 mod widgets;
 
 /// The platform's command modifier, as a reader sees it. Read by the binding

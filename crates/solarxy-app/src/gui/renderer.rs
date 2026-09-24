@@ -90,6 +90,11 @@ pub struct EguiRenderer {
     /// the way the pane toolbar strip is kept out.
     viewport_chrome: Vec<egui::Rect>,
     pub last_viewport_rect: Option<CachedViewportRect>,
+    /// The tour in progress, if one is, and the rectangles it can point at
+    /// as the last pass drew them. Both are per-pass like the rects above,
+    /// and for the same reason: a tour points at panels that come and go.
+    tour: super::tour::overlay::TourState,
+    tour_anchors: super::tour::overlay::TourAnchors,
     /// Whether a node-engine scene is open. Separate from `model_info`,
     /// which describes a file-loaded model: the two roots are mutually
     /// exclusive, and File > Close acts on whichever is present.
@@ -137,6 +142,8 @@ impl EguiRenderer {
             arrangement_save: ArrangementSaveModal::default(),
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
+            tour: super::tour::overlay::TourState::default(),
+            tour_anchors: super::tour::overlay::TourAnchors::default(),
             unsaved_modal: UnsavedModalState::default(),
             recovery_modal: RecoveryModalState::default(),
             environment_open: false,
@@ -381,6 +388,24 @@ impl EguiRenderer {
 
     pub fn open_shortcuts_modal(&mut self) {
         self.shortcuts_modal.open = true;
+    }
+
+    /// Start a tour, against the surfaces the last pass drew.
+    pub fn start_tour(&mut self, id: &str) {
+        let anchors = self.tour_anchors;
+        self.tour.start(id, &anchors);
+    }
+
+    /// Whether a tour is running, so the shell can leave its own Escape
+    /// handling alone while one is.
+    pub fn tour_running(&self) -> bool {
+        self.tour.running()
+    }
+
+    /// The tour that finished since this was last asked, for the state
+    /// layer to record against the preferences.
+    pub fn take_tour_completed(&mut self) -> Option<&'static str> {
+        self.tour.take_completed()
     }
 
     /// Show a panel if it is hidden, hide it if it is shown.
@@ -693,6 +718,8 @@ impl EguiRenderer {
         let mut preview_size_seen: Option<(u32, u32)> = None;
         let mut hovered_tab_seen: Option<SolarxyTab> = None;
         let mut chrome_rects_seen: Vec<egui::Rect> = Vec::new();
+        let mut panel_rects_seen: Vec<(SolarxyTab, egui::Rect)> = Vec::new();
+        let mut menu_bar_rect = egui::Rect::NOTHING;
         let mut dismissed_toast_id: Option<u64> = None;
 
         // Cloned so the closure below can borrow the renderer mutably: the
@@ -707,7 +734,7 @@ impl EguiRenderer {
             // Always drawn. It could be hidden until 0.10.0, from a menu row
             // whose key had lost its binding, which left no way to bring it
             // back; the browser's bar cannot be hidden either.
-            draw_menu_bar(
+            menu_bar_rect = draw_menu_bar(
                 ctx,
                 sources.settings,
                 intents,
@@ -730,6 +757,7 @@ impl EguiRenderer {
                     graph_ctx: &mut self.graph_ctx,
                 },
                 review,
+                panel_rects_out: &mut panel_rects_seen,
                 // Reborrowed rather than moved: the queue outlives the tab
                 // viewer, and the context menu below raises into it.
                 intents: &mut *intents,
@@ -799,6 +827,16 @@ impl EguiRenderer {
                 if !open {
                     self.floating_props = false;
                 }
+            }
+
+            // Ahead of every modal: a tour is modal in intent, so while one
+            // runs its Escape ends it rather than dismissing what is under
+            // it. It points at the surfaces the LAST pass drew, which is
+            // one frame old and invisible at steady state, the same latency
+            // the maximize key already lives with.
+            {
+                let anchors = self.tour_anchors;
+                super::tour::overlay::draw_tour(ctx, &mut self.tour, &anchors, self.theme);
             }
 
             draw_about_modal(ctx, &mut self.about_open);
@@ -1048,6 +1086,26 @@ impl EguiRenderer {
 
         // Cleared as well as set, so a closed or undocked canvas stops
         // claiming the key it took while it was on screen.
+        // Every surface a tour can point at, as this pass drew it, cleared
+        // as well as set so a closed panel stops being pointed at. The
+        // viewport, the tool column and the attribute column come from the
+        // chrome the viewport tab drew; the pane controls are its strip.
+        self.tour_anchors = super::tour::overlay::TourAnchors {
+            viewport: viewport_rect_logical,
+            tool_column: chrome_rects_seen.first().copied(),
+            pane_controls: chrome_rects_seen.get(2).copied(),
+            node_canvas: canvas_rect_seen,
+            properties_body: panel_rects_seen
+                .iter()
+                .find(|(tab, _)| *tab == SolarxyTab::Properties)
+                .map(|(_, r)| *r),
+            review_panel: panel_rects_seen
+                .iter()
+                .find(|(tab, _)| *tab == SolarxyTab::ReviewPanel)
+                .map(|(_, r)| *r),
+            attr_column: chrome_rects_seen.get(1).copied(),
+            menu_bar: menu_bar_rect.is_positive().then_some(menu_bar_rect),
+        };
         self.canvas_rect = canvas_rect_seen;
         self.preview_size_seen = preview_size_seen;
         self.hovered_tab = hovered_tab_seen;

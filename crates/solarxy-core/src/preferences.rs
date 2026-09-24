@@ -1011,6 +1011,20 @@ pub struct UiPrefs {
     /// preference.
     #[serde(default)]
     pub keymap_notice_seen: bool,
+    /// Whether this installation has been offered the guided tour, and the
+    /// version of the overview it saw.
+    ///
+    /// Two fields rather than one because a tour that changes materially
+    /// should be offered again to someone who saw an older one, which is
+    /// what the browser does from the same pair. Defaulted, so a
+    /// configuration file written before the tour existed reads as never
+    /// offered and the offer happens once, which is also what an existing
+    /// browser user gets.
+    #[serde(default)]
+    pub onboarding_seen: bool,
+    #[serde(default)]
+    pub onboarding_version: u32,
+
     /// The playbar, the scene-clock strip under the viewport. Hidden, the
     /// viewport reclaims its height; the playback keys still work, so hiding
     /// it gives up the readout, not the clock. The browser's `transportBar`.
@@ -1029,6 +1043,8 @@ impl Default for UiPrefs {
             status_bar_visible: true,
             theme: ThemeChoice::default(),
             keymap_notice_seen: false,
+            onboarding_seen: false,
+            onboarding_version: 0,
             transport_bar: true,
         }
     }
@@ -1391,6 +1407,8 @@ mod tests {
                 status_bar_visible: false,
                 theme: ThemeChoice::Light,
                 keymap_notice_seen: true,
+                onboarding_seen: true,
+                onboarding_version: 1,
                 transport_bar: false,
             },
             updater: UpdaterPrefs {

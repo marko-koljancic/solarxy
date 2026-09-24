@@ -308,6 +308,7 @@ impl State {
             gpu_faults,
             _backend_info: backend_info,
             preferences,
+            tour_offered: false,
             window,
         };
 

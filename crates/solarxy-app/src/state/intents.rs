@@ -549,6 +549,10 @@ impl State {
             }
             HelpIntent::Shortcuts => self.gui.open_shortcuts_modal(),
             HelpIntent::About => self.gui.open_about(),
+            // The rects come from the pass that just ran, which is the
+            // same one-frame-old source the maximize key reads to learn
+            // which panel the pointer is over.
+            HelpIntent::Tour(id) => self.gui.start_tour(id),
         }
     }
 }

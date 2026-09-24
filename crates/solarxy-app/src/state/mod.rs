@@ -388,5 +388,9 @@ pub struct State {
     pub(super) gpu_faults: solarxy_renderer::faults::GpuFaults,
     pub(super) _backend_info: String,
     pub(super) preferences: Preferences,
+    /// Whether the first-run offer has been considered this launch. The
+    /// offer itself happens once per installation; this stops the frame
+    /// loop from asking the question sixty times a second.
+    pub(super) tour_offered: bool,
     pub window: Arc<Window>,
 }
