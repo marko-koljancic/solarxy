@@ -1002,12 +1002,13 @@ pub struct UiPrefs {
     pub status_bar_visible: bool,
     #[serde(default)]
     pub theme: ThemeChoice,
-    /// Whether this installation has been told that the keyboard map
-    /// changed.
+    /// Whether this installation was told that the keyboard map changed.
     ///
-    /// Absent in every configuration file written before the two shells
-    /// shared one map, which is exactly the population the notice is for. A
-    /// fresh installation writes it set, because there is nothing to be told.
+    /// Written by the first 0.10.0 builds, whose one-time launch notice set
+    /// it; the notice was withdrawn before release and nothing reads or
+    /// writes the field since. It stays so a configuration file those
+    /// builds wrote still loads, which is the rule for every retired
+    /// preference.
     #[serde(default)]
     pub keymap_notice_seen: bool,
     /// The playbar, the scene-clock strip under the viewport. Hidden, the

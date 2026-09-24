@@ -322,7 +322,6 @@ impl State {
         // After the command-line open, so a launch that names a file and
         // finds an autosave is asked about the autosave over that file.
         state.check_recovery_on_launch();
-        state.check_keymap_notice_on_launch();
 
         Ok(state)
     }

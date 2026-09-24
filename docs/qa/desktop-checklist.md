@@ -158,7 +158,8 @@ desktop rewrites the file.
       viewport starts on Gradient.
 - [ ] A dock layout that names the Console, the Outliner or the Material Inspector restores
       without them and keeps everything else.
-- [ ] The notice that the keys moved appears once, and never on a fresh installation.
+- [ ] No notice appears on launch, whatever the file holds; the keys are documented in the
+      release notes and `?` opens the reference.
 - [ ] `solarxy-cli --update` still runs. The desktop has no update check of its own.
 
 ## 12. Exit

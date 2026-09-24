@@ -291,8 +291,8 @@ step any more.
     authoring and panel epics `environment` (the browser's four rows: HDRI with Load and Clear, IBL
     mode, rotation, intensity; reached from the viewport's View menu), `unsaved` (Save, Discard, Cancel) and `recovery` (Restore
     or Discard, offered once on launch), and since the chrome epics `arrangement_save` (the name
-    for a saved arrangement, saying what a used name would replace) and `keymap_change` (the
-    one-time notice an upgraded installation gets that the keys moved), and since the authoring
+    for a saved arrangement, saying what a used name would replace; the one-time notice that the
+    keys moved, which landed beside it, was withdrawn before release), and since the authoring
     and look epics `turntable` (the image-sequence export's settings and progress) and `look`
     (the per-pane look editor, modeless and one window per pane where the browser has a modal;
     the pane's `Look...` entry opens it). Each owns

@@ -392,16 +392,6 @@ impl State {
         if let Some(choice) = self.gui.take_unsaved_choice() {
             self.resolve_discard(choice);
         }
-        // Answered either way, the notice never returns: the flag is what an
-        // existing installation is distinguished by, so setting it is the
-        // whole of the once.
-        let (show_reference, dismissed) = self.gui.take_keymap_notice_answer();
-        if dismissed {
-            self.preferences.ui.keymap_notice_seen = true;
-        }
-        if show_reference {
-            self.gui.open_shortcuts_modal();
-        }
         if let Some(choice) = self.gui.take_recovery_choice() {
             self.resolve_recovery(choice);
         }
