@@ -42,23 +42,33 @@ use solarxy_core::view_config::PANE_TOOLBAR_HEIGHT;
 use solarxy_core::scene::SceneObjectId;
 use solarxy_host::cameras::StandardView;
 
+use crate::gui::chrome::menu_items;
 use crate::gui::intent::{DisplayChange, Intent, Intents, PaneChange, PaneLookIntent};
 use crate::gui::settings::PanelSettings;
 use crate::gui::theme::Theme;
+use crate::state::keymap::Action;
 use crate::state::view_state::{BoundsMode, PaneDisplaySettings};
 
 const PROJECTIONS: [ProjectionMode; 2] =
     [ProjectionMode::Perspective, ProjectionMode::Orthographic];
 
-/// The six standard views, in the order the Views label lists them.
-const AXIS_VIEWS: [(StandardView, &str); 6] = [
-    (StandardView::Top, "Top"),
-    (StandardView::Bottom, "Bottom"),
-    (StandardView::Front, "Front"),
-    (StandardView::Back, "Back"),
-    (StandardView::Left, "Left"),
-    (StandardView::Right, "Right"),
+/// The six standard views, in the order the Views label lists them, each
+/// with the binding whose key it shows.
+///
+/// Back and Right are bound on neither shell and therefore show no key,
+/// which is the browser arrangement rather than an omission here.
+const AXIS_VIEWS: [(StandardView, &str, Option<Action>); 6] = [
+    (StandardView::Top, "Top", Some(Action::ViewTop)),
+    (StandardView::Bottom, "Bottom", Some(Action::ViewBottom)),
+    (StandardView::Front, "Front", Some(Action::ViewFront)),
+    (StandardView::Back, "Back", None),
+    (StandardView::Left, "Left", Some(Action::ViewLeft)),
+    (StandardView::Right, "Right", None),
 ];
+
+/// The entry above them, and the two projections, which are bound too.
+const FIT_VIEW: &str = "Fit view";
+const UV_LAYOUT: &str = "UV Layout";
 
 /// The UV backgrounds a pane offers, in the browser's order.
 ///
@@ -406,8 +416,20 @@ fn draw_scene_labels(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
         ProjectionMode::Orthographic => "Ortho",
     };
     label_menu(ui, (index, "proj"), projection_label, |ui| {
-        if let Some(mode) = radio_pick(ui, projection, PROJECTIONS, |p| p.to_string()) {
-            intents.raise(Intent::PaneProjection { pane: index, mode });
+        // Ticked entries rather than radios, because only a button carries a
+        // shortcut hint and both of these are bound.
+        for mode in PROJECTIONS {
+            let action = match mode {
+                ProjectionMode::Perspective => Action::ProjectionPerspective,
+                ProjectionMode::Orthographic => Action::ProjectionOrthographic,
+            };
+            let checked = projection == mode;
+            if menu_items::check_entry(ui, checked, &mode.to_string(), Some(action)).clicked()
+                && !checked
+            {
+                intents.raise(Intent::PaneProjection { pane: index, mode });
+                ui.close();
+            }
         }
     });
 
@@ -423,15 +445,19 @@ fn draw_scene_labels(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
     });
 
     label_menu(ui, (index, "views"), "Views", |ui| {
-        if ui.button("Fit view").clicked() {
+        // Drawn through the shared entry, not a bare button, so each shows
+        // the key its binding gives it. The browser spells the key into the
+        // label here; this shell reads the table, which is its own rule and
+        // the one that cannot name a key that does nothing.
+        if menu_items::entry(ui, FIT_VIEW, Some(Action::FitView)).clicked() {
             intents.raise(Intent::PaneView {
                 pane: index,
                 view: PaneView::Fit,
             });
             ui.close();
         }
-        for (view, label) in AXIS_VIEWS {
-            if ui.button(label).clicked() {
+        for (view, label, action) in AXIS_VIEWS {
+            if menu_items::entry(ui, label, action).clicked() {
                 intents.raise(Intent::PaneView {
                     pane: index,
                     view: PaneView::Axis(view),
@@ -577,7 +603,7 @@ fn draw_display_menu(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
         intents.pane(index, PaneChange::TurntableActive(v));
     }
     ui.menu_button(
-        format!("Turntable speed: {}", turntable_speed_label(turntable_rpm)),
+        submenu_label(TURNTABLE_SPEED, &turntable_speed_label(turntable_rpm)),
         |ui| {
             for (label, rpm) in TURNTABLE_SPEEDS {
                 if ui.button(label).clicked() {
@@ -587,39 +613,64 @@ fn draw_display_menu(ui: &mut egui::Ui, cx: PaneControls<'_>, intents: &mut Inte
             }
         },
     );
-    ui.menu_button("Normals", |ui| {
-        if let Some(v) = radio_pick(
-            ui,
-            pane.normals_mode,
-            NormalsMode::ALL.iter().copied(),
-            |v| v.to_string(),
-        ) {
-            intents.pane(index, PaneChange::NormalsMode(v));
-        }
-    });
-    ui.menu_button("Bounds", |ui| {
+    ui.menu_button(
+        submenu_label(NORMALS, &pane.normals_mode.to_string()),
+        |ui| {
+            if let Some(v) = radio_pick(
+                ui,
+                pane.normals_mode,
+                NormalsMode::ALL.iter().copied(),
+                |v| v.to_string(),
+            ) {
+                intents.pane(index, PaneChange::NormalsMode(v));
+            }
+        },
+    );
+    ui.menu_button(submenu_label(BOUNDS, &pane.bounds_mode.to_string()), |ui| {
         if let Some(v) = radio_pick(ui, pane.bounds_mode, BoundsMode::ALL.iter().copied(), |v| {
             v.to_string()
         }) {
             intents.pane(index, PaneChange::BoundsMode(v));
         }
     });
-    ui.menu_button("Wireframe", |ui| {
-        if let Some(v) = radio_pick(ui, pane.line_weight, LineWeight::ALL.iter().copied(), |v| {
-            v.descriptive_label()
-        }) {
-            intents.pane(index, PaneChange::LineWeight(v));
-        }
-    });
+    ui.menu_button(
+        submenu_label(WIREFRAME, pane.line_weight.descriptive_label()),
+        |ui| {
+            if let Some(v) =
+                radio_pick(ui, pane.line_weight, LineWeight::ALL.iter().copied(), |v| {
+                    v.descriptive_label()
+                })
+            {
+                intents.pane(index, PaneChange::LineWeight(v));
+            }
+        },
+    );
     ui.menu_button("Background", |ui| {
         if let Some(v) = background_menu_body(ui, pane.background_mode, hdri_available) {
             intents.pane(index, PaneChange::BackgroundMode(v));
         }
     });
-    if ui.button("UV Layout").clicked() {
+    if menu_items::entry(ui, UV_LAYOUT, Some(Action::ToggleUvPane)).clicked() {
         intents.pane(index, PaneChange::PaneMode(PaneMode::UvMap));
         ui.close();
     }
+}
+
+/// The four Display submenus that say what they are set to.
+///
+/// The browser draws the value as a hint to the right of a plain label.
+/// This toolkit has no right-aligned hint inside a menu button, so the
+/// value follows the label instead, which is the form the turntable speed
+/// already used and is now what all four do. The test compares the part
+/// before the colon with the browser label and checks that the browser
+/// carries a hint for each.
+const NORMALS: &str = "Normals";
+const BOUNDS: &str = "Bounds";
+const WIREFRAME: &str = "Wireframe";
+const TURNTABLE_SPEED: &str = "Turntable speed";
+
+fn submenu_label(label: &str, value: &str) -> String {
+    format!("{label}: {value}")
 }
 
 /// A UV pane's two labels plus its overlap readout.
@@ -718,6 +769,7 @@ fn background_menu_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::keymap::hint;
 
     /// The browser's per-pane background list, as `(stored name, label)`
     /// pairs in its order, read from the table its menu is drawn from.
@@ -774,6 +826,159 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../web/src/components/PaneToolbar.tsx");
         std::fs::read_to_string(&path).expect("the browser's pane toolbar reads")
+    }
+
+    /// One of the browser's tables, as `(stored name, label)` pairs in its
+    /// order. The same shape as the background and view-mode readers beside
+    /// it, named once rather than a fourth time.
+    ///
+    /// It declares these two ways, some `as const` and some with a written
+    /// element type, so the reader takes whichever closing form comes first
+    /// rather than insisting on one.
+    fn browser_table(source: &str, name: &str) -> Vec<(String, String)> {
+        let rest = source
+            .split_once(&format!("const {name}"))
+            .and_then(|(_, rest)| rest.split_once("= ["))
+            .map_or_else(
+                || panic!("the browser has no {name} table"),
+                |(_, table)| table,
+            );
+        let end = rest
+            .find("] as const;")
+            .into_iter()
+            .chain(rest.find("];"))
+            .min()
+            .unwrap_or_else(|| panic!("the {name} table has no end"));
+        let table = &rest[..end];
+        table
+            .lines()
+            .filter_map(|line| {
+                let mut quoted = line.split('"').skip(1).step_by(2);
+                Some((quoted.next()?.to_string(), quoted.next()?.to_string()))
+            })
+            .collect()
+    }
+
+    /// What this shell offers for one list, as `(stored name, label)` pairs,
+    /// so a label cannot be right on the wrong entry.
+    fn ours<T: serde::Serialize + std::fmt::Display>(all: &[T]) -> Vec<(String, String)> {
+        all.iter()
+            .map(|v| {
+                let stored = serde_json::to_string(v).expect("a variant serializes");
+                (stored.trim_matches('"').to_string(), v.to_string())
+            })
+            .collect()
+    }
+
+    /// The four lists the browser keeps as tables and this shell keeps as
+    /// enum variants: same entries, same labels, same order.
+    ///
+    /// Bounds and Normals are the two whose labels this release changed:
+    /// the desktop wrote `Face+Vertex`, `Model` and `Per Mesh` where the
+    /// browser writes them spaced and in sentence case.
+    #[test]
+    fn the_display_lists_are_the_browsers() {
+        let source = browser_pane_toolbar();
+        for (name, here) in [
+            ("INSPECTION_MODES", ours(InspectionMode::ALL)),
+            ("MATERIAL_OVERRIDES", ours(MaterialOverride::ALL)),
+            ("NORMALS", ours(NormalsMode::ALL)),
+            ("BOUNDS", ours(BoundsMode::ALL)),
+        ] {
+            let browser = browser_table(&source, name);
+            assert!(
+                browser.len() >= 3,
+                "read {} rows for {name}, so the reader is broken",
+                browser.len()
+            );
+            assert_eq!(here, browser, "the {name} list");
+        }
+    }
+
+    /// The wireframe weights, which name themselves descriptively rather
+    /// than by their stored name, so only the labels are compared.
+    #[test]
+    fn the_wireframe_weights_are_the_browsers() {
+        let source = browser_pane_toolbar();
+        let browser: Vec<String> = browser_table(&source, "LINE_WEIGHTS")
+            .into_iter()
+            .map(|(_, label)| label)
+            .collect();
+        assert_eq!(browser.len(), 3, "the reader found the browser's three");
+        let here: Vec<String> = LineWeight::ALL
+            .iter()
+            .map(|w| w.descriptive_label().to_string())
+            .collect();
+        assert_eq!(here, browser);
+    }
+
+    /// The six standard views are the browser six, in its order, and each
+    /// shows the key the browser spells into its own label. Back and Right
+    /// carry none on either shell.
+    #[test]
+    fn the_axis_views_are_the_browsers_with_their_keys() {
+        let source = browser_pane_toolbar();
+        let browser: Vec<String> = browser_table(&source, "VIEW_AXES")
+            .into_iter()
+            .map(|(_, label)| label)
+            .collect();
+        assert_eq!(browser.len(), 6, "the reader found the browser's six");
+
+        // The browser writes `Top (T)`; this shell writes `Top` and lets the
+        // binding table supply the key, so the two halves are compared.
+        let here: Vec<String> = AXIS_VIEWS
+            .iter()
+            .map(|(_, label, action)| match action.and_then(hint) {
+                Some(key) => format!("{label} ({key})"),
+                None => (*label).to_string(),
+            })
+            .collect();
+        assert_eq!(here, browser);
+    }
+
+    /// The entries the browser spells a key into outside its tables, each
+    /// read from the binding table here.
+    #[test]
+    fn the_keyed_entries_show_what_the_browser_spells() {
+        let source = browser_pane_toolbar();
+        for (label, action) in [
+            (FIT_VIEW, Action::FitView),
+            (UV_LAYOUT, Action::ToggleUvPane),
+            (
+                ProjectionMode::Perspective.to_string().as_str(),
+                Action::ProjectionPerspective,
+            ),
+            (
+                ProjectionMode::Orthographic.to_string().as_str(),
+                Action::ProjectionOrthographic,
+            ),
+        ] {
+            let key = hint(action).unwrap_or_else(|| panic!("{label} is unbound"));
+            assert!(
+                source.contains(&format!("{label} ({key})")),
+                "the browser no longer spells {label} with {key}"
+            );
+        }
+    }
+
+    /// The four submenus that say what they are set to are the browser four,
+    /// under its labels. It draws the value as a hint beside a plain label
+    /// and this shell writes it after the label, so the label is compared
+    /// and the browser is checked for carrying a hint at all.
+    #[test]
+    fn the_valued_submenus_are_the_browsers() {
+        let source = browser_pane_toolbar();
+        for label in [NORMALS, BOUNDS, WIREFRAME, TURNTABLE_SPEED] {
+            let decl = format!("GhostSubmenu label=\"{label}\" hint=");
+            assert!(
+                source.contains(&decl),
+                "the browser no longer draws {label} with a hint"
+            );
+            assert!(
+                submenu_label(label, "x").starts_with(&format!("{label}:")),
+                "{label} no longer leads its own submenu label"
+            );
+        }
     }
 
     /// The browser's view-mode list, as `(stored name, label)` pairs in its

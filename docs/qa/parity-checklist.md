@@ -120,3 +120,69 @@ materials, lighting and validation. The file from section 1 is the document.
       browser saved) opened on the desktop and saved again still carries them:
       `scene_diff --view` on the two files prints nothing, and the description
       is present in the desktop's file.
+
+## 3. The walk
+
+Every panel, menu, menu entry and binding, compared entry by entry on both
+shells. Most of it is held by a test that reads the browser's own source, so
+what is left here is what a test cannot see: what a panel lists once there is
+a scene in it, labels the browser computes at runtime, and how a key behaves
+on a real window.
+
+### Held by a test
+
+These run on every `cargo test` and need no one at a keyboard. Each reads the
+browser component named beside it and compares row by row, and each named
+difference is checked in reverse, so a difference that stops applying fails
+the build rather than lingering.
+
+| Surface | Held by | Against |
+|---|---|---|
+| The five global menus and their order | `chrome/menu.rs` | `menu/MenuBar.tsx` |
+| The arrangement entries and the seven panel toggles | `chrome/menu.rs` | `menu/MenuBar.tsx` |
+| The viewport bar, its pane layouts and handle frames, with their keys | `chrome/viewport_bar.rs` | `ViewportMenuBar.tsx` |
+| The node pane View menu, its order and every key | `panels/nodes/menus.rs` | `menu/NodePaneViewMenu.tsx` |
+| The connection styles | `panels/nodes/menus.rs` | `store/ui.ts` |
+| The Add menu lead entry and its key | `panels/nodes/menus.rs` | `menu/NodesMenu.tsx` |
+| The three Properties menus, their order and every key | `panels/params/menus.rs` | `menu/PropertiesMenus.tsx` |
+| View modes, inspections, overrides, normals, bounds, wireframe weights, backgrounds | `chrome/pane_toolbar.rs` | `PaneToolbar.tsx` |
+| The six standard views and their keys | `chrome/pane_toolbar.rs` | `PaneToolbar.tsx` |
+| Fit view, UV Layout and the two projections, with their keys | `chrome/pane_toolbar.rs` | `PaneToolbar.tsx` |
+| The four Display submenus that say what they are set to | `chrome/pane_toolbar.rs` | `PaneToolbar.tsx` |
+| The viewport context menu: heading, five tools with keys, six entries in order | `chrome/viewport_context_menu.rs` | `ViewportContextMenu.tsx` |
+| The ten panel titles, and that the panel sets are the same set | `gui/dock.rs` | `dock/layouts.ts`, `dock/api.ts` |
+| The review sections, the filter and its hint, the empty state | `panels/review/panel.rs` | `review/ReviewPanel.tsx` |
+| Every binding, in every scope | `state/input/keymap.rs` | `input/keymap.ts` |
+| The shortcuts reference lists exactly the bindings | `gui/modals/shortcuts.rs` | its own `state/input/keymap.rs`, which the row above holds to the browser |
+| The six arrangements | `gui/arrangement.rs` | `store/desks.ts` |
+
+### By hand
+
+About an hour per shell, on a scene with geometry, a camera, a light, a
+material network and at least one review note.
+
+- [ ] **Each panel, with something in it.** Open all ten on both shells and
+      compare what they list, not what their bar offers: the tree rows and
+      their state marks, the parameter panel tabs for a node of each family,
+      the assets grid and its kinds, the attributes table headers and paging,
+      the texture panel with an image network open, the text panel with a
+      snippet in each context, the node info card. Empty states too, since a
+      panel says something different with nothing to show.
+- [ ] **The Add submenus, per category.** The category names and the node
+      types under each are computed from the registry on both shells and no
+      reader can compare them, so they are compared here: every category the
+      current context offers, in the same order, holding the same types under
+      the same display names, in the object, geometry, material and image
+      contexts.
+- [ ] **Every binding, in every scope.** Press each listed key three times,
+      with the pointer over the viewport, over the node canvas, and over
+      neither, and confirm the same thing happens on both shells, including
+      the ones that mean two things in two scopes (`B`, `C`, `E`, `F`, `L`,
+      `P`). This is the half the tables cannot prove: they agree about what
+      is bound, not about what the window does with it.
+- [ ] **The six modals.** Preferences, Keyboard Shortcuts, About, Environment,
+      Unsaved changes and Recovery: open each on both shells and compare the
+      fields, their order, the wording of the buttons, and what Escape does.
+
+Findings that are not fixed go to the milestone document's divergence set
+with a reason, never into this file.

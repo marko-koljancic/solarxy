@@ -94,6 +94,28 @@ impl SolarxyTab {
             Self::Retired => "retired",
         }
     }
+
+    /// What the tab is called, before anything a panel adds to it.
+    ///
+    /// The browser sets each title once when it adds the panel, so the two
+    /// shells can only be compared on the part that does not move. Only the
+    /// asset preview adds anything, naming what it is showing, and the
+    /// browser does the same from the same word.
+    pub(crate) fn title_base(self) -> &'static str {
+        match self {
+            Self::Viewport => "Viewport",
+            Self::ReviewPanel => "Review",
+            Self::Properties => "Properties",
+            Self::Tree => "Tree",
+            Self::Nodes => "Nodes",
+            Self::Assets => "Assets",
+            Self::AssetPreview => "Preview",
+            Self::Texture => "Texture",
+            Self::Attributes => "Attributes",
+            Self::Text => "Text",
+            Self::Retired => "",
+        }
+    }
 }
 
 /// The layout a new installation opens in, and what a layout that cannot be
@@ -145,26 +167,15 @@ impl TabViewer for SolarxyTabViewer<'_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab {
-            SolarxyTab::Viewport => "Viewport".into(),
-            SolarxyTab::ReviewPanel => {
-                format!("Review ({})", self.sources.review.notes.len()).into()
-            }
-            SolarxyTab::Properties => "Properties".into(),
-            SolarxyTab::Tree => "Tree".into(),
-            SolarxyTab::Nodes => "Nodes".into(),
-            SolarxyTab::Assets => "Assets".into(),
-            SolarxyTab::Texture => "Texture".into(),
-            SolarxyTab::Attributes => "Attributes".into(),
-            SolarxyTab::Text => "Text".into(),
             SolarxyTab::AssetPreview => self
                 .panels
                 .asset_preview
                 .map_or_else(
-                    || "Preview".to_string(),
-                    |(_, name)| format!("Preview: {name}"),
+                    || tab.title_base().to_string(),
+                    |(_, name)| format!("{}: {name}", tab.title_base()),
                 )
                 .into(),
-            SolarxyTab::Retired => String::new().into(),
+            other => other.title_base().into(),
         }
     }
 
@@ -665,6 +676,134 @@ mod tests {
 
     fn membership(dock: &DockState<SolarxyTab>) -> HashSet<SolarxyTab> {
         dock.iter_all_tabs().map(|(_, t)| *t).collect()
+    }
+
+    /// Every tab a user can have, which is every variant but the one no tab
+    /// is ever created with.
+    const REAL_TABS: &[SolarxyTab] = &[
+        SolarxyTab::Viewport,
+        SolarxyTab::Nodes,
+        SolarxyTab::Properties,
+        SolarxyTab::ReviewPanel,
+        SolarxyTab::Assets,
+        SolarxyTab::AssetPreview,
+        SolarxyTab::Texture,
+        SolarxyTab::Attributes,
+        SolarxyTab::Tree,
+        SolarxyTab::Text,
+    ];
+
+    /// What the browser calls each of them. The slugs differ because this
+    /// shell writes kebab case into its preferences and the browser writes
+    /// camel case into its layout blob; neither can be renamed without
+    /// costing a reader their arrangement, so the two are mapped here.
+    fn browser_id(tab: SolarxyTab) -> &'static str {
+        match tab {
+            SolarxyTab::ReviewPanel => "review",
+            SolarxyTab::AssetPreview => "assetPreview",
+            other => other.slug(),
+        }
+    }
+
+    fn browser_dock(file: &str) -> String {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("the repository root");
+        std::fs::read_to_string(root.join("web/src/dock").join(file))
+            .unwrap_or_else(|_| panic!("the browser's {file}"))
+    }
+
+    /// The title the browser gives a panel, from whichever of its two
+    /// mechanisms declares it: the arrangement builds panels as object
+    /// literals, and the reopen path passes the title as an argument.
+    fn browser_title(id: &str) -> Option<String> {
+        let api = browser_dock("api.ts");
+        if let Some(rest) = api.split_once(&format!("setPanelOpen(\"{id}\", \"")) {
+            return rest.1.split('"').next().map(str::to_string);
+        }
+        let layouts = browser_dock("layouts.ts");
+        let rest = layouts.split_once(&format!("id: \"{id}\","))?.1;
+        let block = rest.split_once("});")?.0;
+        block
+            .split_once("title: \"")
+            .and_then(|(_, t)| t.split('"').next())
+            .map(str::to_string)
+    }
+
+    /// The preview is the one panel the browser titles from neither of
+    /// those mechanisms: it is opened with the title as an argument, built
+    /// where the asset is picked, so the word is read from there.
+    fn browser_preview_title() -> String {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("the repository root");
+        let source = std::fs::read_to_string(root.join("web/src/components/AssetsPane.tsx"))
+            .expect("the browser's assets pane");
+        let rest = source
+            .split_once("openAssetPreviewPanel(`")
+            .expect("the browser opens the preview with a title")
+            .1;
+        rest.split_once("${")
+            .expect("the title names what it shows")
+            .0
+            .trim_end_matches([' ', ':'])
+            .to_string()
+    }
+
+    /// Each tab is titled as the browser titles the same panel. The asset
+    /// preview names what it shows after its title, on both shells, so the
+    /// part compared is the part that does not move.
+    #[test]
+    fn the_tabs_are_titled_as_the_browser_titles_its_panels() {
+        for tab in REAL_TABS {
+            let id = browser_id(*tab);
+            let theirs = if *tab == SolarxyTab::AssetPreview {
+                browser_preview_title()
+            } else {
+                browser_title(id)
+                    .unwrap_or_else(|| panic!("the browser declares no title for {id}"))
+            };
+            assert_eq!(tab.title_base(), theirs, "the {id} panel");
+        }
+    }
+
+    /// The panel sets are the same set: every panel the browser declares has
+    /// a tab here, and no tab here is one the browser does not have.
+    #[test]
+    fn every_browser_panel_has_a_tab_and_no_tab_is_unaccounted_for() {
+        let layouts = browser_dock("layouts.ts");
+        let start = layouts
+            .find("export const PANEL_IDS = [")
+            .expect("the browser's panel ids");
+        let block = &layouts[start..];
+        let block = &block[..block.find(']').expect("the list's end")];
+        let theirs: HashSet<String> = block
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_string)
+            .collect();
+        assert_eq!(theirs.len(), 10, "the reader found the browser's ten");
+
+        let ours: HashSet<String> = REAL_TABS
+            .iter()
+            .map(|tab| browser_id(*tab).to_string())
+            .collect();
+        assert_eq!(ours, theirs);
+    }
+
+    /// The one variant no tab is created with is the one left out above, so
+    /// a variant added later cannot slip past both tests.
+    #[test]
+    fn every_variant_is_a_real_tab_or_the_retired_one() {
+        for tab in REAL_TABS {
+            assert_ne!(*tab, SolarxyTab::Retired);
+            assert!(!tab.title_base().is_empty(), "{tab:?} has no title");
+        }
+        assert_eq!(REAL_TABS.len(), 10);
+        assert!(SolarxyTab::Retired.title_base().is_empty());
     }
 
     /// The default is the `Default` arrangement, exactly: three panels and

@@ -156,7 +156,7 @@ cycle_enum! {
         Off => "Off",
         Face => "Face",
         Vertex => "Vertex",
-        FaceAndVertex => "Face+Vertex",
+        FaceAndVertex => "Face + Vertex",
     }
     ; cycle
 }

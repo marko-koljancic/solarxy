@@ -45,6 +45,18 @@ impl Section {
     }
 }
 
+/// The words the panel says that are not a section title, each held to the
+/// browser by a test rather than by memory.
+///
+/// The empty state is one sentence in the browser and two lines here, so
+/// the title and the line under it are the two halves of that sentence and
+/// the test joins them before it compares.
+const RESOLVED_FILTER: &str = "Done";
+const FILTER_HINT: &str = "Filter...";
+const EMPTY_TITLE: &str = "No notes yet.";
+const EMPTY_IN_MODE: &str = "Click geometry to pin one.";
+const EMPTY_OUT_OF_MODE: &str = "Shift+R, then click geometry.";
+
 fn section_of(note: &AnnotationSnapshot) -> Section {
     if note.annotation.resolved {
         Section::Complete
@@ -202,13 +214,14 @@ pub(in crate::gui) fn draw_review_panel_content(
                 review.category_filters[idx] = !on;
             }
         }
-        ui.checkbox(&mut review.show_resolved, "Complete");
+        ui.checkbox(&mut review.show_resolved, RESOLVED_FILTER)
+            .on_hover_text("Show resolved");
     });
 
     ui.horizontal(|ui| {
         let resp = ui.add(
             egui::TextEdit::singleline(&mut review.text_filter)
-                .hint_text("filter notes")
+                .hint_text(FILTER_HINT)
                 .desired_width(f32::INFINITY),
         );
         if !review.text_filter.is_empty() && ui.small_button("\u{00D7}").clicked() {
@@ -223,13 +236,17 @@ pub(in crate::gui) fn draw_review_panel_content(
     if notes.is_empty() {
         ui.add_space(20.0);
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("No annotations yet").weak());
+            ui.label(egui::RichText::new(EMPTY_TITLE).weak());
             ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new("Press Shift+R, then click on the model")
-                    .small()
-                    .weak(),
-            );
+            // The second line says what to do next, and what that is depends
+            // on whether review mode is already on. The browser branches the
+            // same way on the same state.
+            let next = if review.active {
+                EMPTY_IN_MODE
+            } else {
+                EMPTY_OUT_OF_MODE
+            };
+            ui.label(egui::RichText::new(next).small().weak());
         });
         return;
     }
@@ -733,10 +750,76 @@ mod tests {
         assert_eq!(section_of(&note(1, "x", true, false)), Section::Complete);
     }
 
+    fn browser_panel() -> String {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("the repository root");
+        std::fs::read_to_string(root.join("web/src/components/review/ReviewPanel.tsx"))
+            .expect("the browser's review panel")
+    }
+
+    /// The sections are the browser sections, in its order, read from the
+    /// component rather than from a list kept here beside them.
     #[test]
     fn the_sections_draw_in_the_browsers_order() {
+        let source = browser_panel();
+        let browser: Vec<String> = source
+            .split("<Section title=\"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .map(str::to_string)
+            .collect();
+        assert_eq!(browser.len(), 3, "the reader found the browser's three");
         let titles: Vec<&str> = Section::ORDER.iter().map(|s| s.title()).collect();
-        assert_eq!(titles, ["Needs re-anchor", "Open", "Complete"]);
+        assert_eq!(titles, browser);
+    }
+
+    /// The filter reads as the browser reads it. The desktop said Complete,
+    /// which it also calls the section and the action on a note, so one word
+    /// was doing three jobs where the browser separates the filter.
+    #[test]
+    fn the_filter_and_its_hint_are_the_browsers() {
+        let source = browser_panel();
+        // Two controls carry this class: the action on a note, which reads
+        // Complete on both shells, and the filter, which reads Done there
+        // and used to read Complete here. The filter is the one titled.
+        let start = source
+            .find("className=\"review-complete\" title=\"Show resolved\"")
+            .expect("the browser's resolved filter");
+        let block = &source[start..];
+        let block = &block[..block.find("</label>").expect("the end of it")];
+        assert!(
+            block.lines().any(|line| line.trim() == RESOLVED_FILTER),
+            "the browser no longer labels the resolved filter {RESOLVED_FILTER}"
+        );
+        assert!(
+            source.contains(&format!("placeholder=\"{FILTER_HINT}\"")),
+            "the browser no longer hints the text filter with {FILTER_HINT}"
+        );
+    }
+
+    /// The empty state says what the browser says, in both of its branches.
+    /// One sentence there, a title and a line here, so the two halves are
+    /// joined before they are compared.
+    #[test]
+    fn the_empty_state_is_the_browsers_in_both_branches() {
+        let source = browser_panel();
+        let start = source
+            .find("review-empty")
+            .expect("the browser's empty state");
+        let block = &source[start..];
+        let block = &block[..block.find("</div>").expect("the end of it")];
+        for line in [
+            format!("{EMPTY_TITLE} {EMPTY_IN_MODE}"),
+            format!("{EMPTY_TITLE} {EMPTY_OUT_OF_MODE}"),
+        ] {
+            let (head, tail) = line.split_once(". ").expect("two halves");
+            assert!(
+                block.contains(&format!("{head}.")) && block.contains(tail),
+                "the browser empty state no longer reads {line}"
+            );
+        }
     }
 
     #[test]

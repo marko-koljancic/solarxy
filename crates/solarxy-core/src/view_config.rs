@@ -208,8 +208,8 @@ impl std::fmt::Display for BoundsMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BoundsMode::Off => write!(f, "Off"),
-            BoundsMode::WholeModel => write!(f, "Model"),
-            BoundsMode::PerMesh => write!(f, "Per Mesh"),
+            BoundsMode::WholeModel => write!(f, "Whole model"),
+            BoundsMode::PerMesh => write!(f, "Per mesh"),
         }
     }
 }
