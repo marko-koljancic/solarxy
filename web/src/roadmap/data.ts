@@ -109,6 +109,10 @@ export const ARCH_LAYERS: ArchLayer[] = [
         d: "OBJ / STL / PLY / glTF loaders and exporters; byte-first, wasm-clean.",
       },
       { n: "solarxy-imaging", d: "Pure-CPU image operators for the texture context." },
+      {
+        n: "solarxy-bvh",
+        d: "GPU-free bounding volume hierarchy for ray queries: binned-SAH build, two-level traversal, CPU twin of the shader kernel.",
+      },
     ],
   },
   {
@@ -129,6 +133,10 @@ export const ARCH_LAYERS: ArchLayer[] = [
         d: "The .slxy ZIP format: serde schema, content-addressed assets, migration gate.",
       },
       { n: "solarxy-validate", d: "Validation orchestration and CI pipeline adapters." },
+      {
+        n: "solarxy-studio",
+        d: "The shared interface derivation: how a node and its parameters are presented, written once and read by both shells.",
+      },
     ],
   },
   {
@@ -140,6 +148,10 @@ export const ARCH_LAYERS: ArchLayer[] = [
         n: "solarxy-renderer",
         d: "Pipelines, IBL, SSAO, bloom, shadow, composite. Talks to the engine only through SceneDelta.",
       },
+      {
+        n: "solarxy-render",
+        d: "Rendering a scene with no browser and no window: one path for a scene file or a bare model, driving the tiled still job.",
+      },
     ],
   },
   {
@@ -150,7 +162,7 @@ export const ARCH_LAYERS: ArchLayer[] = [
       { n: "solarxy (root)", d: "Thin always-GUI entrypoint; parses GuiArgs, calls run_viewer." },
       {
         n: "solarxy-app",
-        d: "winit + egui desktop shell: viewer, validator, reviewer. Not yet wired to solarxy-graph.",
+        d: "winit + egui desktop shell: node canvas, parameter panel, panels, authoring, review and a traced pane, over the same engine.",
       },
       {
         n: "solarxy-web",

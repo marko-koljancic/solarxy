@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { CRATE_COUNT, NODE_TYPE_COUNT } from "./data";
+import { ARCH_LAYERS, CRATE_COUNT, NODE_TYPE_COUNT } from "./data";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -36,4 +36,34 @@ it("the roadmap data module agrees with the workspace on how many crates there a
     .map((entry) => entry.trim().replace(/^"|"$/g, ""))
     .filter((entry) => entry.length > 0);
   expect(members.length).toBe(CRATE_COUNT);
+});
+
+// The count was pinned and the LIST was not, so the page told a reader
+// sixteen and then showed thirteen: the three missing were the three most
+// recently added, because a crate arrives in a Rust pass that never opens
+// this directory. Naming which crate is missing is the point of comparing
+// sets rather than lengths.
+it("the architecture diagram names every workspace crate and nothing else", () => {
+  const manifest = readFileSync(resolve(here, "../../../Cargo.toml"), "utf8");
+  const block = manifest.match(/members\s*=\s*\[([^\]]*)\]/);
+  const members = new Set(
+    (block?.[1] ?? "")
+      .split(",")
+      .map((entry) => entry.trim().replace(/^"|"$/g, ""))
+      .filter((entry) => entry.length > 0)
+      // The root binary is the workspace itself; the diagram names it for
+      // what it is rather than by the dot the manifest uses.
+      .map((entry) => (entry === "." ? "solarxy (root)" : entry.replace(/^crates\//, ""))),
+  );
+
+  const drawn = new Set(
+    ARCH_LAYERS.flatMap((layer) => layer.crates.map((c) => c.n))
+      // One entry declares itself not a crate: the frontend this file is in.
+      .filter((name) => !name.startsWith("web/")),
+  );
+
+  const missing = [...members].filter((name) => !drawn.has(name)).sort();
+  const extra = [...drawn].filter((name) => !members.has(name)).sort();
+  expect(missing, "in the workspace and not in the diagram").toEqual([]);
+  expect(extra, "in the diagram and not in the workspace").toEqual([]);
 });
