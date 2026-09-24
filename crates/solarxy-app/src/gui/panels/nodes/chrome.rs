@@ -198,6 +198,24 @@ mod tests {
         (a[0] - b[0]).abs() < 0.001 && (a[1] - b[1]).abs() < 0.001
     }
 
+    /// The lattice is the browser's, read from the constant its canvas
+    /// snaps to and draws, so a change there fails here.
+    #[test]
+    fn the_snap_lattice_is_the_browsers_grid_gap() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../web/src/flow/NodeCanvas.tsx");
+        let source = std::fs::read_to_string(&path).expect("the browser's canvas reads");
+        let gap: f32 = source
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("const GRID_GAP = "))
+            .and_then(|rest| rest.trim_end_matches(';').trim().parse().ok())
+            .expect("the browser's canvas declares its grid gap");
+        assert!(
+            (GRID - gap).abs() < f32::EPSILON,
+            "the desktop snaps to {GRID} where the browser snaps to {gap}"
+        );
+    }
+
     /// The grid is the browser's eighteen pixels, so a graph snapped on
     /// either shell sits on the same lattice.
     #[test]

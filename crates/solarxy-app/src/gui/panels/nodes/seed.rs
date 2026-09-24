@@ -529,6 +529,12 @@ impl CanvasState {
         self.scale
     }
 
+    /// The graph-to-screen transform the last frame drew with.
+    #[cfg(test)]
+    pub(super) fn last_transform(&self) -> egui::emath::TSTransform {
+        self.to_screen
+    }
+
     /// Remember what the toolbar asked of the view.
     pub(super) fn request_view(&mut self, zoom: Option<super::chrome::ZoomStep>, fit: bool) {
         if zoom.is_some() {

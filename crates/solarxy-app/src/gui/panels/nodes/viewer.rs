@@ -210,7 +210,10 @@ impl CanvasViewer<'_> {
     /// nothing at all, and in particular does not zoom: the substrate's own
     /// double-click centring is switched off so the gesture means one
     /// thing.
-    fn watch_for_dive(&mut self, ui: &egui::Ui, box_rect: egui::Rect, id: NodeId) {
+    ///
+    /// `on_screen` is the node's box in screen points, because that is the
+    /// space the pointer is reported in.
+    fn watch_for_dive(&mut self, ui: &egui::Ui, on_screen: egui::Rect, id: NodeId) {
         if self.dive.is_some() {
             return;
         }
@@ -219,7 +222,7 @@ impl CanvasViewer<'_> {
                 .button_double_clicked(egui::PointerButton::Primary)
                 && i.pointer
                     .interact_pos()
-                    .is_some_and(|p| box_rect.contains(p))
+                    .is_some_and(|p| on_screen.contains(p))
         });
         if !hit {
             return;
@@ -240,7 +243,9 @@ impl CanvasViewer<'_> {
     /// The press rather than the release, because a drag begins with a
     /// press on the node being dragged and a user expects it selected as
     /// it moves rather than after it lands.
-    fn watch_for_click(&mut self, ui: &egui::Ui, box_rect: egui::Rect, id: NodeId) {
+    ///
+    /// `on_screen` is the node's box in screen points, as for the dive.
+    fn watch_for_click(&mut self, ui: &egui::Ui, on_screen: egui::Rect, id: NodeId) {
         if self.clicked.is_some() {
             return;
         }
@@ -248,7 +253,7 @@ impl CanvasViewer<'_> {
             i.pointer.button_pressed(egui::PointerButton::Primary)
                 && i.pointer
                     .interact_pos()
-                    .is_some_and(|p| box_rect.contains(p))
+                    .is_some_and(|p| on_screen.contains(p))
         });
         if hit {
             self.clicked = Some(id);
@@ -561,11 +566,18 @@ impl SnarlViewer<CanvasNode> for CanvasViewer<'_> {
             }
             return;
         }
-        self.watch_for_dive(ui, box_rect, id);
-        self.watch_for_click(ui, box_rect, id);
+        // The box was allocated inside the substrate's transformed layer, so
+        // it is in graph units, while the pointer the input reports is on
+        // the screen. Mapped once here and read three times, so the press,
+        // the double press and the rest cannot disagree about where a node
+        // is. The stored box stays in graph units: the dwell and the info
+        // card map it themselves with the transform of their own frame.
+        let on_screen = self.to_screen * box_rect;
+        self.watch_for_dive(ui, on_screen, id);
+        self.watch_for_click(ui, on_screen, id);
         if ui
             .input(|i| i.pointer.latest_pos())
-            .is_some_and(|p| box_rect.contains(p))
+            .is_some_and(|p| on_screen.contains(p))
         {
             self.hovered = Some((id, box_rect));
         }

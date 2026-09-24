@@ -1210,11 +1210,24 @@ fn canvas_style(
     prefs: solarxy_core::preferences::CanvasPrefs,
 ) -> egui_snarl::ui::SnarlStyle {
     let mut style = egui_snarl::ui::SnarlStyle::new();
+    // The lattice a node snaps to, drawn square. The substrate's own
+    // default is a coarser grid turned by a radian, which is a grid nothing
+    // lands on.
     style.bg_pattern = Some(if prefs.grid {
-        egui_snarl::ui::BackgroundPattern::new()
+        egui_snarl::ui::BackgroundPattern::Grid(egui_snarl::ui::Grid::new(
+            egui::vec2(chrome::GRID, chrome::GRID),
+            0.0,
+        ))
     } else {
         egui_snarl::ui::BackgroundPattern::NoPattern
     });
+    // The node is the art the viewer paints and nothing else. The
+    // substrate would otherwise put its own collapse triangle and a blank
+    // drag block in front of every header, which the browser's node does
+    // not have and which pushed the box away from where the document says
+    // the node is.
+    style.collapsible = Some(false);
+    style.header_drag_space = Some(egui::Vec2::ZERO);
     style.bg_pattern_stroke = Some(egui::Stroke::new(1.0_f32, theme.border));
     // Sockets on the box's edges, which is what the placement override
     // needs: an edge placement is the one that hands a pin the node's own
@@ -1296,7 +1309,9 @@ mod tests {
         Theme::from_choice(ThemeChoice::default())
     }
 
-    /// Draw one real interface pass over a real document.
+    /// Draw one real interface pass over a real document, on a context of
+    /// its own. A gesture that spans frames (a double click, a dwell) needs
+    /// the same context every frame, which is what `one_frame_in` is for.
     fn one_frame(
         engine: &Engine,
         state: &mut CanvasState,
@@ -1304,7 +1319,24 @@ mod tests {
         intents: &mut Intents,
         input: egui::RawInput,
     ) {
-        let egui_ctx = egui::Context::default();
+        one_frame_in(
+            &egui::Context::default(),
+            engine,
+            state,
+            ctx,
+            intents,
+            input,
+        );
+    }
+
+    fn one_frame_in(
+        egui_ctx: &egui::Context,
+        engine: &Engine,
+        state: &mut CanvasState,
+        ctx: &mut GraphContext,
+        intents: &mut Intents,
+        input: egui::RawInput,
+    ) {
         let _ = egui_ctx.run(input, |c| {
             egui::CentralPanel::default().show(c, |ui| {
                 draw_nodes_content(
@@ -1571,6 +1603,388 @@ mod tests {
             declared,
             "the canvas placed a different number of sockets than the document declares"
         );
+    }
+
+    /// A frame's input on a window of a known size at a known time.
+    ///
+    /// The size matters: with none, egui lays the panel out on a ten
+    /// thousand point square and the substrate centres the graph in it,
+    /// which puts every node somewhere no synthetic pointer would go.
+    fn input_at(time: f64, events: Vec<egui::Event>) -> egui::RawInput {
+        input_held(time, events, egui::Modifiers::NONE)
+    }
+
+    /// The same, with a modifier held for the whole frame: the resolver
+    /// reads the frame's modifier state, not the event's.
+    fn input_held(
+        time: f64,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            time: Some(time),
+            events,
+            modifiers,
+            ..Default::default()
+        }
+    }
+
+    fn press(at: egui::Pos2, modifiers: egui::Modifiers) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers,
+            },
+        ]
+    }
+
+    fn release(at: egui::Pos2) -> Vec<egui::Event> {
+        vec![egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    }
+
+    /// The fixture adds every node at the origin, so two nodes share one
+    /// box; a gesture aimed at one has to be aimed at a node alone.
+    fn spread(engine: &mut Engine, ctx: GraphContext, node: NodeId) {
+        engine
+            .apply(Command::MoveNodes {
+                ctx,
+                moves: vec![(node, [240.0, 0.0])],
+            })
+            .expect("a move is legal");
+    }
+
+    /// Two idle frames on the given context, so the boxes are recorded and
+    /// the transform is the one the next frame draws with; then the node's
+    /// box on the screen.
+    fn settled_box(
+        egui_ctx: &egui::Context,
+        engine: &Engine,
+        state: &mut CanvasState,
+        ctx: &mut GraphContext,
+        intents: &mut Intents,
+        node: NodeId,
+    ) -> egui::Rect {
+        for _ in 0..2 {
+            one_frame_in(
+                egui_ctx,
+                engine,
+                state,
+                ctx,
+                intents,
+                input_at(0.0, Vec::new()),
+            );
+        }
+        assert!(raised(intents).is_empty(), "settling raised something");
+        state
+            .screen_box(node, state.last_transform())
+            .expect("the node has a box after two frames")
+    }
+
+    /// The bug this closes: the box is measured inside the substrate's
+    /// transformed layer and the pointer is reported on the screen. A press
+    /// at the box's screen position selects; the same numbers read as graph
+    /// units would miss, which the first assertion makes sure of.
+    #[test]
+    fn a_press_inside_a_nodes_box_selects_it() {
+        let (mut engine, geo, boxy, merge) = scene();
+        let mut ctx = GraphContext::Subflow(geo);
+        spread(&mut engine, ctx, merge);
+        let egui_ctx = egui::Context::default();
+        let mut state = CanvasState::default();
+        let mut intents = Intents::default();
+        let on_screen = settled_box(&egui_ctx, &engine, &mut state, &mut ctx, &mut intents, boxy);
+        let graph_box = state
+            .screen_box(boxy, egui::emath::TSTransform::IDENTITY)
+            .expect("the box is recorded");
+        assert!(
+            !graph_box.contains(on_screen.center()),
+            "the fixture must put the graph and the screen apart, or the mapping is untested"
+        );
+
+        one_frame_in(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            input_at(0.1, press(on_screen.center(), egui::Modifiers::NONE)),
+        );
+        assert_eq!(
+            selections_only(&mut intents),
+            vec![(ctx, vec![boxy])],
+            "a press on a node selects it and nothing else"
+        );
+
+        one_frame_in(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            input_at(0.2, release(on_screen.center())),
+        );
+        assert!(raised(&mut intents).is_empty(), "the release asks nothing");
+    }
+
+    /// The platform modifier adds, and adds again to remove, which is the
+    /// browser's multi-select and the substrate's own deselect composed.
+    #[test]
+    fn a_command_press_adds_to_the_selection_and_a_second_removes_it() {
+        let (mut engine, geo, boxy, merge) = scene();
+        let ctx_now = GraphContext::Subflow(geo);
+        spread(&mut engine, ctx_now, merge);
+        engine
+            .apply(Command::SetSelection {
+                ctx: ctx_now,
+                ids: vec![boxy],
+            })
+            .expect("a selection is legal");
+        let egui_ctx = egui::Context::default();
+        let mut state = CanvasState::default();
+        let mut ctx = ctx_now;
+        let mut intents = Intents::default();
+        let merge_box = settled_box(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            merge,
+        );
+        let held = egui::Modifiers::COMMAND;
+
+        one_frame_in(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            input_held(0.1, press(merge_box.center(), held), held),
+        );
+        assert_eq!(
+            selections_only(&mut intents),
+            vec![(ctx, vec![boxy, merge])],
+            "a modified press adds the node"
+        );
+
+        // The document now holds both; the second modified press removes.
+        engine
+            .apply(Command::SetSelection {
+                ctx: ctx_now,
+                ids: vec![boxy, merge],
+            })
+            .expect("a selection is legal");
+        one_frame_in(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            input_held(0.2, release(merge_box.center()), held),
+        );
+        let _ = raised(&mut intents);
+        one_frame_in(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            input_held(0.3, press(merge_box.center(), held), held),
+        );
+        assert_eq!(
+            selections_only(&mut intents),
+            vec![(ctx, vec![boxy])],
+            "a modified press on a selected node removes it"
+        );
+    }
+
+    /// Two presses inside egui's double-click window on a container enter
+    /// it; the same on a leaf do nothing, because a leaf opens nothing.
+    #[test]
+    fn a_double_click_on_a_container_dives_and_on_a_leaf_does_not() {
+        let (mut engine, geo, boxy, merge) = scene();
+        spread(&mut engine, GraphContext::Subflow(geo), merge);
+        let egui_ctx = egui::Context::default();
+        let mut state = CanvasState::default();
+        let mut ctx = GraphContext::Root;
+        let mut intents = Intents::default();
+        let geo_box = settled_box(&egui_ctx, &engine, &mut state, &mut ctx, &mut intents, geo);
+
+        let at = geo_box.center();
+        let mut t = 0.0;
+        for events in [
+            press(at, egui::Modifiers::NONE),
+            release(at),
+            press(at, egui::Modifiers::NONE),
+            release(at),
+        ] {
+            t += 0.05;
+            one_frame_in(
+                &egui_ctx,
+                &engine,
+                &mut state,
+                &mut ctx,
+                &mut intents,
+                input_at(t, events),
+            );
+        }
+        let _ = raised(&mut intents);
+        assert_eq!(
+            ctx,
+            GraphContext::Subflow(geo),
+            "a double press on a container enters it"
+        );
+
+        // Inside, the same gesture on a leaf leaves the context alone. A
+        // fresh context, because the settling frames start the clock over
+        // and egui's input history refuses to run backwards.
+        let egui_ctx = egui::Context::default();
+        let mut state = CanvasState::default();
+        let mut intents = Intents::default();
+        let box_box = settled_box(&egui_ctx, &engine, &mut state, &mut ctx, &mut intents, boxy);
+        let at = box_box.center();
+        let mut t = 0.0;
+        for events in [
+            press(at, egui::Modifiers::NONE),
+            release(at),
+            press(at, egui::Modifiers::NONE),
+            release(at),
+        ] {
+            t += 0.05;
+            one_frame_in(
+                &egui_ctx,
+                &engine,
+                &mut state,
+                &mut ctx,
+                &mut intents,
+                input_at(t, events),
+            );
+        }
+        let _ = raised(&mut intents);
+        assert_eq!(
+            ctx,
+            GraphContext::Subflow(geo),
+            "a double press on a leaf opens nothing"
+        );
+    }
+
+    /// The ring opens where the node is on the screen, and only on a node.
+    #[test]
+    fn resting_on_a_node_opens_the_ring_and_resting_on_nothing_does_not() {
+        let (mut engine, geo, boxy, merge) = scene();
+        let mut ctx = GraphContext::Subflow(geo);
+        spread(&mut engine, ctx, merge);
+        let egui_ctx = egui::Context::default();
+        let mut state = CanvasState::default();
+        let mut intents = Intents::default();
+        let on_screen = settled_box(&egui_ctx, &engine, &mut state, &mut ctx, &mut intents, boxy);
+        let at = on_screen.center();
+        let rested = 1.0 + radial::DWELL_MS / 1000.0 + 0.1;
+
+        one_frame_in(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            input_at(1.0, vec![egui::Event::PointerMoved(at)]),
+        );
+        assert!(state.radial().is_none(), "the ring waits for the dwell");
+        one_frame_in(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            input_at(rested, vec![]),
+        );
+        let ring = state.radial().expect("resting on a node opens the ring");
+        assert_eq!(ring.node, boxy);
+        assert!(
+            (ring.centre - at).length() < 1.0,
+            "the ring is centred on the node's screen box, not its graph box"
+        );
+
+        // Empty canvas: a corner no node reaches.
+        let egui_ctx = egui::Context::default();
+        let mut state = CanvasState::default();
+        let mut intents = Intents::default();
+        settled_box(&egui_ctx, &engine, &mut state, &mut ctx, &mut intents, boxy);
+        let empty = egui::pos2(790.0, 590.0);
+        one_frame_in(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            input_at(1.0, vec![egui::Event::PointerMoved(empty)]),
+        );
+        one_frame_in(
+            &egui_ctx,
+            &engine,
+            &mut state,
+            &mut ctx,
+            &mut intents,
+            input_at(rested, vec![]),
+        );
+        assert!(state.radial().is_none(), "resting on nothing opens nothing");
+    }
+
+    /// The node is the art the viewer paints: no collapse control and no
+    /// drag block in front of it.
+    #[test]
+    fn the_substrate_draws_no_collapse_triangle_and_no_drag_space() {
+        let style = canvas_style(theme(), solarxy_core::preferences::CanvasPrefs::default());
+        assert_eq!(style.collapsible, Some(false));
+        assert_eq!(style.header_drag_space, Some(egui::Vec2::ZERO));
+    }
+
+    /// The grid drawn is the lattice snapped to: the browser's spacing,
+    /// square, and absent when the preference is off.
+    #[test]
+    fn the_grid_is_the_snap_lattice_drawn_square() {
+        let on = solarxy_core::preferences::CanvasPrefs {
+            grid: true,
+            ..Default::default()
+        };
+        match canvas_style(theme(), on).bg_pattern {
+            Some(egui_snarl::ui::BackgroundPattern::Grid(grid)) => {
+                assert_eq!(grid.spacing, egui::vec2(chrome::GRID, chrome::GRID));
+                assert!(grid.angle.abs() < f32::EPSILON, "the grid is axis-aligned");
+            }
+            other => panic!("the grid preference draws a grid, not {other:?}"),
+        }
+        let off = solarxy_core::preferences::CanvasPrefs {
+            grid: false,
+            ..Default::default()
+        };
+        assert!(matches!(
+            canvas_style(theme(), off).bg_pattern,
+            Some(egui_snarl::ui::BackgroundPattern::NoPattern)
+        ));
+    }
+
+    /// The selections a frame asked for, and nothing else was asked.
+    fn selections_only(intents: &mut Intents) -> Vec<(GraphContext, Vec<NodeId>)> {
+        raised(intents)
+            .into_iter()
+            .map(|action| match action {
+                CanvasAction::SetSelection(ctx, ids) => (ctx, ids),
+                other => panic!("the frame asked for {other:?} rather than a selection"),
+            })
+            .collect()
     }
 
     /// Every rewiring assertion reads the same way: run the resolution
