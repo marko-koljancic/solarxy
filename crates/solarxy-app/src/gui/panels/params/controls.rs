@@ -68,6 +68,29 @@ pub(in crate::gui::panels) enum ControlKind {
     NodePath,
 }
 
+impl ControlKind {
+    /// Whether the row puts its control under the label at full width
+    /// rather than beside it in the label column. Prose does; everything
+    /// else sits in the grid. Exhaustive for the same reason the dispatch
+    /// is: a new kind has to say which shape it takes.
+    #[must_use]
+    pub(in crate::gui::panels) const fn stacked(self) -> bool {
+        match self {
+            Self::Multiline | Self::Snippet => true,
+            Self::Number
+            | Self::Toggle
+            | Self::Line
+            | Self::Attribute
+            | Self::Vector(_)
+            | Self::Colour
+            | Self::Choice
+            | Self::Asset
+            | Self::Action
+            | Self::NodePath => false,
+        }
+    }
+}
+
 /// The control a parameter type gets.
 ///
 /// **Exhaustive on purpose.** A variant added in Rust stops this
@@ -679,7 +702,11 @@ fn text_row(
     let mut text = draft::shown_text(draft.as_ref(), env.node, &spec.key, stored).to_string();
     let rows = text.lines().count().clamp(3, 12);
     let response = match shape {
-        TextShape::Line => ui.add(egui::TextEdit::singleline(&mut text).desired_width(160.0)),
+        // The control column is the row's remaining width, as the
+        // browser's grid gives its second column the rest.
+        TextShape::Line => {
+            ui.add(egui::TextEdit::singleline(&mut text).desired_width(ui.available_width()))
+        }
         TextShape::Prose => ui.add(
             egui::TextEdit::multiline(&mut text)
                 .desired_rows(rows)

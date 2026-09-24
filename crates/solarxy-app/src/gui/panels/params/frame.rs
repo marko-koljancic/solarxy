@@ -15,6 +15,30 @@ use crate::gui::intent::Intents;
 use crate::gui::panels::nodes::CanvasAction;
 use crate::gui::theme::Theme;
 
+/// The browser's measurements for this panel, in its pixels. Its stylesheet
+/// states most of them in rem at ten pixels each, and a test reads them
+/// back from that file so the two panels cannot drift apart.
+///
+/// The label column is what makes the panel scannable: the eye runs down
+/// one edge of labels and one edge of controls. The column is allocated
+/// per row rather than through a grid widget, because a stacked row would
+/// break a grid into segments that each need an identity of their own.
+const LABEL_COLUMN: f32 = 120.0;
+const ROW_GAP: f32 = 10.0;
+const ROW_MARGIN: f32 = 5.0;
+const PANEL_PAD_X: i8 = 12;
+const PANEL_PAD_Y: i8 = 6;
+const BODY_PAD_BOTTOM: i8 = 14;
+const TAB_FONT: f32 = 12.0;
+const TAB_PAD_X: f32 = 10.0;
+const TAB_PAD_TOP: f32 = 6.0;
+const TAB_PAD_BOTTOM: f32 = 5.0;
+const TAB_UNDERLINE: f32 = 2.0;
+const TAB_GAP: f32 = 2.0;
+const STRIP_PAD_X: f32 = 10.0;
+const HEADING_FONT: f32 = 10.0;
+const HEADING_TRACKING: f32 = 0.5;
+
 /// The document and everything the panel draws beside it.
 ///
 /// Behind one reference rather than inline, for the same reason the
@@ -239,6 +263,90 @@ pub(in crate::gui::panels) fn driven(
         .any(|edge| edge.to == node && edge.to_port == port)
 }
 
+/// One underline tab, the browser's: the text with its padding, and a rule
+/// under it in the accent colour when it is the active one.
+fn tab(ui: &mut Ui, label: &str, active: bool, theme: Theme) -> bool {
+    let colour = if active { theme.fg } else { theme.muted };
+    let galley = ui.painter().layout_no_wrap(
+        label.to_string(),
+        egui::FontId::proportional(TAB_FONT),
+        colour,
+    );
+    let size = galley.size()
+        + egui::vec2(
+            2.0 * TAB_PAD_X,
+            TAB_PAD_TOP + TAB_PAD_BOTTOM + TAB_UNDERLINE,
+        );
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        ui.painter().galley(
+            rect.min + egui::vec2(TAB_PAD_X, TAB_PAD_TOP),
+            galley,
+            colour,
+        );
+        if active {
+            let rule = egui::Rect::from_min_max(
+                egui::pos2(rect.left(), rect.bottom() - TAB_UNDERLINE),
+                rect.right_bottom(),
+            );
+            ui.painter().rect_filled(rule, 0.0, theme.accent);
+        }
+    }
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+}
+
+/// A section heading the browser's way: small, uppercase and tracked.
+fn heading(ui: &mut Ui, text: &str, theme: Theme) {
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &text.to_uppercase(),
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(HEADING_FONT),
+            color: theme.muted,
+            extra_letter_spacing: HEADING_TRACKING,
+            ..Default::default()
+        },
+    );
+    ui.label(job);
+}
+
+/// One row: the label in its column and the control beside it, or, for
+/// prose, the label above and the control at the full width.
+///
+/// The column is right-aligned and truncates, so a long label ends in an
+/// ellipsis rather than pushing its control out of line with the others.
+fn row(
+    ui: &mut Ui,
+    label: &str,
+    doc: &str,
+    stacked: bool,
+    theme: Theme,
+    control: impl FnOnce(&mut Ui),
+) {
+    let text = egui::Label::new(egui::RichText::new(label).size(11.0).color(theme.muted));
+    if stacked {
+        ui.vertical(|ui| {
+            ui.add(text).on_hover_text(doc);
+            control(ui);
+        });
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(LABEL_COLUMN, 0.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.add(text.truncate()).on_hover_text(doc);
+            },
+        );
+        ui.add_space(ROW_GAP);
+        control(ui);
+    });
+}
+
 /// The host's own chrome above the panel: the menu bar when docked, a pin
 /// toggle when floating. Drawn before anything can return early, so the
 /// bar is there with its entries disabled even when there is nothing to
@@ -341,50 +449,72 @@ pub(crate) fn draw_params_content(
 
             // The header and the strip are fixed; only the body scrolls,
             // or the tabs scroll out of reach of the rows they choose.
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(solarxy_graph::naming::node_name(data, registry))
-                        .size(13.0),
-                );
-                // The state, not the control: pinning is in the View menu
-                // and on the floating host's own toggle. The chip is here
-                // so a pinned panel does not look like an unpinned one
-                // until something surprising happens, and a click lets go.
-                if pinned
-                    && ui
-                        .small_button("pinned")
-                        .on_hover_text("Pinned to this node. Click to follow the selection again.")
-                        .clicked()
-                {
-                    state.pin = None;
-                }
-            });
-            if let Some(line) = stats_line(stats) {
-                ui.label(egui::RichText::new(line).color(theme.muted).size(10.0));
-            }
+            // One line, the browser's: the name on the left, the cook
+            // statistics and the pinned marker on the right, a rule under
+            // it whatever else is drawn.
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(PANEL_PAD_X, PANEL_PAD_Y))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(solarxy_graph::naming::node_name(data, registry))
+                                .size(13.0)
+                                .strong(),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if let Some(line) = stats_line(stats) {
+                                ui.label(egui::RichText::new(line).color(theme.muted).size(11.0));
+                            }
+                            // The state, not the control: pinning is in the
+                            // View menu and on the floating host's own
+                            // toggle. The chip is here so a pinned panel
+                            // does not look like an unpinned one until
+                            // something surprising happens, and a click
+                            // lets go.
+                            if pinned
+                                && ui
+                                    .small_button("pinned")
+                                    .on_hover_text(
+                                        "Pinned to this node. Click to follow the selection again.",
+                                    )
+                                    .clicked()
+                            {
+                                state.pin = None;
+                            }
+                        });
+                    });
+                });
+            ui.separator();
 
             let (offered, active) = tabs(&desc.params, &data.params, has_report, &state.tab);
             // Hidden at one, not at zero: a node with a single tab draws
             // no strip, and a node whose only tab is Validation draws no
-            // strip and still renders the report.
+            // strip and still renders the report. One row that never
+            // wraps and scrolls sideways instead, with a rule under it
+            // only when it is there at all.
             if offered.len() > 1 {
-                ui.horizontal_wrapped(|ui| {
-                    for tab in &offered {
-                        let label = if tab == VALIDATION_TAB && counts.0 + counts.1 > 0 {
-                            format!("{} ({})", params::tab_label(tab), counts.0 + counts.1)
-                        } else {
-                            params::tab_label(tab)
-                        };
-                        if ui
-                            .selectable_label(active.as_deref() == Some(tab.as_str()), label)
-                            .clicked()
-                        {
-                            state.tab.clone_from(tab);
-                        }
-                    }
-                });
+                egui::ScrollArea::horizontal()
+                    .id_salt("param-tabs")
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.x = TAB_GAP;
+                        ui.horizontal(|ui| {
+                            ui.add_space(STRIP_PAD_X);
+                            for name in &offered {
+                                let label = if name == VALIDATION_TAB && counts.0 + counts.1 > 0 {
+                                    format!("{} ({})", params::tab_label(name), counts.0 + counts.1)
+                                } else {
+                                    params::tab_label(name)
+                                };
+                                let is_active = active.as_deref() == Some(name.as_str());
+                                if tab(ui, &label, is_active, theme) {
+                                    state.tab.clone_from(name);
+                                }
+                            }
+                        });
+                    });
+                ui.separator();
             }
-            ui.separator();
 
             let Some(active) = active else {
                 return placeholder(ui, "No parameters.", theme);
@@ -410,184 +540,203 @@ pub(crate) fn draw_params_content(
             // the browser's rule; offering nested containers would give
             // the two shells different candidate lists for one document.
             let candidates = node_path_candidates(doc, registry, &desc.params);
+            let body_margin = egui::Margin {
+                left: PANEL_PAD_X,
+                right: PANEL_PAD_X,
+                top: PANEL_PAD_Y,
+                bottom: BODY_PAD_BOTTOM,
+            };
             egui::ScrollArea::vertical().show(ui, |ui| {
-                if active == VALIDATION_TAB {
-                    draw_validation_tab(ui, report, counts, ctx, node, intents, theme);
-                    return;
-                }
-                for section in params::param_sections(&desc.params) {
-                    let rows: Vec<&ParamSpec> = section
-                        .params
-                        .iter()
-                        .filter(|spec| spec.group == active)
-                        .filter(|spec| param_visible(spec, &desc.params, &data.params))
-                        .copied()
-                        .collect();
-                    if rows.is_empty() {
-                        continue;
+                egui::Frame::NONE.inner_margin(body_margin).show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.spacing_mut().item_spacing.y = ROW_MARGIN;
+                    if active == VALIDATION_TAB {
+                        draw_validation_tab(ui, report, counts, ctx, node, intents, theme);
+                        return;
                     }
-                    if let Some(subgroup) = section.subgroup {
-                        ui.label(egui::RichText::new(subgroup).color(theme.muted).size(10.0));
-                    }
-                    for spec in rows {
-                        let is_driven = driven(spec, graph, node);
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(&spec.label).size(11.0))
-                                .on_hover_text(&spec.doc);
+                    for section in params::param_sections(&desc.params) {
+                        let rows: Vec<&ParamSpec> = section
+                            .params
+                            .iter()
+                            .filter(|spec| spec.group == active)
+                            .filter(|spec| param_visible(spec, &desc.params, &data.params))
+                            .copied()
+                            .collect();
+                        if rows.is_empty() {
+                            continue;
+                        }
+                        if let Some(subgroup) = section.subgroup {
+                            heading(ui, subgroup, theme);
+                        }
+                        for spec in rows {
+                            let is_driven = driven(spec, graph, node);
                             let expr = expression::driving(data.params.get(&spec.key))
                                 .map(ToString::to_string);
-                            let park = expression::park_key(ctx, node, &spec.key);
-                            if expression::offers_toggle(spec)
-                                && let Some(toggle) =
-                                    expression::draw_toggle(ui, expr.is_some(), theme)
-                            {
-                                let write = match toggle {
-                                    Toggle::On => expression::switch_on(
-                                        state.parked.get(&park).map(String::as_str),
-                                        &controls::shown_value(spec, data.params.get(&spec.key)),
-                                    ),
-                                    Toggle::Off => {
-                                        // Parked on the way out, so the
-                                        // same click brings it back. The
-                                        // field's clear control is the one
-                                        // that discards.
-                                        if let Some(text) = expr.clone() {
-                                            state.parked.insert(park.clone(), text);
+                            // Prose stacks; an expression-driven row never
+                            // does, because its lane is one line whatever the
+                            // parameter is, which is the browser's rule too.
+                            let stacked =
+                                controls::control_kind(&spec.ty).stacked() && expr.is_none();
+                            row(ui, &spec.label, &spec.doc, stacked, theme, |ui| {
+                                let park = expression::park_key(ctx, node, &spec.key);
+                                if expression::offers_toggle(spec)
+                                    && let Some(toggle) =
+                                        expression::draw_toggle(ui, expr.is_some(), theme)
+                                {
+                                    let write = match toggle {
+                                        Toggle::On => expression::switch_on(
+                                            state.parked.get(&park).map(String::as_str),
+                                            &controls::shown_value(
+                                                spec,
+                                                data.params.get(&spec.key),
+                                            ),
+                                        ),
+                                        Toggle::Off => {
+                                            // Parked on the way out, so the
+                                            // same click brings it back. The
+                                            // field's clear control is the one
+                                            // that discards.
+                                            if let Some(text) = expr.clone() {
+                                                state.parked.insert(park.clone(), text);
+                                            }
+                                            solarxy_graph::params::ParamSource::Literal(
+                                                expression::switch_off(
+                                                    resolved.get(&spec.key),
+                                                    spec,
+                                                ),
+                                            )
                                         }
-                                        solarxy_graph::params::ParamSource::Literal(
-                                            expression::switch_off(resolved.get(&spec.key), spec),
-                                        )
-                                    }
-                                };
-                                intents.panel(crate::gui::PanelIntent::Canvas(
-                                    CanvasAction::SetParams(
-                                        ctx,
-                                        node,
-                                        vec![(spec.key.clone(), write)],
-                                    ),
-                                ));
-                            }
-                            // A driven row draws its control disabled
-                            // rather than omitting it: the stored value is
-                            // still what the node falls back to when the
-                            // wire goes, and hiding the row makes that
-                            // impossible to read or to set in advance.
-                            let env = ControlEnv {
-                                node,
-                                candidates: &candidates,
-                                assets,
-                                lanes,
-                                specs: &desc.params,
-                                error,
-                                theme,
-                            };
-                            let edit = ui
-                                .add_enabled_ui(!is_driven, |ui| match expr.as_deref() {
-                                    Some(text) => expression::draw_row(
-                                        ui,
-                                        spec,
-                                        text,
-                                        resolved.get(&spec.key),
-                                        &env,
-                                        &mut state.draft,
-                                        theme,
-                                    ),
-                                    None => controls::draw(
-                                        ui,
-                                        spec,
-                                        data.params.get(&spec.key),
-                                        &env,
-                                        &mut controls::Gesture {
-                                            draft: &mut state.draft,
-                                            drag: &mut state.drag,
-                                            ctx,
-                                        },
-                                    ),
-                                })
-                                .inner;
-                            match edit {
-                                Some(ControlEdit::Write(writes)) => {
+                                    };
                                     intents.panel(crate::gui::PanelIntent::Canvas(
-                                        CanvasAction::SetParams(ctx, node, writes),
-                                    ));
-                                }
-                                Some(ControlEdit::Preview(values)) => {
-                                    intents.panel(crate::gui::PanelIntent::Canvas(
-                                        CanvasAction::PreviewParams(
+                                        CanvasAction::SetParams(
                                             ctx,
                                             node,
-                                            values
-                                                .into_iter()
-                                                .map(|(key, value)| {
-                                                    (
+                                            vec![(spec.key.clone(), write)],
+                                        ),
+                                    ));
+                                }
+                                // A driven row draws its control disabled
+                                // rather than omitting it: the stored value is
+                                // still what the node falls back to when the
+                                // wire goes, and hiding the row makes that
+                                // impossible to read or to set in advance.
+                                let env = ControlEnv {
+                                    node,
+                                    candidates: &candidates,
+                                    assets,
+                                    lanes,
+                                    specs: &desc.params,
+                                    error,
+                                    theme,
+                                };
+                                let edit = ui
+                                    .add_enabled_ui(!is_driven, |ui| match expr.as_deref() {
+                                        Some(text) => expression::draw_row(
+                                            ui,
+                                            spec,
+                                            text,
+                                            resolved.get(&spec.key),
+                                            &env,
+                                            &mut state.draft,
+                                            theme,
+                                        ),
+                                        None => controls::draw(
+                                            ui,
+                                            spec,
+                                            data.params.get(&spec.key),
+                                            &env,
+                                            &mut controls::Gesture {
+                                                draft: &mut state.draft,
+                                                drag: &mut state.drag,
+                                                ctx,
+                                            },
+                                        ),
+                                    })
+                                    .inner;
+                                match edit {
+                                    Some(ControlEdit::Write(writes)) => {
+                                        intents.panel(crate::gui::PanelIntent::Canvas(
+                                            CanvasAction::SetParams(ctx, node, writes),
+                                        ));
+                                    }
+                                    Some(ControlEdit::Preview(values)) => {
+                                        intents.panel(crate::gui::PanelIntent::Canvas(
+                                            CanvasAction::PreviewParams(
+                                                ctx,
+                                                node,
+                                                values
+                                                    .into_iter()
+                                                    .map(|(key, value)| {
+                                                        (
                                                         key,
                                                         solarxy_graph::params::ParamSource::Literal(
                                                             value,
                                                         ),
                                                     )
-                                                })
-                                                .collect(),
-                                        ),
-                                    ));
-                                }
-                                // On a literal row this drops an
-                                // abandoned preview; on an expression row
-                                // it is the destructive control, which
-                                // discards the parked text as well as the
-                                // expression. Two meanings for one shape
-                                // because the row it came from is what
-                                // decides, and the row is right here.
-                                Some(ControlEdit::Clear(keys)) => {
-                                    if expr.is_some() {
-                                        state.parked.remove(&park);
-                                        intents.panel(crate::gui::PanelIntent::Canvas(
-                                            CanvasAction::SetParams(
-                                                ctx,
-                                                node,
-                                                vec![(
-                                                    spec.key.clone(),
-                                                    solarxy_graph::params::ParamSource::Literal(
-                                                        expression::switch_off(
-                                                            resolved.get(&spec.key),
-                                                            spec,
-                                                        ),
-                                                    ),
-                                                )],
+                                                    })
+                                                    .collect(),
                                             ),
                                         ));
-                                    } else {
-                                        intents.panel(crate::gui::PanelIntent::Canvas(
-                                            CanvasAction::ClearPreviews(ctx, node, keys),
-                                        ));
                                     }
+                                    // On a literal row this drops an
+                                    // abandoned preview; on an expression row
+                                    // it is the destructive control, which
+                                    // discards the parked text as well as the
+                                    // expression. Two meanings for one shape
+                                    // because the row it came from is what
+                                    // decides, and the row is right here.
+                                    Some(ControlEdit::Clear(keys)) => {
+                                        if expr.is_some() {
+                                            state.parked.remove(&park);
+                                            intents.panel(crate::gui::PanelIntent::Canvas(
+                                                CanvasAction::SetParams(
+                                                    ctx,
+                                                    node,
+                                                    vec![(
+                                                        spec.key.clone(),
+                                                        solarxy_graph::params::ParamSource::Literal(
+                                                            expression::switch_off(
+                                                                resolved.get(&spec.key),
+                                                                spec,
+                                                            ),
+                                                        ),
+                                                    )],
+                                                ),
+                                            ));
+                                        } else {
+                                            intents.panel(crate::gui::PanelIntent::Canvas(
+                                                CanvasAction::ClearPreviews(ctx, node, keys),
+                                            ));
+                                        }
+                                    }
+                                    Some(ControlEdit::Invoke) => {
+                                        intents.panel(crate::gui::PanelIntent::InvokeAction {
+                                            ctx,
+                                            node,
+                                            key: spec.key.clone(),
+                                        });
+                                    }
+                                    Some(ControlEdit::ChooseAsset) => {
+                                        intents.panel(crate::gui::PanelIntent::ChooseAsset {
+                                            ctx,
+                                            node,
+                                            key: spec.key.clone(),
+                                        });
+                                    }
+                                    None => {}
                                 }
-                                Some(ControlEdit::Invoke) => {
-                                    intents.panel(crate::gui::PanelIntent::InvokeAction {
-                                        ctx,
-                                        node,
-                                        key: spec.key.clone(),
-                                    });
-                                }
-                                Some(ControlEdit::ChooseAsset) => {
-                                    intents.panel(crate::gui::PanelIntent::ChooseAsset {
-                                        ctx,
-                                        node,
-                                        key: spec.key.clone(),
-                                    });
-                                }
-                                None => {}
+                            });
+                            if is_driven {
+                                ui.label(
+                                    egui::RichText::new("Driven by connected input")
+                                        .color(theme.muted)
+                                        .italics()
+                                        .size(9.0),
+                                );
                             }
-                        });
-                        if is_driven {
-                            ui.label(
-                                egui::RichText::new("Driven by connected input")
-                                    .color(theme.muted)
-                                    .italics()
-                                    .size(9.0),
-                            );
                         }
                     }
-                }
+                });
             });
         }
     }
@@ -828,6 +977,143 @@ mod tests {
             }
         }
         (written, previewed, cleared)
+    }
+
+    /// The browser's stylesheet, and one rule's value in it.
+    fn browser_css() -> String {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/styles.css");
+        std::fs::read_to_string(&path).expect("the browser's stylesheet reads")
+    }
+
+    fn css_value(css: &str, selector: &str, property: &str) -> String {
+        let block = css
+            .split_once(&format!("\n{selector} {{"))
+            .and_then(|(_, rest)| rest.split_once('}'))
+            .map_or_else(
+                || panic!("the stylesheet has a {selector} rule"),
+                |(block, _)| block,
+            );
+        block
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(&format!("{property}:")))
+            .map_or_else(
+                || panic!("{selector} declares {property}"),
+                |value| value.trim().trim_end_matches(';').to_string(),
+            )
+    }
+
+    /// A length in px or rem, as pixels at the given root size.
+    fn px(value: &str, rem: f32) -> f32 {
+        if let Some(n) = value.strip_suffix("px") {
+            n.parse().expect("a pixel length")
+        } else if let Some(n) = value.strip_suffix("rem") {
+            n.parse::<f32>().expect("a rem length") * rem
+        } else if value == "0" {
+            0.0
+        } else {
+            panic!("{value} is not a length")
+        }
+    }
+
+    /// The label column, the gaps, the paddings and the tab are the
+    /// browser's numbers, read from its stylesheet so a change there fails
+    /// here. The browser writes most of them in rem at a root size of ten
+    /// pixels, which the test derives rather than assumes.
+    #[test]
+    fn the_label_column_and_the_paddings_are_the_browsers() {
+        let css = browser_css();
+        let root = css_value(&css, "html", "font-size");
+        let percent: f32 = root
+            .strip_suffix('%')
+            .and_then(|n| n.parse().ok())
+            .expect("the root font size is a percentage");
+        let rem = 16.0 * percent / 100.0;
+
+        let columns = css_value(&css, ".param-row", "grid-template-columns");
+        let (label, rest) = columns.split_once(' ').expect("two columns");
+        assert_eq!(rest, "1fr", "the control column takes the rest");
+        assert!((px(label, rem) - LABEL_COLUMN).abs() < f32::EPSILON);
+        assert!((px(&css_value(&css, ".param-row", "gap"), rem) - ROW_GAP).abs() < f32::EPSILON);
+        let margin = css_value(&css, ".param-row", "margin");
+        let vertical = margin.split(' ').next().expect("a vertical margin");
+        assert!((px(vertical, rem) - ROW_MARGIN).abs() < f32::EPSILON);
+
+        let header = css_value(&css, ".param-header", "padding");
+        let mut sides = header.split(' ');
+        let (y, x) = (sides.next().unwrap(), sides.next().unwrap());
+        assert!((px(y, rem) - f32::from(PANEL_PAD_Y)).abs() < f32::EPSILON);
+        assert!((px(x, rem) - f32::from(PANEL_PAD_X)).abs() < f32::EPSILON);
+        let body = css_value(&css, ".param-body", "padding");
+        let bottom = body.split(' ').nth(2).expect("a bottom padding");
+        assert!((px(bottom, rem) - f32::from(BODY_PAD_BOTTOM)).abs() < f32::EPSILON);
+
+        assert!(
+            (px(&css_value(&css, ".param-tab", "font-size"), rem) - TAB_FONT).abs() < f32::EPSILON
+        );
+        let tab_pad = css_value(&css, ".param-tab", "padding");
+        let mut pads = tab_pad.split(' ');
+        let (top, x, bottom) = (
+            pads.next().unwrap(),
+            pads.next().unwrap(),
+            pads.next().unwrap(),
+        );
+        assert!((px(top, rem) - TAB_PAD_TOP).abs() < f32::EPSILON);
+        assert!((px(x, rem) - TAB_PAD_X).abs() < f32::EPSILON);
+        assert!((px(bottom, rem) - TAB_PAD_BOTTOM).abs() < f32::EPSILON);
+        let underline = css_value(&css, ".param-tab", "border-bottom");
+        let width = underline.split(' ').next().expect("a border width");
+        assert!((px(width, rem) - TAB_UNDERLINE).abs() < f32::EPSILON);
+        assert!((px(&css_value(&css, ".param-tabs", "gap"), rem) - TAB_GAP).abs() < f32::EPSILON);
+        let strip = css_value(&css, ".param-tabs", "padding");
+        let strip_x = strip.split(' ').nth(1).expect("a horizontal strip padding");
+        assert!((px(strip_x, rem) - STRIP_PAD_X).abs() < f32::EPSILON);
+
+        assert!(
+            (px(&css_value(&css, ".param-subgroup", "font-size"), rem) - HEADING_FONT).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (px(&css_value(&css, ".param-subgroup", "letter-spacing"), rem) - HEADING_TRACKING)
+                .abs()
+                < f32::EPSILON
+        );
+        assert_eq!(
+            css_value(&css, ".param-subgroup", "text-transform"),
+            "uppercase"
+        );
+        assert!(
+            css.contains("\n.param-row-stacked {"),
+            "the browser stacks a row"
+        );
+    }
+
+    /// Prose stacks and nothing else does, and the two prose parameter
+    /// types resolve to the kinds that stack.
+    #[test]
+    fn the_prose_controls_stack_and_every_other_kind_sits_in_the_grid() {
+        use controls::ControlKind as Kind;
+        use solarxy_graph::registry::param_spec::ParamType;
+        for kind in [Kind::Multiline, Kind::Snippet] {
+            assert!(kind.stacked(), "{kind:?} is prose and stacks");
+        }
+        for kind in [
+            Kind::Number,
+            Kind::Toggle,
+            Kind::Line,
+            Kind::Attribute,
+            Kind::Vector(3),
+            Kind::Colour,
+            Kind::Choice,
+            Kind::Asset,
+            Kind::Action,
+            Kind::NodePath,
+        ] {
+            assert!(!kind.stacked(), "{kind:?} sits in the grid");
+        }
+        assert!(controls::control_kind(&ParamType::MultilineText).stacked());
+        assert!(controls::control_kind(&ParamType::Snippet).stacked());
+        assert!(!controls::control_kind(&ParamType::Text).stacked());
     }
 
     /// Looking at a parameter must not change it.
