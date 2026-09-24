@@ -22,7 +22,7 @@ use solarxy_studio::params;
 
 use super::frame::{ParamScene, Target, reset_keys, tabs, target};
 use crate::gui::chrome::menu_items::{check_entry, entry_if};
-use crate::gui::chrome::panel_bar::{maximize_entry, panel_bar};
+use crate::gui::chrome::panel_bar::{MAXIMIZE_LABEL, maximize_entry, panel_bar};
 use crate::gui::dock::SolarxyTab;
 use crate::gui::intent::{Intent, Intents, LayoutIntent, PanelIntent};
 use crate::gui::panels::nodes::CanvasAction;
@@ -126,106 +126,183 @@ pub(super) fn draw_bar(
     request
 }
 
+/// One row of one of the three menus, in the order it is drawn. A divider
+/// is a row like any other, so each table below is its menu rather than a
+/// list of its entries, and the draw walks the table rather than writing
+/// the entries out. The tests that hold these menus against the browser
+/// read the same tables.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Row {
+    Divider,
+    NodeInfo,
+    CopyNodePath,
+    ToggleBypass,
+    SetDisplayFlag,
+    ResetAllParameters,
+    ResetTab,
+    PinToThisNode,
+    FloatingProperties,
+    Maximize,
+}
+
+impl Row {
+    /// `None` is the divider. [`Row::ResetTab`] gives the wording used when
+    /// no tab can be reset; when one can, the entry is named after it, and
+    /// the browser does the same from the same fallback.
+    const fn label(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Divider => return None,
+            Self::NodeInfo => "Node Info",
+            Self::CopyNodePath => "Copy Node Path",
+            Self::ToggleBypass => "Toggle Bypass",
+            Self::SetDisplayFlag => "Set Display Flag",
+            Self::ResetAllParameters => "Reset All Parameters",
+            Self::ResetTab => "Reset Current Tab",
+            Self::PinToThisNode => "Pin to This Node",
+            Self::FloatingProperties => "Floating Properties",
+            Self::Maximize => MAXIMIZE_LABEL,
+        })
+    }
+
+    /// The binding whose key the row shows, read from the table rather than
+    /// typed beside the entry.
+    const fn action(self) -> Option<Action> {
+        match self {
+            Self::NodeInfo => Some(Action::NodeInfo),
+            Self::ToggleBypass => Some(Action::Bypass),
+            Self::SetDisplayFlag => Some(Action::DisplayFlag),
+            Self::FloatingProperties => Some(Action::FloatingProps),
+            Self::Maximize => Some(Action::PanelMaximize),
+            _ => None,
+        }
+    }
+}
+
+use Row::Divider;
+
+const NODE_MENU: &[Row] = &[
+    Row::NodeInfo,
+    Row::CopyNodePath,
+    Divider,
+    Row::ToggleBypass,
+    Row::SetDisplayFlag,
+];
+
+const PARAMS_MENU: &[Row] = &[Row::ResetAllParameters, Row::ResetTab];
+
+const VIEW_MENU: &[Row] = &[
+    Row::PinToThisNode,
+    Row::FloatingProperties,
+    Divider,
+    Row::Maximize,
+];
+
 fn draw_node(ui: &mut egui::Ui, model: &BarModel, intents: &mut Intents) {
     let node = model.node;
-    if entry_if(
-        ui,
-        node.is_some(),
-        "Node Info",
-        Some(Action::NodeInfo),
-        NO_NODE,
-    )
-    .clicked()
-        && let Some((_, id)) = node
-    {
-        intents.panel(PanelIntent::OpenNodeInfo(id));
-        ui.close();
-    }
-    if entry_if(ui, model.path.is_some(), "Copy Node Path", None, NO_NODE).clicked()
-        && let Some(path) = &model.path
-    {
-        ui.ctx().copy_text(path.clone());
-        intents.panel(PanelIntent::Canvas(CanvasAction::Notify(format!(
-            "Copied {path}"
-        ))));
-        ui.close();
-    }
-    ui.separator();
-    let why_no_bypass = if node.is_none() {
-        NO_NODE
-    } else {
-        "This node type cannot be bypassed"
-    };
-    if entry_if(
-        ui,
-        model.bypassed.is_some(),
-        "Toggle Bypass",
-        Some(Action::Bypass),
-        why_no_bypass,
-    )
-    .clicked()
-        && let (Some((ctx, id)), Some(bypassed)) = (node, model.bypassed)
-    {
-        intents.panel(PanelIntent::Canvas(CanvasAction::SetBypass(
-            ctx, id, !bypassed,
-        )));
-        ui.close();
-    }
-    let why_no_flag = if node.is_none() {
-        NO_NODE
-    } else {
-        "A display flag is set inside a network; at the top level every object shows"
-    };
-    if entry_if(
-        ui,
-        node.is_some() && model.in_container,
-        "Set Display Flag",
-        Some(Action::DisplayFlag),
-        why_no_flag,
-    )
-    .clicked()
-        && let Some((ctx, id)) = node
-    {
-        intents.panel(PanelIntent::Canvas(CanvasAction::SetActiveOutput(ctx, id)));
-        ui.close();
+    for row in NODE_MENU {
+        let Some(label) = row.label() else {
+            ui.separator();
+            continue;
+        };
+        let action = row.action();
+        match row {
+            Row::NodeInfo => {
+                if entry_if(ui, node.is_some(), label, action, NO_NODE).clicked()
+                    && let Some((_, id)) = node
+                {
+                    intents.panel(PanelIntent::OpenNodeInfo(id));
+                    ui.close();
+                }
+            }
+            Row::CopyNodePath => {
+                if entry_if(ui, model.path.is_some(), label, action, NO_NODE).clicked()
+                    && let Some(path) = &model.path
+                {
+                    ui.ctx().copy_text(path.clone());
+                    intents.panel(PanelIntent::Canvas(CanvasAction::Notify(format!(
+                        "Copied {path}"
+                    ))));
+                    ui.close();
+                }
+            }
+            Row::ToggleBypass => {
+                let why_not = if node.is_none() {
+                    NO_NODE
+                } else {
+                    "This node type cannot be bypassed"
+                };
+                if entry_if(ui, model.bypassed.is_some(), label, action, why_not).clicked()
+                    && let (Some((ctx, id)), Some(bypassed)) = (node, model.bypassed)
+                {
+                    intents.panel(PanelIntent::Canvas(CanvasAction::SetBypass(
+                        ctx, id, !bypassed,
+                    )));
+                    ui.close();
+                }
+            }
+            Row::SetDisplayFlag => {
+                let why_not = if node.is_none() {
+                    NO_NODE
+                } else {
+                    "A display flag is set inside a network; at the top level every object shows"
+                };
+                let can = node.is_some() && model.in_container;
+                if entry_if(ui, can, label, action, why_not).clicked()
+                    && let Some((ctx, id)) = node
+                {
+                    intents.panel(PanelIntent::Canvas(CanvasAction::SetActiveOutput(ctx, id)));
+                    ui.close();
+                }
+            }
+            _ => {}
+        }
     }
 }
 
 fn draw_params(ui: &mut egui::Ui, model: &BarModel, intents: &mut Intents) {
-    let why_no_reset = if model.node.is_none() {
-        NO_NODE
-    } else {
-        "This node has no parameters"
-    };
-    if entry_if(
-        ui,
-        model.node.is_some() && model.has_params,
-        "Reset All Parameters",
-        None,
-        why_no_reset,
-    )
-    .clicked()
-        && let Some((ctx, id)) = model.node
-    {
-        intents.panel(PanelIntent::ResetParams(ctx, id, None));
-        ui.close();
-    }
-    // Named after the tab it resets, so the entry says what it will do
-    // before it does it.
-    let label = model.reset_tab.as_ref().map_or_else(
-        || "Reset Current Tab".to_string(),
-        |(tab, _)| format!("Reset {tab} Tab"),
-    );
-    let why_no_tab = if model.node.is_none() {
-        NO_NODE
-    } else {
-        "The current tab holds no parameters to reset"
-    };
-    if entry_if(ui, model.reset_tab.is_some(), &label, None, why_no_tab).clicked()
-        && let (Some((ctx, id)), Some((_, keys))) = (model.node, &model.reset_tab)
-    {
-        intents.panel(PanelIntent::ResetParams(ctx, id, Some(keys.clone())));
-        ui.close();
+    for row in PARAMS_MENU {
+        let Some(label) = row.label() else {
+            ui.separator();
+            continue;
+        };
+        let action = row.action();
+        match row {
+            Row::ResetAllParameters => {
+                let why_not = if model.node.is_none() {
+                    NO_NODE
+                } else {
+                    "This node has no parameters"
+                };
+                let can = model.node.is_some() && model.has_params;
+                if entry_if(ui, can, label, action, why_not).clicked()
+                    && let Some((ctx, id)) = model.node
+                {
+                    intents.panel(PanelIntent::ResetParams(ctx, id, None));
+                    ui.close();
+                }
+            }
+            Row::ResetTab => {
+                // Named after the tab it resets, so the entry says what it
+                // will do before it does it. The table's wording is the
+                // fallback, which is what the browser falls back to too.
+                let named = model
+                    .reset_tab
+                    .as_ref()
+                    .map_or_else(|| label.to_string(), |(tab, _)| format!("Reset {tab} Tab"));
+                let why_not = if model.node.is_none() {
+                    NO_NODE
+                } else {
+                    "The current tab holds no parameters to reset"
+                };
+                if entry_if(ui, model.reset_tab.is_some(), &named, action, why_not).clicked()
+                    && let (Some((ctx, id)), Some((_, keys))) = (model.node, &model.reset_tab)
+                {
+                    intents.panel(PanelIntent::ResetParams(ctx, id, Some(keys.clone())));
+                    ui.close();
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -236,39 +313,187 @@ fn draw_view(
     intents: &mut Intents,
     request: &mut BarRequest,
 ) {
-    // Pinning is the panel's own state, so it sits beside Maximize rather
-    // than in the Node menu, which acts on the node.
-    let can_pin = model.pinned || model.node.is_some();
-    if ui
-        .add_enabled(
-            can_pin,
-            egui::Button::new("Pin to This Node").selected(model.pinned),
-        )
-        .on_disabled_hover_text(NO_NODE)
-        .clicked()
-    {
-        request.toggle_pin = true;
-        ui.close();
+    for row in VIEW_MENU {
+        let Some(label) = row.label() else {
+            ui.separator();
+            continue;
+        };
+        match row {
+            // Pinning is the panel's own state, so it sits beside Maximize
+            // rather than in the Node menu, which acts on the node.
+            Row::PinToThisNode => {
+                let can_pin = model.pinned || model.node.is_some();
+                if ui
+                    .add_enabled(can_pin, egui::Button::new(label).selected(model.pinned))
+                    .on_disabled_hover_text(NO_NODE)
+                    .clicked()
+                {
+                    request.toggle_pin = true;
+                    ui.close();
+                }
+            }
+            Row::FloatingProperties => {
+                if check_entry(ui, floating_open, label, row.action()).clicked() {
+                    intents.raise(Intent::Layout(LayoutIntent::ToggleFloatingProps));
+                    ui.close();
+                }
+            }
+            Row::Maximize => maximize_entry(ui, SolarxyTab::Properties, intents),
+            _ => {}
+        }
     }
-    if check_entry(
-        ui,
-        floating_open,
-        "Floating Properties",
-        Some(Action::FloatingProps),
-    )
-    .clicked()
-    {
-        intents.raise(Intent::Layout(LayoutIntent::ToggleFloatingProps));
-        ui.close();
-    }
-    ui.separator();
-    maximize_entry(ui, SolarxyTab::Properties, intents);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::keymap::hint;
     use solarxy_graph::{Command, Engine};
+
+    fn browser_source() -> String {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("the repository root");
+        std::fs::read_to_string(root.join("web/src/components/menu/PropertiesMenus.tsx"))
+            .expect("the browser's properties menus")
+    }
+
+    /// One of the browser's three entry lists, as `(label, key)` pairs in
+    /// its order. The key is whatever it types beside the entry, or `None`
+    /// where it types nothing; each entry runs from its own label to the
+    /// next, so a key is attributed to the entry it was written under.
+    ///
+    /// Its `Reset ... Tab` row is a template string, so what a reader sees
+    /// there is the literal it falls back to, which is the wording this
+    /// shell keeps in its own table for the same reason.
+    fn browser_entries(source: &str, decl: &str) -> Vec<(String, Option<String>)> {
+        let start = source
+            .find(decl)
+            .unwrap_or_else(|| panic!("no entry list declared {decl}"));
+        let block = &source[start..];
+        let block = &block[..block.find("\n  ];").expect("the list's end")];
+        block
+            .split("label: ")
+            .skip(1)
+            .filter_map(|rest| {
+                // The dynamic row quotes its fallback last, after the ternary.
+                let label = rest
+                    .split('\n')
+                    .next()?
+                    .rsplit_once('"')
+                    .and_then(|(head, _)| head.rsplit('"').next())?
+                    .to_string();
+                let body = rest.split("label: ").next().unwrap_or(rest);
+                let key = body
+                    .split("shortcut: \"")
+                    .nth(1)
+                    .and_then(|k| k.split('"').next())
+                    .map(str::to_string);
+                Some((label, key))
+            })
+            .collect()
+    }
+
+    /// An entry whose key this shell and the browser disagree about: what
+    /// the browser shows there, or `None` where it shows nothing, and why.
+    /// Checked in reverse, like every other named difference.
+    ///
+    /// Both rows are the same thing. The browser types each hint beside its
+    /// entry while this shell asks the binding table, which is how a hint
+    /// and a binding come apart, and these are where they have.
+    const KEYED_DIFFERENTLY: &[(&str, Option<&str>, &str)] = &[
+        (
+            MAXIMIZE_LABEL,
+            Some("Esc to restore"),
+            "the browser names the way back out rather than the key that maximizes, while its own binding table gives the entry the backtick with Escape as a note; this shell shows the key that is bound",
+        ),
+        (
+            "Set Display Flag",
+            None,
+            "the browser binds this to the same key in the same scope and types no hint beside the entry; this shell reads the table, so the key it shows is the key that works",
+        ),
+    ];
+
+    /// The three menus list the browser's entries, in its order and under
+    /// its words.
+    #[test]
+    fn the_three_menus_list_the_browsers_entries_in_its_order() {
+        let source = browser_source();
+        for (decl, rows) in [
+            ("const nodeEntries: MenuEntry[] = [", NODE_MENU),
+            ("const paramsEntries: MenuEntry[] = [", PARAMS_MENU),
+            ("const viewEntries: MenuEntry[] = [", VIEW_MENU),
+        ] {
+            let browser: Vec<String> = browser_entries(&source, decl)
+                .into_iter()
+                .map(|(label, _)| label)
+                .collect();
+            assert!(
+                browser.len() >= 2,
+                "read {} entries for {decl}, so the reader is broken",
+                browser.len()
+            );
+            let here: Vec<String> = rows
+                .iter()
+                .filter_map(|row| row.label())
+                .map(|label| label.replace('\u{2026}', "..."))
+                .collect();
+            assert_eq!(here, browser, "{decl}");
+        }
+    }
+
+    /// Each row shows the same key the browser shows beside the same entry,
+    /// with the one disagreement named and explained.
+    #[test]
+    fn the_three_menus_show_the_browsers_keys() {
+        let source = browser_source();
+        let browser: Vec<(String, Option<String>)> = [
+            "const nodeEntries: MenuEntry[] = [",
+            "const paramsEntries: MenuEntry[] = [",
+            "const viewEntries: MenuEntry[] = [",
+        ]
+        .into_iter()
+        .flat_map(|decl| browser_entries(&source, decl))
+        .collect();
+        assert!(
+            browser.iter().filter(|(_, key)| key.is_some()).count() >= 4,
+            "the reader found no keys, so it is broken"
+        );
+
+        for row in NODE_MENU.iter().chain(PARAMS_MENU).chain(VIEW_MENU) {
+            let Some(label) = row.label() else { continue };
+            let Some((_, theirs)) = browser.iter().find(|(l, _)| l == label) else {
+                panic!("{label} is in no browser menu");
+            };
+            let ours = row.action().and_then(hint);
+            if let Some((_, named, _)) = KEYED_DIFFERENTLY.iter().find(|(l, _, _)| *l == label) {
+                assert_eq!(
+                    theirs.as_deref(),
+                    *named,
+                    "{label} no longer shows what this list says it shows"
+                );
+                assert_ne!(ours.as_deref(), *named, "{label} agrees after all");
+                continue;
+            }
+            assert_eq!(ours.as_deref(), theirs.as_deref(), "the key beside {label}");
+        }
+    }
+
+    /// Every row that names a binding shows the key the table gives it, so
+    /// a hint here cannot name a key that does nothing.
+    #[test]
+    fn every_row_that_names_a_binding_shows_the_tables_key() {
+        for row in NODE_MENU.iter().chain(PARAMS_MENU).chain(VIEW_MENU) {
+            if let Some(action) = row.action() {
+                assert!(
+                    hint(action).is_some(),
+                    "{:?} names an unbound action",
+                    row.label()
+                );
+            }
+        }
+    }
 
     fn added(engine: &mut Engine, ctx: GraphContext, ty: &str) -> NodeId {
         let before: Vec<NodeId> = engine
