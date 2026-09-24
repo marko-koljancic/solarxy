@@ -22,6 +22,7 @@ use solarxy_graph::registry::coerce::DataType;
 use solarxy_studio::attributes;
 use solarxy_studio::expression;
 use solarxy_studio::node;
+use solarxy_studio::palette;
 use solarxy_studio::params;
 use solarxy_studio::tree;
 use solarxy_studio::types;
@@ -400,5 +401,48 @@ impl SolarxyApp {
             Some(pos) => to_js(&pos),
             None => Ok(JsValue::NULL),
         }
+    }
+
+    /// Where the node palette opens, given the pointer and the pane.
+    ///
+    /// Geometry and nothing else, like the error position above: no
+    /// document is read, and the caller measured everything it passes.
+    /// Both shells drew this from their own copy of the arithmetic until
+    /// 0.10.0, which is one copy too many for four numbers and a clamp.
+    ///
+    /// The pointer is optional because the palette opens from a menu as
+    /// well as from a gesture, and the two want different places.
+    #[allow(clippy::too_many_arguments)]
+    pub fn palette_placement(
+        &self,
+        pointer_x: Option<f32>,
+        pointer_y: Option<f32>,
+        pane_left: f32,
+        pane_top: f32,
+        pane_width: f32,
+        pane_height: f32,
+        menu_width: f32,
+        menu_height: f32,
+        margin: f32,
+    ) -> Result<JsValue, JsError> {
+        let pointer = match (pointer_x, pointer_y) {
+            (Some(x), Some(y)) => Some(palette::Point { x, y }),
+            _ => None,
+        };
+        let at = palette::palette_placement(
+            pointer,
+            palette::Rect {
+                left: pane_left,
+                top: pane_top,
+                width: pane_width,
+                height: pane_height,
+            },
+            palette::Size {
+                width: menu_width,
+                height: menu_height,
+            },
+            margin,
+        );
+        to_js(&[at.x, at.y])
     }
 }

@@ -349,6 +349,29 @@ export class SolarxyClient {
     return this.app.snippet_error_position(message) as ErrorPosition | null;
   }
 
+  /** Where the node palette opens, given the pointer and the pane it was
+   * opened in. Geometry only; this shell measured every number it passes.
+   * The rule lives in Rust so both shells place the panel identically. */
+  palettePlacement(
+    pointer: { x: number; y: number } | null,
+    pane: { left: number; top: number; width: number; height: number },
+    panel: { width: number; height: number },
+    margin: number,
+  ): { x: number; y: number } {
+    const [x, y] = this.app.palette_placement(
+      pointer?.x ?? undefined,
+      pointer?.y ?? undefined,
+      pane.left,
+      pane.top,
+      pane.width,
+      pane.height,
+      panel.width,
+      panel.height,
+      margin,
+    ) as [number, number];
+    return { x, y };
+  }
+
   copyNodes(ctx: GraphContext, ids: NodeId[]): unknown {
     return this.app.copy_nodes(ctx, new Float64Array(ids));
   }

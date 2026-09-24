@@ -11,7 +11,20 @@ import { Popover, renderDoc } from "./Popover";
 import { dispatch } from "../engine/session";
 import type { NodeTypeSnapshot } from "../engine/types";
 import { screenToFlow } from "../flow/flowProjection";
-import { MARGIN_PX, palettePlacement, type Point } from "../flow/palettePlacement";
+import { getClient, isBooted } from "../engine/session";
+
+/** A point in viewport CSS pixels, which is what this shell measures in. */
+type Point = { x: number; y: number };
+
+/** The gap kept between the panel and the pane's edges.
+ *
+ * The placement arithmetic itself lives in `solarxy_studio::palette` and is
+ * reached across the boundary, so neither shell decides where the palette
+ * opens. This one number stays here because the panel's own max-height is
+ * computed from it in CSS, which is a fact about a scrolling box rather
+ * than a rule; `the_browser_keeps_the_same_margin` holds it to the Rust
+ * constant so the two cannot drift. */
+const MARGIN_PX = 8;
 import { compareCategories } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
@@ -137,7 +150,8 @@ export function NodePalette() {
     const panel = paletteRef.current?.getBoundingClientRect();
     if (!pane || !panel) return;
     setPaneHeight(pane.height);
-    const next = palettePlacement(pointer.current, pane, panel);
+    if (!isBooted()) return;
+    const next = getClient().palettePlacement(pointer.current, pane, panel, MARGIN_PX);
     setAt((prev) =>
       prev && Math.abs(prev.x - next.x) < 0.5 && Math.abs(prev.y - next.y) < 0.5 ? prev : next,
     );

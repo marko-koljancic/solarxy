@@ -177,6 +177,30 @@ mod tests {
         }
     }
 
+    /// The browser keeps one number of its own, because its panel's
+    /// max-height is computed from the margin in CSS, which is a fact about
+    /// a scrolling box rather than a rule worth a crossing. The arithmetic
+    /// is shared; this holds the constant that is not.
+    #[test]
+    fn the_browser_keeps_the_same_margin() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("the repository root");
+        let source = std::fs::read_to_string(root.join("web/src/components/NodePalette.tsx"))
+            .expect("the browser's palette");
+        let declared = source
+            .split("const MARGIN_PX = ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .expect("the browser declares its margin");
+        let declared: f32 = declared.trim().parse().expect("a number");
+        assert!(
+            (declared - MARGIN_PX).abs() < f32::EPSILON,
+            "the two shells would keep different gaps: {declared} against {MARGIN_PX}"
+        );
+    }
+
     #[test]
     fn degrades_to_the_panes_top_left_when_the_pane_is_smaller_than_the_panel() {
         // A pane narrower than the panel cannot satisfy both edges; it must
