@@ -1118,3 +1118,230 @@ fn the_wasm_boundary_enums_rename_their_fields_too() {
         );
     }
 }
+
+/// The presentation rules the shared crate took over are gone from the
+/// browser, and the six that stayed say what left and where it went.
+///
+/// Checking for absence is the right form here. A test that the shared
+/// rules work does not prove the copies are gone, and a copy that comes
+/// back is exactly the failure this release is built against: each of
+/// these was a deletion, and a deletion is undone by adding something
+/// back.
+///
+/// A residue is a module that SURVIVED and was hollowed out, not a marker
+/// left where one was deleted. The six deleted modules left nothing at
+/// all; their callers read engine answers now.
+#[test]
+fn the_browser_modules_the_shared_rules_replaced_are_gone() {
+    let web = workspace_root().join("web/src");
+
+    // Deleted outright, their callers rewritten.
+    for gone in [
+        "components/paramVisibility.ts",
+        "components/treeModel.ts",
+        "flow/infoLine.ts",
+        "flow/visibility.ts",
+        "flow/nodeLabel.ts",
+        "components/inputs/snippetError.ts",
+        "flow/palettePlacement.ts",
+    ] {
+        assert!(
+            !web.join(gone).exists(),
+            "{gone} is back; the rule it held lives in the shared crate now"
+        );
+    }
+
+    // Survived, hollowed out, each saying what left and where it went.
+    // Five name the crate; the sixth names the presentation tables,
+    // because its departed rules went to the registry snapshot rather
+    // than to the crate, and saying otherwise would be a tidier lie.
+    //
+    // Usually the header says it. One says it beside the survivor instead,
+    // which is where the reason belongs when a single function is what
+    // stayed, so the whole module is read rather than its first lines.
+    for (residue, names) in [
+        ("components/nodeReport.ts", "solarxy-studio"),
+        ("components/attributesTable.ts", "solarxy-studio"),
+        ("components/inputs/expressionLane.ts", "solarxy-studio"),
+        ("components/inputs/draftCommit.ts", "solarxy_studio"),
+        ("registry/datatypes.ts", "solarxy-studio"),
+        ("flow/nodeVisual.ts", "presentation tables"),
+    ] {
+        let path = web.join(residue);
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("{residue} is gone; it is a residue, not a deletion"));
+        // Comment lines only: the claim is that the module SAYS where its
+        // rules went, and a module that merely uses the words in code is
+        // not saying anything to the next reader.
+        let prose: String = source
+            .lines()
+            .filter(|line| {
+                let t = line.trim_start();
+                t.starts_with("//") || t.starts_with("*") || t.starts_with("/*")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            prose.contains(names),
+            "{residue} no longer says where its rules went ({names})"
+        );
+    }
+}
+
+/// Neither shell reads a texture back itself; both ask the renderer.
+///
+/// The desktop carried a private copy of the whole readback until 0.10.0:
+/// encoding the copy, stripping the row padding, swizzling a surface and
+/// polling the map. Deleting it is one of the release's structural claims,
+/// and a claim about absence is kept by looking for the thing.
+#[test]
+fn the_screenshot_readback_lives_in_the_renderer_alone() {
+    // The calls a readback cannot be written without.
+    const READBACK: &[&str] = &["map_async", "MAP_READ", "get_mapped_range"];
+
+    fn walk(dir: &std::path::Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for path in paths {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if path.is_dir() {
+                if !matches!(name.as_str(), "wasm" | "node_modules" | "target") {
+                    walk(&path, out);
+                }
+                continue;
+            }
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default();
+            if !matches!(ext, "rs" | "ts" | "tsx") {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for (i, line) in source.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or_default();
+                if READBACK.iter().any(|call| code.contains(call)) {
+                    out.push(format!("{}:{}", path.display(), i + 1));
+                }
+            }
+        }
+    }
+
+    let root = workspace_root();
+    let mut offenders = Vec::new();
+    for shell in [
+        "crates/solarxy-app/src",
+        "crates/solarxy-web/src",
+        "web/src",
+    ] {
+        walk(&root.join(shell), &mut offenders);
+    }
+    assert!(
+        offenders.is_empty(),
+        "a shell is reading a texture back itself; the renderer owns that. {offenders:?}"
+    );
+
+    // And the desktop says so where its private copy used to be.
+    let capture = std::fs::read_to_string(root.join("crates/solarxy-app/src/state/capture.rs"))
+        .expect("the desktop capture module");
+    assert!(
+        capture.contains("solarxy_renderer::capture"),
+        "the desktop no longer reaches the shared readback by name"
+    );
+}
+
+/// The orchestration each shell used to carry twice resolves to one body.
+///
+/// The counts are not all one, and that is the point of writing them down.
+/// Three of these are a shared body plus a thin per-shell wrapper, which
+/// is the shape the architecture prescribes; one is a single function with
+/// exactly three callers; and one is three separate bodies by design,
+/// because the crate that could hold them may depend on neither the engine
+/// nor the renderer. A census that demanded one of each would be wrong
+/// about four of the five.
+#[test]
+fn the_census_rows_have_one_definition_each() {
+    /// `(function, definitions, why that number)`
+    const CENSUS: &[(&str, usize, &str)] = &[
+        (
+            "rebuild_light_bind_group",
+            3,
+            "the shared body in the host crate, plus one thin wrapper per graphical shell",
+        ),
+        (
+            "compute_panes",
+            3,
+            "the shared body in the renderer, plus one adapter per graphical shell",
+        ),
+        (
+            "setup_pane_lighting",
+            3,
+            "the shared body in the host crate, plus one wrapper per graphical shell",
+        ),
+        (
+            "lights_from_camera",
+            1,
+            "one body in the renderer, reached from three places",
+        ),
+        (
+            "trace_settings_for",
+            3,
+            "one per shell by design: the host crate cannot see the engine and the engine cannot see the renderer",
+        ),
+    ];
+
+    fn walk(dir: &std::path::Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for path in paths {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if path.is_dir() {
+                if !matches!(name.as_str(), "target" | "fixtures") {
+                    walk(&path, out);
+                }
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            out.push(source);
+        }
+    }
+
+    let mut sources = Vec::new();
+    walk(&workspace_root().join("crates"), &mut sources);
+    assert!(
+        sources.len() > 100,
+        "read {} files, so the scanner is broken",
+        sources.len()
+    );
+
+    for (name, expected, why) in CENSUS {
+        // A definition, not a call and not a use: the name follows `fn`.
+        let needle = format!("fn {name}(");
+        let found: usize = sources.iter().map(|s| s.matches(&needle).count()).sum();
+        assert_eq!(
+            found, *expected,
+            "{name} is defined {found} times and the census says {expected}, because {why}"
+        );
+    }
+}

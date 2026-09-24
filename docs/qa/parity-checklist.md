@@ -186,3 +186,46 @@ material network and at least one review note.
 
 Findings that are not fixed go to the milestone document's divergence set
 with a reason, never into this file.
+
+## 4. The structural claims
+
+The release claims three things that are deletions rather than features, and
+a deletion is undone by adding something back. Three tests in
+`crates/solarxy-core/tests/tokens_drift.rs` check for the thing rather than
+for its replacement working, which is the only form that proves an absence:
+
+- `the_browser_modules_the_shared_rules_replaced_are_gone`, the six deleted
+  browser modules absent and the six survivors each saying, in prose, what
+  left and where it went.
+- `the_screenshot_readback_lives_in_the_renderer_alone`, no readback call
+  under either shell.
+- `the_census_rows_have_one_definition_each`, the load-bearing orchestration
+  rows at the number of definitions each is meant to have, with the reason
+  for that number beside it. Three of the five are a shared body plus a thin
+  per-shell wrapper, so the census records three rather than pretending to
+  one.
+
+The fourth claim spans the whole release and cannot be a unit test: that the
+renderer draws exactly what it drew before any of it. Run it once per
+release, from the commit the release began on.
+
+```bash
+BASE=$(mktemp -d)
+git archive <the commit the release began on> | tar -x -C "$BASE"
+( cd "$BASE" && CARGO_TARGET_DIR="$BASE/target" bash scripts/capture_goldens.sh /tmp/golden-base )
+bash scripts/capture_goldens.sh /tmp/golden-head
+cargo run --release -p solarxy-host --example golden -- \
+    compare /tmp/golden-base/dragon /tmp/golden-head/dragon --tolerance 0
+cargo run --release -p solarxy-host --example golden -- \
+    compare /tmp/golden-base/knot /tmp/golden-head/knot --tolerance 0
+```
+
+- [ ] Both comparisons report every mode matching at tolerance zero.
+
+Give the archived tree its own target directory. Sharing one with the
+repository makes the two trees evict each other, and the point of the
+exercise is the pixels rather than the build time.
+
+**Expect no pixel to differ** in a release that adds no pass and changes no
+shader. A difference is a finding whatever else is green, and the release
+notes for a release that re-baselines say so and say why.
