@@ -9,7 +9,10 @@ The automated half is `crates/solarxy-host/examples/golden.rs` (see
 input, dialogs, and anything that needs a window.
 
 Rendering has its own gate, `docs/qa/render-checklist.md`, because it spans all
-three shells and half of what it checks is not on this one.
+three shells and half of what it checks is not on this one. The claim that the
+two shells present one product has its own too, `docs/qa/parity-checklist.md`:
+the same input on both, a document crossing between them, and the walk of every
+panel, menu and binding.
 
 Record the run in the milestone spec's amendments: date, commit, platform, and
 any box left unticked with the reason.
